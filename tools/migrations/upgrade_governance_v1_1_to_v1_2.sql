@@ -266,6 +266,9 @@ CREATE INDEX IF NOT EXISTS ix_cdc_stream_keys_kek ON autheris_cdc_stream_keys (k
 
 -- 2. Add missing columns on existing tables
 ALTER TABLE TABLES ADD COLUMN required_filter_columns_json TEXT;
+ALTER TABLE TABLES ADD COLUMN texts_json TEXT;
+ALTER TABLE TABLE_COLUMNS ADD COLUMN display_name TEXT;
+ALTER TABLE TABLE_COLUMNS ADD COLUMN texts_json TEXT;
 ALTER TABLE CONSENTS ADD COLUMN grantee_sid_norm TEXT;
 ALTER TABLE CONSENTS ADD COLUMN renewal_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE CONSENTS ADD COLUMN description TEXT;

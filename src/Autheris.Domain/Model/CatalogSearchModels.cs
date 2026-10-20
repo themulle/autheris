@@ -50,7 +50,8 @@ public sealed record CatalogSearchQuery(
     CatalogSearchMode Mode = CatalogSearchMode.Hybrid,
     float MinRelevanceScore = 0.01f,
     bool ExpandRelations = true,
-    int MaxRelationsPerHit = 3);
+    int MaxRelationsPerHit = 3,
+    string? Language = null);
 
 /// <summary>
 /// Repräsentiert einen einzelnen bewerteten Treffer der Katalogsuche mit Schema- und Join-Details.
@@ -70,7 +71,8 @@ public sealed record CatalogSearchHit(
     string? SuggestedGraphQlField,
     string Kind = "table",
     string? DatasetId = null,
-    string? EffectiveMode = null);
+    string? EffectiveMode = null,
+    string? Language = null);
 
 /// <summary>
 /// Typed key uniquely identifying an entity in the catalog index.

@@ -55,6 +55,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly ICatalogVisibilityService? visibility;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
+    private readonly Autheris.Application.Catalog.Localization.ILanguageNegotiator? _languageNegotiator;
+    private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -75,7 +77,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         ILogger<McpDatasetCatalog>? logger = null,
         ICatalogVisibilityService? visibilityService = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
+        IOptions<CatalogLocalizationOptions>? localizationOptions = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -96,6 +100,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         this.visibility = visibilityService;
         this._procedureRegistry = procedureRegistry;
         this._procedureExecutionService = procedureExecutionService;
+        this._languageNegotiator = languageNegotiator;
+        this._localizationOptions = localizationOptions;
     }
 
     public McpDatasetCatalog(
@@ -115,7 +121,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         ILogger<McpDatasetCatalog>? logger = null,
         ICatalogVisibilityService? visibilityService = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
+        IOptions<CatalogLocalizationOptions>? localizationOptions = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -135,6 +143,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         this.visibility = visibilityService;
         this._procedureRegistry = procedureRegistry;
         this._procedureExecutionService = procedureExecutionService;
+        this._languageNegotiator = languageNegotiator;
+        this._localizationOptions = localizationOptions;
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -151,7 +161,17 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         int? offset,
         int? limit,
         CancellationToken ct) =>
-        ListDatasetsAsync(principal, search, domain, offset, limit, tag: null, ct);
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag: null, language: null, ct);
+
+    public Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        int? offset,
+        int? limit,
+        string? tag,
+        CancellationToken ct) =>
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag, language: null, ct);
 
     public async Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
@@ -160,6 +180,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         int? offset = null,
         int? limit = null,
         string? tag = null,
+        string? language = null,
         CancellationToken ct = default)
     {
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
@@ -170,6 +191,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             .ToList();
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+
+        var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
 
         var tableSummaries = new List<McpDatasetSummary>();
         foreach (var t in visible)
@@ -187,11 +210,15 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                 ? "GRANTED"
                 : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
 
+            var resolved = negotiatedLanguage != null ? t.Table.Texts.Resolve(negotiatedLanguage) : null;
+            var displayName = McpCatalogText.DisplayName(resolved?.Title ?? t.Table.DisplayName, t.Identifier.TableName);
+            var description = resolved?.Description ?? t.Table.Description;
+
             // 4b.1: Only short description in summary; long description only in describe_dataset
             tableSummaries.Add(new McpDatasetSummary(
                 DatasetId(t.Identifier),
-                McpCatalogText.DisplayName(t.Table.DisplayName, t.Identifier.TableName),
-                t.Table.Description,
+                displayName,
+                description,
                 t.Table.Sensitivity,
                 summaryOnly ? 0 : t.Columns.Count,
                 graphQl?.QueryField,
@@ -279,10 +306,15 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             Endpoints(),
             effectiveOffset,
             effectiveLimit,
-            nextOffset);
+            nextOffset,
+            Language: negotiatedLanguage,
+            RequestedLanguage: language);
     }
 
-    public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
+    public Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default) =>
+        DescribeDatasetAsync(principal, dataset, language: null, ct);
+
+    public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(dataset);
         if (dataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
@@ -298,9 +330,11 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             ? "GRANTED"
             : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
 
+        var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
+
         if (shape == CatalogOutputShape.Summary)
         {
-            return await BuildSummaryDescriptionAsync(table, accessStatus, ct).ConfigureAwait(false);
+            return await BuildSummaryDescriptionAsync(table, accessStatus, negotiatedLanguage, language, ct).ConfigureAwait(false);
         }
 
         // Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.
@@ -334,17 +368,22 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                     valueProfile = effectiveProfileService.GetColumnProfile(table, c, effectiveLevel, hasActiveRowFilters);
                 }
 
+                var colResolved = negotiatedLanguage != null ? c.Texts.Resolve(negotiatedLanguage) : null;
+                var colDisplayName = colResolved?.Title ?? c.DisplayName;
+                var colDescription = colResolved?.Description ?? c.Description;
+
                 return new McpDatasetColumn(
                     c.ColumnName,
                     c.DataType,
-                    c.Description,
+                    colDescription,
                     c.IsSensitive,
                     primaryKeys.Contains(c.ColumnName),
                     field?.Field,
                     field?.GraphQlType,
                     RestrictSemantics(c, canViewProfile ? effectiveLevel : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny, valueProfile),
                     Deprecation: deprecation,
-                    ValueProfile: valueProfile);
+                    ValueProfile: valueProfile,
+                    DisplayName: colDisplayName);
             })
             .ToList();
 
@@ -359,14 +398,19 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
 
         var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
 
+        var tableResolved = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
+        var tableDisplayName = McpCatalogText.DisplayName(tableResolved?.Title ?? table.Table.DisplayName, id.TableName);
+        var tableDescription = tableResolved?.Description ?? table.Table.Description;
+        var tableLongDescription = tableResolved?.LongDescription ?? table.Table.LongDescription;
+
         return new McpDatasetDescription(
             DatasetId(id),
-            McpCatalogText.DisplayName(table.Table.DisplayName, id.TableName),
+            tableDisplayName,
             id.Domain,
             id.Schema,
             id.TableName,
-            table.Table.Description,
-            table.Table.LongDescription,
+            tableDescription,
+            tableLongDescription,
             table.Table.Sensitivity,
             table.Table.RequiresFourEyes,
             columns,
@@ -379,7 +423,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             AccessStatus: accessStatus,
             Indexes: keyView.Indexes,
             RequiredFilterColumns: table.RequiredFilterColumns.Length > 0 ? table.RequiredFilterColumns : null,
-            RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null);
+            RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null,
+            Language: negotiatedLanguage,
+            RequestedLanguage: language);
     }
 
     /// <summary>
@@ -431,17 +477,18 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     /// excluded until it is listed here): identifier, sanitised display name (PLAN-CAT-146-A, same trust as the description), description,
     /// sensitivity, four-eyes flag, tags, display-name-only owners, access status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
     /// </summary>
-    private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, CancellationToken ct)
+    private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, string? negotiatedLanguage, string? requestedLanguage, CancellationToken ct)
     {
         var id = table.Identifier;
         var (owner, delegates) = await LoadOwnersAsync(id, displayNameOnly: true, ct).ConfigureAwait(false);
+        var resolved = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
         return new McpDatasetDescription(
             DatasetId(id),
-            McpCatalogText.DisplayName(table.Table.DisplayName, id.TableName),
+            McpCatalogText.DisplayName(resolved?.Title ?? table.Table.DisplayName, id.TableName),
             id.Domain,
             id.Schema,
             id.TableName,
-            table.Table.Description,
+            resolved?.Description ?? table.Table.Description,
             LongDescription: null,
             table.Table.Sensitivity,
             table.Table.RequiresFourEyes,
@@ -454,7 +501,9 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             DataOwnerDelegates: delegates,
             AccessStatus: accessStatus,
             Indexes: null,
-            View: SummaryView);
+            View: SummaryView,
+            Language: negotiatedLanguage,
+            RequestedLanguage: requestedLanguage);
     }
 
     private async Task<McpDatasetDescription> DescribeProcedureDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
@@ -1112,8 +1161,10 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     private static bool Matches(TableMetadata table, string search) =>
         DatasetId(table.Identifier).Contains(search, StringComparison.OrdinalIgnoreCase) ||
         (table.Table.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+        table.Table.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
         // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
         (table.CatalogView != CatalogView.Summary && table.Columns.Any(c =>
             c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)));
+            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            c.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)));
 }

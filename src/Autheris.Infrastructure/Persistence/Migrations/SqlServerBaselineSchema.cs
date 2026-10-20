@@ -35,6 +35,7 @@ CREATE TABLE dbo.TABLES (
     http_endpoint_json NVARCHAR(MAX) NULL,
     plugin_name NVARCHAR(256) NULL,
     required_filter_columns_json NVARCHAR(MAX) NULL,
+    texts_json NVARCHAR(MAX) NULL,
     source_name_lc AS LOWER(source_name) PERSISTED,
     schema_name_lc AS LOWER(schema_name) PERSISTED,
     table_name_lc AS LOWER(table_name) PERSISTED
@@ -50,7 +51,9 @@ CREATE TABLE dbo.TABLE_COLUMNS (
     description NVARCHAR(MAX) NULL,
     long_description NVARCHAR(MAX) NULL,
     doc_source NVARCHAR(MAX) NULL,
-    meta_json NVARCHAR(MAX) NULL
+    meta_json NVARCHAR(MAX) NULL,
+    display_name NVARCHAR(512) NULL,
+    texts_json NVARCHAR(MAX) NULL
 );
 
 IF OBJECT_ID(N'dbo.COLUMN_MASKING_RULES', N'U') IS NULL

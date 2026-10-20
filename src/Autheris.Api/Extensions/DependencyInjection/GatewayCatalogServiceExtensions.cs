@@ -2,6 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Localization;
 using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
@@ -29,6 +30,12 @@ public static class GatewayCatalogServiceExtensions
             .Configure<IConfiguration>((o, cfg) => cfg.GetSection(CatalogSearchOptions.SectionName).Bind(o))
             .ValidateOnStart();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<CatalogSearchOptions>, CatalogSearchOptionsValidator>());
+
+        services.AddOptions<CatalogLocalizationOptions>()
+            .Configure<IConfiguration>((o, cfg) => cfg.GetSection(CatalogLocalizationOptions.SectionName).Bind(o))
+            .ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<CatalogLocalizationOptions>, CatalogLocalizationOptionsValidator>());
+        services.TryAddSingleton<ILanguageNegotiator, LanguageNegotiator>();
 
         // State Versioning & Snapshots (INC-138-2, INC-138-4)
         services.TryAddSingleton<ICatalogVersionProvider>(sp =>

@@ -1878,6 +1878,16 @@
           "name": "meta_json",
           "type": "NVARCHAR",
           "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "texts_json",
+          "type": "NVARCHAR",
+          "family": "string"
         }
       ],
       "primaryKey": [
@@ -2310,6 +2320,11 @@
         },
         {
           "name": "required_filter_columns_json",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "texts_json",
           "type": "NVARCHAR",
           "family": "string"
         },

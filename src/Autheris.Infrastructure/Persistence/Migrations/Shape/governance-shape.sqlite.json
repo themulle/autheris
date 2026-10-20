@@ -1520,6 +1520,11 @@
           "name": "required_filter_columns_json",
           "type": "TEXT",
           "family": "string"
+        },
+        {
+          "name": "texts_json",
+          "type": "TEXT",
+          "family": "string"
         }
       ],
       "primaryKey": [
@@ -1620,6 +1625,16 @@
         },
         {
           "name": "meta_json",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "texts_json",
           "type": "TEXT",
           "family": "string"
         }

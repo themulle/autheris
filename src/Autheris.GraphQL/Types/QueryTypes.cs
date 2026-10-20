@@ -290,11 +290,11 @@ public sealed class Query
     [GraphQLIgnore]
     public Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
         [Service] IGovernanceRepository repository,
-        [Service] IHttpContextAccessor httpContextAccessor,
-        [Service] IOptions<GatewayOptions>? options = null,
-        [Service] Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
+        IHttpContextAccessor httpContextAccessor,
+        IOptions<GatewayOptions>? options = null,
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
         CancellationToken ct = default)
-        => GetCatalogAsync(null, null, null, null, null, repository, repository, repository, repository, httpContextAccessor, options, visibilityService, ct);
+        => GetCatalogAsync(domain: null, first: null, after: null, search: null, tag: null, metadataRepository: repository, consentRepository: repository, approvalRepository: repository, dataOwnershipRepository: repository, httpContextAccessor: httpContextAccessor, options: options, visibilityService: visibilityService, language: null, languageNegotiator: null, localizationOptions: null, ct: ct);
 
     [GraphQLIgnore]
     public Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
@@ -308,7 +308,7 @@ public sealed class Query
         IOptions<GatewayOptions>? options = null,
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
         CancellationToken ct = default)
-        => GetCatalogAsync(domain, first, after, search, tag: null, metadataRepository, consentRepository, approvalRepository: null, dataOwnershipRepository: null, httpContextAccessor, options, visibilityService, ct);
+        => GetCatalogAsync(domain, first, after, search, tag: null, metadataRepository, consentRepository, approvalRepository: null, dataOwnershipRepository: null, httpContextAccessor, options, visibilityService, language: null, languageNegotiator: null, localizationOptions: null, ct: ct);
 
     public async Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
         string? domain = null,
@@ -323,11 +323,18 @@ public sealed class Query
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GatewayOptions>? options = null,
         [Service] Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
+        string? language = null,
+        [Service] Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
+        [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
         CancellationToken ct = default)
     {
         var httpContext = httpContextAccessor?.HttpContext;
         var principal = httpContext?.User;
         var isOpenSchema = options?.Value?.IsOpenSchemaAllowed == true;
+
+        var acceptLanguage = httpContext?.Request?.Headers.AcceptLanguage.ToString();
+        var requestedLang = !string.IsNullOrWhiteSpace(language) ? language : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
+        var targetLang = languageNegotiator?.NegotiateLanguage(requestedLang, localizationOptions?.Value.SupportedLanguages, localizationOptions?.Value.DefaultLanguage);
 
         if (string.IsNullOrWhiteSpace(domain))
         {
@@ -356,17 +363,22 @@ public sealed class Query
             {
                 tables = Autheris.Application.Services.CatalogVisibility.FilterByContract(tables, contractDef);
             }
-            var dtos = tables.Select(t => new TableMetadataDto
+            var dtos = tables.Select(t =>
             {
-                Domain = t.Identifier.Domain,
-                Schema = t.Table.SchemaName,
-                TableName = t.Table.TableName,
-                DisplayName = t.Table.DisplayName,
-                Sensitivity = t.Table.Sensitivity,
-                Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                Tags = t.CatalogTags,
-                AccessStatus = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, Array.Empty<Consent>(), null, isAdmin: true)
+                var resolved = targetLang != null ? t.Table.Texts.Resolve(targetLang) : null;
+                return new TableMetadataDto
+                {
+                    Domain = t.Identifier.Domain,
+                    Schema = t.Table.SchemaName,
+                    TableName = t.Table.TableName,
+                    DisplayName = resolved?.Title ?? t.Table.DisplayName,
+                    Sensitivity = t.Table.Sensitivity,
+                    Description = resolved?.Description ?? t.Table.Description,
+                    Columns = t.Columns.Select(c => c.ColumnName).ToList(),
+                    Tags = t.CatalogTags,
+                    AccessStatus = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, Array.Empty<Consent>(), null, isAdmin: true),
+                    Language = targetLang
+                };
             });
             return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
         }
@@ -438,20 +450,20 @@ public sealed class Query
         }
 
         // Second line of defence (SEC-CAT138-16): ToCatalogDtos re-applies the shaping rule with the set's admin view.
-        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin);
+        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang);
 
         return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
     }
 
     /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
     internal static List<TableMetadataDto> ToCatalogDtos(
-        IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin)
+        IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, string? language = null)
     {
         var catalogList = new List<TableMetadataDto>();
         foreach (var t in visibleTables)
         {
             var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
-            var dto = ToCatalogDto(t, isAdminView, status);
+            var dto = ToCatalogDto(t, isAdminView, status, language);
             if (dto != null)
             {
                 catalogList.Add(dto);
@@ -466,7 +478,7 @@ public sealed class Query
     /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>. Not used by the
     /// explicit OpenSchema branch.
     /// </summary>
-    internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status)
+    internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status, string? language = null)
     {
         var shape = Autheris.Application.Services.CatalogViewShaping.Resolve(isAdminView, t.CatalogView);
         if (shape == Autheris.Application.Services.CatalogOutputShape.NotFound)
@@ -474,17 +486,20 @@ public sealed class Query
             return null;
         }
 
+        var resolved = !string.IsNullOrWhiteSpace(language) ? t.Table.Texts.Resolve(language) : null;
+
         return new TableMetadataDto
         {
             Domain = t.Identifier.Domain,
             Schema = t.Table.SchemaName,
             TableName = t.Table.TableName,
-            DisplayName = t.Table.DisplayName,
+            DisplayName = resolved?.Title ?? t.Table.DisplayName,
             Sensitivity = t.Table.Sensitivity,
-            Description = t.Table.Description,
+            Description = resolved?.Description ?? t.Table.Description,
             Columns = shape == Autheris.Application.Services.CatalogOutputShape.Summary ? [] : t.Columns.Select(c => c.ColumnName).ToList(),
             Tags = t.CatalogTags,
-            AccessStatus = status
+            AccessStatus = status,
+            Language = language
         };
     }
 
@@ -828,4 +843,5 @@ public sealed class TableMetadataDto
     public string? AccessStatus { get; init; }
     public string? DataOwner { get; init; }
     public IReadOnlyList<string>? Delegates { get; init; }
+    public string? Language { get; init; }
 }
