@@ -164,6 +164,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var domain = root.TryGetProperty("domain", out var dProp) ? dProp.GetString() : null;
             var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? l : 5;
             var modeStr = root.TryGetProperty("mode", out var mProp) ? mProp.GetString() : "hybrid";
+            var language = root.TryGetProperty("language", out var langProp) ? langProp.GetString() : null;
 
             var mode = modeStr?.ToLowerInvariant() switch
             {
@@ -172,7 +173,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 _ => CatalogSearchMode.Hybrid
             };
 
-            var searchQuery = new CatalogSearchQuery(query, domain, limit, mode, ExpandRelations: true);
+            var searchQuery = new CatalogSearchQuery(query, domain, limit, mode, ExpandRelations: true, Language: language);
             var results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
 
             return JsonSerializer.Serialize(new
@@ -183,7 +184,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 {
                     table = $"{h.TableIdentifier.Domain}.{h.TableIdentifier.TableName}",
                     domain = h.Domain,
+                    display_name = h.DisplayName,
                     description = h.Description,
+                    language = h.Language,
                     relevance_score = Math.Round(h.CombinedScore, 4),
                     matched_terms = h.MatchedTerms,
                     matched_columns = h.RelevantColumns,

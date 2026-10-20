@@ -59,12 +59,49 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             ct.ThrowIfCancellationRequested();
             metadataMap[t.Identifier] = t;
 
-            // Pre-Scrubbing gegen Secret Leaks in Beschreibungen
-            var cleanDesc = SecretScrubber.Redact(t.Table.Description ?? string.Empty);
-            var colDetails = string.Join(" ", t.Columns.Select(c => 
-                $"{c.ColumnName} {c.DataType} {SecretScrubber.Redact(c.Description ?? string.Empty)}"));
+            var docBuilder = new StringBuilder(1024);
 
-            var docContent = $"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName} {cleanDesc} {colDetails}";
+            // Technical names
+            docBuilder.Append($"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName} ");
+
+            // Default language texts (scrubbed)
+            if (!string.IsNullOrWhiteSpace(t.Table.DisplayName))
+                docBuilder.Append($"{SecretScrubber.Redact(t.Table.DisplayName)} ");
+            if (!string.IsNullOrWhiteSpace(t.Table.Description))
+                docBuilder.Append($"{SecretScrubber.Redact(t.Table.Description)} ");
+            if (!string.IsNullOrWhiteSpace(t.Table.LongDescription))
+                docBuilder.Append($"{SecretScrubber.Redact(t.Table.LongDescription)} ");
+
+            // All table translation texts (scrubbed)
+            foreach (var (_, entry) in t.Table.Texts.Entries)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.DisplayName))
+                    docBuilder.Append($"{SecretScrubber.Redact(entry.DisplayName)} ");
+                if (!string.IsNullOrWhiteSpace(entry.Description))
+                    docBuilder.Append($"{SecretScrubber.Redact(entry.Description)} ");
+                if (!string.IsNullOrWhiteSpace(entry.LongDescription))
+                    docBuilder.Append($"{SecretScrubber.Redact(entry.LongDescription)} ");
+            }
+
+            // Columns: technical name, types, default texts & translations (scrubbed)
+            foreach (var c in t.Columns)
+            {
+                docBuilder.Append($"{c.ColumnName} {c.DataType} ");
+                if (!string.IsNullOrWhiteSpace(c.DisplayName))
+                    docBuilder.Append($"{SecretScrubber.Redact(c.DisplayName)} ");
+                if (!string.IsNullOrWhiteSpace(c.Description))
+                    docBuilder.Append($"{SecretScrubber.Redact(c.Description)} ");
+
+                foreach (var (_, colEntry) in c.Texts.Entries)
+                {
+                    if (!string.IsNullOrWhiteSpace(colEntry.DisplayName))
+                        docBuilder.Append($"{SecretScrubber.Redact(colEntry.DisplayName)} ");
+                    if (!string.IsNullOrWhiteSpace(colEntry.Description))
+                        docBuilder.Append($"{SecretScrubber.Redact(colEntry.Description)} ");
+                }
+            }
+
+            var docContent = docBuilder.ToString();
             bm25Docs.Add((t.Identifier, docContent));
 
             var declaredKey = t.PrimaryKeyColumns;
@@ -248,15 +285,39 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
                 }
 
                 var matchedCols = meta?.Columns
-                    .Where(c => kvp.Value.Terms.Any(term => c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase)))
+                    .Where(c => kvp.Value.Terms.Any(term =>
+                        c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(c.DisplayName) && c.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrEmpty(c.Description) && c.Description.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                        c.Texts.Entries.Values.Any(entry =>
+                            (!string.IsNullOrEmpty(entry.DisplayName) && entry.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                            (!string.IsNullOrEmpty(entry.Description) && entry.Description.Contains(term, StringComparison.OrdinalIgnoreCase)))))
                     .Select(c => c.ColumnName)
                     .Take(5)
                     .ToList() ?? [];
 
+                var defaultDisplayName = !string.IsNullOrWhiteSpace(meta?.Table.DisplayName)
+                    ? meta.Table.DisplayName
+                    : $"{kvp.Key.Domain}.{kvp.Key.TableName}";
+
+                string resolvedDisplayName = defaultDisplayName;
+                string? resolvedDescription = meta?.Table.Description;
+
+                if (!string.IsNullOrWhiteSpace(query.Language) && meta?.Table != null)
+                {
+                    var resolved = meta.Table.Texts.Resolve(
+                        [query.Language],
+                        defaultDisplayName,
+                        meta.Table.Description,
+                        meta.Table.LongDescription);
+                    resolvedDisplayName = resolved.DisplayName;
+                    resolvedDescription = resolved.Description;
+                }
+
                 return new CatalogSearchHit(
                     TableIdentifier: kvp.Key,
-                    DisplayName: $"{kvp.Key.Domain}.{kvp.Key.TableName}",
-                    Description: meta?.Table.Description,
+                    DisplayName: resolvedDisplayName,
+                    Description: resolvedDescription,
                     Domain: kvp.Key.Domain,
                     Sensitivity: meta?.Table.Sensitivity ?? "NORMAL",
                     CombinedScore: kvp.Value.Score,
@@ -266,7 +327,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
                     RelevantColumns: matchedCols,
                     RelatedJoinPaths: relations,
                     SuggestedGraphQlField: $"{kvp.Key.Domain}_{kvp.Key.TableName}",
-                    EffectiveMode: effectiveMode
+                    EffectiveMode: effectiveMode,
+                    Language: query.Language
                 );
             })
             .ToList();

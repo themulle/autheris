@@ -6,6 +6,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
+using Autheris.Infrastructure.Persistence.Catalog;
 
 namespace Autheris.Infrastructure.Persistence;
 
@@ -45,7 +46,7 @@ public partial class SqlServerGovernanceRepository
         {
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json
+                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json
                                     FROM TABLES
                                     WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
                 cmd.Parameters.AddWithValue("@domain", table.Domain);
@@ -67,6 +68,8 @@ public partial class SqlServerGovernanceRepository
                         ? ImmutableArray<string>.Empty
                         : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
                     if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
+                    var textsJson = reader.IsDBNull(16) ? null : reader.GetString(16);
+                    var texts = CatalogLocalizationPersistence.ParseLocalizedTexts(textsJson, tableId.Value, _logger);
 
                     tableEntity = new Table
                     {
@@ -84,6 +87,7 @@ public partial class SqlServerGovernanceRepository
                         PluginName = pluginName,
                         Description = reader.IsDBNull(12) ? null : reader.GetString(12),
                         LongDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
+                        Texts = texts,
                         DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14),
                         RequiredFilterColumns = reqFilters
                     };
@@ -99,7 +103,8 @@ public partial class SqlServerGovernanceRepository
             {
                 cmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive,
                                            m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-                                           c.description, c.long_description, c.meta_json, c.doc_source
+                                           c.description, c.long_description, c.meta_json, c.doc_source,
+                                           c.display_name, c.texts_json
                                     FROM TABLE_COLUMNS c
                                     LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
                                     WHERE c.table_id = @tableId";
@@ -117,6 +122,9 @@ public partial class SqlServerGovernanceRepository
                     var longDesc = reader.IsDBNull(10) ? null : reader.GetString(10);
                     var metaJson = reader.IsDBNull(11) ? null : reader.GetString(11);
                     var docSource = reader.IsDBNull(12) ? null : reader.GetString(12);
+                    var colDisplayName = reader.IsDBNull(13) ? null : reader.GetString(13);
+                    var colTextsJson = reader.IsDBNull(14) ? null : reader.GetString(14);
+                    var colTexts = CatalogLocalizationPersistence.ParseLocalizedTexts(colTextsJson, colId, _logger);
 
                     var metaDict = SqliteGovernanceRepository.ParseColumnMetaJson(metaJson);
 
@@ -125,10 +133,12 @@ public partial class SqlServerGovernanceRepository
                         Id = colId,
                         TableId = tableId.Value,
                         ColumnName = colName,
+                        DisplayName = colDisplayName,
                         DataType = dataType,
                         IsSensitive = isSensitive,
                         Description = desc,
                         LongDescription = longDesc,
+                        Texts = colTexts,
                         DocumentationSource = docSource,
                         Meta = metaDict
                     });
@@ -267,12 +277,13 @@ public partial class SqlServerGovernanceRepository
         {
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
+            var structuralChange = false;
 
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
                 // UPDLOCK/ROWLOCK serialise concurrent upserts of the same table (SQL Server equivalent of FOR UPDATE).
-                cmd.CommandText = @"SELECT id, description, long_description, doc_source FROM TABLES WITH (UPDLOCK, ROWLOCK)
+                cmd.CommandText = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type FROM TABLES WITH (UPDLOCK, ROWLOCK)
                                     WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
                 cmd.Parameters.AddWithValue("@domain", metadata.Identifier.Domain);
                 cmd.Parameters.AddWithValue("@schema", metadata.Identifier.Schema);
@@ -283,6 +294,23 @@ public partial class SqlServerGovernanceRepository
                 {
                     tableId = Guid.Parse(reader.GetString(0));
                     tableExisted = true;
+                    var existingSourceType = reader.GetString(1);
+                    var existingSensitivity = reader.GetString(2);
+                    var existingFourEyes = reader.GetInt32(3) == 1;
+                    var existingActive = reader.GetInt32(4) == 1;
+                    var existingDst = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+                    if (!string.Equals(existingSourceType, metadata.Table.SourceType, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(existingSensitivity, metadata.Table.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
+                        existingFourEyes != metadata.Table.RequiresFourEyes ||
+                        existingActive != metadata.Table.IsActive ||
+                        existingDst != (int)metadata.Table.DataSourceType)
+                    {
+                        structuralChange = true;
+                    }
+                }
+                else
+                {
+                    structuralChange = true;
                 }
             }
 
@@ -311,9 +339,10 @@ public partial class SqlServerGovernanceRepository
                                               description = COALESCE(@desc, t.description),
                                               long_description = COALESCE(@longDesc, t.long_description),
                                               doc_source = COALESCE(@docSource, t.doc_source),
-                                              required_filter_columns_json = @requiredFilterColumnsJson
-                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json)
-                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson);";
+                                              required_filter_columns_json = @requiredFilterColumnsJson,
+                                              texts_json = @textsJson
+                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json)
+                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson);";
                 upsertCmd.Parameters.AddWithValue("@id", tableId.ToString());
                 upsertCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                 upsertCmd.Parameters.AddWithValue("@domain", metadata.Identifier.Domain);
@@ -330,6 +359,7 @@ public partial class SqlServerGovernanceRepository
                 upsertCmd.Parameters.AddWithValue("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
                 upsertCmd.Parameters.AddWithValue("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
+                upsertCmd.Parameters.AddWithValue("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -339,18 +369,23 @@ public partial class SqlServerGovernanceRepository
                 await DatasetCatalogStore.InsertDefaultAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
             }
 
+            var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive)>(StringComparer.OrdinalIgnoreCase);
             var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
             await using (var existingColsCmd = conn.CreateCommand())
             {
                 existingColsCmd.Transaction = tx;
-                existingColsCmd.CommandText = "SELECT id, column_name FROM TABLE_COLUMNS WHERE table_id = @tableId";
+                existingColsCmd.CommandText = "SELECT id, column_name, data_type, is_sensitive FROM TABLE_COLUMNS WHERE table_id = @tableId";
                 existingColsCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
                 await using var reader = await existingColsCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
                     if (Guid.TryParse(reader.GetString(0), out var existingId))
                     {
-                        colIdByName[reader.GetString(1)] = existingId;
+                        var colName = reader.GetString(1);
+                        var colDataType = reader.GetString(2);
+                        var colSens = reader.GetInt32(3) == 1;
+                        existingColsByName[colName] = (existingId, colDataType, colSens);
+                        colIdByName[colName] = existingId;
                     }
                 }
             }
@@ -358,9 +393,18 @@ public partial class SqlServerGovernanceRepository
             foreach (var col in metadata.Columns)
             {
                 var colId = col.Id == Guid.Empty ? Guid.NewGuid() : col.Id;
-                if (colIdByName.TryGetValue(col.ColumnName, out var existingColId))
+                if (existingColsByName.TryGetValue(col.ColumnName, out var existingCol))
                 {
-                    colId = existingColId;
+                    colId = existingCol.Id;
+                    if (!string.Equals(existingCol.DataType, col.DataType, StringComparison.OrdinalIgnoreCase) ||
+                        existingCol.IsSensitive != col.IsSensitive)
+                    {
+                        structuralChange = true;
+                    }
+                }
+                else
+                {
+                    structuralChange = true;
                 }
 
                 IReadOnlyDictionary<string, string> effectiveMeta = metadata.ReplaceKeyDefinition
@@ -383,9 +427,11 @@ public partial class SqlServerGovernanceRepository
                                                     description = COALESCE(@description, t.description),
                                                     long_description = COALESCE(@longDescription, t.long_description),
                                                     doc_source = COALESCE(@docSource, t.doc_source),
-                                                    meta_json = COALESCE(@metaJson, t.meta_json)
-                                                WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json)
-                                                    VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson);";
+                                                    meta_json = COALESCE(@metaJson, t.meta_json),
+                                                    display_name = @displayName,
+                                                    texts_json = @textsJson
+                                                WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json)
+                                                    VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson);";
                     insertColCmd.Parameters.AddWithValue("@id", colId.ToString());
                     insertColCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
                     insertColCmd.Parameters.AddWithValue("@columnName", col.ColumnName);
@@ -395,6 +441,8 @@ public partial class SqlServerGovernanceRepository
                     insertColCmd.Parameters.AddWithValue("@longDescription", (object?)col.LongDescription ?? DBNull.Value);
                     insertColCmd.Parameters.AddWithValue("@docSource", (object?)col.DocumentationSource ?? DBNull.Value);
                     insertColCmd.Parameters.AddWithValue("@metaJson", (object?)metaJson ?? DBNull.Value);
+                    insertColCmd.Parameters.AddWithValue("@displayName", (object?)col.DisplayName ?? DBNull.Value);
+                    insertColCmd.Parameters.AddWithValue("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(col.Texts) ?? DBNull.Value);
                     await insertColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
 
@@ -429,11 +477,14 @@ public partial class SqlServerGovernanceRepository
 
             if (metadata.ReplaceKeyDefinition)
             {
+                structuralChange = true;
                 await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
-            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+            var structureDelta = structuralChange ? 1L : 0L;
+            var contentDelta = structuralChange ? 0L : 1L;
+            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
             await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
         }

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Localization;
 using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -32,7 +33,16 @@ public static class CatalogApiEndpoints
             HttpContext httpContext,
             CancellationToken ct) =>
         {
-            var context = CreateRequestContext(httpContext);
+            var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
+            var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
+            var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
+            var languageNegotiator = httpContext.RequestServices.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
+            var localizationOptions = (httpContext.RequestServices.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
+            var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
+            httpContext.Response.Headers.Append("Content-Language", targetLang);
+            httpContext.Response.Headers.Append("Vary", "Accept-Language");
+
+            var context = CreateRequestContext(httpContext, targetLang);
             var datasets = await discoveryService.ListDatasetsAsync(context, ct);
             return Results.Ok(datasets);
         })
@@ -50,7 +60,16 @@ public static class CatalogApiEndpoints
                 return Results.BadRequest(new { error = $"Invalid dataset identifier '{datasetId}'." });
             }
 
-            var context = CreateRequestContext(httpContext);
+            var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
+            var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
+            var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
+            var languageNegotiator = httpContext.RequestServices.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
+            var localizationOptions = (httpContext.RequestServices.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
+            var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
+            httpContext.Response.Headers.Append("Content-Language", targetLang);
+            httpContext.Response.Headers.Append("Vary", "Accept-Language");
+
+            var context = CreateRequestContext(httpContext, targetLang);
             var detail = await discoveryService.GetDatasetDetailAsync(tableId, context, ct);
             return detail is not null ? Results.Ok(detail) : Results.NotFound();
         })
@@ -103,7 +122,16 @@ public static class CatalogApiEndpoints
             HttpContext httpContext,
             CancellationToken ct) =>
         {
-            var context = CreateRequestContext(httpContext);
+            var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
+            var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
+            var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
+            var languageNegotiator = httpContext.RequestServices.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
+            var localizationOptions = (httpContext.RequestServices.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
+            var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
+            httpContext.Response.Headers.Append("Content-Language", targetLang);
+            httpContext.Response.Headers.Append("Vary", "Accept-Language");
+
+            var context = CreateRequestContext(httpContext, targetLang);
             var searchMode = mode?.ToLowerInvariant() switch
             {
                 "semantic" => CatalogSearchMode.SemanticVector,
@@ -115,7 +143,8 @@ public static class CatalogApiEndpoints
                 QueryText: q ?? string.Empty,
                 DomainFilter: domain,
                 Limit: Math.Clamp(limit ?? 10, 1, 50),
-                Mode: searchMode);
+                Mode: searchMode,
+                Language: targetLang);
 
             var hits = await discoveryService.SearchCatalogDetailedAsync(query, context, ct);
             return Results.Ok(hits);
@@ -556,12 +585,12 @@ public static class CatalogApiEndpoints
         }
     }
 
-    private static RequestContext CreateRequestContext(HttpContext httpContext)
+    private static RequestContext CreateRequestContext(HttpContext httpContext, string? language = null)
     {
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
         var sid = httpContext.User.GetUserSid() ?? new Sid("anonymous");
         var roles = httpContext.User.GetUserRoles();
-        return new RequestContext(tenant, sid, roles, httpContext.TraceIdentifier, httpContext.User);
+        return new RequestContext(tenant, sid, roles, httpContext.TraceIdentifier, httpContext.User, Language: language);
     }
 }
 

@@ -50,10 +50,28 @@ public static class SmartSchemaTokenizer
             .Where(t => !StopWords.Contains(t))
             .ToList();
 
-        if (!expandAbbreviations) return rawTokens.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var diacriticExpanded = new List<string>(rawTokens.Count * 3);
+        foreach (var t in rawTokens)
+        {
+            diacriticExpanded.Add(t);
+            var folded = DiacriticNormalizer.FoldGermanUmlauts(t).ToLowerInvariant();
+            if (!string.Equals(folded, t, StringComparison.OrdinalIgnoreCase))
+            {
+                diacriticExpanded.Add(folded);
+            }
 
-        var expanded = new List<string>(rawTokens.Count * 2);
-        foreach (var token in rawTokens)
+            var stripped = DiacriticNormalizer.StripAccents(t).ToLowerInvariant();
+            if (!string.Equals(stripped, t, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(stripped, folded, StringComparison.OrdinalIgnoreCase))
+            {
+                diacriticExpanded.Add(stripped);
+            }
+        }
+
+        if (!expandAbbreviations) return diacriticExpanded.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        var expanded = new List<string>(diacriticExpanded.Count * 2);
+        foreach (var token in diacriticExpanded)
         {
             expanded.Add(token);
             if (AbbreviationMap.TryGetValue(token, out var synonyms))

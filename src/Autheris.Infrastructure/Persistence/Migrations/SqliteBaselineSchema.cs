@@ -38,7 +38,8 @@ internal sealed class SqliteBaselineSchema
                 data_source_type INTEGER NOT NULL DEFAULT 0,
                 http_endpoint_json TEXT,
                 plugin_name TEXT,
-                required_filter_columns_json TEXT
+                required_filter_columns_json TEXT,
+                texts_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS TABLE_COLUMNS (
@@ -50,7 +51,9 @@ internal sealed class SqliteBaselineSchema
                 description TEXT,
                 long_description TEXT,
                 doc_source TEXT,
-                meta_json TEXT
+                meta_json TEXT,
+                display_name TEXT,
+                texts_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS COLUMN_MASKING_RULES (

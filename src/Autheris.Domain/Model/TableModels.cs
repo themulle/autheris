@@ -46,6 +46,92 @@ public enum SmallGroupStrategy
     MergeToOther = 2
 }
 
+public sealed record LocalizedTextEntry(
+    string? DisplayName = null,
+    string? Description = null,
+    string? LongDescription = null)
+{
+    public string? Title => DisplayName;
+}
+
+public sealed record LocalizedTexts : IEnumerable<KeyValuePair<string, LocalizedTextEntry>>
+{
+    public static readonly LocalizedTexts Empty = new(ImmutableDictionary<string, LocalizedTextEntry>.Empty);
+
+    public ImmutableDictionary<string, LocalizedTextEntry> Entries { get; init; }
+
+    public LocalizedTexts() : this(ImmutableDictionary<string, LocalizedTextEntry>.Empty) { }
+
+    public LocalizedTexts(ImmutableDictionary<string, LocalizedTextEntry> entries)
+    {
+        Entries = entries ?? ImmutableDictionary<string, LocalizedTextEntry>.Empty;
+    }
+
+    public LocalizedTexts(IReadOnlyDictionary<string, LocalizedTextEntry>? entries)
+    {
+        Entries = entries == null ? ImmutableDictionary<string, LocalizedTextEntry>.Empty : entries.ToImmutableDictionary();
+    }
+
+    public bool IsEmpty => Entries.IsEmpty;
+
+    public IEnumerator<KeyValuePair<string, LocalizedTextEntry>> GetEnumerator() => Entries.GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+    public LocalizedTextEntry? Resolve(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language) || Entries.IsEmpty) return null;
+        if (Entries.TryGetValue(language, out var entry)) return entry;
+        if (Autheris.Domain.Common.Bcp47LanguageTag.IsValid(language, out var canonical))
+        {
+            foreach (var cand in Autheris.Domain.Common.Bcp47LanguageTag.GetFallbackChain(canonical))
+            {
+                if (Entries.TryGetValue(cand, out var fallbackEntry)) return fallbackEntry;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Field-by-field fallback: resolves each field through the fallback chain,
+    /// ultimately falling back to default texts (R-146-3, AC-146-3).
+    /// </summary>
+    public (string DisplayName, string? Description, string? LongDescription) Resolve(
+        IEnumerable<string> fallbackChain,
+        string defaultDisplayName,
+        string? defaultDescription,
+        string? defaultLongDescription)
+    {
+        string? resolvedDisplayName = null;
+        string? resolvedDescription = null;
+        string? resolvedLongDesc = null;
+
+        if (fallbackChain != null)
+        {
+            foreach (var lang in fallbackChain)
+            {
+                if (Entries.TryGetValue(lang, out var entry) && entry != null)
+                {
+                    if (resolvedDisplayName == null && !string.IsNullOrWhiteSpace(entry.DisplayName))
+                        resolvedDisplayName = entry.DisplayName;
+                    if (resolvedDescription == null && !string.IsNullOrWhiteSpace(entry.Description))
+                        resolvedDescription = entry.Description;
+                    if (resolvedLongDesc == null && !string.IsNullOrWhiteSpace(entry.LongDescription))
+                        resolvedLongDesc = entry.LongDescription;
+
+                    if (resolvedDisplayName != null && resolvedDescription != null && resolvedLongDesc != null)
+                        break;
+                }
+            }
+        }
+
+        return (
+            resolvedDisplayName ?? defaultDisplayName,
+            resolvedDescription ?? defaultDescription,
+            resolvedLongDesc ?? defaultLongDescription
+        );
+    }
+}
+
 public sealed record Table
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -56,6 +142,7 @@ public sealed record Table
     public string DisplayName { get; init; } = string.Empty;
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
+    public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;
     public string? DocumentationSource { get; init; }
     public string Sensitivity { get; init; } = "NORMAL";
     public bool RequiresFourEyes { get; init; }
@@ -125,10 +212,12 @@ public sealed class TableColumn
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TableId { get; init; }
     public string ColumnName { get; init; } = string.Empty;
+    public string? DisplayName { get; init; }
     public string DataType { get; init; } = "varchar";
     public bool IsSensitive { get; init; }
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
+    public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;
     public string? DocumentationSource { get; init; }
     public IReadOnlyDictionary<string, string> Meta { get; init; } = new Dictionary<string, string>();
 

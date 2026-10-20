@@ -18,6 +18,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
+using Autheris.Application.Catalog.Search;
 using Autheris.Application.Services;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
@@ -78,7 +79,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ct.ThrowIfCancellationRequested();
 
         var (permitted, _) = await VisibleForAsync(context, ct).ConfigureAwait(false);
-        return permitted.Select(ToSummary).ToList();
+        return permitted.Select(t => ToSummary(t, t.Table.DataSourceType.ToString(), context.Language)).ToList();
     }
 
     public async Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default)
@@ -138,6 +139,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         }
 
         var metadata = visibleRow.Table;
+        var lang = context.Language;
+        var tableResolved = !string.IsNullOrWhiteSpace(lang) ? metadata.Table.Texts.Resolve(lang) : null;
+        var tableDisplayName = tableResolved?.Title ?? metadata.Table.DisplayName;
+        var tableDescription = tableResolved?.Description ?? metadata.Table.Description;
+        var tableLongDescription = tableResolved?.LongDescription ?? metadata.Table.LongDescription;
 
         // Summary (issue #111): identifier, sensitivity and activity only; no columns, keys or indexes.
         if (visibleRow.Shape == CatalogOutputShape.Summary)
@@ -151,7 +157,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 PrimaryKeys: [],
                 Sensitivity: metadata.Table.Sensitivity.ToString(),
                 IsActive: metadata.Table.IsActive,
-                Indexes: []);
+                Indexes: [],
+                DisplayName: tableDisplayName,
+                Description: tableDescription,
+                LongDescription: null,
+                Language: lang);
         }
 
         // SD-4: declared keys and indexes are reported only as a whole and only over the columns this response lists.
@@ -171,13 +181,16 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 maskingState = "Masked";
             }
 
+            var colResolved = !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
             return new CatalogColumnDetail(
                 Name: c.ColumnName,
                 Type: c.DataType,
                 Sensitivity: c.IsSensitive ? "Sensitive" : "Public",
                 MaskingState: maskingState,
                 IsPrimaryKey: pkSet.Contains(c.ColumnName),
-                IsPiiIndicator: CatalogPiiDetector.IsPii(c.ColumnName, c.IsSensitive)
+                IsPiiIndicator: CatalogPiiDetector.IsPii(c.ColumnName, c.IsSensitive),
+                DisplayName: colResolved?.Title ?? c.DisplayName ?? c.ColumnName,
+                Description: colResolved?.Description ?? c.Description
             );
         }).ToList();
 
@@ -190,7 +203,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             PrimaryKeys: keys.PrimaryKeyColumns,
             Sensitivity: metadata.Table.Sensitivity.ToString(),
             IsActive: metadata.Table.IsActive,
-            Indexes: keys.Indexes
+            Indexes: keys.Indexes,
+            DisplayName: tableDisplayName,
+            Description: tableDescription,
+            LongDescription: tableLongDescription,
+            Language: lang
         );
     }
 
@@ -249,7 +266,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         {
             return permitted
                 .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))
-                .Select(ToSummary)
+                .Select(t => ToSummary(t, context.Language))
                 .Concat(procSummaries)
                 .ToList();
         }
@@ -267,7 +284,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var tableHits = hits
                 .Select(h => ShapeHit(h, permittedById, allById, terms))
                 .Where(h => h != null)
-                .Select(h => ToSummary(permittedById[h!.TableIdentifier], "Catalog"))
+                .Select(h => ToSummary(permittedById[h!.TableIdentifier], "Catalog", context.Language))
                 .ToList();
 
             return tableHits.Concat(procSummaries).ToList();
@@ -278,7 +295,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             .Where(d => d.Identifier.TableName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                         d.Identifier.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                         (d.Table.Description != null && d.Table.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
-            .Select(ToSummary)
+            .Select(t => ToSummary(t, context.Language))
             .Concat(procSummaries)
             .ToList();
 
@@ -439,18 +456,24 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         return (set.Tables, set.AllTables);
     }
 
-    private static CatalogDatasetSummary ToSummary(TableMetadata table) => ToSummary(table, table.Table.DataSourceType.ToString());
+    private static CatalogDatasetSummary ToSummary(TableMetadata table, string? language = null) => ToSummary(table, table.Table.DataSourceType.ToString(), language);
 
-    private static CatalogDatasetSummary ToSummary(TableMetadata table, string sourceType) => new(
-        DatasetId: table.Identifier.ToString(),
-        Domain: table.Identifier.Domain,
-        Schema: table.Identifier.Schema,
-        Table: table.Identifier.TableName,
-        // A Summary row discloses only the allow-listed fields; the source type is not one of them.
-        SourceType: table.CatalogView == CatalogView.Summary ? string.Empty : sourceType,
-        Sensitivity: table.Table.Sensitivity.ToString(),
-        Description: table.Table.Description,
-        IsActive: table.Table.IsActive);
+    private static CatalogDatasetSummary ToSummary(TableMetadata table, string sourceType, string? language = null)
+    {
+        var resolved = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;
+        return new(
+            DatasetId: table.Identifier.ToString(),
+            Domain: table.Identifier.Domain,
+            Schema: table.Identifier.Schema,
+            Table: table.Identifier.TableName,
+            // A Summary row discloses only the allow-listed fields; the source type is not one of them.
+            SourceType: table.CatalogView == CatalogView.Summary ? string.Empty : sourceType,
+            Sensitivity: table.Table.Sensitivity.ToString(),
+            Description: resolved?.Description ?? table.Table.Description,
+            IsActive: table.Table.IsActive,
+            DisplayName: resolved?.Title ?? table.Table.DisplayName,
+            Language: language);
+    }
 
     private static IReadOnlyList<string> QueryTerms(string? query) =>
         (query ?? string.Empty)
@@ -470,7 +493,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     /// For a table with at least one non-visible column a hit that has no lexical match in visible text (a hit caused by a hidden
     /// column, or a vector-only hit) is dropped; semantic-only recall is therefore reduced for column-restricted callers.
     /// </summary>
-    private static CatalogSearchHit? ShapeHit(
+    internal static CatalogSearchHit? ShapeHit(
         CatalogSearchHit hit,
         IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
         IReadOnlyDictionary<TableIdentifier, TableMetadata> all,
@@ -527,17 +550,53 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private static HashSet<string> VisibleTokens(TableMetadata table)
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append(table.Identifier.Domain).Append(' ').Append(table.Identifier.Schema).Append(' ').Append(table.Identifier.TableName).Append(' ')
+        sb.Append(table.Identifier.Domain).Append(' ')
+          .Append(table.Identifier.Schema).Append(' ')
+          .Append(table.Identifier.TableName).Append(' ')
+          .Append(table.Table.DisplayName).Append(' ')
           .Append(table.Table.Description).Append(' ');
+
+        if (table.Table.Texts is not null)
+        {
+            foreach (var (_, entry) in table.Table.Texts.Entries)
+            {
+                sb.Append(entry.DisplayName).Append(' ')
+                  .Append(entry.Description).Append(' ')
+                  .Append(entry.LongDescription).Append(' ');
+            }
+        }
+
         foreach (var c in table.Columns)
         {
-            sb.Append(c.ColumnName).Append(' ').Append(c.DataType).Append(' ').Append(c.Description).Append(' ');
+            sb.Append(c.ColumnName).Append(' ')
+              .Append(c.DataType).Append(' ')
+              .Append(c.DisplayName).Append(' ')
+              .Append(c.Description).Append(' ');
+
+            if (c.Texts is not null)
+            {
+                foreach (var (_, entry) in c.Texts.Entries)
+                {
+                    sb.Append(entry.DisplayName).Append(' ')
+                      .Append(entry.Description).Append(' ');
+                }
+            }
         }
 
         var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in sb.ToString().Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             tokens.Add(t);
+            var folded = DiacriticNormalizer.FoldGermanUmlauts(t);
+            if (!string.Equals(t, folded, StringComparison.OrdinalIgnoreCase))
+            {
+                tokens.Add(folded);
+            }
+            var stripped = DiacriticNormalizer.StripAccents(t);
+            if (!string.Equals(t, stripped, StringComparison.OrdinalIgnoreCase))
+            {
+                tokens.Add(stripped);
+            }
         }
 
         return tokens;

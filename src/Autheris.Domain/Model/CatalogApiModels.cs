@@ -13,7 +13,9 @@ public sealed record CatalogDatasetSummary(
     string SourceType,
     string Sensitivity,
     string? Description,
-    bool IsActive);
+    bool IsActive,
+    string? DisplayName = null,
+    string? Language = null);
 
 public sealed record CatalogColumnDetail(
     string Name,
@@ -21,7 +23,9 @@ public sealed record CatalogColumnDetail(
     string Sensitivity,
     string MaskingState,
     bool IsPrimaryKey,
-    bool IsPiiIndicator);
+    bool IsPiiIndicator,
+    string? DisplayName = null,
+    string? Description = null);
 
 public sealed record CatalogDatasetDetail(
     string DatasetId,
@@ -32,7 +36,11 @@ public sealed record CatalogDatasetDetail(
     IReadOnlyList<string> PrimaryKeys,
     string Sensitivity,
     bool IsActive,
-    IReadOnlyList<TableIndexDefinition>? Indexes = null);
+    IReadOnlyList<TableIndexDefinition>? Indexes = null,
+    string? DisplayName = null,
+    string? Description = null,
+    string? LongDescription = null,
+    string? Language = null);
 
 public sealed record CatalogDatasourceSummary(
     string Id,
@@ -95,20 +103,21 @@ public sealed record RequestContext(
     IReadOnlyCollection<string>? Roles = null,
     string? CorrelationId = null,
     ClaimsPrincipal? User = null,
-    string? ClientIp = null)
+    string? ClientIp = null,
+    string? Language = null)
 {
     public ClaimsPrincipal User { get; init; } = User ?? new ClaimsPrincipal(new ClaimsIdentity());
 
-    public RequestContext() : this(TenantId.LegacySingleTenant, new Sid("anonymous"), null, null, new ClaimsPrincipal(new ClaimsIdentity()), null) { }
+    public RequestContext() : this(TenantId.LegacySingleTenant, new Sid("anonymous"), null, null, new ClaimsPrincipal(new ClaimsIdentity()), null, null) { }
 
-    public RequestContext(ClaimsPrincipal user, TenantId tenantId, string? clientIp = null)
-        : this(tenantId, user.GetUserSid() ?? new Sid("anonymous"), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(user.Claims, c => c.Type == ClaimTypes.Role), c => c.Value)), null, user, clientIp)
+    public RequestContext(ClaimsPrincipal user, TenantId tenantId, string? clientIp = null, string? language = null)
+        : this(tenantId, user.GetUserSid() ?? new Sid("anonymous"), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(user.Claims, c => c.Type == ClaimTypes.Role), c => c.Value)), null, user, clientIp, language)
     {
     }
 
-    public static RequestContext FromUser(ClaimsPrincipal user, TenantId? tenantId = null, string? clientIp = null) =>
-        new(user, tenantId ?? TenantId.LegacySingleTenant, clientIp);
+    public static RequestContext FromUser(ClaimsPrincipal user, TenantId? tenantId = null, string? clientIp = null, string? language = null) =>
+        new(user, tenantId ?? TenantId.LegacySingleTenant, clientIp, language);
 
-    public static RequestContext FromCaller(CallerSecurityContext caller, string? correlationId = null) =>
-        new(caller.Tenant, caller.UserSid, caller.Roles, correlationId, null, null);
+    public static RequestContext FromCaller(CallerSecurityContext caller, string? correlationId = null, string? language = null) =>
+        new(caller.Tenant, caller.UserSid, caller.Roles, correlationId, null, null, language);
 }
