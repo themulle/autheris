@@ -27,6 +27,9 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
 
     private static readonly char[] CrlfChars = new[] { '\r', '\n' };
 
+    // API version path segment (v1, v2, V10, ...), see ExtractResourceFromPath.
+    private static readonly Regex VersionSegment = new(@"^v[0-9]+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
     private readonly Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? _virtualFilters;
 
     public EnvoyExtAuthzService(
@@ -205,7 +208,18 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}', Method '{Method}' - Reason: {Reason}",
                 principal, tenantStr, resourceName, method, reason);
 
-            return EnvoyCheckResponse.Deny(403, reason);
+            // Security review: the denied reasons describe policy internals; they stay in the log, the caller gets a generic message.
+            return EnvoyCheckResponse.Deny(403, DeniedByPolicyMessage);
+        }
+
+        // Security review: ext_authz can only answer allow/deny for the whole request; it cannot apply a row filter or a
+        // column mask/deny to the upstream response. A decision that restricts rows or columns is therefore denied
+        // (fail closed), mirroring the raw-access rule of the Iceberg REST catalog federation.
+        if (IsRestricted(decision))
+        {
+            _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}', Method '{Method}' - the decision requires row filtering or column restrictions that ext_authz cannot enforce. Reasons: {Reasons}",
+                principal, tenantStr, resourceName, method, string.Join("; ", decision.DeniedReasons));
+            return EnvoyCheckResponse.Deny(403, RestrictedMessage);
         }
 
         // Virtual filters (decision 7): ext_authz enforces no row filters. A caller whose access profile has the table in
@@ -235,6 +249,21 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         // SEC C-1: Do not leak raw CombinedRowFilterSql in header response
         return EnvoyCheckResponse.Allow(principal, tenantStr);
     }
+
+    internal const string DeniedByPolicyMessage = "Access denied by policy.";
+
+    internal const string RestrictedMessage = "Access denied: the resource is restricted by row or column policies; use a governed data channel.";
+
+    /// <summary>
+    /// True when the decision restricts rows (row filter, typed row policy, mandatory predicate) or columns (any column not
+    /// in clear, or no unconstrained column allow). Same rule as the Iceberg raw-access check.
+    /// </summary>
+    internal static bool IsRestricted(TableAccessDecision decision) =>
+        !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
+        !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql) ||
+        decision.RowPolicy != null ||
+        decision.ColumnAccess.Values.Any(v => v != ColumnAccessLevel.Clear) ||
+        !decision.HasUnconstrainedColumnAllow;
 
     private static string? NormalizePath(string rawPath)
     {
@@ -274,11 +303,12 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             return "root";
         }
 
-        // Skip common API prefix segments (e.g. /api/v1/customers/123 -> "customers")
+        // Skip common API prefix segments (e.g. /api/v1/customers/123 -> "customers"). Only real version segments
+        // (v + digits) are skipped, so /api/vat/1 resolves to "vat" and not to "1".
         int idx = 0;
         while (idx < segments.Length &&
                (segments[idx].Equals("api", StringComparison.OrdinalIgnoreCase) ||
-                segments[idx].StartsWith("v", StringComparison.OrdinalIgnoreCase) && segments[idx].Length <= 3))
+                VersionSegment.IsMatch(segments[idx])))
         {
             idx++;
         }

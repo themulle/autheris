@@ -80,6 +80,60 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         repo.ReplaceCalls.ShouldBe(0);
     }
 
+    // The grant policy classifies every service principal as GrantClass.ServicePrincipal (no four-eyes flag); the manifest still
+    // refuses an Allow on a sensitive table or with a Clear column rule for it.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SR_M_10_SensitiveServicePrincipalManifestGrant_RequiresFourEyes_AndNothingIsWritten(bool dryRun)
+    {
+        var repo = new FakeConsentRepository();
+
+        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c"), dryRun: dryRun, sensitivity: "CONFIDENTIAL"));
+
+        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
+        ex.Decision.Class.ShouldBe(GrantClass.ServicePrincipal);
+        repo.ReplaceCalls.ShouldBe(0);
+        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SR_M_10_ClearColumnRule_OnAServicePrincipalManifestGrant_RequiresFourEyes(bool dryRun)
+    {
+        var repo = new FakeConsentRepository();
+
+        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", clearColumn: "id"), dryRun: dryRun));
+
+        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
+        repo.ReplaceCalls.ShouldBe(0);
+        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SR_M_10_RegularServicePrincipalManifestGrant_IsStillApplied()
+    {
+        var repo = new FakeConsentRepository();
+
+        var result = await ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c"));
+
+        result.Applied.ShouldBe(1);
+        repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task SR_M_10_ServicePrincipalDenyOnASensitiveTable_NeedsNoFourEyes()
+    {
+        var repo = new FakeConsentRepository();
+
+        var result = await ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", effect: "Deny"), sensitivity: "CONFIDENTIAL");
+
+        result.Applied.ShouldBe(1);
+    }
+
     [Fact]
     public async Task SR_M_10_RegularIndividualManifestGrant_IsStillApplied()
     {
@@ -115,6 +169,49 @@ public sealed class ManifestFourEyesAndSelfGrantTests
 
         ex.Message.ShouldContain("Self-grant prohibited");
         repo.ReplaceCalls.ShouldBe(0);
+    }
+
+    // An app-only GitOps token (no user SID) must not grant to its own client id.
+    [Theory]
+    [InlineData("appid")]
+    [InlineData("azp")]
+    [InlineData("client_id")]
+    public async Task SR_M_10_SelfGrant_ToTheActorsOwnApplicationId_IsRefused(string claimType)
+    {
+        const string AppId = "0f0f0f0f-1111-2222-3333-444444444444";
+        var caller = Caller(new Claim(claimType, AppId));
+        var repo = new FakeConsentRepository();
+
+        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(repo, Policy("ServicePrincipal", AppId), caller));
+
+        ex.Message.ShouldContain("Self-grant prohibited");
+        repo.ReplaceCalls.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("hasgroups", "true")]
+    [InlineData("_claim_names", "{\"groups\":\"src1\"}")]
+    public async Task SR_M_10_GroupAllow_WithAnEntraGroupOverage_IsRefused_AlsoInDryRun(string claimType, string claimValue)
+    {
+        var caller = Caller(new Claim(claimType, claimValue));
+        var repo = new FakeConsentRepository();
+
+        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(repo, Policy("Group", "S-1-5-21-GRP-OTHERS"), caller, dryRun: true));
+
+        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
+        ex.Message.ShouldContain("group overage");
+        repo.ReplaceCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task SR_M_10_GroupDenyAndRoleGrant_WithAnEntraGroupOverage_StayAllowed()
+    {
+        var caller = Caller(new Claim("hasgroups", "true"));
+
+        (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-GRP-OTHERS", effect: "Deny"), caller)).Applied.ShouldBe(1);
+        (await ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller)).Applied.ShouldBe(1);
     }
 
     [Fact]

@@ -1011,11 +1011,12 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 if (item.TryGetProperty("sensitivity", out var sProp) && sProp.GetString() is string incomingSensitivity &&
                     !string.IsNullOrWhiteSpace(incomingSensitivity))
                 {
-                    // Fail closed: a lower table sensitivity is not applied but rejects the import (proposal workflow).
-                    if (!string.IsNullOrWhiteSpace(existingMeta.Table.Sensitivity) &&
-                        Table.SensitivityRank(incomingSensitivity) < Table.SensitivityRank(existingMeta.Table.Sensitivity))
+                    // Fail closed: a lower table sensitivity is not applied but rejects the import (proposal workflow). An empty stored
+                    // value is the implicit NORMAL (SensitivityRank ranks it like NORMAL), so it cannot be lowered either.
+                    if (Table.SensitivityRank(incomingSensitivity) < Table.SensitivityRank(existingMeta.Table.Sensitivity))
                     {
-                        rejections.Add($"Table '{tableId}': sensitivity '{incomingSensitivity}' would lower the stored sensitivity '{existingMeta.Table.Sensitivity}'; use the dbt proposal workflow.");
+                        var storedTableSensitivity = string.IsNullOrWhiteSpace(existingMeta.Table.Sensitivity) ? "NORMAL" : existingMeta.Table.Sensitivity;
+                        rejections.Add($"Table '{tableId}': sensitivity '{incomingSensitivity}' would lower the stored sensitivity '{storedTableSensitivity}'; use the dbt proposal workflow.");
                     }
                     else
                     {

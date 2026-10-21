@@ -22,7 +22,8 @@ using Xunit;
 
 /// <summary>
 /// Security review (TOTP trust on first use): a user's first TOTP enrollment requires a fresh interactive sign-in
-/// (auth_time, else iat) outside Development; re-enrollment stays protected by the current code.
+/// outside Development (JWT: auth_time only; Basic session cookie: iat = login time; ForwardAuth: denied); re-enrollment
+/// stays protected by the current code.
 /// </summary>
 public class TotpFirstEnrollmentGuardTests
 {
@@ -76,10 +77,22 @@ public class TotpFirstEnrollmentGuardTests
     }
 
     [Fact]
-    public void Iat_IsUsed_WhenAuthTimeIsMissing()
+    public void Jwt_Iat_IsNotAcceptedAsSignInTime()
     {
-        TotpFirstEnrollmentGuard.IsFreshAuthentication(User(UnixClaim("iat", Now.AddMinutes(-4))), TimeSpan.FromMinutes(5), Now).ShouldBeTrue();
-        TotpFirstEnrollmentGuard.IsFreshAuthentication(User(UnixClaim("iat", Now.AddMinutes(-6))), TimeSpan.FromMinutes(5), Now).ShouldBeFalse();
+        // A silent token refresh resets iat; only auth_time proves the interactive sign-in for JWT identities.
+        var user = User(UnixClaim("iat", Now.AddMinutes(-1)));
+
+        TotpFirstEnrollmentGuard.GetAuthenticationTime(user).ShouldBeNull();
+        TotpFirstEnrollmentGuard.IsFreshAuthentication(user, TimeSpan.FromMinutes(5), Now).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void BasicSession_Iat_IsUsedAsLoginTime()
+    {
+        var scheme = Autheris.Api.Security.BasicAuthSession.SchemeName;
+        TotpFirstEnrollmentGuard.ClassifyAuthentication(UserWithAuthType(scheme)).ShouldBe(TotpEnrollmentAuthKind.SessionCookie);
+        TotpFirstEnrollmentGuard.IsFreshAuthentication(UserWithAuthType(scheme, UnixClaim("iat", Now.AddMinutes(-4))), TimeSpan.FromMinutes(5), Now).ShouldBeTrue();
+        TotpFirstEnrollmentGuard.IsFreshAuthentication(UserWithAuthType(scheme, UnixClaim("iat", Now.AddMinutes(-6))), TimeSpan.FromMinutes(5), Now).ShouldBeFalse();
     }
 
     [Fact]
@@ -124,6 +137,58 @@ public class TotpFirstEnrollmentGuardTests
         check.IsFirstEnrollment.ShouldBeTrue();
         check.Rejection.ShouldBeNull();
         await audit.DidNotReceive().RecordBestEffortAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+        await audit.DidNotReceive().RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task JwtIdentity_WithFreshIatButNoAuthTime_IsDenied()
+    {
+        var (context, audit) = CreateContext(User(UnixClaim("iat", Now)));
+
+        var check = await TotpFirstEnrollmentGuard.CheckAsync(context, Enrollment(hasActiveSecret: false), Sid, "begin", CancellationToken.None);
+
+        StatusOf(check.Rejection).ShouldBe(StatusCodes.Status403Forbidden);
+        await audit.Received(1).RecordBestEffortAsync(
+            Arg.Is<AuditLogEntry>(e => e.Decision == "DENY" && e.DetailsJson.Contains("auth_time claim missing")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Verify_AcceptsAuthenticationAgeUpToBeginWindowPlusPendingLifetime()
+    {
+        // Default: 5 min begin window + 10 min pending-seed lifetime.
+        var (beginContext, _) = CreateContext(User(UnixClaim("auth_time", Now.AddMinutes(-12))));
+        var (verifyContext, _) = CreateContext(User(UnixClaim("auth_time", Now.AddMinutes(-12))));
+        var (staleVerifyContext, _) = CreateContext(User(UnixClaim("auth_time", Now.AddMinutes(-16))));
+
+        var begin = await TotpFirstEnrollmentGuard.CheckAsync(beginContext, Enrollment(hasActiveSecret: false), Sid, "begin", CancellationToken.None);
+        var verify = await TotpFirstEnrollmentGuard.CheckAsync(verifyContext, Enrollment(hasActiveSecret: false), Sid, "verify", CancellationToken.None);
+        var staleVerify = await TotpFirstEnrollmentGuard.CheckAsync(staleVerifyContext, Enrollment(hasActiveSecret: false), Sid, "verify", CancellationToken.None);
+
+        StatusOf(begin.Rejection).ShouldBe(StatusCodes.Status403Forbidden);
+        verify.Rejection.ShouldBeNull();
+        StatusOf(staleVerify.Rejection).ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public void MaxAuthAge_ForVerify_IsBeginWindowPlusPendingLifetime()
+    {
+        var options = new TotpOptions { FirstEnrollmentMaxAuthAgeMinutes = 5, PendingEnrollmentMinutes = 10 };
+
+        TotpFirstEnrollmentGuard.GetMaxAuthAge(options, "begin").ShouldBe(TimeSpan.FromMinutes(5));
+        TotpFirstEnrollmentGuard.GetMaxAuthAge(options, "verify").ShouldBe(TimeSpan.FromMinutes(15));
+    }
+
+    [Fact]
+    public async Task ForwardAuthIdentity_IsDenied_EvenWithAuthTime()
+    {
+        var (context, audit) = CreateContext(UserWithAuthType(Autheris.Api.Security.GatewayAuthSchemes.ForwardAuth, UnixClaim("auth_time", Now)));
+
+        var check = await TotpFirstEnrollmentGuard.CheckAsync(context, Enrollment(hasActiveSecret: false), Sid, "begin", CancellationToken.None);
+
+        TotpFirstEnrollmentGuard.ClassifyAuthentication(context.User).ShouldBe(TotpEnrollmentAuthKind.ProxyAsserted);
+        StatusOf(check.Rejection).ShouldBe(StatusCodes.Status403Forbidden);
+        await audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e => e.Decision == "DENY"), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -185,9 +250,22 @@ public class TotpFirstEnrollmentGuardTests
         TotpFirstEnrollmentGuard.ClassifyAuthentication(context.User).ShouldBe(TotpEnrollmentAuthKind.PerRequest);
         check.IsFirstEnrollment.ShouldBeTrue();
         check.Rejection.ShouldBeNull();
-        await audit.Received(1).RecordBestEffortAsync(
+        await audit.Received(1).RecordRequiredAsync(
             Arg.Is<AuditLogEntry>(e => e.Decision == "ALLOW" && e.EventType == AuditEventTypes.TwoFactorEnrollmentStarted),
             Arg.Any<CancellationToken>());
+        await audit.DidNotReceive().RecordBestEffortAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PerRequestAuthentication_AuditUnavailable_FailsClosedWith503()
+    {
+        var (context, audit) = CreateContext(UserWithAuthType("Kerberos"));
+        audit.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new AuditUnavailableException("down"));
+
+        var check = await TotpFirstEnrollmentGuard.CheckAsync(context, Enrollment(hasActiveSecret: false), Sid, "begin", CancellationToken.None);
+
+        StatusOf(check.Rejection).ShouldBe(StatusCodes.Status503ServiceUnavailable);
     }
 
     [Theory]
@@ -236,8 +314,19 @@ public class TotpFirstEnrollmentGuardTests
 
         await TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, Sid, CancellationToken.None);
 
-        await audit.Received(1).RecordBestEffortAsync(
+        await audit.Received(1).RecordRequiredAsync(
             Arg.Is<AuditLogEntry>(e => e.Decision == "ALLOW" && e.ActorSid.Value == Sid && e.DetailsJson.Contains("firstEnrollment")),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CompletedFirstEnrollment_AuditUnavailable_Throws()
+    {
+        var (context, audit) = CreateContext(User(UnixClaim("auth_time", Now)));
+        audit.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new AuditUnavailableException("down"));
+
+        await Should.ThrowAsync<AuditUnavailableException>(
+            () => TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, Sid, CancellationToken.None));
     }
 }

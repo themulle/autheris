@@ -8,9 +8,11 @@ using Autheris.Api.Security;
 using Autheris.Application.Mesh.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// F-ARCH-11: Envoy External Authorization (ext_authz) endpoints and Istio CRD manifest exporter.
@@ -29,9 +31,9 @@ public static class EnvoyExtAuthzEndpoints
         app.MapMethods("/api/v1/envoy/check/{**originalPath}", new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" }, async (
             HttpContext context,
             IEnvoyExtAuthzService authzService,
-            ITrustedProxyValidator proxyValidator) =>
+            IOptions<GatewayOptions> gatewayOptions) =>
         {
-            var (method, path) = ResolveOriginalRequest(context, proxyValidator);
+            var (method, path) = ResolveOriginalRequest(context, gatewayOptions.Value.EnvoyExtAuthz);
 
             var headerMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in context.Request.Headers)
@@ -126,12 +128,14 @@ public static class EnvoyExtAuthzEndpoints
 
     /// <summary>
     /// Security review: <c>X-Original-Method</c> / <c>X-Original-URI</c> describe the request being authorised and are
-    /// only honoured when the raw TCP peer is a trusted proxy (Envoy). Any other caller is decided on the route suffix
-    /// and the real method, so it cannot obtain an ALLOW for a different (e.g. read-only) request than the one it sends.
+    /// only honoured when the raw TCP peer (captured before forwarded headers are applied) is in the dedicated
+    /// <see cref="EnvoyExtAuthzOptions"/> allowlist, not the shared ForwardAuth/ReverseProxy trusted proxies. Empty
+    /// allowlist (default) = never trusted. Any other caller is decided on the route suffix and the real method, so it
+    /// cannot obtain an ALLOW for a different (e.g. read-only) request than the one it sends.
     /// </summary>
-    internal static (string Method, string Path) ResolveOriginalRequest(HttpContext context, ITrustedProxyValidator proxyValidator)
+    internal static (string Method, string Path) ResolveOriginalRequest(HttpContext context, EnvoyExtAuthzOptions? options)
     {
-        var trustedPeer = proxyValidator.IsRawPeerTrusted(context);
+        var trustedPeer = options != null && options.IsTrustedPeer(TrustedProxyPeer.GetRawRemoteIp(context));
 
         var method = trustedPeer && context.Request.Headers.TryGetValue("X-Original-Method", out var om) && om.Count > 0 && !string.IsNullOrWhiteSpace(om[0])
             ? om[0]!

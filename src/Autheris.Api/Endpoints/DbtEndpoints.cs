@@ -69,7 +69,17 @@ public static class DbtEndpoints
 
             // Virtual filters and access profiles are saved as the calling user (never as the sync, so the approval workflow
             // applies) in the server-resolved request tenant; only a canonical ClusterAdmin may import into another tenant.
-            var security = EndpointSecurity.GetSecurityContext(context);
+            Autheris.Domain.Security.SecurityPrincipalContext security;
+            try
+            {
+                security = EndpointSecurity.GetSecurityContext(context);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Authenticated without a resolvable SID: refused (403) instead of surfacing as a 500.
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var caller = new DbtGovernanceImportCaller(
                 new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
                 EndpointSecurity.GetRequestTenant(context),

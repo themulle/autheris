@@ -1,9 +1,8 @@
 using System.Net;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
-using Autheris.Api.Security;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -11,7 +10,8 @@ namespace Autheris.Tests.Unit;
 
 /// <summary>
 /// Security review: ext_authz honours X-Original-Method / X-Original-URI only when the raw TCP peer (captured before
-/// forwarded headers are applied) is a trusted proxy; every other caller is decided on the route suffix and real method.
+/// forwarded headers are applied) is in the dedicated EnvoyExtAuthz allowlist (not the shared ForwardAuth/ReverseProxy
+/// trusted proxies); every other caller is decided on the route suffix and real method.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class EnvoyExtAuthzTrustedProxyTests
@@ -19,12 +19,7 @@ public sealed class EnvoyExtAuthzTrustedProxyTests
     private static readonly IPAddress Envoy = IPAddress.Parse("10.0.0.5");
     private static readonly IPAddress Attacker = IPAddress.Parse("203.0.113.7");
 
-    private static ITrustedProxyValidator Validator()
-    {
-        var validator = Substitute.For<ITrustedProxyValidator>();
-        validator.IsProxyTrusted(Arg.Any<IPAddress>()).Returns(ci => ci.Arg<IPAddress>().Equals(Envoy));
-        return validator;
-    }
+    private static EnvoyExtAuthzOptions Validator() => new() { TrustedPeers = [Envoy.ToString()] };
 
     private static DefaultHttpContext Request(IPAddress? rawPeer, IPAddress? connectionIp = null)
     {
@@ -70,6 +65,54 @@ public sealed class EnvoyExtAuthzTrustedProxyTests
 
         method.ShouldBe("GET");
         path.ShouldBe("/api/v1/tables/sales");
+    }
+
+    [Fact]
+    public void EmptyAllowlist_NeverTrustsOriginalHeaders()
+    {
+        // Default: no dedicated ext_authz peers configured, even a peer trusted as ForwardAuth/ReverseProxy proxy is ignored.
+        var (method, path) = EnvoyExtAuthzEndpoints.ResolveOriginalRequest(Request(Envoy), new EnvoyExtAuthzOptions());
+
+        method.ShouldBe("GET");
+        path.ShouldBe("/api/v1/tables/sales");
+    }
+
+    [Fact]
+    public void NullOptions_NeverTrustsOriginalHeaders()
+    {
+        var (method, path) = EnvoyExtAuthzEndpoints.ResolveOriginalRequest(Request(Envoy), null);
+
+        method.ShouldBe("GET");
+        path.ShouldBe("/api/v1/tables/sales");
+    }
+
+    [Fact]
+    public void PeerInTrustedNetwork_HonoursOriginalHeaders()
+    {
+        var options = new EnvoyExtAuthzOptions { TrustedNetworks = ["10.0.0.0/24"] };
+
+        var (method, path) = EnvoyExtAuthzEndpoints.ResolveOriginalRequest(Request(Envoy), options);
+
+        method.ShouldBe("DELETE");
+        path.ShouldBe("/api/v1/admin/purge");
+    }
+
+    [Fact]
+    public void IPv4MappedPeer_IsMatched()
+    {
+        var options = new EnvoyExtAuthzOptions { TrustedPeers = ["10.0.0.5"] };
+
+        options.IsTrustedPeer(Envoy.MapToIPv6()).ShouldBeTrue();
+        options.IsTrustedPeer(Attacker).ShouldBeFalse();
+        options.IsTrustedPeer(null).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void InvalidEntries_AreIgnored()
+    {
+        var options = new EnvoyExtAuthzOptions { TrustedPeers = ["not-an-ip"], TrustedNetworks = ["garbage/99"] };
+
+        options.IsTrustedPeer(Envoy).ShouldBeFalse();
     }
 
     [Fact]

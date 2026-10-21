@@ -117,6 +117,7 @@ public static class DevPortalEndpoints
             }
 
             // Security review (TOTP TOFU): checked again on activation, the pending seed alone does not prove a fresh sign-in.
+            // The verify window covers the pending-seed lifetime, so an enrollment admitted at "begin" is not re-failed here.
             var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "verify", ct).ConfigureAwait(false);
             if (firstEnrollment.Rejection != null)
             {
@@ -128,6 +129,7 @@ public static class DevPortalEndpoints
 
             if (outcome == TotpEnrollmentOutcome.Completed && firstEnrollment.IsFirstEnrollment)
             {
+                // Required audit (fail closed): an unavailable audit store aborts with 503 via the gateway exception handler.
                 await TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, userSid, ct).ConfigureAwait(false);
             }
 

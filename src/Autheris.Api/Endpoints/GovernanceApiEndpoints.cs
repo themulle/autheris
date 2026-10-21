@@ -72,6 +72,7 @@ public static class GovernanceApiEndpoints
                 return Results.BadRequest(new TotpVerifyResult(false, "TotpCode is required."));
             }
 
+            // Security review (TOTP TOFU): checked again on activation; the verify window covers the pending-seed lifetime.
             var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "verify", context.RequestAborted).ConfigureAwait(false);
             if (firstEnrollment.Rejection != null)
             {
@@ -83,6 +84,7 @@ public static class GovernanceApiEndpoints
 
             if (outcome == TotpEnrollmentOutcome.Completed && firstEnrollment.IsFirstEnrollment)
             {
+                // Required audit (fail closed): an unavailable audit store aborts with 503 via the gateway exception handler.
                 await TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, userSid, context.RequestAborted).ConfigureAwait(false);
             }
 

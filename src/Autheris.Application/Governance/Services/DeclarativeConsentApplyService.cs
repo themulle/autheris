@@ -62,6 +62,7 @@ public sealed class DeclarativeConsentApplyService(
 
         // SR-M-10: the self-grant check compares against every identifier form of the actor and the groups and roles it holds.
         var actorIdentifiers = CollectActorIdentifiers(caller, actorSid, callerContext);
+        var hasGroupOverage = HasGroupOverage(caller);
 
         int totalEvaluated = 0;
         int applied = 0;
@@ -155,25 +156,39 @@ public sealed class DeclarativeConsentApplyService(
                     $"Self-grant prohibited: Actor '{actorSid}' cannot grant consent to themselves or to a group or role they belong to via declarative manifest."));
             }
 
+            // With an Entra group overage the token does not list every group of the actor, so a grant to an own group cannot be
+            // ruled out: an Allow towards a group is refused (fail closed) instead of relying on an incomplete group list.
+            if (granteeType == GranteeType.Group && effect == ConsentEffect.Allow && hasGroupOverage)
+            {
+                throw new GrantPolicyViolationException(GrantDecision.Deny(
+                    GrantErrorCodes.FourEyesRequired,
+                    "Group grant refused: the actor's token carries an Entra group overage marker, so its group memberships are incomplete and a self-grant through a group cannot be ruled out. Use a token with the full group list or the consent request/approval workflow."));
+            }
+
             DateTimeOffset validTo;
             if (individual)
             {
+                var sensitivity = GrantClassifier.Classify([metadata]);
+                var hasClearColumnRule = HasClearColumnRule(policy);
                 var decision = _grantPolicy.Evaluate(new GrantRequest(
                     granteeType,
                     policy.GranteeRef,
                     GrantKind.ManifestPolicy,
                     policy.ValidUntil,
                     now,
-                    GrantClassifier.Classify([metadata]),
-                    HasClearColumnRule(policy) ? MaskingPolicyMode.Unmasked : MaskingPolicyMode.Default,
+                    sensitivity,
+                    hasClearColumnRule ? MaskingPolicyMode.Unmasked : MaskingPolicyMode.Default,
                     Requester: actorSid.Value,
                     Justification: description ?? "GitOps manifest",
                     Effect: effect));
                 GrantPolicyViolationException.ThrowIfDenied(decision);
 
-                // The manifest activates the consent immediately and carries no approvals, so a class that needs four-eyes (Sensitive,
-                // Unmasked/Clear columns, privileged) is refused here (also in dry-run) and must use the consent request/approval workflow.
-                if (decision.RequiresFourEyes)
+                // The manifest activates the consent immediately and carries no approvals, so an Allow on a sensitive table or with a
+                // Clear column rule (or any class the policy marks as four-eyes) is refused here (also in dry-run) and must use the consent
+                // request/approval workflow. Sensitivity and Clear are checked directly because the policy classifies every service
+                // principal as GrantClass.ServicePrincipal, which carries no four-eyes flag. The manifest never sets a privileged right.
+                if (effect == ConsentEffect.Allow &&
+                    (sensitivity == GrantSensitivity.Sensitive || hasClearColumnRule || decision.RequiresFourEyes))
                 {
                     throw new GrantPolicyViolationException(GrantDecision.Deny(
                         GrantErrorCodes.FourEyesRequired,
@@ -427,9 +442,23 @@ public sealed class DeclarativeConsentApplyService(
 
     private static readonly string[] ActorEmailClaimTypes = [ClaimTypes.Email, "email"];
 
+    // Application identifiers of the actor: an app-only GitOps token must not grant to its own client id.
+    private static readonly string[] ActorApplicationIdClaimTypes = ["appid", "azp", "client_id"];
+
     /// <summary>
-    /// SR-M-10: every identifier of the actor (SIDs, oid, sub, UPN, e-mail, name), its group SIDs and its roles, taken from the claims and,
-    /// when given, from the resolved request context (plugin-enriched groups and roles). Same identifier forms as the bulk grant path.
+    /// Entra group overage: with too many groups the token carries "hasgroups" (implicit flow) or a "_claim_names" entry for "groups"
+    /// instead of the group list, so the group claims are incomplete.
+    /// </summary>
+    private static bool HasGroupOverage(ClaimsPrincipal caller) =>
+        caller.HasClaim(c => string.Equals(c.Type, "hasgroups", StringComparison.OrdinalIgnoreCase)
+                             && !string.Equals(c.Value?.Trim(), "false", StringComparison.OrdinalIgnoreCase)) ||
+        caller.HasClaim(c => string.Equals(c.Type, "_claim_names", StringComparison.OrdinalIgnoreCase)
+                             && c.Value != null
+                             && c.Value.Contains("groups", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// SR-M-10: every identifier of the actor (SIDs, oid, sub, UPN, e-mail, name, application ids), its group SIDs and its roles, taken from
+    /// the claims and, when given, from the resolved request context (plugin-enriched groups and roles). Same identifier forms as the bulk grant path.
     /// </summary>
     private static HashSet<string> CollectActorIdentifiers(ClaimsPrincipal caller, Sid actorSid, SecurityPrincipalContext? callerContext)
     {
@@ -440,7 +469,7 @@ public sealed class DeclarativeConsentApplyService(
             AddIdentifierForms(ids, id);
         }
 
-        foreach (var claimType in ActorEmailClaimTypes)
+        foreach (var claimType in ActorEmailClaimTypes.Concat(ActorApplicationIdClaimTypes))
         {
             foreach (var claim in caller.FindAll(claimType))
             {

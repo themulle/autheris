@@ -155,6 +155,36 @@ public sealed class McpUnderlyingTableFourEyesTests
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(null, true)]
+    [InlineData("dbo.secret", false)]
+    [InlineData("dbo.unknown", true)]
+    public async Task CallProcedure_RegisteredButNotActive_IsAnsweredLikeAnUnknownProcedure(string? resultTable, bool disabled)
+    {
+        // SEC-GOV153-02: a non-Active procedure runs nothing (the executor refuses it); a guardrail denial would reveal that it exists.
+        var registry = Procedure("GetData", resultTable);
+        if (disabled)
+        {
+            registry.MarkDisabled("GetData", "validation failed");
+        }
+        else
+        {
+            registry.TryGet("GetData", out var active).ShouldBeTrue();
+            registry.Register(active!.Definition); // re-registration resets the state to Pending
+        }
+
+        var unknownExecutor = Executor();
+        var unknown = await CallProcedure(Guardrail(unknownExecutor, Procedure("Other", "dbo.pub")), """{"procedure_name":"GetData"}""");
+        var executor = Executor();
+        var result = await CallProcedure(Guardrail(executor, registry), """{"procedure_name":"GetData"}""");
+
+        result.IsSuccess.ShouldBe(unknown.IsSuccess);
+        result.ErrorMessage.ShouldBe(unknown.ErrorMessage);
+        await unknownExecutor.ReceivedWithAnyArgs(1).ExecuteOperationAsync(default!, default!, default!, default);
+        await executor.ReceivedWithAnyArgs(1).ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
     [Fact]
     public async Task CallProcedure_WithoutProcedureRegistry_FailsClosed()
     {

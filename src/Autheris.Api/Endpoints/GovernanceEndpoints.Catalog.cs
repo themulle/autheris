@@ -106,10 +106,21 @@ public static partial class GovernanceEndpoints
             return Results.BadRequest(new { error = "Manifest payload is null or empty." });
         }
 
+        // SR-M-10: the resolved security context carries the caller's (plugin-enriched) groups and roles for the self-grant check.
+        Autheris.Domain.Security.SecurityPrincipalContext callerContext;
         try
         {
-            // SR-M-10: the resolved security context carries the caller's (plugin-enriched) groups and roles for the self-grant check.
-            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, EndpointSecurity.GetSecurityContext(context), ct);
+            callerContext = EndpointSecurity.GetSecurityContext(context);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Authenticated without a resolvable SID: refused (403) instead of surfacing as a 500.
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, callerContext, ct);
             return Results.Ok(result);
         }
         catch (Autheris.Application.Governance.Services.DeclarativeDatasetCatalogException ex)

@@ -162,6 +162,7 @@ public sealed partial class AiDataGuardrailService
     /// <summary>
     /// The tables of a registered procedure, exactly the set its visibility stage consent-checks (GovernedProcedureExecutionService):
     /// the validated referenced tables of an Active procedure plus its result table, each keyed under the procedure's catalog domain.
+    /// Unknown and non-Active procedures resolve to no tables alike (the executor refuses both).
     /// </summary>
     private IReadOnlyList<TableIdentifier>? ResolveProcedureTables(string? argumentsJson)
     {
@@ -178,9 +179,16 @@ public sealed partial class AiDataGuardrailService
             return [];
         }
 
+        if (registered.State != ProcedureState.Active)
+        {
+            // A non-Active procedure reads nothing: the executor refuses it (NOT_FOUND, or unavailable only for callers that may
+            // see it). Denying here would answer it differently from an unknown procedure (SEC-GOV153-02 existence oracle).
+            return [];
+        }
+
         var definition = registered.Definition;
         var keys = new List<string>();
-        if (registered.State == ProcedureState.Active && registered.Validation != null)
+        if (registered.Validation != null)
         {
             keys.AddRange(registered.Validation.ReferencedTables);
         }

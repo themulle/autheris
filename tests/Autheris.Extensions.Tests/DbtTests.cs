@@ -875,6 +875,28 @@ public sealed class DbtTests
         await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
     }
 
+    // An empty stored table sensitivity is the implicit NORMAL: lowering it to PUBLIC/LOW is rejected like lowering an explicit NORMAL.
+    [Theory]
+    [InlineData("", "PUBLIC")]
+    [InlineData("   ", "LOW")]
+    [InlineData("NORMAL", "PUBLIC")]
+    public async Task DbtMetadataIngestionService_GovernanceImport_RejectsLoweringAnImplicitNormalTableSensitivity(string stored, string incoming)
+    {
+        var table = GovernanceTable("customers", stored);
+        var (service, metadataRepo) = GovernanceService(table);
+
+        var json = $$"""
+        { "classifications": [ { "database": "postgres", "schema": "analytics", "table": "customers", "sensitivity": "{{incoming}}" } ] }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        result.Success.ShouldBeFalse();
+        result.Warnings.ShouldContain(w => w.Contains("Table 'postgres.analytics.customers'") && w.Contains($"sensitivity '{incoming}'") && w.Contains("'NORMAL'"));
+        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
     [Theory]
     [InlineData("\"required_filter_columns\": [\"tenant_id\"]", false, false)]
     [InlineData("\"required_filter_columns\": []", false, false)]

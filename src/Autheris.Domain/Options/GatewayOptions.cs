@@ -38,6 +38,7 @@ public sealed class GatewayOptions
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
     public TotpOptions Totp { get; init; } = new();
+    public EnvoyExtAuthzOptions EnvoyExtAuthz { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public CrossSourceOptions CrossSource { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();

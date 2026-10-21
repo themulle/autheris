@@ -35,8 +35,9 @@ public sealed class EnvoyExtAuthzSecurityTests
             Table: table,
             IsAllowed: true,
             ColumnAccess: new Dictionary<string, ColumnAccessLevel>(),
-            CombinedRowFilterSql: "tenant_id = 'corp'",
-            DeniedReasons: Array.Empty<string>());
+            CombinedRowFilterSql: null,
+            DeniedReasons: Array.Empty<string>(),
+            HasUnconstrainedColumnAllow: true);
 
         _policyService
             .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
@@ -104,7 +105,100 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.Equal(7, response.Status.Code); // PERMISSION_DENIED
         Assert.NotNull(response.HttpResponse.DeniedResponse);
         Assert.Equal(403, response.HttpResponse.DeniedResponse.Status.Code);
-        Assert.Contains("insufficient clearance level", response.HttpResponse.DeniedResponse.Body);
+        // Security review: denied reasons describe policy internals; they are logged, not returned to the caller.
+        Assert.DoesNotContain("insufficient clearance level", response.HttpResponse.DeniedResponse.Body);
+        Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
+    }
+
+    private static System.Security.Claims.ClaimsPrincipal MeshCaller(string sid) =>
+        new(new System.Security.Claims.ClaimsIdentity(
+            new[]
+            {
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid),
+                new System.Security.Claims.Claim("tenant_id", "corp")
+            },
+            "MeshTls"));
+
+    public static TheoryData<string, string?, ColumnAccessLevel?, bool> RestrictedDecisions => new()
+    {
+        // case, row filter, column access level, hasUnconstrainedColumnAllow
+        { "row filter", "tenant_id = 'corp'", null, true },
+        { "masked column", null, ColumnAccessLevel.Mask, true },
+        { "denied column", null, ColumnAccessLevel.Deny, true },
+        { "no unconstrained column allow", null, null, false },
+    };
+
+    [Theory]
+    [MemberData(nameof(RestrictedDecisions))]
+    public async Task CheckHttpAsync_AllowedButRestrictedDecision_FailsClosedWith403(
+        string restriction, string? rowFilter, ColumnAccessLevel? columnLevel, bool unconstrained)
+    {
+        var columns = new Dictionary<string, ColumnAccessLevel>();
+        if (columnLevel is { } level)
+        {
+            columns["salary"] = level;
+        }
+
+        var decision = new TableAccessDecision(
+            Table: new TableIdentifier("default", "public", "customers"),
+            IsAllowed: true,
+            ColumnAccess: columns,
+            CombinedRowFilterSql: rowFilter,
+            DeniedReasons: new[] { "internal: rule p42 matched" },
+            HasUnconstrainedColumnAllow: unconstrained);
+        _policyService
+            .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(decision);
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.True(response.Status.Code != 0, restriction);
+        Assert.NotNull(response.HttpResponse.DeniedResponse);
+        Assert.Equal(403, response.HttpResponse.DeniedResponse.Status.Code);
+        Assert.Equal(EnvoyExtAuthzService.RestrictedMessage, response.HttpResponse.DeniedResponse.Body);
+        Assert.DoesNotContain("p42", response.HttpResponse.DeniedResponse.Body);
+        Assert.DoesNotContain("tenant_id", response.HttpResponse.DeniedResponse.Body);
+    }
+
+    [Fact]
+    public async Task CheckHttpAsync_AllowedWithOnlyClearColumns_IsAllowed()
+    {
+        var decision = new TableAccessDecision(
+            Table: new TableIdentifier("default", "public", "customers"),
+            IsAllowed: true,
+            ColumnAccess: new Dictionary<string, ColumnAccessLevel> { ["name"] = ColumnAccessLevel.Clear },
+            CombinedRowFilterSql: null,
+            DeniedReasons: Array.Empty<string>(),
+            HasUnconstrainedColumnAllow: true);
+        _policyService
+            .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(decision);
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(0, response.Status.Code);
+    }
+
+    [Theory]
+    [InlineData("/api/vat/1", "vat")]
+    [InlineData("/api/v1/customers/123", "customers")]
+    [InlineData("/api/V2/orders", "orders")]
+    [InlineData("/v10/api/items", "items")]
+    [InlineData("/api/val/7", "val")]
+    [InlineData("/api/v1x/7", "v1x")]
+    public async Task CheckHttpAsync_ResourceFromPath_SkipsOnlyRealVersionSegments(string path, string expectedTable)
+    {
+        SecurityEvaluationContext? capturedContext = null;
+        _policyService
+            .EvaluatePolicyAsync(
+                Arg.Do<SecurityEvaluationContext>(ctx => capturedContext = ctx),
+                Arg.Any<CancellationToken>())
+            .Returns(ci => TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+
+        await _service.CheckHttpAsync("GET", path, new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.NotNull(capturedContext);
+        Assert.Equal(expectedTable, capturedContext.TargetTable.TableName);
     }
 
     [Fact]
@@ -135,7 +229,8 @@ public sealed class EnvoyExtAuthzSecurityTests
             IsAllowed: true,
             ColumnAccess: new Dictionary<string, ColumnAccessLevel>(),
             CombinedRowFilterSql: null,
-            DeniedReasons: Array.Empty<string>());
+            DeniedReasons: Array.Empty<string>(),
+            HasUnconstrainedColumnAllow: true);
 
         SecurityEvaluationContext? capturedContext = null;
         _policyService
@@ -177,7 +272,8 @@ public sealed class EnvoyExtAuthzSecurityTests
             IsAllowed: true,
             ColumnAccess: new Dictionary<string, ColumnAccessLevel>(),
             CombinedRowFilterSql: null,
-            DeniedReasons: Array.Empty<string>());
+            DeniedReasons: Array.Empty<string>(),
+            HasUnconstrainedColumnAllow: true);
 
         SecurityEvaluationContext? capturedContext = null;
         _policyService
