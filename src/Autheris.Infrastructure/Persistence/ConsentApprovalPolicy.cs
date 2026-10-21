@@ -16,6 +16,16 @@ internal static class ConsentApprovalPolicy
     public const string Withdrawn = "WITHDRAWN";
     public const string RequestStatusWithdrawn = "WITHDRAWN";
 
+    /// <summary>The approver already recorded a step of this request (four-eyes needs two different people).</summary>
+    public const string SameApproverViolationMessage = "Vier-Augen-Prinzip verletzt: Genehmiger hat diesen Antrag bereits genehmigt.";
+
+    /// <summary>
+    /// Security review (four-eyes on the atomic path): the final approval with consent creation was called for a step that does not
+    /// complete the four-eyes requirement (e.g. the first step of a four-eyes request). Nothing is written.
+    /// </summary>
+    public static string FourEyesNotSatisfiedMessage(Guid requestId) =>
+        $"Vier-Augen-Prinzip verletzt: Request {requestId} requires a second, independent approval before it can be approved and the consent created.";
+
     /// <summary>
     /// Identity of an approver independent of the actor prefix: the part after the last ':' (e.g. the ITSM-reported account in
     /// <c>ITSM_SNOW:instance:alice@corp</c>), or an explicitly passed ITSM account.

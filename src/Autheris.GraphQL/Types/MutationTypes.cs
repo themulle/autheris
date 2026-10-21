@@ -681,18 +681,35 @@ public sealed class Mutation
             }
         }
 
-        bool requiresFourEyes = tableMeta?.Table.RequiresFourEyes ?? false;
-        bool isFinalStep = !(requiresFourEyes && req.ApprovalSteps.Count == 0);
+        // ADR-008 / D-4: the canonical four-eyes rule (explicit flag OR CONFIDENTIAL/HIGH/RESTRICTED/SECRET sensitivity), identical to
+        // ConsentApprovalPolicy.RequiresFourEyesApproval in the repositories, which stay authoritative under the row lock.
+        bool requiresFourEyes = tableMeta?.Table.IsHighlySensitive ?? false;
+        // Not every read model populates ApprovalSteps (SQLite does not): the status after the first step counts as well.
+        bool firstStepRecorded =
+            string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) ||
+            req.ApprovalSteps.Any(s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase));
+        bool isFinalStep = !requiresFourEyes || firstStepRecorded;
+        bool hasRestrictions = builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0);
+
+        // Security review: restrictions are only applied with the final approval that creates the consent. On the first step of a
+        // four-eyes request they would be dropped and the second approver could approve unrestricted, so they are refused (fail closed).
+        if (hasRestrictions && !isFinalStep)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("BAD_REQUEST")
+                .SetMessage($"Consent request '{requestId}' requires four-eyes approval: rowFilter and columnMasking can only be supplied with the second (final) approval, not with the first step.")
+                .Build());
+        }
 
         ConsentRequest approved;
-        if (isFinalStep && (builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0)))
+        if (hasRestrictions)
         {
             var isRole = req.RequestedGranteeType == GranteeType.Role;
             var step = new ApprovalStep
             {
                 Id = Guid.NewGuid(),
                 ConsentRequestId = requestId,
-                StepNumber = req.ApprovalSteps.Count + 1,
+                StepNumber = req.ApprovalSteps.Count + 1, // informational: the repository assigns the step number under the row lock
                 ApproverSid = approverSid,
                 Decision = "APPROVED",
                 DecidedAt = DateTimeOffset.UtcNow
@@ -712,11 +729,14 @@ public sealed class Mutation
                 ValidTo = req.RequestedValidTo,
                 CreatedBySid = approverSid,
                 ColumnRules = columnRules,
-                RowFilters = builtRowFilters
+                RowFilters = builtRowFilters,
+                Description = validatedDescription
             };
 
             try
             {
+                // The repository re-checks separation of duties and the four-eyes requirement under the row lock and refuses a
+                // step that would not complete the request (nothing is written).
                 await approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
                     requestId, step, consent, builtRowFilters, columnRules, ct).ConfigureAwait(false);
                 approved = req;

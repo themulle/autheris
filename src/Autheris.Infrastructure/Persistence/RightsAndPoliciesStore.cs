@@ -375,13 +375,14 @@ WHERE tenant_id = @tenantId AND policy_id = @policyId";
         AddParam(delS, "@policyId", policy.PolicyId);
         await delS.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-        // Insert grantees
+        // Insert grantees. Security review: the rows always belong to the policy being saved (its tenant and id), never to the
+        // tenant/policy ids carried by the grantee or selector objects, which may come from a request body.
         foreach (var g in policy.Grantees)
         {
             await using var insG = conn.CreateCommand();
             insG.CommandText = "INSERT INTO ACCESS_POLICY_GRANTEES (tenant_id, policy_id, realm_id, grantee_type, grantee_id) VALUES (@tenantId, @policyId, @realmId, @type, @id)";
-            AddParam(insG, "@tenantId", g.TenantId);
-            AddParam(insG, "@policyId", g.PolicyId);
+            AddParam(insG, "@tenantId", policy.TenantId);
+            AddParam(insG, "@policyId", policy.PolicyId);
             AddParam(insG, "@realmId", g.RealmId);
             AddParam(insG, "@type", g.GranteeType.ToString());
             AddParam(insG, "@id", g.GranteeId);
@@ -393,8 +394,8 @@ WHERE tenant_id = @tenantId AND policy_id = @policyId";
         {
             await using var insS = conn.CreateCommand();
             insS.CommandText = "INSERT INTO ACCESS_POLICY_SELECTORS (tenant_id, policy_id, selector_type, selector_value) VALUES (@tenantId, @policyId, @type, @val)";
-            AddParam(insS, "@tenantId", s.TenantId);
-            AddParam(insS, "@policyId", s.PolicyId);
+            AddParam(insS, "@tenantId", policy.TenantId);
+            AddParam(insS, "@policyId", policy.PolicyId);
             AddParam(insS, "@type", s.SelectorType.ToString());
             AddParam(insS, "@val", s.SelectorValue);
             await insS.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
