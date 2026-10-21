@@ -71,7 +71,54 @@ public static class CatalogApiEndpoints
 
             var context = CreateRequestContext(httpContext, targetLang);
             var detail = await discoveryService.GetDatasetDetailAsync(tableId, context, ct);
-            return detail is not null ? Results.Ok(detail) : Results.NotFound();
+            if (detail is null)
+            {
+                return Results.NotFound();
+            }
+
+            var isBrief = httpContext.Request.Query.TryGetValue("brief", out var briefVal) &&
+                          bool.TryParse(briefVal.ToString(), out var b) && b;
+            if (isBrief)
+            {
+                var briefDetail = new
+                {
+                    dataset = detail.DatasetId,
+                    domain = detail.Domain,
+                    schema = detail.Schema,
+                    table = detail.Table,
+                    description = detail.Description,
+                    sensitivity = detail.Sensitivity,
+                    primaryKeys = detail.PrimaryKeys,
+                    columns = detail.Columns.Select(c => new
+                    {
+                        name = c.Name,
+                        type = c.Type,
+                        description = c.Description,
+                        isPrimaryKey = c.IsPrimaryKey,
+                        isSensitive = c.Sensitivity != "Public" && c.Sensitivity != "NORMAL" && !string.IsNullOrEmpty(c.Sensitivity)
+                    })
+                };
+                return Results.Ok(briefDetail);
+            }
+
+            return Results.Ok(detail);
+        })
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapGet("/domains", async (
+            ICatalogDiscoveryService discoveryService,
+            HttpContext httpContext,
+            CancellationToken ct) =>
+        {
+            var context = CreateRequestContext(httpContext);
+            var datasets = await discoveryService.ListDatasetsAsync(context, ct);
+            var domains = datasets
+                .GroupBy(d => d.Domain, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new { domain = g.Key, tableCount = g.Count() })
+                .OrderByDescending(d => d.tableCount)
+                .ToList();
+            return Results.Ok(new { totalTables = datasets.Count, totalDomains = domains.Count, domains });
         })
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
