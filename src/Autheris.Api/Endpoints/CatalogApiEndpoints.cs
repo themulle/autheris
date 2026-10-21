@@ -220,6 +220,23 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
+        // Predefined Synthetic Samples
+        group.MapPut("/datasets/{id}/synthetic-samples", SetDatasetSyntheticSamplesHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        app.MapPut("/api/catalog/datasets/{id}/synthetic-samples", SetDatasetSyntheticSamplesHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        group.MapGet("/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        app.MapGet("/api/catalog/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
         // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
         // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
         MapDatasetCatalogRoutes(group);
@@ -537,6 +554,63 @@ public static class CatalogApiEndpoints
             requiredFilterColumns = reqCols,
             requiredFilterColumnGroups = reqGroups
         });
+    }
+
+    internal static async Task<IResult> SetDatasetSyntheticSamplesHandler(
+        string id,
+        System.Collections.Generic.IReadOnlyList<System.Collections.Generic.Dictionary<string, object?>>? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
+        if (tableId is null)
+        {
+            return DatasetKeysNotFound();
+        }
+
+        var samples = request != null
+            ? System.Linq.Enumerable.ToList(request.Select(r => (System.Collections.Generic.IReadOnlyDictionary<string, object?>)r))
+            : (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
+
+        if (samples.Count > 100)
+        {
+            return Results.BadRequest(new { error = "Maximum allowed synthetic sample rows is 100." });
+        }
+
+        generator.RegisterSyntheticSamples(tableId.Value, samples);
+
+        var existingMeta = await metadataRepository.GetTableMetadataAsync(tableId.Value, ct).ConfigureAwait(false);
+        if (existingMeta != null)
+        {
+            await metadataRepository.UpsertTableMetadataAsync(existingMeta with
+            {
+                PredefinedSyntheticSamples = samples
+            }, ct).ConfigureAwait(false);
+        }
+
+        return Results.Ok(new { dataset = id, registeredRows = samples.Count });
+    }
+
+    internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(
+        string id,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
+        CancellationToken ct)
+    {
+        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
+        if (tableId is null)
+        {
+            return DatasetKeysNotFound();
+        }
+
+        var existingMeta = await metadataRepository.GetTableMetadataAsync(tableId.Value, ct).ConfigureAwait(false);
+        var samples = existingMeta?.PredefinedSyntheticSamples is { Count: > 0 } p
+            ? p
+            : generator.GetRegisteredSyntheticSamples(tableId.Value) ?? (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
+
+        return Results.Ok(new { dataset = id, count = samples.Count, rows = samples });
     }
 
     internal static async Task<IResult> SetDatasetStateHandler(
