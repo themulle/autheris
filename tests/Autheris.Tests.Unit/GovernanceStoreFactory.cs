@@ -24,10 +24,11 @@ public static class GovernanceStoreFactory
         ILogger<SqliteGovernanceRepository>? logger = null,
         IAuditAnchorSigner? auditAnchorSigner = null,
         ICallerContextProvider? callerContextProvider = null,
-        IGatewayStatePaths? statePaths = null)
+        IGatewayStatePaths? statePaths = null,
+        IEventBus? eventBus = null)
     {
         var repository = CreateUnmigratedSqlite(
-            epochValidationService, options, environment, secretProvider, auditAnchorStore, logger, auditAnchorSigner, callerContextProvider, statePaths);
+            epochValidationService, options, environment, secretProvider, auditAnchorStore, logger, auditAnchorSigner, callerContextProvider, statePaths, eventBus);
         var gateway = options ?? Options.Create(new GatewayOptions());
         try
         {
@@ -53,7 +54,8 @@ public static class GovernanceStoreFactory
         ILogger<SqliteGovernanceRepository>? logger = null,
         IAuditAnchorSigner? auditAnchorSigner = null,
         ICallerContextProvider? callerContextProvider = null,
-        IGatewayStatePaths? statePaths = null)
+        IGatewayStatePaths? statePaths = null,
+        IEventBus? eventBus = null)
     {
         var gateway = options ?? Options.Create(new GatewayOptions
         {
@@ -77,7 +79,8 @@ public static class GovernanceStoreFactory
             anchorStore,
             callerContextProvider ?? Substitute.For<ICallerContextProvider>(),
             paths,
-            logger);
+            logger,
+            eventBus);
     }
 
     /// <summary>A PostgreSQL repository that is neither migrated nor initialized and opens no connection.</summary>

@@ -25,7 +25,8 @@ public sealed record CatalogColumnField(
     string ColumnName,
     CatalogFieldType FieldType,
     string DataType,
-    bool IsNullable);
+    bool IsNullable,
+    string? Description = null);
 
 public sealed record CatalogRelationField(
     string FieldName,
@@ -272,7 +273,7 @@ public sealed partial class CatalogSchemaModel
                 {
                     fieldType = CatalogFieldType.String;
                 }
-                columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true));
+                columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true, col.Description));
             }
 
             // BUG #157: a table without queryable columns would yield field-less GraphQL types and abort schema build. It is
