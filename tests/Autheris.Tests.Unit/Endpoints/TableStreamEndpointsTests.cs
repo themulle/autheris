@@ -231,4 +231,157 @@ public sealed class TableStreamEndpointsTests
         firstDoc.RootElement.GetProperty("id").GetInt32().ShouldBe(1);
         firstDoc.RootElement.GetProperty("item").GetString().ShouldBe("Item 1");
     }
+
+    private static ClaimsPrincipal CreatePrincipal(string sub, string tenant) =>
+        new(new ClaimsIdentity([new Claim("sub", sub), new Claim("tenant", tenant)], "Bearer"));
+
+    private static void SetJsonBody(DefaultHttpContext context, string json)
+    {
+        var bytes = Encoding.UTF8.GetBytes(json);
+        context.Request.Body = new MemoryStream(bytes);
+        context.Request.ContentType = "application/json";
+        context.Request.ContentLength = bytes.Length;
+    }
+
+    [Fact]
+    public async Task HandleBulkStreamAsync_EndpointIssuedCursor_DecodesInPlanner_AndReplayFailsClosed()
+    {
+        var table = CreateTableMetadata();
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(table));
+
+        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+
+        // One DI-style encoder (configured signing key) shared by the endpoint and the planner, as in production.
+        var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
+
+        var captured = new List<GovernedSqlQueryRequest>();
+        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
+        sqlExecution.ExecuteGovernedQueryAsync(
+            Arg.Any<GovernedSqlQueryRequest>(),
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Any<TenantId>(),
+            Arg.Any<Func<DbDataReader, CancellationToken, Task>>(),
+            Arg.Any<CancellationToken>())
+            .Returns(async callInfo =>
+            {
+                captured.Add(callInfo.Arg<GovernedSqlQueryRequest>());
+                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
+                using var reader = CreateDataTableReader(5);
+                await writer(reader, CancellationToken.None);
+            });
+        var masking = Substitute.For<IColumnMaskingProvider>();
+
+        // Page 1: the endpoint issues nextCursor for the last emitted row (id = 2).
+        var first = CreateHttpContext(CreatePrincipal("alice", "tenant-a"));
+        SetJsonBody(first, "{\"limit\":2,\"select\":[\"id\",\"item\"]}");
+        await TableStreamEndpoints.HandleBulkStreamAsync(
+            "sales", "dbo", "orders",
+            first, repo, pdp, planner, sqlExecution, encoder, masking,
+            NullLoggerFactory.Instance, CancellationToken.None);
+
+        first.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        first.Response.Headers["X-Has-More"].ToString().ShouldBe("true");
+        var nextCursor = first.Response.Headers["X-Next-Cursor"].ToString();
+        nextCursor.ShouldNotBeNullOrWhiteSpace();
+
+        async Task<DefaultHttpContext> ContinueAsync(ClaimsPrincipal principal, string bodyJson, string tableName = "orders")
+        {
+            var ctx = CreateHttpContext(principal);
+            SetJsonBody(ctx, bodyJson);
+            await TableStreamEndpoints.HandleBulkStreamAsync(
+                "sales", "dbo", tableName,
+                ctx, repo, pdp, planner, sqlExecution, encoder, masking,
+                NullLoggerFactory.Instance, CancellationToken.None);
+            return ctx;
+        }
+
+        var cursorJson = JsonSerializer.Serialize(nextCursor);
+
+        // Page 2: same tenant, caller, table, filter and projection -> the planner decodes the endpoint's cursor.
+        var second = await ContinueAsync(CreatePrincipal("alice", "tenant-a"), $"{{\"limit\":2,\"select\":[\"id\",\"item\"],\"cursor\":{cursorJson}}}");
+        second.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        captured.Count.ShouldBe(2);
+        captured[1].Parameters!["@cursor_0"].ShouldBe(2);
+
+        // Other caller
+        var otherCaller = await ContinueAsync(CreatePrincipal("mallory", "tenant-a"), $"{{\"limit\":2,\"select\":[\"id\",\"item\"],\"cursor\":{cursorJson}}}");
+        otherCaller.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        // Other tenant
+        var otherTenant = await ContinueAsync(CreatePrincipal("alice", "tenant-b"), $"{{\"limit\":2,\"select\":[\"id\",\"item\"],\"cursor\":{cursorJson}}}");
+        otherTenant.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        // Other filter
+        var otherFilter = await ContinueAsync(CreatePrincipal("alice", "tenant-a"), $"{{\"limit\":2,\"select\":[\"id\",\"item\"],\"filter\":{{\"field\":\"item\",\"op\":\"eq\",\"value\":\"x\"}},\"cursor\":{cursorJson}}}");
+        otherFilter.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        // Other projection
+        var otherSelect = await ContinueAsync(CreatePrincipal("alice", "tenant-a"), $"{{\"limit\":2,\"select\":[\"id\",\"price\"],\"cursor\":{cursorJson}}}");
+        otherSelect.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        // Other table (same key shape)
+        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(CreateTableMetadata("invoices")));
+        var otherTable = await ContinueAsync(CreatePrincipal("alice", "tenant-a"), $"{{\"limit\":2,\"select\":[\"id\",\"item\"],\"cursor\":{cursorJson}}}", "invoices");
+        otherTable.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        // None of the rejected continuations reached the database.
+        captured.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task HandleBulkStreamAsync_ClientAbort_SettlesQuotaWithoutRequestToken()
+    {
+        var context = CreateHttpContext();
+        var table = CreateTableMetadata();
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(table));
+
+        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
+        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), null, true)));
+
+        var rateLimiter = Substitute.For<IRateLimiterService>();
+        rateLimiter.ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new CostQuotaResult(true, 5000, 0)));
+        rateLimiter.SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                callInfo.ArgAt<CancellationToken>(4).ThrowIfCancellationRequested();
+                return Task.FromResult(new CostQuotaResult(true, 4990, 0));
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(new GatewayOptions()));
+        services.AddSingleton(rateLimiter);
+        context.RequestServices = services.BuildServiceProvider();
+
+        using var aborted = new CancellationTokenSource();
+        var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
+        sqlExecution.ExecuteGovernedQueryAsync(
+            Arg.Any<GovernedSqlQueryRequest>(),
+            Arg.Any<ClaimsPrincipal>(),
+            Arg.Any<TenantId>(),
+            Arg.Any<Func<DbDataReader, CancellationToken, Task>>(),
+            Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                aborted.Cancel();
+                return Task.FromException(new IOException("client aborted"));
+            });
+
+        // The original stream failure surfaces (not an OperationCanceledException from settlement) and the reservation is settled.
+        await Should.ThrowAsync<IOException>(() => TableStreamEndpoints.HandleBulkStreamAsync(
+            "sales", "dbo", "orders",
+            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder(), Substitute.For<IColumnMaskingProvider>(),
+            NullLoggerFactory.Instance, aborted.Token));
+
+        await rateLimiter.Received(1).SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
+    }
 }

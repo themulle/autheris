@@ -19,10 +19,24 @@ public sealed partial class GovernedTableReadPlanner
         "alter", "create", "truncate", "union", "intersect", "except", "where", "from", "into", "exec", "execute"
     };
 
+    private readonly IKeysetCursorEncoder _cursorEncoder;
+
+    /// <summary>
+    /// Creates the planner. <paramref name="cursorEncoder"/> must be the DI <see cref="IKeysetCursorEncoder"/> (keyed by
+    /// <c>RestApi:BulkStream:SigningKey</c>) — the same instance the streaming endpoint issues cursors with. The fallback
+    /// (a process-local key) exists only for direct construction in tests and in non-streaming planner uses.
+    /// </summary>
+    public GovernedTableReadPlanner(IKeysetCursorEncoder? cursorEncoder = null)
+    {
+        _cursorEncoder = cursorEncoder ?? new KeysetCursorEncoder();
+    }
+
     public PlannedTableRead PlanKeysetStream(
         BulkTableStreamRequest request,
         TableMetadata metadata,
-        TableAccessDecision decision)
+        TableAccessDecision decision,
+        string? tenantId = null,
+        string? callerSid = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -178,15 +192,10 @@ public sealed partial class GovernedTableReadPlanner
         string? seekSql = null;
         if (!string.IsNullOrWhiteSpace(request.Cursor))
         {
-            var encoder = new KeysetCursorEncoder();
-            var cursorContext = new KeysetCursorContext(
-                TenantId: metadata.TenantColumnName,
-                DataSource: metadata.Identifier.Domain,
-                TableName: metadata.Identifier.TableName,
-                Direction: "asc",
-                Columns: pkCols,
-                Caller: null);
-            var pkValues = encoder.DecodeCursor(request.Cursor, metadata, cursorContext);
+            // The context is built by the same factory the endpoint issues cursors with (tenant, caller, table, key,
+            // direction, filter and projection), and verified with the same DI encoder; any mismatch fails closed.
+            var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenantId, metadata, pkCols, callerSid, request);
+            var pkValues = _cursorEncoder.DecodeCursor(request.Cursor, metadata, cursorContext);
 
             var cursorParamNames = new List<string>(pkCols.Count);
             for (int i = 0; i < pkCols.Count; i++)

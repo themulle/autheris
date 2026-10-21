@@ -28,10 +28,14 @@ public static class GatewayStreamingServiceExtensions
 
             if (topology?.IsClusterWide == true && multiplexer is not null)
             {
+                // The envelopes are sealed with a key derived from the CDC KEK keyring; without a usable KEK the channel
+                // throws (fail closed) instead of broadcasting unmasked row images in clear text.
                 return new RedisCdcEventChannel(
                     multiplexer,
                     localChannel,
-                    sp.GetRequiredService<ILogger<RedisCdcEventChannel>>());
+                    sp.GetRequiredService<ILogger<RedisCdcEventChannel>>(),
+                    sp.GetService<ICdcKeyEncryptionKeyProvider>(),
+                    timeProvider: sp.GetService<System.TimeProvider>());
             }
 
             return localChannel;
