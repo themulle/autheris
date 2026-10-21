@@ -31,6 +31,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
     private readonly IRebacStore? _rebacStore;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
+    private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -139,8 +140,26 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         IRebacStore? rebacStore,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        IRebacStore? rebacStore,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
+        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        ILogger<DbtMetadataIngestionService> logger)
     {
         _tagImport = tagImport;
+        _syntheticRowGenerator = syntheticRowGenerator;
         _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
@@ -538,13 +557,19 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         Columns = updatedColumns,
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
-                        Indexes = existingMeta.Indexes
+                        Indexes = existingMeta.Indexes,
+                        PredefinedSyntheticSamples = model.SyntheticSamples ?? existingMeta.PredefinedSyntheticSamples
                     };
 
                     // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
                     if (model.DeclaredKeys is { } declared)
                     {
                         updatedMetadata = ApplyDeclaredKeys(updatedMetadata, declared);
+                    }
+
+                    if (model.SyntheticSamples != null)
+                    {
+                        _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, model.SyntheticSamples);
                     }
 
                     await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
