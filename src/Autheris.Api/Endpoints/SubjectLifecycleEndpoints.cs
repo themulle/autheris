@@ -21,7 +21,8 @@ public static class SubjectLifecycleEndpoints
     public static IEndpointRouteBuilder MapSubjectLifecycleEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/tenants/{tenantId}/lifecycle")
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .RequireTenantRouteMatch();
 
         group.MapPost("/deprovision", async (
             string tenantId,

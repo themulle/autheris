@@ -66,8 +66,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         : base(options, logger, encoder)
     {
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
-        _isDevelopment = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
+        _isDevelopment = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
         _clientIpResolver = clientIpResolver;
 
         ConfigureDummyCost(

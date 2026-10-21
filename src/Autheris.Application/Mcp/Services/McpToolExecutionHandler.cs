@@ -266,7 +266,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             }
 
             var node = _lineageGraphStore.GetNode(dataset);
-            if (node == null)
+            bool isTenantMatch = node != null && (isClusterAdmin || string.IsNullOrWhiteSpace(node.TenantId) || string.Equals(node.TenantId, sessionContext.TenantId, StringComparison.OrdinalIgnoreCase));
+
+            if (node == null || !isTenantMatch)
             {
                 return JsonSerializer.Serialize(new
                 {

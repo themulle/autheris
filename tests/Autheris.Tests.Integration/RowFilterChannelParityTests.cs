@@ -344,6 +344,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
 
             _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             {
+                b.UseEnvironment("Development");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");

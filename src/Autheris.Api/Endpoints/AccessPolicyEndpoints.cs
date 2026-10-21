@@ -20,7 +20,8 @@ public static class AccessPolicyEndpoints
     public static IEndpointRouteBuilder MapAccessPolicyEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/tenants/{tenantId}/governance/policies")
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .RequireTenantRouteMatch();
 
         group.MapGet("", async (
             string tenantId,

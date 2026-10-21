@@ -250,6 +250,11 @@ public sealed partial class SemanticMetricQueryService
 
         if (requestWhere != null && !string.IsNullOrWhiteSpace(requestWhere.SqlPredicate))
         {
+            if (HasUnbalancedOrBreakoutParentheses(requestWhere.SqlPredicate))
+            {
+                throw new ArgumentException("The request filter predicate contains unbalanced parentheses or a breakout sequence.", nameof(requestWhere));
+            }
+
             sqlParts.Add(requestWhere.SqlPredicate);
             var requestClause = requestWhere;
             // The Trino text is always composed through GetTrinoPredicate (which fails closed without a Trino factory), never from SqlPredicate.
@@ -337,6 +342,30 @@ public sealed partial class SemanticMetricQueryService
         text = text.Replace("{{", string.Empty, StringComparison.Ordinal).Replace("}}", string.Empty, StringComparison.Ordinal).Trim();
 
         return text;
+    }
+
+    internal static bool HasUnbalancedOrBreakoutParentheses(string predicate)
+    {
+        if (string.IsNullOrWhiteSpace(predicate)) return false;
+        int depth = 0;
+        bool inQuotes = false;
+        for (int i = 0; i < predicate.Length; i++)
+        {
+            char c = predicate[i];
+            if (c == '\'')
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (inQuotes) continue;
+            if (c == '(') depth++;
+            else if (c == ')')
+            {
+                depth--;
+                if (depth < 0) return true;
+            }
+        }
+        return depth != 0;
     }
 
     private static AggregationGroupRow EnrichGroupWithMetricValues(

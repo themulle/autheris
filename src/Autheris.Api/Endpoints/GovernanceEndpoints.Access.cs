@@ -26,7 +26,8 @@ public static partial class GovernanceEndpoints
     private static readonly string[] SelfGrantClaimTypes =
     [
         ClaimTypes.PrimarySid, ClaimTypes.NameIdentifier, "objectSid", "onprem_sid", "oid", "sub",
-        ClaimTypes.Upn, ClaimTypes.Email, ClaimTypes.Name, "preferred_username", "upn", "email", "name"
+        ClaimTypes.Upn, ClaimTypes.Email, ClaimTypes.Name, "preferred_username", "upn", "email", "name",
+        ClaimTypes.Role, "role", "roles"
     ];
 
     private static void AddIdentifierForms(HashSet<string> set, string? value)
@@ -71,6 +72,14 @@ public static partial class GovernanceEndpoints
         foreach (var group in security.GroupSids)
         {
             AddIdentifierForms(callerIds, group.Value);
+        }
+        foreach (var role in security.TenantRoles)
+        {
+            AddIdentifierForms(callerIds, role);
+        }
+        foreach (var role in security.ClusterRoles)
+        {
+            AddIdentifierForms(callerIds, role);
         }
 
         var subjectForms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -231,6 +240,13 @@ public static partial class GovernanceEndpoints
         {
             return Results.Json(
                 new { error = grantDecision.ErrorCode, message = grantDecision.Reason, maxValidTo = grantDecision.MaxValidTo },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (grantDecision.RequiresFourEyes)
+        {
+            return Results.Json(
+                new { error = GrantErrorCodes.FourEyesRequired, message = "Bulk grant of sensitive or unmasked access requires independent four-eyes approver(s) and cannot be self-approved." },
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
