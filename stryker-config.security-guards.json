@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/stryker-config.schema.json",
+  "stryker-config": {
+    "configuration": "Release",
+    "test-case-filter": "FullyQualifiedName~MandatoryRowFilterResolver|FullyQualifiedName~SecretScrubber",
+    "mutate": [
+      "**/VirtualFilters/MandatoryRowFilterResolver.cs",
+      "**/Security/SecretScrubber.cs"
+    ],
+    "thresholds": {
+      "high": 85,
+      "low": 75,
+      "break": 70
+    },
+    "concurrency": 8,
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json",
+      "html"
+    ],
+    "project": "Autheris.Application.csproj"
+  }
+}
