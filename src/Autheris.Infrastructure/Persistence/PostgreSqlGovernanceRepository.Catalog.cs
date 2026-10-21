@@ -203,41 +203,268 @@ public partial class PostgreSqlGovernanceRepository
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
+                    try
+                    {
+                        tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        _logger?.LogWarning(ex, "Catalog table has an invalid identifier and was skipped.");
+                    }
                 }
             }
         }
 
-        // M4: the key rows of every table that is not cached are read with one query each (chunked), not per table.
-        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetched = null;
         var uncached = tables
             .Where(t => !(_metadataCache.TryGetValue(t.Identifier.ToString().ToLowerInvariant(), out var cached) &&
                           DateTime.UtcNow.Ticks - cached.CachedAtTicks < MetadataCacheTtlTicks))
             .Select(t => t.Id)
             .ToList();
-        if (uncached.Count > 1)
-        {
-            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, ct, _keyTables).ConfigureAwait(false))
-            {
-                prefetched = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, uncached, ct).ConfigureAwait(false);
-            }
-        }
 
-        var result = new List<TableMetadata>();
-        foreach (var (_, t) in tables)
+        List<TableMetadata> result;
+        if (uncached.Count == 0)
         {
-            try
+            result = new List<TableMetadata>(tables.Count);
+            foreach (var (_, t) in tables)
             {
-                var meta = await GetTableMetadataCoreAsync(t, prefetched, ct).ConfigureAwait(false);
-                if (meta != null)
+                if (_metadataCache.TryGetValue(t.ToString().ToLowerInvariant(), out var cached) && cached.Metadata != null)
                 {
-                    result.Add(meta);
+                    result.Add(cached.Metadata);
                 }
             }
-            catch (TableMetadataUnavailableException)
+        }
+        else
+        {
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+            var activeTables = new List<(Guid Id, TableIdentifier Identifier, Table Table)>();
+            await using (var cmd = conn.CreateCommand())
             {
-                // Fail closed: already logged by GetTableMetadataAsync; the table is not offered.
+                cmd.CommandText = @"SELECT id, source_type, source_name, schema_name, table_name,
+                                           display_name, sensitivity, requires_four_eyes, is_active,
+                                           data_source_type, http_endpoint_json, plugin_name,
+                                           description, long_description, doc_source,
+                                           required_filter_columns_json, texts_json
+                                    FROM TABLES
+                                    WHERE is_active = 1";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        var tid = Guid.Parse(reader.GetString(0));
+                        var domain = reader.GetString(2);
+                        var schema = reader.GetString(3);
+                        var tableName = reader.GetString(4);
+                        var identifier = new TableIdentifier(domain, schema, tableName);
+
+                        var dstInt = reader.IsDBNull(9) ? 0 : reader.GetInt32(9);
+                        var httpEndpointJson = reader.IsDBNull(10) ? null : reader.GetString(10);
+                        var pluginName = reader.IsDBNull(11) ? null : reader.GetString(11);
+                        var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
+                            ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
+                            : null;
+                        var reqFiltersJson = reader.IsDBNull(15) ? null : reader.GetString(15);
+                        var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
+                            ? ImmutableArray<string>.Empty
+                            : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
+                        if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
+                        var textsJson = reader.IsDBNull(16) ? null : reader.GetString(16);
+                        var texts = CatalogLocalizationPersistence.ParseLocalizedTexts(textsJson, tid, _logger);
+
+                        var tableEntity = new Table
+                        {
+                            Id = tid,
+                            SourceType = reader.GetString(1),
+                            SourceName = domain,
+                            SchemaName = schema,
+                            TableName = tableName,
+                            DisplayName = reader.GetString(5),
+                            Sensitivity = reader.GetString(6),
+                            RequiresFourEyes = reader.GetInt32(7) == 1,
+                            IsActive = reader.GetInt32(8) == 1,
+                            DataSourceType = (DataSourceType)dstInt,
+                            HttpEndpoint = httpEndpoint,
+                            PluginName = pluginName,
+                            Description = reader.IsDBNull(12) ? null : reader.GetString(12),
+                            LongDescription = reader.IsDBNull(13) ? null : reader.GetString(13),
+                            Texts = texts,
+                            DocumentationSource = reader.IsDBNull(14) ? null : reader.GetString(14),
+                            RequiredFilterColumns = reqFilters
+                        };
+                        activeTables.Add((tid, identifier, tableEntity));
+                    }
+                    catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
+                    {
+                        _logger?.LogWarning(ex, "Catalog row in TABLES is invalid and was skipped.");
+                    }
+                }
+            }
+
+            var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
+            var maskingRulesByTable = new Dictionary<Guid, Dictionary<string, MaskingRule>>();
+            var corruptedTableIds = new HashSet<Guid>();
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
+                                           m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+                                           c.description, c.long_description, c.meta_json, c.doc_source,
+                                           c.display_name, c.texts_json
+                                    FROM TABLE_COLUMNS c
+                                    LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                                    INNER JOIN TABLES t ON c.table_id = t.id
+                                    WHERE t.is_active = 1";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    Guid? tid = null;
+                    try
+                    {
+                        var colId = Guid.Parse(reader.GetString(0));
+                        tid = Guid.Parse(reader.GetString(1));
+                        var colName = reader.GetString(2);
+                        var dataType = reader.GetString(3);
+                        var isSensitive = reader.GetInt32(4) == 1;
+
+                        var desc = reader.IsDBNull(10) ? null : reader.GetString(10);
+                        var longDesc = reader.IsDBNull(11) ? null : reader.GetString(11);
+                        var metaJson = reader.IsDBNull(12) ? null : reader.GetString(12);
+                        var docSource = reader.IsDBNull(13) ? null : reader.GetString(13);
+                        var colDisplayName = reader.IsDBNull(14) ? null : reader.GetString(14);
+                        var colTextsJson = reader.IsDBNull(15) ? null : reader.GetString(15);
+                        var colTexts = CatalogLocalizationPersistence.ParseLocalizedTexts(colTextsJson, colId, _logger);
+                        var metaDict = SqliteGovernanceRepository.ParseColumnMetaJson(metaJson);
+
+                        if (!columnsByTable.TryGetValue(tid.Value, out var colList))
+                        {
+                            colList = new List<TableColumn>();
+                            columnsByTable[tid.Value] = colList;
+                        }
+
+                        colList.Add(new TableColumn
+                        {
+                            Id = colId,
+                            TableId = tid.Value,
+                            ColumnName = colName,
+                            DisplayName = colDisplayName,
+                            DataType = dataType,
+                            IsSensitive = isSensitive,
+                            Description = desc,
+                            LongDescription = longDesc,
+                            Texts = colTexts,
+                            DocumentationSource = docSource,
+                            Meta = metaDict
+                        });
+
+                        if (!reader.IsDBNull(5))
+                        {
+                            var ruleType = reader.GetString(6);
+                            if (string.IsNullOrWhiteSpace(ruleType))
+                            {
+                                throw new FormatException("Corrupted masking rule: rule_type is empty");
+                            }
+
+                            if (!maskingRulesByTable.TryGetValue(tid.Value, out var maskDict))
+                            {
+                                maskDict = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+                                maskingRulesByTable[tid.Value] = maskDict;
+                            }
+
+                            maskDict[colName] = new MaskingRule
+                            {
+                                Id = Guid.Parse(reader.GetString(5)),
+                                TableColumnId = colId,
+                                RuleType = ruleType,
+                                PatternOrFormat = reader.IsDBNull(7) ? null : reader.GetString(7),
+                                Replacement = reader.IsDBNull(8) ? null : reader.GetString(8),
+                                HmacKeyId = reader.IsDBNull(9) ? null : reader.GetString(9)
+                            };
+                        }
+                    }
+                    catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
+                    {
+                        _logger?.LogWarning(ex, "Catalog row in TABLE_COLUMNS / COLUMN_MASKING_RULES is invalid; marking table as unavailable (fail-closed).");
+                        if (tid.HasValue)
+                        {
+                            corruptedTableIds.Add(tid.Value);
+                        }
+                    }
+                }
+            }
+
+            Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
+            var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
+            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, ct, _keyTables).ConfigureAwait(false))
+            {
+                prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, allActiveTableIds, ct).ConfigureAwait(false);
+            }
+
+            var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
+                conn, null, CatalogKeyDefinitionStore.PostgreSql, ct).ConfigureAwait(false);
+
+            result = new List<TableMetadata>(activeTables.Count);
+            foreach (var (tid, identifier, tableEntity) in activeTables)
+            {
+                if (corruptedTableIds.Contains(tid))
+                {
+                    _logger?.LogWarning("Catalog table {Table} was omitted: its column or masking rule definition is invalid (fail-closed).", identifier);
+                    continue;
+                }
+
+                var cacheKey = identifier.ToString().ToLowerInvariant();
+                if (_metadataCache.TryGetValue(cacheKey, out var cached) &&
+                    DateTime.UtcNow.Ticks - cached.CachedAtTicks < MetadataCacheTtlTicks &&
+                    cached.Metadata != null)
+                {
+                    result.Add(cached.Metadata);
+                    continue;
+                }
+
+                var columns = columnsByTable.TryGetValue(tid, out var cols) ? cols : new List<TableColumn>();
+                var maskingRules = maskingRulesByTable.TryGetValue(tid, out var rules)
+                    ? rules
+                    : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+
+                IReadOnlyList<string> pkColumns;
+                IReadOnlyList<TableIndexDefinition> indexes;
+                try
+                {
+                    (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                        conn, null, CatalogKeyDefinitionStore.PostgreSql, identifier, tid, columns, ct,
+                        _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
+                }
+                catch (TableMetadataUnavailableException)
+                {
+                    _logger?.LogWarning("Catalog table {Table} was omitted: its declared key or index definition is invalid.", identifier);
+                    continue;
+                }
+
+                rowFilterStrategies.TryGetValue(tid, out var rowFilterEvaluation);
+
+                var meta = new TableMetadata
+                {
+                    Identifier = identifier,
+                    Table = tableEntity,
+                    Columns = columns,
+                    ColumnMaskingRules = maskingRules,
+                    PrimaryKeyColumns = pkColumns,
+                    Indexes = indexes,
+                    RowFilterEvaluation = rowFilterEvaluation
+                };
+
+                try
+                {
+                    meta.ValidateRequiredFilterColumns();
+                }
+                catch (CatalogValidationException ex)
+                {
+                    _logger?.LogWarning(ex, "Catalog table {Table} was omitted: required filter column definition is invalid.", identifier);
+                    continue;
+                }
+
+                _metadataCache[cacheKey] = (meta, DateTime.UtcNow.Ticks);
+                result.Add(meta);
             }
         }
 
@@ -366,11 +593,16 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive)>(StringComparer.OrdinalIgnoreCase);
+            var existingMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
             var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
             await using (var existingColsCmd = conn.CreateCommand())
             {
                 existingColsCmd.Transaction = tx;
-                existingColsCmd.CommandText = "SELECT id, column_name, data_type, is_sensitive FROM TABLE_COLUMNS WHERE table_id = @tableId";
+                existingColsCmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive,
+                                                       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id
+                                                FROM TABLE_COLUMNS c
+                                                LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                                                WHERE c.table_id = @tableId";
                 existingColsCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
                 await using var reader = await existingColsCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -382,8 +614,26 @@ public partial class PostgreSqlGovernanceRepository
                         var colSens = reader.GetInt32(3) == 1;
                         existingColsByName[colName] = (existingId, colDataType, colSens);
                         colIdByName[colName] = existingId;
+
+                        if (!reader.IsDBNull(4) && Guid.TryParse(reader.GetString(4), out var maskId))
+                        {
+                            existingMaskingRules[colName] = new MaskingRule
+                            {
+                                Id = maskId,
+                                TableColumnId = existingId,
+                                RuleType = reader.GetString(5),
+                                PatternOrFormat = reader.IsDBNull(6) ? null : reader.GetString(6),
+                                Replacement = reader.IsDBNull(7) ? null : reader.GetString(7),
+                                HmacKeyId = reader.IsDBNull(8) ? null : reader.GetString(8)
+                            };
+                        }
                     }
                 }
+            }
+
+            if (SqliteGovernanceRepository.HasMaskingRulesChanged(existingMaskingRules, metadata.ColumnMaskingRules))
+            {
+                structuralChange = true;
             }
 
             foreach (var col in metadata.Columns)

@@ -32,6 +32,34 @@ internal static class RowFilterEvaluationStore
         return ReadSettings(reader, 0);
     }
 
+    /// <summary>Batch reads the stored settings of all tables from <c>TABLE_ROW_FILTER_STRATEGIES</c>.</summary>
+    internal static async Task<Dictionary<Guid, RowFilterEvaluationSettings>> ReadBatchObjectAsync(
+        DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, CancellationToken ct)
+    {
+        var result = new Dictionary<Guid, RowFilterEvaluationSettings>();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            Enlist(cmd, tx);
+            cmd.CommandText = $"SELECT table_id, strategy, duration_seconds, max_keys FROM {dialect.Prefix}{StrategyTable}";
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var idObj = reader.GetValue(0);
+                if (idObj is not null && Guid.TryParse(Convert.ToString(idObj, CultureInfo.InvariantCulture), out var tid))
+                {
+                    result[tid] = ReadSettings(reader, 1);
+                }
+            }
+        }
+        catch (DbException)
+        {
+            // Table may not exist in unmigrated or testing environments; fail safely with empty result.
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Replaces the object-level settings of one table (null or all-null deletes the row) and bumps the table epoch through
     /// <paramref name="bumpEpoch"/> inside the caller's transaction. Null when the table is unknown.

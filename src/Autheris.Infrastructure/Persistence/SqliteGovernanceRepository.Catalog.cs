@@ -333,21 +333,31 @@ public partial class SqliteGovernanceRepository
             }
 
             var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
+            var maskingRulesByTable = new Dictionary<Guid, Dictionary<string, MaskingRule>>();
+            var corruptedTables = new HashSet<Guid>();
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = @"SELECT id, table_id, column_name, data_type, is_sensitive, description, long_description, meta_json, doc_source, display_name, texts_json FROM TABLE_COLUMNS ORDER BY rowid";
+                cmd.CommandText = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
+                                           c.description, c.long_description, c.meta_json, c.doc_source, c.display_name, c.texts_json,
+                                           m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id
+                                    FROM TABLE_COLUMNS c
+                                    LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                                    ORDER BY c.rowid";
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
+                  Guid? currentTid = null;
                   try
                   {
                     var colId = Guid.Parse(reader.GetString(0));
                     var tid = Guid.Parse(reader.GetString(1));
+                    currentTid = tid;
                     if (!columnsByTable.TryGetValue(tid, out var list))
                     {
                         list = new List<TableColumn>();
                         columnsByTable[tid] = list;
                     }
+                    var colName = reader.GetString(2);
                     var metaJson = reader.IsDBNull(7) ? null : reader.GetString(7);
                     var metaDict = ParseColumnMetaJson(metaJson);
                     var colDisplayName = reader.IsDBNull(9) ? null : reader.GetString(9);
@@ -358,7 +368,7 @@ public partial class SqliteGovernanceRepository
                     {
                         Id = colId,
                         TableId = tid,
-                        ColumnName = reader.GetString(2),
+                        ColumnName = colName,
                         DisplayName = colDisplayName,
                         DataType = reader.GetString(3),
                         IsSensitive = reader.GetInt32(4) == 1,
@@ -368,10 +378,39 @@ public partial class SqliteGovernanceRepository
                         DocumentationSource = reader.IsDBNull(8) ? null : reader.GetString(8),
                         Meta = metaDict
                     });
+
+                    if (!reader.IsDBNull(11))
+                    {
+                        var ruleType = reader.GetString(12);
+                        if (string.IsNullOrWhiteSpace(ruleType))
+                        {
+                            throw new FormatException("Corrupted masking rule: rule_type is empty");
+                        }
+
+                        if (!maskingRulesByTable.TryGetValue(tid, out var ruleDict))
+                        {
+                            ruleDict = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+                            maskingRulesByTable[tid] = ruleDict;
+                        }
+
+                        ruleDict[colName] = new MaskingRule
+                        {
+                            Id = Guid.Parse(reader.GetString(11)),
+                            TableColumnId = colId,
+                            RuleType = ruleType,
+                            PatternOrFormat = reader.IsDBNull(13) ? null : reader.GetString(13),
+                            Replacement = reader.IsDBNull(14) ? null : reader.GetString(14),
+                            HmacKeyId = reader.IsDBNull(15) ? null : reader.GetString(15)
+                        };
+                    }
                   }
                   catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
                   {
-                    _logger?.LogWarning(ex, "Catalog row {RowId} in TABLE_COLUMNS is invalid and was skipped.", SafeValue(reader, 0));
+                    _logger?.LogWarning(ex, "Catalog row in TABLE_COLUMNS / COLUMN_MASKING_RULES is invalid and was skipped (fail-closed).");
+                    if (currentTid.HasValue)
+                    {
+                        corruptedTables.Add(currentTid.Value);
+                    }
                   }
                 }
             }
@@ -395,7 +434,16 @@ public partial class SqliteGovernanceRepository
                     continue;
                 }
 
+                if (corruptedTables.Contains(id))
+                {
+                    _logger?.LogWarning("Catalog table {Table} was omitted: its column or masking rule definition is invalid (fail-closed).", identifier);
+                    continue;
+                }
+
                 var columns = columnsByTable.TryGetValue(id, out var cols) ? cols : new List<TableColumn>();
+                var maskingRules = maskingRulesByTable.TryGetValue(id, out var rules)
+                    ? rules
+                    : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
                 IReadOnlyList<string> pkColumns;
                 IReadOnlyList<TableIndexDefinition> indexes;
                 try
@@ -416,7 +464,7 @@ public partial class SqliteGovernanceRepository
                     Table = table,
                     Identifier = identifier,
                     Columns = columns,
-                    ColumnMaskingRules = new Dictionary<string, MaskingRule>(),
+                    ColumnMaskingRules = maskingRules,
                     PrimaryKeyColumns = pkColumns,
                     Indexes = indexes
                 };
@@ -593,11 +641,16 @@ public partial class SqliteGovernanceRepository
                 }
 
                 var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)>(StringComparer.OrdinalIgnoreCase);
+                var existingMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
                 var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
                 using (var getColsCmd = conn.CreateCommand())
                 {
                     getColsCmd.Transaction = tx;
-                    getColsCmd.CommandText = "SELECT id, column_name, data_type, is_sensitive, description, long_description, doc_source FROM TABLE_COLUMNS WHERE table_id = @tableId";
+                    getColsCmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
+                                                      m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id
+                                               FROM TABLE_COLUMNS c
+                                               LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                                               WHERE c.table_id = @tableId";
                     getColsCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
                     using var reader = await getColsCmd.ExecuteReaderAsync(ct);
                     while (await reader.ReadAsync(ct))
@@ -611,7 +664,25 @@ public partial class SqliteGovernanceRepository
                         var cDocSource = reader.IsDBNull(6) ? null : reader.GetString(6);
                         existingColsByName[cName] = (cId, cType, cSens, cDesc, cLongDesc, cDocSource);
                         colIdByName[cName] = cId;
+
+                        if (!reader.IsDBNull(7))
+                        {
+                            existingMaskingRules[cName] = new MaskingRule
+                            {
+                                Id = Guid.Parse(reader.GetString(7)),
+                                TableColumnId = cId,
+                                RuleType = reader.GetString(8),
+                                PatternOrFormat = reader.IsDBNull(9) ? null : reader.GetString(9),
+                                Replacement = reader.IsDBNull(10) ? null : reader.GetString(10),
+                                HmacKeyId = reader.IsDBNull(11) ? null : reader.GetString(11)
+                            };
+                        }
                     }
+                }
+
+                if (HasMaskingRulesChanged(existingMaskingRules, metadata.ColumnMaskingRules))
+                {
+                    structuralChange = true;
                 }
 
                 var updatedColumns = new List<TableColumn>(metadata.Columns.Count);
@@ -1556,5 +1627,35 @@ public partial class SqliteGovernanceRepository
                 _logger?.LogWarning(ex, "Failed to publish catalog changed event; polling will detect changes.");
             }
         }
+    }
+
+    internal static bool HasMaskingRulesChanged(
+        IReadOnlyDictionary<string, MaskingRule> existing,
+        IReadOnlyDictionary<string, MaskingRule>? incoming)
+    {
+        var incomingRules = incoming ?? (IReadOnlyDictionary<string, MaskingRule>)System.Collections.Immutable.ImmutableDictionary<string, MaskingRule>.Empty;
+        if (existing.Count != incomingRules.Count)
+        {
+            return true;
+        }
+
+        foreach (var (colName, incomingRule) in incomingRules)
+        {
+            if (!existing.TryGetValue(colName, out var existingRule))
+            {
+                return true;
+            }
+
+            if (!string.Equals(existingRule.RuleType, incomingRule.RuleType, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existingRule.PatternOrFormat, incomingRule.PatternOrFormat, StringComparison.Ordinal) ||
+                !string.Equals(existingRule.Replacement, incomingRule.Replacement, StringComparison.Ordinal) ||
+                !string.Equals(existingRule.HmacKeyId, incomingRule.HmacKeyId, StringComparison.Ordinal) ||
+                existingRule.IsHmac != incomingRule.IsHmac)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

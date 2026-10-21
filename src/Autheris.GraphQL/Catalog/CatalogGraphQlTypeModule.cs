@@ -265,9 +265,14 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                         ? new NamedTypeNode(scalarName)
                         : new NonNullTypeNode(new NamedTypeNode(scalarName));
 
-                    d.Field(col.FieldName)
+                    var fieldDesc = d.Field(col.FieldName)
                         .Type(typeNode)
                         .Resolve(ctx => ResolveColumnValue(ctx, col));
+
+                    if (!string.IsNullOrWhiteSpace(col.Description))
+                    {
+                        fieldDesc.Description(col.Description);
+                    }
                 }
 
                 foreach (var rel in table.Relations)
@@ -526,7 +531,13 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     : (string.Equals(prop.GetString(), "false", StringComparison.OrdinalIgnoreCase) || prop.GetString() == "0" ? false : ReportMasked(ctx, col)),
                 _ => ReportMasked(ctx, col)
             },
-            CatalogFieldType.String or CatalogFieldType.DateTime => prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText(),
+            CatalogFieldType.String => prop.ValueKind switch
+            {
+                JsonValueKind.String => prop.GetString(),
+                JsonValueKind.Number => prop.GetRawText(),
+                _ => ReportMasked(ctx, col)
+            },
+            CatalogFieldType.DateTime => prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText(),
             _ => prop.ToString()
         };
     }
