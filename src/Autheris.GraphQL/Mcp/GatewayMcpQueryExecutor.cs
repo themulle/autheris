@@ -276,18 +276,24 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             double d => (int)d,
             _ => null
         } : null;
+        bool? Bool(string name) => variables.TryGetValue(name, out var v) ? v switch
+        {
+            bool b => b,
+            string s => bool.TryParse(s, out var b) ? b : null,
+            _ => null
+        } : null;
 
         try
         {
             object result = tool.Name.ToLowerInvariant() switch
             {
-                McpDatasetTools.ListDatasets => Text("language") != null
-                    ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), cancellationToken).ConfigureAwait(false)
+                McpDatasetTools.ListDatasets => (Text("language") != null || Bool("overview") != null || Text("format") != null)
+                    ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), Text("language"), Bool("overview"), Text("format"), cancellationToken).ConfigureAwait(false)
                     : (Number("offset") != null || Number("limit") != null || Text("tag") != null)
                         ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), Text("tag"), cancellationToken).ConfigureAwait(false)
                         : await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.DescribeDataset => Text("language") != null
-                    ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, Text("language"), cancellationToken).ConfigureAwait(false)
+                McpDatasetTools.DescribeDataset => (Text("language") != null || Bool("brief") != null)
+                    ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.DescribeMyAccess => await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)

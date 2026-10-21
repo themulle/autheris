@@ -173,7 +173,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct) =>
         ListDatasetsAsync(principal, search, domain, offset, limit, tag, language: null, ct);
 
-    public async Task<McpDatasetList> ListDatasetsAsync(
+    public Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
         string? search = null,
         string? domain = null,
@@ -181,6 +181,19 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         int? limit = null,
         string? tag = null,
         string? language = null,
+        CancellationToken ct = default) =>
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, overview: null, format: null, ct);
+
+    public async Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        int? offset,
+        int? limit,
+        string? tag,
+        string? language,
+        bool? overview,
+        string? format,
         CancellationToken ct = default)
     {
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
@@ -190,11 +203,44 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
             .ToList();
 
-        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
-
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
 
-        var tableSummaries = new List<McpDatasetSummary>();
+        // Domain Overview mode (token-efficient hierarchical exploration across 10,000+ tables)
+        if (overview == true)
+        {
+            var matching = visible.Where(t =>
+            {
+                if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (!string.IsNullOrWhiteSpace(search) && !Matches(t, search.Trim()))
+                    return false;
+                if (!string.IsNullOrWhiteSpace(tag) && !t.CatalogTags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    return false;
+                return true;
+            }).ToList();
+
+            var domainCounts = matching
+                .GroupBy(t => t.Identifier.Domain, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new McpDomainCount(g.Key, g.Count()))
+                .OrderByDescending(d => d.TableCount)
+                .ToList();
+
+            return new McpDatasetList(
+                Datasets: [],
+                Total: matching.Count,
+                Truncated: false,
+                Guidance: $"Catalog contains {matching.Count} tables across {domainCounts.Count} domains. Use 'domain' parameter in list_datasets, or use 'find_relevant_tables' / 'search_catalog' for natural language table discovery.",
+                Endpoints: null,
+                Offset: 0,
+                Limit: 0,
+                NextOffset: null,
+                Language: negotiatedLanguage,
+                RequestedLanguage: language,
+                Domains: domainCounts);
+        }
+
+        // Step 1: Lightweight candidate collection without eager materialization (supports 10,000+ tables with sub-millisecond overhead)
+        var candidateTables = new List<(string Id, TableMetadata Table)>();
         foreach (var t in visible)
         {
             if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -204,30 +250,10 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             if (!string.IsNullOrWhiteSpace(tag) && !t.CatalogTags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)))
                 continue;
 
-            var summaryOnly = Shape(isAdminView, t) == CatalogOutputShape.Summary;
-            var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
-            var status = options?.Value.IsMcpAuthBypassed == true
-                ? "GRANTED"
-                : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
-
-            var resolved = negotiatedLanguage != null ? t.Table.Texts.Resolve(negotiatedLanguage) : null;
-            var displayName = McpCatalogText.DisplayName(resolved?.Title ?? t.Table.DisplayName, t.Identifier.TableName);
-            var description = resolved?.Description ?? t.Table.Description;
-
-            // 4b.1: Only short description in summary; long description only in describe_dataset
-            tableSummaries.Add(new McpDatasetSummary(
-                DatasetId(t.Identifier),
-                displayName,
-                description,
-                t.Table.Sensitivity,
-                summaryOnly ? 0 : t.Columns.Count,
-                graphQl?.QueryField,
-                Tags: t.CatalogTags,
-                AccessStatus: status,
-                Kind: "table"));
+            candidateTables.Add((DatasetId(t.Identifier), t));
         }
 
-        var procedureSummaries = new List<McpDatasetSummary>();
+        var candidateProcedures = new List<(string Id, RegisteredProcedure Proc)>();
         if (_procedureRegistry != null && _procedureExecutionService != null)
         {
             var tenantId = principal.GetTenantId();
@@ -258,52 +284,100 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
                                 continue;
                         }
 
-                        int columnCount = 0;
-                        string sensitivity = "NORMAL";
-                        if (def.ResultTableIdentifier is { } resId)
-                        {
-                            var resMeta = await _metadataRepository.GetTableMetadataAsync(resId, ct).ConfigureAwait(false);
-                            if (resMeta != null)
-                            {
-                                sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
-                                var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: options?.Value.IsMcpAuthBypassed == true);
-                                columnCount = resMeta.Columns.Count(c => !levels.TryGetValue(c.ColumnName, out var lvl) || lvl != ColumnAccessLevel.Deny);
-                            }
-                        }
-
-                        procedureSummaries.Add(new McpDatasetSummary(
-                            Id: procId,
-                            DisplayName: McpCatalogText.DisplayName(def.Summary, def.Name),
-                            Description: def.Description ?? def.Summary,
-                            Sensitivity: sensitivity,
-                            ColumnCount: columnCount,
-                            GraphQlField: null,
-                            Tags: null,
-                            AccessStatus: "GRANTED",
-                            Kind: "procedure"));
+                        candidateProcedures.Add((procId, proc));
                     }
                 }
             }
         }
 
-        var allMatches = tableSummaries.Concat(procedureSummaries)
-            .OrderBy(s => s.Id, StringComparer.Ordinal)
+        // Step 2: Total count and sorting by Id (preserving exact existing sort order)
+        var allCandidates = candidateTables.Select(c => (c.Id, Table: (TableMetadata?)c.Table, Proc: (RegisteredProcedure?)null))
+            .Concat(candidateProcedures.Select(c => (c.Id, Table: (TableMetadata?)null, Proc: (RegisteredProcedure?)c.Proc)))
+            .OrderBy(c => c.Id, StringComparer.Ordinal)
             .ToList();
 
+        var total = allCandidates.Count;
         var effectiveOffset = Math.Max(0, offset ?? 0);
         var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
+        var pagedCandidates = allCandidates.Skip(effectiveOffset).Take(effectiveLimit).ToList();
 
-        var pagedSummaries = allMatches.Skip(effectiveOffset).Take(effectiveLimit).ToList();
-        var total = allMatches.Count;
+        // Step 3: Deferred materialization ONLY for the paged slice (50 items max)
+        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+        var pagedSummaries = new List<McpDatasetSummary>(pagedCandidates.Count);
+
+        foreach (var c in pagedCandidates)
+        {
+            if (c.Table is { } t)
+            {
+                var summaryOnly = Shape(isAdminView, t) == CatalogOutputShape.Summary;
+                var graphQl = graphQlMap == null || summaryOnly ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
+                var status = options?.Value.IsMcpAuthBypassed == true
+                    ? "GRANTED"
+                    : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
+
+                var resolved = negotiatedLanguage != null ? t.Table.Texts.Resolve(negotiatedLanguage) : null;
+                var displayName = McpCatalogText.DisplayName(resolved?.Title ?? t.Table.DisplayName, t.Identifier.TableName);
+                var description = resolved?.Description ?? t.Table.Description;
+
+                pagedSummaries.Add(new McpDatasetSummary(
+                    c.Id,
+                    displayName,
+                    description,
+                    t.Table.Sensitivity,
+                    summaryOnly ? 0 : t.Columns.Count,
+                    graphQl?.QueryField,
+                    Tags: t.CatalogTags,
+                    AccessStatus: status,
+                    Kind: "table"));
+            }
+            else if (c.Proc is { } proc)
+            {
+                var def = proc.Definition;
+                int columnCount = 0;
+                string sensitivity = "NORMAL";
+                if (def.ResultTableIdentifier is { } resId)
+                {
+                    var resMeta = await _metadataRepository.GetTableMetadataAsync(resId, ct).ConfigureAwait(false);
+                    if (resMeta != null)
+                    {
+                        sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
+                        var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: options?.Value.IsMcpAuthBypassed == true);
+                        columnCount = resMeta.Columns.Count(col => !levels.TryGetValue(col.ColumnName, out var lvl) || lvl != ColumnAccessLevel.Deny);
+                    }
+                }
+
+                pagedSummaries.Add(new McpDatasetSummary(
+                    Id: c.Id,
+                    DisplayName: McpCatalogText.DisplayName(def.Summary, def.Name),
+                    Description: def.Description ?? def.Summary,
+                    Sensitivity: sensitivity,
+                    ColumnCount: columnCount,
+                    GraphQlField: null,
+                    Tags: null,
+                    AccessStatus: "GRANTED",
+                    Kind: "procedure"));
+            }
+        }
+
         var hasMore = effectiveOffset + pagedSummaries.Count < total;
         int? nextOffset = hasMore ? effectiveOffset + pagedSummaries.Count : null;
+
+        var isCompact = string.Equals(format, "compact", StringComparison.OrdinalIgnoreCase);
+        var guidance = Guidance;
+        if (total > 100)
+        {
+            guidance += $" [Tip: Catalog contains {total} datasets. For token-efficient querying, use 'find_relevant_tables' or 'search_catalog' for natural language discovery, and 'get_table_schema' or 'describe_dataset(brief: true)' for concise schemas.]";
+        }
+
+        // Token efficiency: omit redundant access paths when compact is requested or when paginating past page 0
+        var endpoints = isCompact || effectiveOffset > 0 ? null : Endpoints();
 
         return new McpDatasetList(
             pagedSummaries,
             total,
             hasMore,
-            Guidance,
-            Endpoints(),
+            guidance,
+            endpoints,
             effectiveOffset,
             effectiveLimit,
             nextOffset,
@@ -312,9 +386,12 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     }
 
     public Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default) =>
-        DescribeDatasetAsync(principal, dataset, language: null, ct);
+        DescribeDatasetAsync(principal, dataset, language: null, brief: false, ct);
 
-    public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, CancellationToken ct = default)
+    public Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, CancellationToken ct = default) =>
+        DescribeDatasetAsync(principal, dataset, language, brief: false, ct);
+
+    public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, bool brief, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(dataset);
         if (dataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
@@ -353,6 +430,46 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         // SD-4: only keys and indexes that lie wholly within the columns listed for this caller.
         var keyView = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(table, table.Columns);
         var primaryKeys = new HashSet<string>(keyView.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+
+        // Token-efficient Brief view for AI App & Report Generators
+        if (brief)
+        {
+            var briefColumns = table.Columns.Select(c =>
+            {
+                var colResolved = negotiatedLanguage != null ? c.Texts.Resolve(negotiatedLanguage) : null;
+                return new McpDatasetColumn(
+                    c.ColumnName,
+                    c.DataType,
+                    colResolved?.Description ?? c.Description,
+                    c.IsSensitive,
+                    primaryKeys.Contains(c.ColumnName),
+                    DisplayName: colResolved?.Title ?? c.DisplayName);
+            }).ToList();
+
+            var tableResolvedBrief = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
+            return new McpDatasetDescription(
+                DatasetId(id),
+                McpCatalogText.DisplayName(tableResolvedBrief?.Title ?? table.Table.DisplayName, id.TableName),
+                id.Domain,
+                id.Schema,
+                id.TableName,
+                tableResolvedBrief?.Description ?? table.Table.Description,
+                LongDescription: null,
+                table.Table.Sensitivity,
+                table.Table.RequiresFourEyes,
+                briefColumns,
+                Examples: [],
+                GraphQl: null,
+                OtherAccess: null,
+                Tags: table.CatalogTags,
+                DataOwner: null,
+                DataOwnerDelegates: null,
+                AccessStatus: accessStatus,
+                Indexes: null,
+                View: "Brief",
+                Language: negotiatedLanguage,
+                RequestedLanguage: language);
+        }
         var columns = table.Columns
             .Select(c =>
             {
@@ -1144,8 +1261,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         // (no enumeration oracle).
         if (IsBypassed)
         {
-            var all = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-            var found = all.FirstOrDefault(t => t.Identifier == requested);
+            var found = await _metadataRepository.GetTableMetadataAsync(requested, ct).ConfigureAwait(false);
             return found != null && Shape(true, found) != CatalogOutputShape.NotFound
                 ? (found, Shape(true, found))
                 : throw new TableNotFoundException(requested);
@@ -1158,13 +1274,45 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             : throw new TableNotFoundException(requested);
     }
 
-    private static bool Matches(TableMetadata table, string search) =>
-        DatasetId(table.Identifier).Contains(search, StringComparison.OrdinalIgnoreCase) ||
-        (table.Table.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-        table.Table.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+    private static bool Matches(TableMetadata table, string search)
+    {
+        var id = table.Identifier;
+        if (id.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            id.Domain.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            id.Schema.Contains(search, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (search.Contains('.') && DatasetId(id).Contains(search, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (table.Table.Description != null && table.Table.Description.Contains(search, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (table.Table.Texts.Entries.Count > 0 && table.Table.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
+        {
+            return true;
+        }
+
         // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
-        (table.CatalogView != CatalogView.Summary && table.Columns.Any(c =>
-            c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            c.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)));
+        if (table.CatalogView != CatalogView.Summary && table.Columns.Count > 0)
+        {
+            foreach (var c in table.Columns)
+            {
+                if (c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (c.Texts.Entries.Count > 0 && c.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 }

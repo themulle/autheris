@@ -19,9 +19,15 @@ public interface IMcpDatasetCatalog
 
     Task<McpDatasetList> ListDatasetsAsync(ClaimsPrincipal principal, string? search = null, string? domain = null, int? offset = null, int? limit = null, string? tag = null, string? language = null, CancellationToken ct = default);
 
+    Task<McpDatasetList> ListDatasetsAsync(ClaimsPrincipal principal, string? search, string? domain, int? offset, int? limit, string? tag, string? language, bool? overview, string? format, CancellationToken ct)
+        => ListDatasetsAsync(principal, search, domain, offset, limit, tag, language, ct);
+
     Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default);
 
     Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, CancellationToken ct = default);
+
+    Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, string? language, bool brief, CancellationToken ct = default)
+        => DescribeDatasetAsync(principal, dataset, language, ct);
 
     Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default);
 

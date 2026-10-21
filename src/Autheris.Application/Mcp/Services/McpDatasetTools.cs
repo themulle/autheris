@@ -21,6 +21,8 @@ public static class McpDatasetTools
     public const string QuerySql = "query_sql";
     public const string QueryDataset = "query_dataset";
     public const string SearchCatalog = "search_catalog";
+    public const string FindRelevantTables = "find_relevant_tables";
+    public const string GetTableSchema = "get_table_schema";
     public const string GetMyPermissions = "get_my_permissions";
     public const string ListDatasources = "list_datasources";
     public const string GetDataLineage = "get_data_lineage";
@@ -30,11 +32,11 @@ public static class McpDatasetTools
 
     /// <summary>Sent as MCP <c>instructions</c> on initialize: how an agent finds and queries data.</summary>
     public const string ServerInstructions =
-        "Autheris is a governed data gateway. To answer questions with data: " +
-        "1) call list_datasets or search_catalog to find datasets you may use, " +
-        "2) call describe_dataset or get_my_permissions for columns, types and access permissions, " +
-        "3) query with query_sql, query_dataset or query_graphql. " +
-        "sample_rows shows a few sample rows. Use describe_api and invoke_api for dynamic REST access. " +
+        "Autheris is a governed data gateway with 10,000+ datasets. For token-efficient AI workflows (Report & App Generation): " +
+        "1) call find_relevant_tables or search_catalog to find candidate tables and foreign key join conditions for your use-case, " +
+        "2) call get_table_schema or describe_dataset(brief: true) to fetch concise schemas without consuming token budget, " +
+        "3) query data with query_sql, query_dataset or query_graphql. " +
+        "Use list_datasets(overview: true) for domain summaries. sample_rows inspects sample records. " +
         "Results are filtered and masked for your identity; hidden datasets and columns do not appear.";
 
     /// <summary>ABAC object for catalog listings (like <c>query_data_catalog</c>).</summary>
@@ -49,6 +51,8 @@ public static class McpDatasetTools
         string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SearchCatalog, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, FindRelevantTables, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, GetTableSchema, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, GetMyPermissions, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ListDatasources, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, GetDataLineage, StringComparison.OrdinalIgnoreCase) ||
@@ -71,8 +75,18 @@ public static class McpDatasetTools
     public static TableIdentifier? TargetTable(string toolName, string? argumentsJson)
     {
         if (string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(toolName, SearchCatalog, StringComparison.OrdinalIgnoreCase))
+            string.Equals(toolName, SearchCatalog, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(toolName, FindRelevantTables, StringComparison.OrdinalIgnoreCase))
         {
+            return CatalogTable;
+        }
+
+        if (string.Equals(toolName, GetTableSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryGetStringArgument(argumentsJson, "dataset", out var ds) && McpDatasetCatalog.TryParseDatasetId(ds, out var id))
+            {
+                return id;
+            }
             return CatalogTable;
         }
 
@@ -185,7 +199,9 @@ public static class McpDatasetTools
                 "tag": { "type": "string", "description": "Optional tag filter to find datasets with a matching tag (e.g. 'finance', 'pii', 'sales')." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Optional pagination offset (default 0)." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." },
-                "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset titles and descriptions." }
+                "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset titles and descriptions." },
+                "overview": { "type": "boolean", "description": "When true, returns an aggregated summary of business domains and table counts without paginating individual datasets (optimal for large catalogs in <200 tokens)." },
+                "format": { "type": "string", "enum": ["full", "compact"], "description": "Output format: 'full' (default) or 'compact' (dense table list omitting verbose access paths, ideal for LLM token efficiency)." }
               }
             }
             """,
@@ -200,6 +216,7 @@ public static class McpDatasetTools
               "required": ["dataset"],
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
+                "brief": { "type": "boolean", "description": "When true, returns only the short description and essential column signatures (name, type, pk) omitting bulky profiling and golden queries to save tokens." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for localized dataset and column descriptions." }
               }
             }
@@ -286,6 +303,39 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: SearchCatalog);
+
+        yield return new McpToolDefinition(
+            Name: FindRelevantTables,
+            Description: "Discovers the required tables, columns, and foreign key join conditions for an AI application, report, or dashboard use-case across 10,000+ tables. Performs hybrid semantic and keyword search, returning ranked candidate tables with join conditions in a compact token-efficient response.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["use_case"],
+              "properties": {
+                "use_case": { "type": "string", "description": "Natural language description of the report, app, or query requirement (e.g. 'Customer revenue and margin by sales region')." },
+                "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance')." },
+                "limit": { "type": "integer", "description": "Maximum candidate tables to return (default: 5, max: 20)." },
+                "language": { "type": "string", "description": "Optional BCP 47 language tag." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: FindRelevantTables);
+
+        yield return new McpToolDefinition(
+            Name: GetTableSchema,
+            Description: "Token-efficient schema retrieval for single or multiple datasets. Returns table descriptions, columns (name, type, pk), and foreign-key join relations without bulky profiling or metadata. Ideal for AI Report Generators and Self-Service App Generators.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "properties": {
+                "dataset": { "type": "string", "description": "Single dataset identifier (domain.schema.table)." },
+                "datasets": { "type": "array", "items": { "type": "string" }, "description": "Batch of dataset identifiers to describe together (e.g. ['sales.public.orders', 'sales.public.customers'])." },
+                "include_relations": { "type": "boolean", "description": "Whether to include foreign key join relations (default true)." },
+                "language": { "type": "string", "description": "Optional BCP 47 language tag." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: GetTableSchema);
 
         yield return new McpToolDefinition(
             Name: GetMyPermissions,

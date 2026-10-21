@@ -62,11 +62,28 @@ public sealed class McpResourceProvider : IMcpResourceProvider
             var datasets = await _discovery.ListDatasetsAsync(BuildRequestContext(session), ct).ConfigureAwait(false);
             var sb = new StringBuilder();
             sb.AppendLine("# Autheris Data Catalog Summary\n");
-            sb.AppendLine("| Dataset | Domain | Schema | Table | Type | Sensitivity | Description |");
-            sb.AppendLine("|---|---|---|---|---|---|---|");
-            foreach (var d in datasets)
+
+            if (datasets.Count > 50)
             {
-                sb.AppendLine($"| `{d.DatasetId}` | {d.Domain} | {d.Schema} | {d.Table} | {d.SourceType} | {d.Sensitivity} | {d.Description ?? "-"} |");
+                var domains = datasets.GroupBy(d => d.Domain).OrderByDescending(g => g.Count()).ToList();
+                sb.AppendLine($"Total Datasets: {datasets.Count} across {domains.Count} business domains.\n");
+                sb.AppendLine("| Domain | Table Count | Sample Tables |");
+                sb.AppendLine("|---|---|---|");
+                foreach (var g in domains)
+                {
+                    var sample = string.Join(", ", g.Take(3).Select(d => $"`{d.Table}`"));
+                    sb.AppendLine($"| **{g.Key}** | {g.Count()} | {sample} |");
+                }
+                sb.AppendLine("\n> **Tip:** Use `find_relevant_tables` or `search_catalog` to discover tables for a specific use case, or use `get_table_schema` / `describe_dataset(brief: true)` for token-efficient schema retrieval.");
+            }
+            else
+            {
+                sb.AppendLine("| Dataset | Domain | Schema | Table | Type | Sensitivity | Description |");
+                sb.AppendLine("|---|---|---|---|---|---|---|");
+                foreach (var d in datasets)
+                {
+                    sb.AppendLine($"| `{d.DatasetId}` | {d.Domain} | {d.Schema} | {d.Table} | {d.SourceType} | {d.Sensitivity} | {d.Description ?? "-"} |");
+                }
             }
             return new McpResourceContent(uri, Markdown, sb.ToString());
         }

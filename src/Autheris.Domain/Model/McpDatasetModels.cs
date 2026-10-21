@@ -32,6 +32,9 @@ public sealed record McpAccessPath(
     string Description,
     bool Preferred = false);
 
+/// <summary>Summary count of tables in a business domain for high-level token-efficient catalog exploration.</summary>
+public sealed record McpDomainCount(string Domain, int TableCount);
+
 /// <summary>Result of the MCP <c>list_datasets</c> tool.</summary>
 /// <param name="Guidance">How to query data: GraphQL first.</param>
 /// <param name="Endpoints">All enabled protocols of the gateway, GraphQL first.</param>
@@ -45,7 +48,8 @@ public sealed record McpDatasetList(
     int Limit = 50,
     int? NextOffset = null,
     string? Language = null,
-    string? RequestedLanguage = null);
+    string? RequestedLanguage = null,
+    IReadOnlyList<McpDomainCount>? Domains = null);
 
 /// <summary>Issue #79: Field sunsetting and deprecation metadata exposed in <c>describe_dataset</c> and query analysis.</summary>
 public sealed record FieldDeprecationInfo(
@@ -157,3 +161,48 @@ public sealed record McpDatasetSample(
     int RowCount,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     bool IsSynthetic = false);
+
+/// <summary>Token-efficient column summary for AI code and query generation.</summary>
+public sealed record McpTableBriefColumn(
+    string Name,
+    string Type,
+    string? Description = null,
+    bool PrimaryKey = false,
+    bool IsSensitive = false);
+
+/// <summary>Join relationship between datasets for automated query/report construction.</summary>
+public sealed record McpTableRelation(
+    string TargetTable,
+    string FromColumn,
+    string ToColumn);
+
+/// <summary>Token-efficient schema description of a single dataset.</summary>
+public sealed record McpTableBriefSchema(
+    string Dataset,
+    string Domain,
+    string? Description,
+    IReadOnlyList<string> PrimaryKeys,
+    IReadOnlyList<McpTableBriefColumn> Columns,
+    IReadOnlyList<McpTableRelation> Relations,
+    string? AccessStatus = "GRANTED");
+
+/// <summary>Result of get_table_schema.</summary>
+public sealed record McpTableSchemaResult(
+    int TotalTables,
+    IReadOnlyList<McpTableBriefSchema> Tables);
+
+/// <summary>Candidate table for an AI report or app generation use case.</summary>
+public sealed record McpUseCaseCandidate(
+    string Dataset,
+    string Domain,
+    string? Description,
+    double RelevanceScore,
+    IReadOnlyList<string> MatchedColumns,
+    IReadOnlyList<McpTableRelation> Relations);
+
+/// <summary>Result of find_relevant_tables.</summary>
+public sealed record McpUseCaseDiscoveryResult(
+    string UseCase,
+    int TotalCandidates,
+    IReadOnlyList<McpUseCaseCandidate> Candidates,
+    string? RecommendedNextStep = null);

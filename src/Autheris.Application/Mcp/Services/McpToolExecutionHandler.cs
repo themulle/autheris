@@ -75,6 +75,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         string.Equals(toolName, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.QueryDataset, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.SearchCatalog, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, McpDatasetTools.FindRelevantTables, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.ListDatasources, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.GetDataLineage, StringComparison.OrdinalIgnoreCase) ||
@@ -197,6 +199,112 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     })
                 })
             }, JsonOpts);
+        }
+
+        if (string.Equals(tool.Name, McpDatasetTools.FindRelevantTables, StringComparison.OrdinalIgnoreCase))
+        {
+            var useCase = root.TryGetProperty("use_case", out var ucProp) ? ucProp.GetString() ?? "" :
+                          (root.TryGetProperty("query", out var qProp) ? qProp.GetString() ?? "" : "");
+            var domain = root.TryGetProperty("domain", out var dProp) ? dProp.GetString() : null;
+            var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? Math.Clamp(l, 1, 20) : 5;
+            var language = root.TryGetProperty("language", out var langProp) ? langProp.GetString() : null;
+
+            var searchQuery = new CatalogSearchQuery(useCase, domain, limit, CatalogSearchMode.Hybrid, ExpandRelations: true, Language: language);
+            var results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+
+            var candidates = results.Select(h => new McpUseCaseCandidate(
+                Dataset: h.DatasetId ?? $"{h.TableIdentifier.Domain}.{h.TableIdentifier.TableName}",
+                Domain: h.Domain ?? h.TableIdentifier.Domain ?? "",
+                Description: h.Description,
+                RelevanceScore: Math.Round(h.CombinedScore, 4),
+                MatchedColumns: h.RelevantColumns,
+                Relations: h.RelatedJoinPaths.Select(r => new McpTableRelation(
+                    TargetTable: $"{r.ToTable.Domain}.{r.ToTable.TableName}",
+                    FromColumn: r.FromColumn,
+                    ToColumn: r.ToColumn)).ToList()
+            )).ToList();
+
+            var result = new McpUseCaseDiscoveryResult(
+                UseCase: useCase,
+                TotalCandidates: candidates.Count,
+                Candidates: candidates,
+                RecommendedNextStep: "Call get_table_schema(datasets: [...]) to inspect required columns and join conditions, then generate query using query_sql or query_dataset.");
+
+            return JsonSerializer.Serialize(result, JsonOpts);
+        }
+
+        if (string.Equals(tool.Name, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            var requestedDatasets = new List<string>();
+            if (root.TryGetProperty("dataset", out var dsProp) && dsProp.GetString() is { } ds && !string.IsNullOrWhiteSpace(ds))
+            {
+                requestedDatasets.Add(ds.Trim());
+            }
+
+            if (root.TryGetProperty("datasets", out var dssProp) && dssProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in dssProp.EnumerateArray())
+                {
+                    if (item.GetString() is { } str && !string.IsNullOrWhiteSpace(str))
+                    {
+                        requestedDatasets.Add(str.Trim());
+                    }
+                }
+            }
+
+            if (requestedDatasets.Count == 0)
+            {
+                return JsonSerializer.Serialize(new { error = "InvalidParams", message = "Missing required argument 'dataset' or 'datasets'." }, JsonOpts);
+            }
+
+            var briefSchemas = new List<McpTableBriefSchema>();
+            foreach (var dsName in requestedDatasets.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!McpDatasetCatalog.TryParseDatasetId(dsName, out var tableId))
+                {
+                    continue;
+                }
+
+                var detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
+                if (detail == null)
+                {
+                    continue;
+                }
+
+                var columns = detail.Columns.Select(c => new McpTableBriefColumn(
+                    Name: c.Name,
+                    Type: c.Type,
+                    Description: c.Description,
+                    PrimaryKey: c.IsPrimaryKey,
+                    IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase)
+                )).ToList();
+
+                var relations = new List<McpTableRelation>();
+                foreach (var col in detail.Columns)
+                {
+                    if (col.Name.EndsWith("_id", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(col.Name, "id", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(col.Name, "tenant_id", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var entityName = col.Name[..^3];
+                        var targetTable = entityName.EndsWith("s", StringComparison.OrdinalIgnoreCase) ? entityName : entityName + "s";
+                        relations.Add(new McpTableRelation(
+                            TargetTable: $"{detail.Domain}.{targetTable}",
+                            FromColumn: col.Name,
+                            ToColumn: "id"));
+                    }
+                }
+
+                briefSchemas.Add(new McpTableBriefSchema(
+                    Dataset: detail.DatasetId,
+                    Domain: detail.Domain,
+                    Description: detail.Description,
+                    PrimaryKeys: detail.PrimaryKeys,
+                    Columns: columns,
+                    Relations: relations));
+            }
+
+            return JsonSerializer.Serialize(new McpTableSchemaResult(briefSchemas.Count, briefSchemas), JsonOpts);
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase))
