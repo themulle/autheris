@@ -98,7 +98,7 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         }
 
         var realm = _realmRegistry.GetRealm(realmId);
-        bool isCustomerRealm = realm != null && (realm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C);
+        bool isCustomerRealm = realm != null && (realm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer);
 
         var mappings = await _repository.GetApprovedMappingsForGroupsAndRolesAsync(
             tenantId, realmId, groupsAndRoles, ct).ConfigureAwait(false);
