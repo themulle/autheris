@@ -267,9 +267,7 @@ public static class GatewayGovernanceServiceExtensions
             var entraIdOptions = gatewayOptions?.Authentication?.EntraId;
             var config = sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
 
-            string? secret = gatewayOptions?.BulkStream?.SigningKey
-                ?? gatewayOptions?.RestApi?.BulkStream?.SigningKey
-                ?? entraIdOptions?.ClientId
+            string? secret = config?["Gateway:Audit:ActorPseudonymizationKey"]
                 ?? config?["Gateway:GovernanceDb:AuditHmacKey"]
                 ?? config?["Gateway:Audit:AuditHmacKey"]
                 ?? config?["Gateway:Cluster:Secret"];

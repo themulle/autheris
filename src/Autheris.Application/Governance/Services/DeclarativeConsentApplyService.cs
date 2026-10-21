@@ -141,6 +141,13 @@ public sealed class DeclarativeConsentApplyService(
 
             // WP-SC-16: individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
             var individual = granteeType is GranteeType.User or GranteeType.ServicePrincipal;
+            if (individual && string.Equals(policy.GranteeRef, actorSid, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GrantPolicyViolationException(GrantDecision.Deny(
+                    GrantErrorCodes.FourEyesRequired,
+                    $"Self-grant prohibited: Actor '{actorSid}' cannot grant consent to themselves via declarative manifest."));
+            }
+
             DateTimeOffset validTo;
             if (individual)
             {
@@ -160,7 +167,8 @@ public sealed class DeclarativeConsentApplyService(
             }
             else
             {
-                validTo = now.AddDays(policy.ValidityDays is > 0 ? policy.ValidityDays.Value : 365);
+                var days = policy.ValidityDays is > 0 ? Math.Min(policy.ValidityDays.Value, 365) : 365;
+                validTo = now.AddDays(days);
             }
 
             // WP-SC-02: role consents have no subject SID, so they are looked up by role name (the subject lookup never returns them).

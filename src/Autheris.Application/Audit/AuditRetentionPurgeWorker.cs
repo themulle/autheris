@@ -144,7 +144,12 @@ public sealed class AuditRetentionPurgeWorker : BackgroundService
         }
 
         var now = _timeProvider.GetUtcNow();
-        var thresholdUtc = now - TimeSpan.FromDays(options.RetentionDays);
+        var effectiveRetentionDays = Math.Max(
+            options.RetentionDays,
+            Math.Max(options.SecurityDays,
+            Math.Max(options.DataAccessDays,
+            Math.Max(options.OperationsDays, options.AggregatedDays))));
+        var thresholdUtc = now - TimeSpan.FromDays(effectiveRetentionDays);
 
         var plan = await repo.PlanPurgePrefixAsync(thresholdUtc, ct).ConfigureAwait(false);
         if (plan == null || plan.Value.PurgeCount <= 0)

@@ -231,6 +231,7 @@ public static class TrinoMetadataQueryHandler
 
         // information_schema.columns
         var colRows = new List<IReadOnlyDictionary<string, object?>>();
+        var userSid = user.GetUserSid();
         foreach (var table in visibleTables
             .Where(t => MatchesFilter(filters, "table_catalog", t.Identifier.Domain) &&
                         MatchesFilter(filters, "table_schema", t.Identifier.Schema) &&
@@ -239,16 +240,34 @@ public static class TrinoMetadataQueryHandler
             .ThenBy(t => t.Identifier.Schema, StringComparer.OrdinalIgnoreCase)
             .ThenBy(t => t.Identifier.TableName, StringComparer.OrdinalIgnoreCase))
         {
+            HashSet<string>? deniedColumns = null;
+            if (consentRepository != null && userSid != null)
+            {
+                var consents = await consentRepository.GetActiveConsentsForSubjectsAsync([userSid.Value], table.Identifier, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
+                deniedColumns = consents
+                    .Where(c => c.IsActive(DateTimeOffset.UtcNow))
+                    .SelectMany(c => c.ColumnRules ?? [])
+                    .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny)
+                    .Select(cr => cr.ColumnName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+
+            int pos = 1;
             for (int i = 0; i < table.Columns.Count; i++)
             {
                 var col = table.Columns[i];
+                if (deniedColumns != null && deniedColumns.Contains(col.ColumnName))
+                {
+                    continue;
+                }
+
                 colRows.Add(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["table_catalog"] = table.Identifier.Domain,
                     ["table_schema"] = table.Identifier.Schema,
                     ["table_name"] = table.Identifier.TableName,
                     ["column_name"] = col.ColumnName,
-                    ["ordinal_position"] = i + 1,
+                    ["ordinal_position"] = pos++,
                     ["is_nullable"] = "YES",
                     ["data_type"] = string.IsNullOrWhiteSpace(col.DataType) ? "varchar" : col.DataType
                 });

@@ -544,6 +544,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
         services.AddHttpClient<CloudflareCdnPurgeService>().AddSecureOutboundHandlers(EgressIntegrations.Cdn);
         services.AddHttpClient<FastlyCdnPurgeService>().AddSecureOutboundHandlers(EgressIntegrations.Cdn);
+        services.AddHttpClient("OpenApiIngestion").AddSecureOutboundHandlers(EgressIntegrations.Catalog);
         services.AddTransient<ICdnCachePurgeService, CloudflareCdnPurgeService>();
 
         services.AddFusionFederationServices(gatewayOptions);

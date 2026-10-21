@@ -215,4 +215,33 @@ internal static class EndpointSecurity
             return Results.Json(new { error = tooLargeMessage }, statusCode: StatusCodes.Status413PayloadTooLarge);
         }
     }
+
+    /// <summary>
+    /// Finding 04: Rejects with 403 Forbidden when route {tenantId} does not match caller's token tenant
+    /// unless the caller is a canonical ClusterAdmin.
+    /// </summary>
+    public static RouteGroupBuilder RequireTenantRouteMatch(this RouteGroupBuilder group)
+    {
+        return group.AddEndpointFilter(async (invocationContext, next) =>
+        {
+            var httpContext = invocationContext.HttpContext;
+            if (IsCanonicalClusterAdmin(httpContext.User) || IsClusterAdmin(httpContext.User))
+            {
+                return await next(invocationContext);
+            }
+
+            if (httpContext.Request.RouteValues.TryGetValue("tenantId", out var rawRouteTenant) &&
+                rawRouteTenant is string routeTenantStr &&
+                !string.IsNullOrWhiteSpace(routeTenantStr))
+            {
+                var tokenTenant = GetRequestTenant(httpContext);
+                if (!string.Equals(routeTenantStr, tokenTenant.Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+            }
+
+            return await next(invocationContext);
+        });
+    }
 }

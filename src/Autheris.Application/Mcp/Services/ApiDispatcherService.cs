@@ -43,7 +43,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     // PLAN-SEC-115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
     private bool DataBranchAllowed => _switches is null || (_switches.RestDataEndpointEnabled && _switches.IsGroupEnabled(McpToolGroup.Query));
     private bool CatalogBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Catalog) ?? true;
-    private bool StatementBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Query) ?? true;
+    private bool StatementBranchAllowed => _switches is null || (_switches.IsGroupEnabled(McpToolGroup.Query) && _switches.IsToolEnabled(McpDatasetTools.QuerySql));
     private bool AccessBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Access) ?? true;
 
     public ApiDispatcherService(

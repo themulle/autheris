@@ -24,7 +24,8 @@ public static class FunctionalRightEndpoints
     public static IEndpointRouteBuilder MapFunctionalRightEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/tenants/{tenantId}/governance/rights/{realmId}")
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .RequireTenantRouteMatch();
 
         group.MapGet("", async (
             string tenantId,

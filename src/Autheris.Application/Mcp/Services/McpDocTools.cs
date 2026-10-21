@@ -429,6 +429,19 @@ public static class McpDocTools
             }
             appId = aProp.GetString()!;
 
+            if (sessionContext != null)
+            {
+                var roles = sessionContext.Roles ?? [];
+                var isGlobalApp = string.Equals(appId, "autheris", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(appId, "global", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(appId, "system", StringComparison.OrdinalIgnoreCase);
+
+                if (isGlobalApp && !roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase))
+                {
+                    return JsonSerializer.Serialize(new { error = "Forbidden", message = "Depositing documentation for global application requires ClusterAdmin role." });
+                }
+            }
+
             if (root.TryGetProperty("category", out var cProp) && cProp.ValueKind == JsonValueKind.String)
             {
                 if (Enum.TryParse<DocCategory>(cProp.GetString(), true, out var parsedCat))
@@ -477,6 +490,7 @@ public static class McpDocTools
         var request = new DepositDocRequest(appId, category, title, content, docId, errorCode, tags);
         var result = await docStore.DepositDocumentAsync(request, ct).ConfigureAwait(false);
 
-        return JsonSerializer.Serialize(result, IndentedOptions);
+        var scrubbedResult = result with { FilePath = null };
+        return JsonSerializer.Serialize(scrubbedResult, IndentedOptions);
     }
 }

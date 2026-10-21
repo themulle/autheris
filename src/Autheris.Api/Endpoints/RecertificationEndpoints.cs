@@ -23,7 +23,8 @@ public static class RecertificationEndpoints
     public static IEndpointRouteBuilder MapRecertificationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/tenants/{tenantId}/governance/recert")
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+            .RequireTenantRouteMatch();
 
         group.MapGet("/campaigns", async (
             string tenantId,

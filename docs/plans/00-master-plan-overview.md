@@ -32,10 +32,9 @@
 
 | Rank | Item | Size | Status | Next Milestone / Notes |
 |---:|---|:---:|:---:|---|
-| **1** | **Issue #271:** Security Audit Remediation (CI/CD Supply Chain, Audit Retention, 4-Eyes Bypass, Multi-Tenancy Route Guards, MCP AuthZ, SSRF Egress & SQL Hardening) ([`REQ-SEC-271`](2026-10-21-req-issue-271-security-audit.md) / [`PLAN-SEC-271`](2026-10-21-plan-issue-271-security-audit.md)) | M | **IN PROGRESS 🚀** | Phase 1 & 2 active; prioritizing High-severity Findings 01–03. |
-| **2** | **Issue #270:** GraphQL HMAC Pseudonymization Typing & Cross-Channel Schema Parity for Non-String Columns ([`REQ-GOV-270`](2026-10-21-req-issue-270-graphql-hmac-non-string-columns.md) / [`PLAN-GOV-270`](2026-10-21-plan-issue-270-graphql-hmac-non-string-columns.md)) | S | **COMPLETED & VERIFIED ✅** | Verified with 20 unit/security tests; ready for merge. |
-| **3** | **BL-07:** PostgreSQL wire protocol endpoint (native pgwire protocol support for PostgreSQL BI tools) ([`REQ-PG-WIRE-01`](2026-10-16-req-postgres-wire-protocol-endpoint.md)) | L | **PROPOSED** | Conditional go pending owner evaluation. |
-| **4** | **WP-ARC-C-19:** Unit test project physical separation | S | **PLANNED** | Scheduled for next release freeze window. |
+| **1** | **Issue #271:** Security Audit Remediation (CI/CD Supply Chain, Audit Retention, 4-Eyes Bypass, Multi-Tenancy Route Guards, MCP AuthZ, SSRF Egress & SQL Hardening) ([`REQ-SEC-271`](2026-10-21-req-issue-271-security-audit.md) / [`PLAN-SEC-271`](2026-10-21-plan-issue-271-security-audit.md)) | M | **COMPLETED & VERIFIED ✅** | All 7 audit findings remediated and verified with unit & integration test coverage (0 errors, 0 warnings). Ready for PR & merge. |
+| **2** | **BL-07:** PostgreSQL wire protocol endpoint (native pgwire protocol support for PostgreSQL BI tools) ([`REQ-PG-WIRE-01`](2026-10-16-req-postgres-wire-protocol-endpoint.md)) | L | **PROPOSED** | Conditional go pending owner evaluation. |
+| **3** | **WP-ARC-C-19:** Unit test project physical separation | S | **PLANNED** | Scheduled for next release freeze window. |
 
 ---
 
@@ -43,6 +42,7 @@
 
 | Item | Document | PR | Summary |
 |---|---|:---:|---|
+| **#270** | [`PLAN-GOV-270`](2026-10-21-plan-issue-270-graphql-hmac-non-string-columns.md)<br/>[`REQ-GOV-270`](2026-10-21-req-issue-270-graphql-hmac-non-string-columns.md) | **#272** | GraphQL HMAC Pseudonymization Typing & Cross-Channel Schema Parity for Non-String Columns. Batch rule hydration across engines, automatic String projection, HotChocolate schema invalidation. |
 | **BL-03 Wave 2** | [`PLAN-SCALE-5000-WAVE2`](2026-10-20-plan-scale-5000-users-wave2.md)<br/>[`REQ-SCALE-5000-WAVE2`](2026-10-20-req-scale-5000-users-wave2.md) | **#265** | Scale to 5,000 users: Multi-issuer Identity Realm Registry, Role-Resolver with SCIM-store/Graph/AppRoles, SCIM 2.0 receiver, sub-second deprovisioning lock, functional-rights mapping, scoped access policies, and recertification campaigns. |
 | **#257** | [`PLAN-OPS-257-256`](2026-10-20-plan-issues-256-257-poc-blockers-and-dbt-sources.md) | **#259** | PoC deployment blockers remediation (Serilog guard resiliency, release pipeline tagging/signing, diagnostic clarity in TableAccessPolicy, and schema 80->83 alignment). |
 | **#256** | [`PLAN-OPS-257-256`](2026-10-20-plan-issues-256-257-poc-blockers-and-dbt-sources.md) | **#259** | dbt sources manifest ingestion documentation & end-to-end test suite. |
