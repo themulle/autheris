@@ -38,6 +38,9 @@ public sealed record DbtModelDefinition(
     /// <summary>Declared keys of the model; null when the manifest declares none.</summary>
     public DbtDeclaredKeys? DeclaredKeys { get; init; }
 
+    /// <summary>Synthetic sample rows declared in meta (e.g. meta.synthetic_samples); null when none declared.</summary>
+    public IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples { get; init; }
+
     public TableIdentifier ToTableIdentifier() => new(Database, Schema, Name);
 }
 

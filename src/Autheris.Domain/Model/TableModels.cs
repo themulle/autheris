@@ -284,6 +284,9 @@ public sealed record TableMetadata
     /// <summary>Issue #80: Controls whether full coarsened ranges/distinct counts or only format + empty share are published when row filters apply.</summary>
     public DatasetProfilePublicationPolicy ProfilePublicationPolicy { get; init; } = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly;
 
+    /// <summary>Predefined synthetic sample rows (e.g. from dbt meta.synthetic_samples). Kept unmasked at runtime.</summary>
+    public IReadOnlyList<IReadOnlyDictionary<string, object?>> PredefinedSyntheticSamples { get; init; } = Array.Empty<IReadOnlyDictionary<string, object?>>();
+
     /// <summary>Issue #80: Optional estimated row count of the table used for small-table privacy coarsening.</summary>
     public long? EstimatedRowCount { get; init; }
 

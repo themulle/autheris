@@ -15,6 +15,18 @@ using Autheris.Domain.Model;
 public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? profileService = null) : ISyntheticSampleRowGenerator
 {
     private readonly IColumnValueProfileService _profileService = profileService ?? new ColumnValueProfileService();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<IReadOnlyDictionary<string, object?>>> _registeredSamples = new(StringComparer.OrdinalIgnoreCase);
+
+    public void RegisterSyntheticSamples(TableIdentifier table, IReadOnlyList<IReadOnlyDictionary<string, object?>> samples)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+        _registeredSamples[table.ToString()] = samples;
+    }
+
+    public IReadOnlyList<IReadOnlyDictionary<string, object?>>? GetRegisteredSyntheticSamples(TableIdentifier table)
+    {
+        return _registeredSamples.TryGetValue(table.ToString(), out var samples) ? samples : null;
+    }
 
     public IReadOnlyList<IReadOnlyDictionary<string, object?>> GenerateRows(
         TableMetadata table,
@@ -26,6 +38,67 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
         ArgumentNullException.ThrowIfNull(table);
         int rowCount = Math.Clamp(count, 1, 100);
 
+        var rows = new List<IReadOnlyDictionary<string, object?>>(rowCount);
+
+        var predefined = (table.PredefinedSyntheticSamples is { Count: > 0 } p && p.Count > 0)
+            ? p
+            : GetRegisteredSyntheticSamples(table.Identifier);
+
+        if (predefined is { Count: > 0 })
+        {
+            foreach (var preRow in predefined)
+            {
+                if (rows.Count >= rowCount) break;
+
+                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["__synthetic"] = true
+                };
+
+                foreach (var column in table.Columns)
+                {
+                    var level = ColumnAccessLevel.Clear;
+                    if (columnAccessLevels != null && columnAccessLevels.TryGetValue(column.ColumnName, out var explicitLevel))
+                    {
+                        level = explicitLevel;
+                    }
+
+                    if (level == ColumnAccessLevel.Deny)
+                    {
+                        continue;
+                    }
+
+                    // Requirement: Sample data should not be masked.
+                    // Kept in plain text for non-denied columns.
+                    object? val = null;
+                    if (preRow.TryGetValue(column.ColumnName, out var exactVal))
+                    {
+                        val = exactVal;
+                    }
+                    else
+                    {
+                        foreach (var kvp in preRow)
+                        {
+                            if (string.Equals(kvp.Key, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                val = kvp.Value;
+                                break;
+                            }
+                        }
+                    }
+
+                    row[column.ColumnName] = val;
+                }
+
+                rows.Add(row);
+            }
+
+            if (rows.Count >= rowCount)
+            {
+                return rows;
+            }
+        }
+
         var primaryKeys = new HashSet<string>(table.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
         if (primaryKeys.Count == 0 && table.HasColumn("id"))
         {
@@ -33,9 +106,8 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
         }
 
         var profiles = _profileService.GetDatasetProfiles(table, columnAccessLevels, hasActiveRowFilters, options);
-        var rows = new List<IReadOnlyDictionary<string, object?>>(rowCount);
 
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        for (int rowIndex = rows.Count; rowIndex < rowCount; rowIndex++)
         {
             var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {

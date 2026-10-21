@@ -105,4 +105,10 @@ public interface ISyntheticSampleRowGenerator
         IReadOnlyDictionary<string, ColumnAccessLevel>? columnAccessLevels = null,
         bool hasActiveRowFilters = false,
         ColumnProfileOptions? options = null);
+
+    /// <summary>Registers pre-defined or dbt-ingested synthetic sample rows for a table.</summary>
+    void RegisterSyntheticSamples(TableIdentifier table, IReadOnlyList<IReadOnlyDictionary<string, object?>> samples);
+
+    /// <summary>Gets registered synthetic sample rows for a table, if any.</summary>
+    IReadOnlyList<IReadOnlyDictionary<string, object?>>? GetRegisteredSyntheticSamples(TableIdentifier table);
 }
