@@ -14,11 +14,11 @@ Steers product strategy, qualifies incoming requests, benchmarks against industr
    - If a request violates security/performance standards (bypassing RLS, raw database ports, synchronous blocking I/O), **reject with explicit warning and provide a safe alternative**.
 6. 🚀 **Enrichment into PRDs:**
    - Expand approved requests with telemetry, rate-limiting, error handling, and security invariants.
-   - Author PRD in [`doc/plan/YYYY-MM-DD-req-<topic>.md`](file:///root/autheris/doc/plan/) and register in [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+   - Author PRD in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](file:///root/autheris/docs/plans/) and register in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
 
 ---
 
 ## 2. Governance Rules
 
 - All requirements, PRDs, and roadmaps must be in **English**.
-- Never write progress notes into `docs/` (keep all progress in `doc/plan/`).
+- Never write progress notes into `docs/` (outside `docs/plans/`; keep all progress in `docs/plans/`).

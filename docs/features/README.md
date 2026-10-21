@@ -8,7 +8,7 @@ Every feature document includes an architectural overview, explanation of busine
 > **Documentation Standard for AI Agents & Contributors:**
 > - All individual feature documentation **must be placed here in `docs/features/`** using the naming scheme `f-<category>-<number>-<slug>.md`.
 > - Always register new feature documents in the index table below.
-> - Feature documents must describe the **working state, architecture, and usage** (pure documentation). Do not include transient development progress, WIP notes, or task checklists (those belong in [`doc/plan/`](file:///root/autheris/doc/plan/)). See [`AGENTS.md`](file:///root/autheris/AGENTS.md).
+> - Feature documents must describe the **working state, architecture, and usage** (pure documentation). Do not include transient development progress, WIP notes, or task checklists (those belong in [`docs/plans/`](file:///root/autheris/docs/plans/)). See [`AGENTS.md`](file:///root/autheris/AGENTS.md).
 
 | Feature ID | Title | Documentation |
 | :--- | :--- | :--- |

@@ -13,11 +13,11 @@ This directory defines custom agent roles and skills for the Autheris ecosystem.
 2. **Strict Separation of Documentation vs. Development Progress:**
    - **Documentation (`docs/`) is strictly for actual system reference and operator manuals.**
    - Never write status tags, WIP notes, sprint backlogs, or progress reports inside `docs/`.
-   - All progress tracking, roadmaps, and checklists belong **exclusively in `doc/plan/`**.
+   - All progress tracking, roadmaps, and checklists belong **exclusively in `docs/plans/`**.
 
 3. **Requirements & Planning Protocol:**
-   - Any new requirement or initiative must be recorded under [`doc/plan/`](file:///root/autheris/doc/plan/).
-   - The primary origin plan is [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+   - Any new requirement or initiative must be recorded under [`docs/plans/`](file:///root/autheris/docs/plans/).
+   - The primary origin plan is [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
    - All agents (architects, developers, reviewers) must update and refine their respective child plans on this origin plan.
 
 4. **Individual Feature Documentation (`docs/features/`):**

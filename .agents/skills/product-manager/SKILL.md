@@ -4,7 +4,7 @@ description: >-
   Enterprise product manager and strategic gatekeeper. Scouts for new features, qualifies incoming
   requests against existing catalog (docs/features/), evaluates architectural fit, benchmarks with web
   and industry best practices (OWASP, GraphQL Foundation, OpenFGA), rejects anti-patterns with alternatives,
-  and enriches approved requirements into comprehensive PRDs in doc/plan/.
+  and enriches approved requirements into comprehensive PRDs in docs/plans/.
 ---
 
 # Enterprise Product Manager & Strategic Gatekeeper Skill
@@ -29,8 +29,8 @@ flowchart TD
     FIT -->|Out of Scope / Anti-Pattern| REJECT["🛑 Gatekeeper Rejection<br/>Warn about hazards, provide safe alternative"]
     FIT -->|Valid Scope Fit| BENCH["4. Industry & Web Benchmark<br/>(OWASP, RFCs, GraphQL Foundation)"]
     
-    BENCH --> ENRICH["5. Enrich & Expand with Best Practices<br/>Draft PRD in doc/plan/"]
-    ENRICH --> REGISTER["Register in doc/plan/00-master-plan-overview.md"]
+    BENCH --> ENRICH["5. Enrich & Expand with Best Practices<br/>Draft PRD in docs/plans/"]
+    ENRICH --> REGISTER["Register in docs/plans/00-master-plan-overview.md"]
 ```
 
 ### Stage 1: Feature Scouting & Intake
@@ -68,8 +68,8 @@ If a request violates best practices or architectural boundaries:
 #### 🟢 When to Approve & Enrich:
 If the request is sound and strategically valuable:
 1. **Expand with Enterprise Best Practices:** Include telemetry spans, rate-limiting, error handling, audit line-aging, and fail-closed behaviors.
-2. **Draft the Requirement Document:** Place it in [`doc/plan/`](file:///root/autheris/doc/plan/) as `YYYY-MM-DD-req-<name>.md`.
-3. **Register in Origin Master Plan:** Link the new initiative in [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+2. **Draft the Requirement Document:** Place it in [`docs/plans/`](file:///root/autheris/docs/plans/) as `YYYY-MM-DD-req-<name>.md`.
+3. **Register in Origin Master Plan:** Link the new initiative in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
 
 ---
 
@@ -101,7 +101,7 @@ $$\text{Score} = \frac{\text{Reach} \times \text{Impact} \times \text{Confidence
 
 ## 4. Product Requirements Document (PRD) Template
 
-Store in `doc/plan/YYYY-MM-DD-req-<topic>.md`:
+Store in `docs/plans/YYYY-MM-DD-req-<topic>.md`:
 
 ```markdown
 # PRD: [Feature Name, e.g. REQ-FEDERATED-VF: Federated Virtual Filters on Web APIs]

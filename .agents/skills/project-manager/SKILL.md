@@ -13,7 +13,7 @@ This skill equips an agent to act as the **Delivery Project Manager and Lead Wor
 
 ---
 
-> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. After Phase 5 the project manager only updates the delivery tracker in `doc/plan/` / `docs/plans/` (status row and resume instruction), commits and pushes.
+> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. After Phase 5 the project manager only updates the delivery tracker in `docs/plans/` (status row and resume instruction), commits and pushes.
 
 ## 1. The 5-Phase Implementation Lifecycle
 
@@ -29,8 +29,8 @@ sequenceDiagram
 
     User->>PM: New Feature Request / Initiative
     PM->>PM: Deduplicate (docs/features/), Benchmark (OWASP/RFC), Enrich PRD
-    PM->>Arch: Hand off approved PRD (doc/plan/YYYY-MM-DD-req-*.md)
-    Arch->>Arch: Design architecture & Implementation Plan (doc/plan/YYYY-MM-DD-plan-*.md)
+    PM->>Arch: Hand off approved PRD (docs/plans/YYYY-MM-DD-req-*.md)
+    Arch->>Arch: Design architecture & Implementation Plan (docs/plans/YYYY-MM-DD-plan-*.md)
     Arch->>Sec: Hand off Implementation Plan
     Sec->>Sec: Audit security controls, Fail-Closed, add threat mitigations
     Sec->>Dev: Approved Implementation Plan with security specs
@@ -54,12 +54,12 @@ sequenceDiagram
 - [ ] Validated fit for Autheris (Zero-Trust, High-Perf .NET 10, Hot Chocolate GraphQL, Casbin ABAC).
 - [ ] Benchmarked against industry standards (OWASP API Top 10, RFCs, GraphQL Foundation).
 - [ ] If anti-pattern detected: **Blocked with explicit warning & safe architectural alternative**.
-- [ ] PRD authored in [`doc/plan/YYYY-MM-DD-req-<topic>.md`](file:///root/autheris/doc/plan/) and registered in [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+- [ ] PRD authored in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](file:///root/autheris/docs/plans/) and registered in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
 
 ### Gate 2: Architecture Planning Gate (`csharp-architect`)
 - [ ] Clean Architecture layers respected: Domain (pure) -> Application -> Infrastructure -> Api/GraphQL.
 - [ ] Zero-allocation patterns considered for hot query execution paths (`ReadOnlySpan<T>`, memory pooling).
-- [ ] Concrete implementation steps drafted in [`doc/plan/YYYY-MM-DD-plan-<topic>.md`](file:///root/autheris/doc/plan/).
+- [ ] Concrete implementation steps drafted in [`docs/plans/YYYY-MM-DD-plan-<topic>.md`](file:///root/autheris/docs/plans/).
 - [ ] Decomposed into parallel subtasks if suitable for multiple developers.
 
 ### Gate 3: Security & Compliance Gate (`csharp-security-expert`)
@@ -81,7 +81,7 @@ sequenceDiagram
 - [ ] If issues are found: developer iteration loop initiated.
 
 ### After Gate 5: Tracker Bookkeeping (no documentation phase)
-- [ ] Delivery tracker status row updated in `doc/plan/` / `docs/plans/`.
+- [ ] Delivery tracker status row updated in `docs/plans/`.
 - [ ] Resume instruction for the next step or run written.
 - [ ] Committed and pushed.
 
@@ -101,4 +101,4 @@ The Project Manager ensures interface contracts from Phase 2 are established bef
 ## 4. Language & Repository Governance
 
 - **English Standard:** All plans, code, tests, reviews, and documentation must be in **English**.
-- **No Progress in `docs/`:** Progress tracking resides strictly in [`doc/plan/`](file:///root/autheris/doc/plan/).
+- **No Progress in `docs/`:** Progress tracking resides strictly in [`docs/plans/`](file:///root/autheris/docs/plans/).
