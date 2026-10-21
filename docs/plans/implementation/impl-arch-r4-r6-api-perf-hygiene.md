@@ -428,6 +428,6 @@ Decisions already taken in Gate 0 ([`00-implementation-roadmap.md`](00-implement
 2. **TrinoSqlEngine Core/Governance split (ARC-S-10, deferred):** only worth doing if the engine is published standalone. Recommendation: defer; record the decision in `architecture.md`.
 3. **Streaming API location (WP-13):** implement now on the governed execution path and let WP-ARC-B-10 move it, or wait for B-10. Recommendation: define the port now, implement in the existing executor, let the B-10 move carry it.
 4. **Metrics stack (WP-16):** OpenTelemetry Prometheus exporter (pre-release package) vs keeping prometheus-net for `/metrics` and bridging meters. Recommendation: OTel exporter; otherwise keep prometheus-net only in `Autheris.Api` and bridge `Meter` instruments.
-5. **Governance documents (WP-21):** CLAUDE.md/AGENTS.md still refer to `doc/plan/` and `/root/autheris` absolute paths; removing the `doc` symlink requires the owner to approve edits to those files.
+5. **Governance documents (WP-21):** CLAUDE.md/AGENTS.md now refer directly to `docs/plans/`; the `doc` and `docs/plan` symlinks were removed per owner directive (2026-10-21).
 6. **Option binding model (WP-03):** keep `GatewayOptions` root as the user-facing config model (recommended; no config break) vs separate top-level config sections (breaking).
 7. **Parser inline fast path (carry-over from the delivered WP-C-11):** `FastSqlEngine.InlineParseMaxLength` exists and defaults to 0 (off). Enable it only after a `ParseThroughputBenchmarks` run (not yet in `benchmarks/`) shows a material gain.

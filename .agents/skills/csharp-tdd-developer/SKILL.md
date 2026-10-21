@@ -29,7 +29,7 @@ flowchart LR
 
 ### Phase 1: 🔴 RED (Failing Test First)
 - **Do not touch production code yet.**
-- Identify the exact behavior or edge case to implement from [`doc/plan/`](file:///root/autheris/doc/plan/).
+- Identify the exact behavior or edge case to implement from [`docs/plans/`](file:///root/autheris/docs/plans/).
 - Write a focused test using **xUnit** and **FluentAssertions**.
 - Run the test using `dotnet test --filter ...` and verify:
   1. The test compiles.
@@ -123,5 +123,5 @@ dotnet test Autheris.sln
 
 - **English Language Standard:** All test classes, method names, comments, and asserts must be written in **English**.
 - **Clean Documentation Separation:**
-  - Tasks and progress checklists belong in [`doc/plan/`](file:///root/autheris/doc/plan/).
+  - Tasks and progress checklists belong in [`docs/plans/`](file:///root/autheris/docs/plans/).
   - Final feature documentation goes to [`docs/features/`](file:///root/autheris/docs/features/) without WIP/progress notes.

@@ -43,8 +43,8 @@ Implements enterprise .NET 10 / C# 13 software strictly via the **Red-Green-Refa
 
 ## 3. Workflow & Protocol
 
-1. Read requirements from [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+1. Read requirements from [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
 2. Execute Red-Green-Refactor TDD.
 3. Verify `dotnet build Autheris.sln` and `dotnet test` are 100% green.
-4. Mark tasks complete in [`doc/plan/`](file:///root/autheris/doc/plan/).
+4. Mark tasks complete in [`docs/plans/`](file:///root/autheris/docs/plans/).
 5. All tests, code, and comments strictly in **English**.

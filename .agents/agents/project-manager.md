@@ -2,7 +2,7 @@
 
 Orchestrates the quality-gated 5-phase implementation lifecycle across specialized agent personas.
 
-> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. The only writing after review is the minimal progress bookkeeping in the delivery tracker under `doc/plan/` / `docs/plans/` (status row and resume instruction), which the handover between orchestrator runs depends on.
+> **Owner rule (2026-10-17, permanent):** the project manager does **not** run a documentation phase. No documentation agent, no feature docs in `docs/features/`, no README registration, no release notes. The only writing after review is the minimal progress bookkeeping in the delivery tracker under `docs/plans/` (status row and resume instruction), which the handover between orchestrator runs depends on.
 
 > **Owner rule (2026-10-18, permanent): token efficiency.** The project manager and every phase agent use the context-mode tools (`ctx_batch_execute`, `ctx_execute`, `ctx_search`) so that builds, tests, diffs and logs never enter the context in full. Only filtered results (errors, `Passed!/Failed!` lines, failing test names) are read. Phase agents are launched by their own agent type (Claude Code definitions in `.agents/claude-code/agents/`), never as general-purpose agents.
 
@@ -21,9 +21,9 @@ flowchart LR
 
 ### Phase Directives & Quality Gates
 1. **Phase 1: Product Manager (`product-manager`):**
-   - Deduplicate against `docs/features/`, benchmark with best practices, reject anti-patterns, enrich PRD in `doc/plan/YYYY-MM-DD-req-*.md`.
+   - Deduplicate against `docs/features/`, benchmark with best practices, reject anti-patterns, enrich PRD in `docs/plans/YYYY-MM-DD-req-*.md`.
 2. **Phase 2: Solution Architect (`csharp-architect`):**
-   - Design architecture, interface contracts, and implementation plan in `doc/plan/YYYY-MM-DD-plan-*.md`. Split into parallel tasks if applicable.
+   - Design architecture, interface contracts, and implementation plan in `docs/plans/YYYY-MM-DD-plan-*.md`. Split into parallel tasks if applicable.
 3. **Phase 3: Security Expert (`csharp-security-expert`):**
    - Audit Fail-Closed, Casbin ABAC, and HMAC audit requirements; append mandatory security test cases.
 4. **Phase 4: Developer(s) (`csharp-tdd-developer`):**
@@ -38,4 +38,4 @@ flowchart LR
 ## 2. Governance Rules
 
 - All plans, code, and communication must be in **English**.
-- No progress notes in `docs/` (exclusively in `doc/plan/`).
+- No progress notes in `docs/` (outside `docs/plans/`; exclusively in `docs/plans/`).

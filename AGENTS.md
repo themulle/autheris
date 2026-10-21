@@ -8,7 +8,7 @@ This document governs all AI agents, assistant models (Antigravity, Claude, Copi
 
 * **Universal Implementation Standard:** English is the **sole standard language** across the entire Autheris repository for:
   - All source code, unit/integration tests, docstrings, and inline code comments.
-  - All documentation in `docs/` and planning files in `doc/plan/`.
+  - All documentation in `docs/` and planning files in `docs/plans/`.
   - The root [`README.md`](file:///root/autheris/README.md) and competitive comparisons in `docs/comparisons/`.
   - All git commit messages, PR descriptions, and inter-agent communication.
 * **Alignment with Root README:** The canonical [README.md](file:///root/autheris/README.md) is written in English. All supporting documentation and code must consistently adhere to English.
@@ -31,35 +31,35 @@ This document governs all AI agents, assistant models (Antigravity, Claude, Copi
   - **No implementation plans or roadmaps:** Documents titled `*implementation-plan*`, `*roadmap*`, or `*backlog*` must NEVER be placed in `docs/` (e.g. not in `docs/architecture/` or `docs/features/`).
   - **No personal/agent work logs:** Discussion of what an agent did today, what needs to be fixed tomorrow, or internal handoff notes.
 * **Where does development progress belong?**
-  - **EXCLUSIVELY in `doc/plan/`!** Every status update, roadmap, task checklist, and progress note must live in [`doc/plan/`](file:///root/autheris/doc/plan/) and be anchored in [`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md).
+  - **EXCLUSIVELY in `docs/plans/`!** Every status update, roadmap, task checklist, and progress note must live in [`docs/plans/`](file:///root/autheris/docs/plans/) and be anchored in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
 
 ---
 
-## 3. 📁 Requirements & Planning Location (`doc/plan/`)
+## 3. 📁 Requirements & Planning Location (`docs/plans/`)
 
-All new requirements, architectural designs, technical proposals, and implementation roadmaps **MUST be placed in `doc/plan/`** (symlinked to `docs/plans/`).
+All new requirements, architectural designs, technical proposals, and implementation roadmaps **MUST be placed in `docs/plans/`**.
 
 ### Standardized Naming Convention
-* **Requirements / PRDs:** `doc/plan/YYYY-MM-DD-req-<topic>.md`
-* **Architecture Concepts & Designs:** `doc/plan/YYYY-MM-DD-concept-<topic>.md`
-* **Implementation Plans & Roadmaps:** `doc/plan/YYYY-MM-DD-plan-<topic>.md`
+* **Requirements / PRDs:** `docs/plans/YYYY-MM-DD-req-<topic>.md`
+* **Architecture Concepts & Designs:** `docs/plans/YYYY-MM-DD-concept-<topic>.md`
+* **Implementation Plans & Roadmaps:** `docs/plans/YYYY-MM-DD-plan-<topic>.md`
 
 ---
 
 ## 4. 🎯 Origin Plan Protocol ("Ursprungsplan")
 
 The central origin/master plan for the entire project is:
-👉 **[`doc/plan/00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md)**
+👉 **[`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md)**
 
 ### Mandatory Workflow for All Agents:
 
 1. **Consult the Origin Plan First:**
-   Before beginning any work, analyze `doc/plan/00-master-plan-overview.md` to identify active tracks, architectural boundaries, and dependencies.
+   Before beginning any work, analyze `docs/plans/00-master-plan-overview.md` to identify active tracks, architectural boundaries, and dependencies.
 2. **Refine & Build on the Origin Plan:**
    Agents must never create isolated, disconnected plans. Any new requirement or feature stream must be registered in `00-master-plan-overview.md`.
 3. **Continuous Plan Refinement:**
    When an agent refines an existing concept (e.g., breaking down a concept into execution steps, designing schema models, or writing test specifications), the agent must:
-   * Update the specific detailed plan file in `doc/plan/`.
+   * Update the specific detailed plan file in `docs/plans/`.
    * Update the status, checklist, and notes in the origin plan (`00-master-plan-overview.md`).
 4. **Lifecycle & Status Transitions:**
    Track statuses in the origin plan table:
@@ -88,7 +88,7 @@ The central origin/master plan for the entire project is:
   4. **Security, Zero-Trust & Fail-Closed Behavior**: RLS pushdown, Casbin rules, and error handling.
 * **Separation of Concerns Reminder:**
   - Feature documents in `docs/features/` describe **how the feature works and how to use it**.
-  - Feature documents **MUST NOT contain development progress, WIP notes, sprint roadmaps, or task checklists** (those belong in `doc/plan/`).
+  - Feature documents **MUST NOT contain development progress, WIP notes, sprint roadmaps, or task checklists** (those belong in `docs/plans/`).
 
 ---
 
@@ -102,14 +102,14 @@ flowchart LR
     P2 --> P3["3. Security Expert<br/>(Audit & Threat Hardening)"]
     P3 --> P4["4. Developer(s)<br/>(Strict TDD Red-Green-Refactor)"]
     P4 --> P5["5. Code Reviewer<br/>(Inspection & Quality Gate)"]
-    P5 --> T["Tracker update<br/>(doc/plan/, commit, push)"]
+    P5 --> T["Tracker update<br/>(docs/plans/, commit, push)"]
 ```
 
 1. **Phase 1: Product Management (`product-manager`)**
    - Qualifies incoming requests, deduplicates against [`docs/features/`](file:///root/autheris/docs/features/), benchmarks with web/industry best practices (OWASP, RFCs).
-   - Gatekeeper role: Rejects/warns on anti-patterns with safe alternatives. Enriches valid requests into PRDs in `doc/plan/YYYY-MM-DD-req-*.md`.
+   - Gatekeeper role: Rejects/warns on anti-patterns with safe alternatives. Enriches valid requests into PRDs in `docs/plans/YYYY-MM-DD-req-*.md`.
 2. **Phase 2: Architectural Implementation Plan (`csharp-architect`)**
-   - Designs architecture, interfaces, and concrete step-by-step implementation plan in `doc/plan/YYYY-MM-DD-plan-*.md`.
+   - Designs architecture, interfaces, and concrete step-by-step implementation plan in `docs/plans/YYYY-MM-DD-plan-*.md`.
    - Splits into parallel developer streams if applicable.
 3. **Phase 3: Security & Compliance Review (`csharp-security-expert`)**
    - Audits plan against Zero-Trust, Fail-Closed, Casbin ABAC, and HMAC audit requirements. Expands plan with security test criteria.
@@ -118,7 +118,7 @@ flowchart LR
 5. **Phase 5: Code Review & Quality Gate (`csharp-code-reviewer`)**
    - Audits code quality, C# 13 idioms, allocation efficiency, and test completeness. Loops back to developers if issues arise.
 6. **After Phase 5: Tracker update (no documentation phase)**
-   - Updates the progress tracker and `doc/plan/00-master-plan-overview.md` (status and links), commits and pushes. No feature documentation is written as part of the lifecycle.
+   - Updates the progress tracker and `docs/plans/00-master-plan-overview.md` (status and links), commits and pushes. No feature documentation is written as part of the lifecycle.
 
 ---
 
