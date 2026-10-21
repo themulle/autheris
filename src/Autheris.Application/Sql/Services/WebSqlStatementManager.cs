@@ -156,8 +156,9 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             using var scope = _scopeFactory.CreateScope();
             var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
             var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
+            var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
             var metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, sessionCts.Token).ConfigureAwait(false);
+                request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, sessionCts.Token).ConfigureAwait(false);
             if (metadataResult != null)
             {
                 return metadataResult;

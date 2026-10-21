@@ -124,18 +124,21 @@ public static class McpDatasetTools
 
         if (string.Equals(toolName, CallProcedure, StringComparison.OrdinalIgnoreCase))
         {
-            if ((TryGetStringArgument(argumentsJson, "procedure_name", out var pName) ||
-                 TryGetStringArgument(argumentsJson, "procedure", out pName) ||
-                 TryGetStringArgument(argumentsJson, "dataset", out pName)) &&
-                !string.IsNullOrWhiteSpace(pName))
+            // The ABAC object names the procedure the executor really calls (same argument, same parsing), never an alias argument.
+            var procedureName = ProcedureNameArgument(argumentsJson);
+            if (procedureName == null)
             {
-                var clean = pName.StartsWith("procedure:", StringComparison.OrdinalIgnoreCase)
-                    ? pName["procedure:".Length..].Trim()
-                    : pName.Trim();
-                return string.IsNullOrWhiteSpace(clean) ? null : new TableIdentifier("procedure", "dbo", clean);
+                return null;
             }
 
-            return null;
+            try
+            {
+                return new TableIdentifier("procedure", "dbo", procedureName);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
         }
 
         if (TryGetStringArgument(argumentsJson, "dataset", out var dataset))
@@ -425,6 +428,24 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: CallProcedure);
+    }
+
+    /// <summary>
+    /// The procedure a <c>call_procedure</c> call names: the single <c>procedure_name</c> string argument without the optional
+    /// <c>procedure:</c> prefix. Shared by the guardrail (ABAC and four-eyes targets) and the executor, so both always see the same
+    /// procedure. Null when the argument is missing, repeated, not a string or empty.
+    /// </summary>
+    public static string? ProcedureNameArgument(string? argumentsJson)
+    {
+        if (!TryGetStringArgument(argumentsJson, "procedure_name", out var raw) || string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var clean = raw.StartsWith("procedure:", StringComparison.OrdinalIgnoreCase)
+            ? raw["procedure:".Length..].Trim()
+            : raw.Trim();
+        return string.IsNullOrWhiteSpace(clean) ? null : clean;
     }
 
     /// <summary>

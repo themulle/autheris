@@ -250,6 +250,15 @@ public sealed class TotpOptions
     public int PendingEnrollmentMinutes { get; init; } = 10;
 
     /// <summary>
+    /// Maximum age of the interactive authentication (<c>auth_time</c>, else <c>iat</c>) for a user's first TOTP
+    /// enrollment. Without an active secret there is no second factor to prove, so a stolen long-lived credential must
+    /// not be able to bind an authenticator (trust on first use). Applies to replayable-token identities (JWT bearer,
+    /// Basic session cookie); per-request authentication (Negotiate/Kerberos, raw Basic header) is allowed and audited,
+    /// unknown authentication types are rejected. Not enforced in the Development environment.
+    /// </summary>
+    public int FirstEnrollmentMaxAuthAgeMinutes { get; init; } = 5;
+
+    /// <summary>
     /// Encrypts TOTP seeds at rest with ASP.NET Data Protection. Requires a persisted key ring shared by all nodes
     /// (otherwise seeds become unreadable after a restart or on other nodes), hence off by default.
     /// </summary>

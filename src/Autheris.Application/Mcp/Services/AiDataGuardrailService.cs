@@ -50,6 +50,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly TrinoSqlEngine.ISqlEngine? _sqlEngine;
     private readonly IReadPathSwitches? _switches;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
+    private readonly Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? _semanticCatalog;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -76,7 +78,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IGatewayEventBus? eventBus = null,
         TrinoSqlEngine.ISqlEngine? sqlEngine = null,
         IReadPathSwitches? switches = null,
-        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null)
+        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
+        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -98,6 +102,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _sqlEngine = sqlEngine;
         _switches = switches;
         _datasetCatalogAdmin = datasetCatalogAdmin;
+        _procedureRegistry = procedureRegistry;
+        _semanticCatalog = semanticCatalog;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -308,11 +314,28 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         var needsFourEyesCheck = ToolReadsDatasetRows(tool);
-        foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? resolvedTables ?? [] : [])
+
+        // call_procedure and query_metrics: the ABAC object above is a pseudo table (procedure.dbo.<name>, the semantic catalog) that
+        // never carries the four-eyes flag. The gate below runs on the real tables behind the call instead; unresolvable is fail-closed.
+        IReadOnlyList<TableIdentifier>? fourEyesTables = resolvedTables;
+        var gatesUnderlyingTables = needsFourEyesCheck && _tableMetadataRepository != null && ReadsThroughUnderlyingTables(tool);
+        if (gatesUnderlyingTables)
+        {
+            fourEyesTables = await ResolveUnderlyingTablesAsync(tool, request.ArgumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+            if (fourEyesTables == null)
+            {
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+                _logger.LogWarning("Zero-Trust Fail-Closed: Could not resolve the tables behind MCP tool '{ToolName}'. Denying execution.", tool.Name);
+                await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Tool execution denied: the tables behind the call could not be resolved (fail-closed).", false, false, 0, cancellationToken).ConfigureAwait(false);
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
+            }
+        }
+
+        foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? fourEyesTables ?? [] : [])
         {
             if (_tableMetadataRepository == null || resolvedTable == null ||
-                resolvedTable.Value.Equals(McpDatasetTools.CatalogTable) ||
-                resolvedTable.Value.Equals(McpSemanticTools.SemanticCatalogTable))
+                resolvedTable.Value.Equals(McpDatasetTools.CatalogTable))
             {
                 continue;
             }
@@ -330,7 +353,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 unavailable = true;
             }
 
-            if (unavailable || (meta != null && !meta.Table.IsActive))
+            // A table behind a procedure or metric without catalog metadata cannot be classified: same answer as an inactive one.
+            if (unavailable || (meta == null && gatesUnderlyingTables) || (meta != null && !meta.Table.IsActive))
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);

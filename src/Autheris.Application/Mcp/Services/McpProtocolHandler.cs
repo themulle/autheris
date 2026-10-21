@@ -344,6 +344,33 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     public const string ApplicationIdentityKind = "application";
 
     /// <summary>
+    /// Raw role and group claim types of a token (short JWT names and the long WS-Federation names that <c>GetUserRoles</c> /
+    /// <c>GetGroupSids</c> also read). The session carries the vetted roles and group SIDs separately; letting the raw claims through
+    /// as additional claims would re-add groups to an app-only principal (SR-M-08) and untrusted roles.
+    /// </summary>
+    private static readonly HashSet<string> RoleAndGroupClaimTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "roles",
+        "role",
+        "groups",
+        "groupsid",
+        "wids",
+        System.Security.Claims.ClaimTypes.Role,
+        System.Security.Claims.ClaimTypes.GroupSid,
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+    };
+
+    /// <summary>
+    /// Whether a token claim may be carried into the MCP session principal as an additional claim. Role and group claims never are
+    /// (they come only from the vetted session roles and group SIDs), nor are the identity markers that only the gateway sets.
+    /// </summary>
+    public static bool IsAllowedAdditionalClaimType(string? claimType) =>
+        !string.IsNullOrWhiteSpace(claimType) &&
+        !RoleAndGroupClaimTypes.Contains(claimType) &&
+        !string.Equals(claimType, IdentityKindClaimType, StringComparison.Ordinal) &&
+        !string.Equals(claimType, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal);
+
+    /// <summary>
     /// The principal of an MCP caller as the catalog, resource and tool services expect it (SID, tenant, roles, groups, claims, read-only
     /// marker). SR-M-08: the subject is the authenticated user of the session. A session without a user SID (app-only token) keeps the
     /// application identity, is marked with <see cref="IdentityKindClaimType"/> and carries no group SIDs, so no user-level consent applies.
@@ -385,9 +412,9 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         {
             foreach (var (k, v) in session.AdditionalClaims)
             {
-                // The identity markers are set by the gateway only; a token claim must not spoof or clear them.
-                if (string.Equals(k, IdentityKindClaimType, StringComparison.Ordinal) ||
-                    string.Equals(k, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal))
+                // The identity markers are set by the gateway only; a token claim must not spoof or clear them. Raw role and group
+                // claims must not re-add what the session deliberately left out (app-only sessions carry no groups).
+                if (!IsAllowedAdditionalClaimType(k))
                 {
                     continue;
                 }

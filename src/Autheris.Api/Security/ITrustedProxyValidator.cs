@@ -1,5 +1,6 @@
 using System.Net;
 using Autheris.Domain.Options;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Api.Security;
@@ -70,5 +71,42 @@ public sealed class TrustedProxyValidator(IOptions<GatewayOptions> gatewayOption
         }
 
         return false;
+    }
+}
+
+/// <summary>
+/// Raw TCP peer helpers shared by ForwardAuth and ext_authz: the peer address is captured by
+/// <see cref="Autheris.Api.Middleware.CorrelationIdMiddleware"/> before <c>UseForwardedHeaders</c> rewrites
+/// <c>Connection.RemoteIpAddress</c> from client-controlled <c>X-Forwarded-For</c>.
+/// </summary>
+public static class TrustedProxyPeer
+{
+    /// <summary>The raw TCP peer address (captured before forwarded headers are applied), else the connection address.</summary>
+    public static IPAddress? GetRawRemoteIp(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (context.Items.TryGetValue(Autheris.Api.Middleware.CorrelationIdMiddleware.OriginalTcpRemoteIpItemKey, out var origIpObj))
+        {
+            if (origIpObj is IPAddress origIp)
+            {
+                return origIp;
+            }
+
+            if (origIpObj is string origIpStr && IPAddress.TryParse(origIpStr, out var parsedIp))
+            {
+                return parsedIp;
+            }
+        }
+
+        return context.Connection.RemoteIpAddress;
+    }
+
+    /// <summary>True only when the raw TCP peer is known and a configured trusted proxy (fail closed).</summary>
+    public static bool IsRawPeerTrusted(this ITrustedProxyValidator validator, HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(validator);
+        var remoteIp = GetRawRemoteIp(context);
+        return remoteIp != null && validator.IsProxyTrusted(remoteIp);
     }
 }

@@ -8,6 +8,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Dbt.Services;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -59,12 +60,20 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtMetadataIngestionService dbtService) =>
         {
-            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("DbtAdmin");
-            if (!isPrivileged)
+            // The direct governance import writes masking rules, sensitivities, virtual filters and access profiles; the DbtAdmin
+            // role alone (manifest / run-results automation) does not authorize it. Only global governance administrators.
+            if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
+
+            // Virtual filters and access profiles are saved as the calling user (never as the sync, so the approval workflow
+            // applies) in the server-resolved request tenant; only a canonical ClusterAdmin may import into another tenant.
+            var security = EndpointSecurity.GetSecurityContext(context);
+            var caller = new DbtGovernanceImportCaller(
+                new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
+                EndpointSecurity.GetRequestTenant(context),
+                EndpointSecurity.IsCanonicalClusterAdmin(context.User));
 
             const string governanceTooLarge = "Governance file size exceeds maximum allowed size (100 MB).";
             var limitError = EndpointSecurity.TryApplyBodyLimit(context.Request, 100 * 1024 * 1024, governanceTooLarge);
@@ -81,7 +90,7 @@ public static class DbtEndpoints
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, replace, context.RequestAborted);
+                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, caller, dryRun, replace, context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, governanceTooLarge);
         }).RequireAuthorization()

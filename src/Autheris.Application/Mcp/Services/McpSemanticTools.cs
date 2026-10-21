@@ -185,6 +185,35 @@ public static class McpSemanticTools
         return JsonSerializer.Serialize(SemanticMetricCatalogProjection.ProjectOne(metric, principal), IndentedOptions);
     }
 
+    /// <summary>
+    /// The metric names of a <c>query_metrics</c> call (<c>metrics</c> as array or string, else <c>metric</c>). Shared by the executor
+    /// and the guardrail's four-eyes resolution, so both see the same metrics.
+    /// </summary>
+    public static IReadOnlyList<string> MetricNamesArgument(JsonElement root)
+    {
+        var metrics = new List<string>();
+        if (root.TryGetProperty("metrics", out var mProp))
+        {
+            if (mProp.ValueKind == JsonValueKind.Array)
+            {
+                metrics.AddRange(mProp.EnumerateArray()
+                    .Where(e => e.ValueKind == JsonValueKind.String)
+                    .Select(e => e.GetString()!)
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+            }
+            else if (mProp.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(mProp.GetString()))
+            {
+                metrics.Add(mProp.GetString()!);
+            }
+        }
+        else if (root.TryGetProperty("metric", out var singleProp) && singleProp.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(singleProp.GetString()))
+        {
+            metrics.Add(singleProp.GetString()!);
+        }
+
+        return metrics;
+    }
+
     public static async Task<string> ExecuteQueryMetricsAsync(
         ISemanticMetricQueryService metricQueryService,
         ClaimsPrincipal principal,
@@ -207,24 +236,7 @@ public static class McpSemanticTools
                 using var doc = JsonDocument.Parse(argumentsJson);
                 var root = doc.RootElement;
 
-                if (root.TryGetProperty("metrics", out var mProp))
-                {
-                    if (mProp.ValueKind == JsonValueKind.Array)
-                    {
-                        metrics.AddRange(mProp.EnumerateArray()
-                            .Where(e => e.ValueKind == JsonValueKind.String)
-                            .Select(e => e.GetString()!)
-                            .Where(s => !string.IsNullOrWhiteSpace(s)));
-                    }
-                    else if (mProp.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(mProp.GetString()))
-                    {
-                        metrics.Add(mProp.GetString()!);
-                    }
-                }
-                else if (root.TryGetProperty("metric", out var singleProp) && singleProp.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(singleProp.GetString()))
-                {
-                    metrics.Add(singleProp.GetString()!);
-                }
+                metrics.AddRange(MetricNamesArgument(root));
 
                 if (root.TryGetProperty("groupBy", out var gProp) && gProp.ValueKind == JsonValueKind.Array)
                 {

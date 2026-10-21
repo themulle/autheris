@@ -693,6 +693,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         {
             foreach (var (k, v) in sessionContext.AdditionalClaims)
             {
+                // SR-M-08: raw role/group claims and the gateway identity markers never come from the additional claims.
+                if (!Autheris.Application.Mcp.Services.McpProtocolHandler.IsAllowedAdditionalClaimType(k))
+                {
+                    continue;
+                }
+
                 claims.Add(new Claim(k, v));
             }
         }

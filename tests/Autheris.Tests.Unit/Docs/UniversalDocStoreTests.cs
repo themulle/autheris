@@ -266,4 +266,50 @@ public sealed class UniversalDocStoreTests : IDisposable
         searchHits[0].Id.DocId.ShouldBe("stock-alert");
         searchHits[0].Summary.ShouldContain("ERR_STOCK_LOW");
     }
+
+    [Fact]
+    public async Task DocumentExistsAsync_SeesExactlyTheFileADepositWrites()
+    {
+        var request = new DepositDocRequest("billing-service", DocCategory.Runbook, "Payment Timeout", "# Payment Timeout", DocId: "payment-timeout");
+
+        (await _docStore.DocumentExistsAsync(request)).ShouldBeFalse();
+        await _docStore.DepositDocumentAsync(request);
+
+        (await _docStore.DocumentExistsAsync(request)).ShouldBeTrue();
+        // Same document id without DocId (slug of the title) and in another category.
+        (await _docStore.DocumentExistsAsync(request with { DocId = null, Title = "payment-timeout" })).ShouldBeTrue();
+        (await _docStore.DocumentExistsAsync(request with { Category = DocCategory.Guide })).ShouldBeFalse();
+    }
+
+    private static McpSessionContext DocSession(string role) =>
+        new("s1", "user-1", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-1", Roles: [role]);
+
+    [Fact]
+    public async Task McpDeposit_TenantGovernanceAdmin_CannotOverwriteAnExistingDocument_ClusterAdminCan()
+    {
+        await _docStore.DepositDocumentAsync(new DepositDocRequest("billing-service", DocCategory.Runbook, "Runbook", "# Original", DocId: "runbook"));
+        var filePath = Path.Combine(_testRootDir, "billing-service", "runbook", "runbook.md");
+        var overwrite = """{"appId":"billing-service","category":"Runbook","docId":"runbook","title":"Runbook","content":"# Replaced"}""";
+
+        var denied = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, overwrite, DocSession("GovernanceAdmin"));
+
+        denied.ShouldContain("Forbidden");
+        (await File.ReadAllTextAsync(filePath)).ShouldBe("# Original");
+
+        var allowed = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, overwrite, DocSession("ClusterAdmin"));
+
+        allowed.ShouldContain("\"success\": true");
+        (await File.ReadAllTextAsync(filePath)).ShouldBe("# Replaced");
+    }
+
+    [Fact]
+    public async Task McpDeposit_TenantGovernanceAdmin_MayAddANewDocument()
+    {
+        var args = """{"appId":"billing-service","category":"Runbook","docId":"new-runbook","title":"New","content":"# New"}""";
+
+        var result = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, args, DocSession("GovernanceAdmin"));
+
+        result.ShouldContain("\"success\": true");
+        File.Exists(Path.Combine(_testRootDir, "billing-service", "runbook", "new-runbook.md")).ShouldBeTrue();
+    }
 }

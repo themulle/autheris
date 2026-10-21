@@ -108,7 +108,8 @@ public static partial class GovernanceEndpoints
 
         try
         {
-            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
+            // SR-M-10: the resolved security context carries the caller's (plugin-enriched) groups and roles for the self-grant check.
+            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, EndpointSecurity.GetSecurityContext(context), ct);
             return Results.Ok(result);
         }
         catch (Autheris.Application.Governance.Services.DeclarativeDatasetCatalogException ex)

@@ -29,6 +29,10 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
 {
     private static readonly VirtualFilterActor DbtActor = new(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
 
+    // The direct dbt governance import runs as the calling user in the caller's tenant (the tenant of DavidProfile / DavidFilter).
+    private static readonly DbtGovernanceImportCaller ImportCaller =
+        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), VirtualFilterModelTests.DavidProfile().TenantId);
+
     private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfb_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
@@ -129,10 +133,53 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
             """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-        var result = await dbt.IngestGovernanceStreamAsync(stream);
+        var result = await dbt.IngestGovernanceStreamAsync(stream, ImportCaller);
 
         result.AccessProfilesCount.ShouldBe(1);
         result.Warnings.ShouldBeEmpty();
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task DbtImport_SavesTheProfileAsTheCallingUser_SoTheApprovalWorkflowApplies()
+    {
+        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), DbtActor);
+        var catalog = Substitute.For<ITableMetadataRepository>();
+        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        {
+            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
+            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+        });
+        var approvalService = new VirtualFilterAdministrationService(
+            _repository,
+            Substitute.For<IAuditLogRepository>(),
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }),
+            catalog: catalog);
+        var dbt = new DbtMetadataIngestionService(
+            Substitute.For<IDbtProposalRepository>(),
+            Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<ILineageGraphStore>(),
+            epochRepository: null,
+            gatewayOptions: null,
+            sqlEndpointLoader: null,
+            relationRepository: null,
+            virtualFilterAdmin: approvalService,
+            logger: NullLogger<DbtMetadataIngestionService>.Instance);
+        const string json = """
+            {"access_profiles":{"david":{"scope":"lwetem_prod.*.*","uncovered":"deny",
+              "grantee":{"type":"user","sid":"S-1-5-21-LWE-DAVID"},
+              "bindings":[{"filter":"nicht_ausgelieferte_krane","target":"lwetem_prod.*.*.client_id"}]}}}
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await dbt.IngestGovernanceStreamAsync(stream, ImportCaller);
+
+        // No payload tenant: the caller's request tenant. Not the sync actor: the profile waits for a distinct approver.
+        result.Success.ShouldBeTrue();
+        result.Warnings.ShouldBeEmpty();
+        var profile = (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+        profile.TenantId.ShouldBe(ImportCaller.Tenant);
+        profile.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        profile.CreatedBy.ShouldBe(ImportCaller.Actor.Sid);
     }
 }

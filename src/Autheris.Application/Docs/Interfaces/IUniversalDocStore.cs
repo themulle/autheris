@@ -30,6 +30,12 @@ public interface IUniversalDocStore
     Task<DepositDocResult> DepositDocumentAsync(DepositDocRequest request, CancellationToken ct = default);
 
     /// <summary>
+    /// Whether <see cref="DepositDocumentAsync"/> would overwrite an existing document for <paramref name="request"/>
+    /// (same application, category and document id, resolved exactly as the deposit resolves them).
+    /// </summary>
+    Task<bool> DocumentExistsAsync(DepositDocRequest request, CancellationToken ct = default);
+
+    /// <summary>
     /// Safely unpacks and applies an application documentation ZIP archive with Zip-Slip defense.
     /// </summary>
     Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default);

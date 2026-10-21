@@ -4,6 +4,7 @@ using System;
 using System.Text.Encodings.Web;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Options.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
@@ -61,6 +62,28 @@ public sealed class ScimAuthenticationHandlerTests
         result.Principal.Identity?.Name.ShouldBe("scim-client:workforce-entra");
         result.Principal.HasClaim("autheris:realm", "workforce-entra").ShouldBeTrue();
         result.Principal.IsInRole("SCIM_PROVISIONER").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_ValidSecret_IsNeverClusterAdmin()
+    {
+        var result = await RunAuthenticateAsync($"Bearer {ExpectedSecret}");
+
+        result.Succeeded.ShouldBeTrue();
+        result.Principal!.IsInRole("ClusterAdmin").ShouldBeFalse();
+        result.Principal.IsInRole(GatewayPolicies.ScimProvisionerRole).ShouldBeTrue();
+        GatewayPolicies.IsScimProvisioner(result.Principal).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_RealmsConfigured_RejectsRealmWithoutScimProvisioning()
+    {
+        _realmOptions.Realms["workforce-entra"] = new IdentityRealmConfigOptions { Provisioning = RealmProvisioningMode.Scim };
+        _realmOptions.Realms["partners"] = new IdentityRealmConfigOptions { Provisioning = RealmProvisioningMode.Jit };
+
+        (await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/workforce-entra/Users")).Succeeded.ShouldBeTrue();
+        (await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/partners/Users")).Succeeded.ShouldBeFalse();
+        (await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/unknown-realm/Groups")).Succeeded.ShouldBeFalse();
     }
 
     [Fact]

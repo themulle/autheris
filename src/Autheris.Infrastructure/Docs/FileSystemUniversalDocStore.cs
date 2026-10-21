@@ -144,38 +144,19 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return Task.FromResult<DocAppManifest?>(null);
     }
 
+    public Task<bool> DocumentExistsAsync(DepositDocRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (_, _, _, _, filePath) = ResolveDocumentPath(request);
+        return Task.FromResult(File.Exists(filePath));
+    }
+
     public async Task<DepositDocResult> DepositDocumentAsync(DepositDocRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ValidateSafeIdentifier(request.AppId, nameof(request.AppId));
-
-        var docId = !string.IsNullOrWhiteSpace(request.DocId)
-            ? request.DocId.Trim()
-            : Slugify(request.Title);
-
-        ValidateSafeIdentifier(docId, nameof(docId));
-
-        var safeAppId = Path.GetFileName(request.AppId);
-        var safeDocId = Path.GetFileName(docId);
-        var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
-
-        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
-            ? _rootPath
-            : _rootPath + Path.DirectorySeparatorChar;
-
-        var targetCategoryDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId, categoryName));
-        if (!targetCategoryDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Invalid category directory path.", nameof(request));
-        }
+        var (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath) = ResolveDocumentPath(request);
 
         Directory.CreateDirectory(targetCategoryDir);
-
-        var filePath = Path.GetFullPath(Path.Combine(targetCategoryDir, $"{safeDocId}.md"));
-        if (!filePath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Invalid document file path.", nameof(request));
-        }
 
         await File.WriteAllTextAsync(filePath, request.Content, ct).ConfigureAwait(false);
 
@@ -403,6 +384,43 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             totalIndexed, appDirs.Length);
 
         return totalIndexed;
+    }
+
+    /// <summary>
+    /// The validated target of a deposit (shared by <see cref="DepositDocumentAsync"/> and <see cref="DocumentExistsAsync"/>, so the
+    /// existence check sees exactly the file a deposit would write).
+    /// </summary>
+    private (string SafeAppId, string SafeDocId, string CategoryName, string CategoryDir, string FilePath) ResolveDocumentPath(DepositDocRequest request)
+    {
+        ValidateSafeIdentifier(request.AppId, nameof(request.AppId));
+
+        var docId = !string.IsNullOrWhiteSpace(request.DocId)
+            ? request.DocId.Trim()
+            : Slugify(request.Title);
+
+        ValidateSafeIdentifier(docId, nameof(docId));
+
+        var safeAppId = Path.GetFileName(request.AppId);
+        var safeDocId = Path.GetFileName(docId);
+        var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
+
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _rootPath
+            : _rootPath + Path.DirectorySeparatorChar;
+
+        var targetCategoryDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId, categoryName));
+        if (!targetCategoryDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid category directory path.", nameof(request));
+        }
+
+        var filePath = Path.GetFullPath(Path.Combine(targetCategoryDir, $"{safeDocId}.md"));
+        if (!filePath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid document file path.", nameof(request));
+        }
+
+        return (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath);
     }
 
     private static DocCategory ResolveCategoryFromPath(string relativePath)

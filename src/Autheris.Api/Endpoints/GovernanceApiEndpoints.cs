@@ -31,6 +31,13 @@ public static class GovernanceApiEndpoints
                 return Results.Unauthorized();
             }
 
+            // Security review (TOTP TOFU): a first enrollment requires a fresh interactive sign-in (not in Development).
+            var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "begin", context.RequestAborted).ConfigureAwait(false);
+            if (firstEnrollment.Rejection != null)
+            {
+                return firstEnrollment.Rejection;
+            }
+
             var email = ResolveUserEmail(context, userSid);
             var enrollment = await enrollmentService.BeginEnrollmentAsync(userSid, email, "Autheris", context.RequestAborted).ConfigureAwait(false);
             if (enrollment == null)
@@ -65,8 +72,19 @@ public static class GovernanceApiEndpoints
                 return Results.BadRequest(new TotpVerifyResult(false, "TotpCode is required."));
             }
 
+            var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "verify", context.RequestAborted).ConfigureAwait(false);
+            if (firstEnrollment.Rejection != null)
+            {
+                return firstEnrollment.Rejection;
+            }
+
             var outcome = await enrollmentService.CompleteEnrollmentAsync(
                 userSid, request.TotpCode, request.CurrentTotpCode, context.RequestAborted).ConfigureAwait(false);
+
+            if (outcome == TotpEnrollmentOutcome.Completed && firstEnrollment.IsFirstEnrollment)
+            {
+                await TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, userSid, context.RequestAborted).ConfigureAwait(false);
+            }
 
             return outcome switch
             {

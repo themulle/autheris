@@ -240,7 +240,9 @@ public static class McpEndpoints
                             c.Type != ClaimTypes.Role &&
                             c.Type != ClaimTypes.GroupSid &&
                             c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType &&
-                            c.Type != CallerAttributeSchemeGate.MarkerClaimType)
+                            c.Type != CallerAttributeSchemeGate.MarkerClaimType &&
+                            // SR-M-08: raw role/group claims ("roles", "groups", "wids", ...) stay out; the session carries the vetted ones.
+                            Autheris.Application.Mcp.Services.McpProtocolHandler.IsAllowedAdditionalClaimType(c.Type))
                 .GroupBy(c => c.Type, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
             : null;

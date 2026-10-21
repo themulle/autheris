@@ -488,6 +488,19 @@ public static class McpDocTools
         }
 
         var request = new DepositDocRequest(appId, category, title, content, docId, errorCode, tags);
+
+        // Documents are served to every tenant: a tenant administrator may add documents but never replace an existing one
+        // (of any application). Session roles carry "ClusterAdmin" only for canonical cluster administrators.
+        if (sessionContext != null)
+        {
+            var roles = sessionContext.Roles ?? [];
+            if (!roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) &&
+                await docStore.DocumentExistsAsync(request, ct).ConfigureAwait(false))
+            {
+                return JsonSerializer.Serialize(new { error = "Forbidden", message = "Overwriting an existing document requires ClusterAdmin role." });
+            }
+        }
+
         var result = await docStore.DepositDocumentAsync(request, ct).ConfigureAwait(false);
 
         var scrubbedResult = result with { FilePath = null };

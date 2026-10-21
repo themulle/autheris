@@ -376,7 +376,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var node = _lineageGraphStore.GetNode(dataset);
             bool isTenantMatch = node != null && (isClusterAdmin || string.IsNullOrWhiteSpace(node.TenantId) || string.Equals(node.TenantId, sessionContext.TenantId, StringComparison.OrdinalIgnoreCase));
 
-            if (node == null || !isTenantMatch)
+            // The node must also be a catalog dataset the caller may see (same visibility as get_table_schema/get_my_permissions), so a
+            // tenant-less node is no longer enough on its own. Unknown, foreign and hidden nodes get one indistinguishable answer.
+            if (node == null || !isTenantMatch || !await IsLineageNodeVisibleAsync(node.Id, requestContext, ct).ConfigureAwait(false))
             {
                 return JsonSerializer.Serialize(new
                 {
@@ -386,12 +388,22 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 }, JsonOpts);
             }
 
+            // Downstream consumers the caller cannot see are left out (their ids alone disclose the existence of hidden datasets).
+            var visibleDownstream = new List<string>();
+            foreach (var downstreamId in node.DownstreamNodeIds)
+            {
+                if (await IsLineageNodeVisibleAsync(downstreamId, requestContext, ct).ConfigureAwait(false))
+                {
+                    visibleDownstream.Add(downstreamId);
+                }
+            }
+
             return JsonSerializer.Serialize(new
             {
                 dataset = node.Id,
                 name = node.Name,
                 type = node.Type.ToString(),
-                downstreamNodes = node.DownstreamNodeIds,
+                downstreamNodes = visibleDownstream,
                 ownerTeam = node.OwnerTeam,
                 hasLineage = true
             }, JsonOpts);
@@ -469,15 +481,12 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         TenantId tenantId,
         CancellationToken ct)
     {
-        var procNameRaw = root.TryGetProperty("procedure_name", out var pnProp) ? pnProp.GetString() : null;
-        if (string.IsNullOrWhiteSpace(procNameRaw))
+        // Same parsing as the guardrail's ABAC and four-eyes targets, so the checked procedure is the one that runs.
+        var procName = McpDatasetTools.ProcedureNameArgument(root.GetRawText());
+        if (procName == null)
         {
             return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "INVALID_PARAMS", "Missing required argument 'procedure_name'.");
         }
-
-        var procName = procNameRaw.StartsWith("procedure:", StringComparison.OrdinalIgnoreCase)
-            ? procNameRaw["procedure:".Length..].Trim()
-            : procNameRaw.Trim();
 
         var rawInputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         if (root.TryGetProperty("arguments", out var argsProp) && argsProp.ValueKind == JsonValueKind.Object)
@@ -563,6 +572,29 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "EXECUTION_FAILED", "Procedure execution failed.");
         }
+    }
+
+    /// <summary>
+    /// Whether a lineage node id names a catalog dataset the caller may see. Ids that are no table identifier (dashboards, pipelines,
+    /// malformed ids) cannot be checked against the catalog and are not visible (fail closed).
+    /// </summary>
+    private async Task<bool> IsLineageNodeVisibleAsync(string? nodeId, RequestContext requestContext, CancellationToken ct)
+    {
+        TableIdentifier tableId;
+        try
+        {
+            if (!TableIdentifier.TryParse(nodeId, out tableId))
+            {
+                return false;
+            }
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        var detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
+        return detail != null;
     }
 
     private static string CreateMcpError(string tenantId, string tool, string code, string message)
