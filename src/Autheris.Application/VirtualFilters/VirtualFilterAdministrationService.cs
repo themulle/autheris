@@ -260,12 +260,20 @@ public sealed partial class VirtualFilterAdministrationService
         return direct;
     }
 
-    public Task<VirtualFilter> ApproveFilterAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct) =>
-        ApproveFilterAsync(tenantId, name, actor, expectedHash: null, ct);
+    /// <summary>
+    /// VF-05: the hash an approval compares: the definition hash for a deletion, the draft hash for a pending draft, else the definition hash.
+    /// The read API returns the same value as <c>pending_hash</c>, so the reviewer approves exactly what was reviewed.
+    /// </summary>
+    public static string PendingHash(VirtualFilter filter) =>
+        filter.PendingDeletion
+            ? filter.ComputeDefinitionHash()
+            : (filter.Draft?.ComputeDefinitionHash() ?? filter.ComputeDefinitionHash());
 
-    public async Task<VirtualFilter> ApproveFilterAsync(TenantId tenantId, string name, VirtualFilterActor actor, string? expectedHash = null, CancellationToken ct = default)
+    /// <summary>VF-05: approval is bound to the reviewed definition; there is no hash-less approval.</summary>
+    public async Task<VirtualFilter> ApproveFilterAsync(TenantId tenantId, string name, VirtualFilterActor actor, string expectedHash, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedHash);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindFilter(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The virtual filter '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"virtual filter '{name}'");
@@ -284,11 +292,9 @@ public sealed partial class VirtualFilterAdministrationService
             throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own rule.");
         }
 
-        string pendingHash = existing.PendingDeletion
-            ? existing.ComputeDefinitionHash()
-            : (existing.Draft?.ComputeDefinitionHash() ?? existing.ComputeDefinitionHash());
+        string pendingHash = PendingHash(existing);
 
-        if (expectedHash != null && !string.Equals(expectedHash, pendingHash, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
         {
             throw new VirtualFilterConflictException($"Hash mismatch for virtual filter '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
         }

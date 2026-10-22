@@ -157,12 +157,17 @@ public sealed partial class VirtualFilterAdministrationService
         return direct;
     }
 
-    public Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct) =>
-        ApproveProfileAsync(tenantId, name, actor, expectedHash: null, ct);
+    /// <summary>VF-05: the hash an approval compares (see <see cref="PendingHash(VirtualFilter)"/>).</summary>
+    public static string PendingHash(VirtualFilterAccessProfile profile) =>
+        profile.PendingDeletion
+            ? profile.ComputeDefinitionHash()
+            : (profile.Draft?.ComputeDefinitionHash() ?? profile.ComputeDefinitionHash());
 
-    public async Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string? expectedHash = null, CancellationToken ct = default)
+    /// <summary>VF-05: approval is bound to the reviewed definition; there is no hash-less approval.</summary>
+    public async Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string expectedHash, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedHash);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
@@ -181,11 +186,9 @@ public sealed partial class VirtualFilterAdministrationService
             throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own profile.");
         }
 
-        string pendingHash = existing.PendingDeletion
-            ? existing.ComputeDefinitionHash()
-            : (existing.Draft?.ComputeDefinitionHash() ?? existing.ComputeDefinitionHash());
+        string pendingHash = PendingHash(existing);
 
-        if (expectedHash != null && !string.Equals(expectedHash, pendingHash, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
         {
             throw new VirtualFilterConflictException($"Hash mismatch for access profile '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
         }

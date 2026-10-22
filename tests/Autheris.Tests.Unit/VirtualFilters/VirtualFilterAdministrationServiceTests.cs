@@ -367,10 +367,10 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
 
         // Self-approval must fail (four-eyes principle)
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, creatorActor));
+            serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, creatorActor, VirtualFilterAdministrationService.PendingHash(saved)));
 
         // Distinct approver succeeds
-        var approved = await serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, approverActor);
+        var approved = await serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, approverActor, VirtualFilterAdministrationService.PendingHash(saved));
         approved.Status.ShouldBe(FilterApprovalStatus.Active);
         approved.ApprovedBy.ShouldBe(approverActor.Sid);
     }

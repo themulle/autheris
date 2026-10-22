@@ -69,6 +69,69 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
         _resolver = new MandatoryRowFilterResolver(new RepositorySnapshotProvider(_repository), new TestPredicates());
     }
 
+    // VF-05: the service requires the reviewed hash; these helpers read the current pending hash unless a hash is given.
+    private async Task<VirtualFilter> ApproveFilterAsync(string name, VirtualFilterActor actor, string? expectedHash = null)
+    {
+        var snapshot = await _repository.LoadSnapshotAsync();
+        var current = snapshot.Filters.FirstOrDefault(f => f.TenantId == Tenant && f.Name == name);
+        return await _adminService.ApproveFilterAsync(Tenant, name, actor, expectedHash ?? (current is null ? "missing" : VirtualFilterAdministrationService.PendingHash(current)));
+    }
+
+    private async Task<VirtualFilterAccessProfile> ApproveProfileAsync(string name, VirtualFilterActor actor, string? expectedHash = null)
+    {
+        var snapshot = await _repository.LoadSnapshotAsync();
+        var current = snapshot.Profiles.FirstOrDefault(p => p.TenantId == Tenant && p.Name == name);
+        return await _adminService.ApproveProfileAsync(Tenant, name, actor, expectedHash ?? (current is null ? "missing" : VirtualFilterAdministrationService.PendingHash(current)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ApproveFilter_WithoutHash_Rejected()
+    {
+        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_nohash"), CreatorActor);
+
+        await Should.ThrowAsync<ArgumentException>(() => _adminService.ApproveFilterAsync(Tenant, "filter_nohash", SupervisorActor, expectedHash: null!));
+        await Should.ThrowAsync<ArgumentException>(() => _adminService.ApproveFilterAsync(Tenant, "filter_nohash", SupervisorActor, expectedHash: " "));
+        var stored = (await _repository.LoadSnapshotAsync()).Filters.Single(f => f.Name == "filter_nohash");
+        stored.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ApproveProfile_WithoutHash_Rejected()
+    {
+        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_pnh"), new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
+        await _adminService.SaveProfileAsync(VirtualFilterModelTests.DavidProfile("profile_nohash", "filter_pnh"), CreatorActor);
+
+        await Should.ThrowAsync<ArgumentException>(() => _adminService.ApproveProfileAsync(Tenant, "profile_nohash", SupervisorActor, expectedHash: ""));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ApproveFilter_DraftChangedAfterReview_Conflict()
+    {
+        var filter = VirtualFilterModelTests.DavidFilter("filter_toctou");
+        await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
+        await _adminService.SaveFilterAsync(filter with { KeyColumns = ["client.client_id"] }, CreatorActor);
+        var reviewed = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Filters.Single(f => f.Name == "filter_toctou"));
+
+        // The draft changes after the reviewer read it.
+        await _adminService.SaveFilterAsync(filter with { KeyColumns = ["crane.crane_serial_number"] }, CreatorActor);
+
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => ApproveFilterAsync("filter_toctou", SupervisorActor, expectedHash: reviewed));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ApproveFilter_HashCaseDiffers_Conflict()
+    {
+        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_case"), CreatorActor);
+        var hash = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Filters.Single(f => f.Name == "filter_case"));
+
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => ApproveFilterAsync("filter_case", SupervisorActor, expectedHash: hash.ToUpperInvariant()));
+        (await ApproveFilterAsync("filter_case", SupervisorActor, expectedHash: hash)).Status.ShouldBe(FilterApprovalStatus.Active);
+    }
+
     public void Dispose() => _repository.Dispose();
 
     private static MandatoryFilterQuery Query(TableMetadata table) =>
@@ -118,15 +181,15 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
         // 3. Creator cannot self-approve
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_v1", CreatorActor));
+            ApproveFilterAsync("filter_v1", CreatorActor));
 
         // 4. Supervisor approves with TOCTOU expectedHash check
         var wrongHash = "0000000000000000000000000000000000000000000000000000000000000000";
         await Should.ThrowAsync<VirtualFilterConflictException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_v1", SupervisorActor, expectedHash: wrongHash));
+            ApproveFilterAsync("filter_v1", SupervisorActor, expectedHash: wrongHash));
 
         var correctHash = storedMid.Draft.ComputeDefinitionHash();
-        var approved = await _adminService.ApproveFilterAsync(Tenant, "filter_v1", SupervisorActor, expectedHash: correctHash);
+        var approved = await ApproveFilterAsync("filter_v1", SupervisorActor, expectedHash: correctHash);
 
         approved.Status.ShouldBe(FilterApprovalStatus.Active);
         approved.Draft.ShouldBeNull();
@@ -171,10 +234,10 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
         // 3. Creator cannot self-approve deletion
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_del", CreatorActor));
+            ApproveFilterAsync("filter_del", CreatorActor));
 
         // 4. Supervisor approves deletion
-        await _adminService.ApproveFilterAsync(Tenant, "filter_del", SupervisorActor);
+        await ApproveFilterAsync("filter_del", SupervisorActor);
 
         // Filter is now deleted from repository
         var snapshotAfter = await _repository.LoadSnapshotAsync();
@@ -208,11 +271,11 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
         // 4. Creator cannot self-approve
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveProfileAsync(Tenant, "david_p", CreatorActor));
+            ApproveProfileAsync("david_p", CreatorActor));
 
         // 5. Supervisor approves with TOCTOU hash check
         var draftHash = storedMid.Draft.ComputeDefinitionHash();
-        var approved = await _adminService.ApproveProfileAsync(Tenant, "david_p", SupervisorActor, expectedHash: draftHash);
+        var approved = await ApproveProfileAsync("david_p", SupervisorActor, expectedHash: draftHash);
         approved.Status.ShouldBe(FilterApprovalStatus.Active);
         approved.Draft.ShouldBeNull();
         approved.Uncovered.ShouldBe(UncoveredPolicy.Skip);
@@ -229,7 +292,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
         // Has no pending changes
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_clean", SupervisorActor));
+            ApproveFilterAsync("filter_clean", SupervisorActor));
     }
 
     [Fact]
@@ -249,24 +312,24 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
         // 3. Bob attempts to self-approve his own edits -> MUST throw
         var exBob = await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_sg03", bobActor));
+            ApproveFilterAsync("filter_sg03", bobActor));
         exBob.Message.ShouldContain("Four-eyes principle violation");
 
         // 4. Bob attempts with another identifier (e.g. UPN/email) -> MUST throw
         var bobAlternateActor = new VirtualFilterActor(new Sid("S-1-5-21-BOB-ALT"), IsSync: false, Identifiers: ["bob_admin"]);
         var exBobAlt = await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_sg03", bobAlternateActor));
+            ApproveFilterAsync("filter_sg03", bobAlternateActor));
         exBobAlt.Message.ShouldContain("Four-eyes principle violation");
 
         // 5. Alice attempts to approve Bob's modified filter -> MUST throw
         var exAlice = await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveFilterAsync(Tenant, "filter_sg03", CreatorActor));
+            ApproveFilterAsync("filter_sg03", CreatorActor));
         exAlice.Message.ShouldContain("Four-eyes principle violation");
 
         // 6. Charlie (neutral 3rd supervisor) approves -> SUCCESS!
         var charlieSid = new Sid("S-1-5-21-CHARLIE");
         var charlieActor = new VirtualFilterActor(charlieSid, IsSync: false, Identifiers: ["charlie_admin"]);
-        var approved = await _adminService.ApproveFilterAsync(Tenant, "filter_sg03", charlieActor);
+        var approved = await ApproveFilterAsync("filter_sg03", charlieActor);
         approved.Status.ShouldBe(FilterApprovalStatus.Active);
         approved.ApprovedBy.ShouldBe(charlieSid);
     }
@@ -292,18 +355,18 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
         // 4. Bob attempts to self-approve his own edits -> MUST throw
         var exBob = await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveProfileAsync(Tenant, "profile_sg03", bobActor));
+            ApproveProfileAsync("profile_sg03", bobActor));
         exBob.Message.ShouldContain("Four-eyes principle violation");
 
         // 5. Alice attempts to approve -> MUST throw
         var exAlice = await Should.ThrowAsync<InvalidOperationException>(() =>
-            _adminService.ApproveProfileAsync(Tenant, "profile_sg03", CreatorActor));
+            ApproveProfileAsync("profile_sg03", CreatorActor));
         exAlice.Message.ShouldContain("Four-eyes principle violation");
 
         // 6. Charlie (neutral 3rd supervisor) approves -> SUCCESS!
         var charlieSid = new Sid("S-1-5-21-CHARLIE");
         var charlieActor = new VirtualFilterActor(charlieSid, IsSync: false, Identifiers: ["charlie_admin"]);
-        var approved = await _adminService.ApproveProfileAsync(Tenant, "profile_sg03", charlieActor);
+        var approved = await ApproveProfileAsync("profile_sg03", charlieActor);
         approved.Status.ShouldBe(FilterApprovalStatus.Active);
         approved.ApprovedBy.ShouldBe(charlieSid);
     }
