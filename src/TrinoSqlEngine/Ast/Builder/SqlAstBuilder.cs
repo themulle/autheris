@@ -555,11 +555,10 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         SqlQualifiedName? qualifier = null;
         if (context.primaryExpression() != null)
         {
+            // SQLE-14: a base that is not a column reference, and an AS (aliases) list, would be dropped silently: rejected.
+            if (context.columnAliases() != null) throw Unsupported("expression.* AS (aliases)");
             var expr = (Expression)Visit(context.primaryExpression());
-            if (expr is ColumnReference colRef)
-            {
-                qualifier = colRef.Name;
-            }
+            qualifier = expr is ColumnReference colRef ? colRef.Name : throw Unsupported("expression.* with a base that is not a column reference");
         }
         return new WildcardSelectItem(qualifier);
     }
@@ -1340,11 +1339,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             foreach (var arg in context.argument())
             {
-                var exprCtx = arg is SqlBaseParser.PositionalArgumentContext pos
-                    ? pos.expression()
-                    : arg is SqlBaseParser.NamedArgumentContext named
-                        ? named.expression()
-                        : null;
+                // SQLE-14: a named argument would lose its name and be passed positionally: rejected.
+                if (arg is SqlBaseParser.NamedArgumentContext) throw Unsupported("named function arguments");
+                var exprCtx = arg is SqlBaseParser.PositionalArgumentContext pos ? pos.expression() : null;
                 if (exprCtx != null)
                 {
                     args.Add((Expression)Visit(exprCtx));
@@ -1515,6 +1512,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             foreach (var f in context.fieldConstructor())
             {
+                if (f.identifier() != null) throw Unsupported("ROW field names");   // SQLE-14: the names would be dropped
                 list.Add((Expression)Visit(f.expression()));
             }
         }
