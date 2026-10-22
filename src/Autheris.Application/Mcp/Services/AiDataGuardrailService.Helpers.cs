@@ -20,7 +20,8 @@ public sealed partial class AiDataGuardrailService
         bool isMasked,
         bool truncated,
         int estimatedTokens,
-        CancellationToken ct)
+        CancellationToken ct,
+        string eventType = "MCP_TOOL_EXECUTION")
     {
         try
         {
@@ -31,7 +32,7 @@ public sealed partial class AiDataGuardrailService
             var entry = new AuditLogEntry
             {
                 TenantId = tenantId,
-                EventType = "MCP_TOOL_EXECUTION",
+                EventType = eventType,
                 ActorSid = actorSid,
                 TargetTable = toolName,
                 Decision = decision,
@@ -174,6 +175,33 @@ public sealed partial class AiDataGuardrailService
         }
         var single = ParseTableIdentifierFromTool(tool, argumentsJson);
         return single == null ? null : [single.Value];
+    }
+
+    /// <summary>
+    /// Output inspection (MCP-09): string values of a tool or resource result that carry a suspected prompt injection are replaced by a
+    /// fixed marker and audited as <c>MCP_OUTPUT_INJECTION_SUSPECTED</c>. The call is never denied, so a poisoned catalog text cannot be
+    /// used to block access.
+    /// </summary>
+    private async Task<string> InspectOutputAsync(
+        string toolName,
+        string json,
+        McpSessionContext sessionContext,
+        CancellationToken ct,
+        Action<bool>? markMasked = null)
+    {
+        var sanitized = _promptGuardrail.SanitizeToolOutput(toolName, json, out var withheld, out var attackType);
+        if (withheld == 0 || sanitized is null)
+        {
+            return json;
+        }
+
+        _logger.LogWarning("Suspected prompt injection withheld from the output of '{ToolName}' ({Count} value(s), {AttackType}).", toolName, withheld, attackType);
+        markMasked?.Invoke(true);
+        await RecordAuditEventAsync(
+            toolName, sessionContext, "ALLOW",
+            $"Output withheld: {withheld} value(s) with suspected prompt injection ({attackType ?? "unknown"}).",
+            true, false, Math.Max(1, sanitized.Length / 4), ct, Autheris.Domain.Audit.AuditEventTypes.McpOutputInjectionSuspected).ConfigureAwait(false);
+        return sanitized;
     }
 
     /// <summary>

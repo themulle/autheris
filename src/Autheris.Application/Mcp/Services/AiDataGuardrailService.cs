@@ -236,6 +236,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             bool docWasMasked = false;
             string scrubbedDocJson = !_options.Value.IsMcpUnmaskedAllowed ? ScrubPiiAndSensitiveData(rawDocJson, out docWasMasked) : rawDocJson;
             bool isError = TryGetExecutorError(rawDocJson, out var docErr);
+            if (!isError)
+            {
+                scrubbedDocJson = await InspectOutputAsync(tool.Name, scrubbedDocJson, sessionContext, cancellationToken, m => docWasMasked |= m).ConfigureAwait(false);
+            }
+
             // MCP-08: doc tools run under the same per-call token budget as dataset tools.
             scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated);
             await RecordAuditEventAsync(tool.Name, sessionContext, isError ? "DENY" : "ALLOW",
@@ -495,6 +500,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return new McpToolCallResult(IsSuccess: false, ContentJson: scrubbedJson, ErrorMessage: scrubbedJson, IsMasked: wasMasked);
         }
 
+        scrubbedJson = await InspectOutputAsync(tool.Name, scrubbedJson, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
         scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated);
 
         await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
@@ -589,6 +595,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         {
             _logger.LogWarning("SECURITY ALERT [WARN]: AI resource read '{Uri}' is running unmasked (warn_allow_unmasked_ai_access is ACTIVE).", resourceUri);
         }
+
+        text = await InspectOutputAsync(name, text, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
 
         int estimatedTokens = Math.Max(1, text.Length / 4);
         bool truncated = false;
