@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Services;
 
 using System;
+using System.Security.Claims;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
@@ -42,6 +43,8 @@ public interface ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
+        ClaimsPrincipal user,
+        TenantId tenantId,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
         SqlStatement? statement = null,
         FederatedParameterContract? parameters = null);
@@ -85,24 +88,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             VirtualFilterErrorCodes.EnforcementIncomplete);
     }
 
-    public CrossSourcePlan Plan(
-        string rawSql,
-        SqlQueryMetadata metadata,
-        IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
-        CrossSourceOptions options) =>
-        Plan(rawSql, metadata, tables, decisions, options, null, null, null);
-
-    public CrossSourcePlan Plan(
-        string rawSql,
-        SqlQueryMetadata metadata,
-        IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
-        CrossSourceOptions options,
-        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans,
-        SqlStatement? statement) =>
-        Plan(rawSql, metadata, tables, decisions, options, virtualFilterPlans, statement, null);
-
     /// <summary>
     /// Plans the staging requests and the DuckDB query. <paramref name="virtualFilterPlans"/> (WI-6) are attached to the
     /// staging request of their table; the user query is never rewritten for Virtual Filters. <paramref name="statement"/>
@@ -114,11 +99,14 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
+        ClaimsPrincipal user,
+        TenantId tenantId,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
         SqlStatement? statement = null,
         FederatedParameterContract? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
+        ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(decisions);
@@ -300,7 +288,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         foreach (var st in partitionResult.Subtrees)
         {
-            var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine);
+            var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine, user, tenantId);
             subtreePlans.Add(plan);
         }
 

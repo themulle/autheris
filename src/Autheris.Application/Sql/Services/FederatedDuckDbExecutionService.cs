@@ -237,7 +237,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
-        _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions);
+        _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId);
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan)> ExecuteFederatedInternalAsync(
@@ -338,7 +338,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // (single policy decision point: the decisions). Without a planner a table with applied Virtual Filters is denied.
             var statement = ParseStatement(sqlForAnalysis);
             var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, keySourceReads, timeoutCts.Token).ConfigureAwait(false);
-            var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement, parameterContract);
+            var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId, vfPlans, statement, parameterContract);
 
             // Start Audit (fail-closed, INV-17)
             await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, parameterContract, plan.Compiled.Parameters.Length, ct).ConfigureAwait(false);

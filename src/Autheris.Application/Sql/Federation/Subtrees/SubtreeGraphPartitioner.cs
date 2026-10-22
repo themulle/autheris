@@ -3,6 +3,7 @@ namespace Autheris.Application.Sql.Federation.Subtrees;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -131,7 +132,7 @@ public static class SubtreeGraphPartitioner
         var subtrees = new List<SourceSubtree>();
         foreach (var c in finalizedClusters)
         {
-            subtrees.Add(CreateSubtree(c, querySpec, $"st{subtrees.Count}", tables));
+            subtrees.Add(CreateSubtree(c, querySpec, fromSource, $"st{subtrees.Count}", tables));
         }
 
         foreach (var st in subtrees)
@@ -247,6 +248,7 @@ public static class SubtreeGraphPartitioner
     private static SourceSubtree CreateSubtree(
         Cluster cluster,
         QuerySpecification querySpec,
+        TableSource fromSource,
         string subtreeId,
         IReadOnlyList<ResolvedSourceTable> allTables)
     {
@@ -261,7 +263,10 @@ public static class SubtreeGraphPartitioner
 
         // 1. Identify pushable predicates from WHERE
         var pushable = new List<Expression>();
-        if (querySpec.Where != null)
+
+        // SQLA-16: a cluster on the null-supplying side of an outer join with an outside table gets no WHERE conjuncts (they would filter before
+        // the null extension); the gateway-side join evaluates them afterwards.
+        if (querySpec.Where != null && !OuterJoinSides.IsNullSuppliedFromOutside(fromSource, cluster.Root))
         {
             var conjuncts = ExtractConjuncts(querySpec.Where);
             foreach (var c in conjuncts)

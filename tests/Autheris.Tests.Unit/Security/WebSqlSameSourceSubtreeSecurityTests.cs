@@ -119,7 +119,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         };
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         var pgStaging = plan.StagingRequests.Single(r => r.StagingName == "s0");
         pgStaging.Subtree.ShouldNotBeNull();
@@ -175,7 +175,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         };
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         var pgStaging = plan.StagingRequests.Single(r => r.StagingName == "s0");
         pgStaging.Subtree.ShouldNotBeNull();
@@ -229,7 +229,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var planner = new CrossSourcePlanner(Engine);
 
         var ex = Should.Throw<WebSqlPolicyException>(() =>
-            planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }));
+            planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.Message.ShouldContain("ssn");
         ex.Message.ShouldContain("protected by");
@@ -301,7 +301,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         var subtreeRequest = plan.StagingRequests.Single(r => r.Subtree != null);
 
@@ -387,7 +387,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
         var subtreeRequest = plan.StagingRequests.Single(r => r.Subtree != null);
 
         var connector = Substitute.For<IAutherisConnector>();
@@ -480,7 +480,8 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var badSubtree = pgSubtree with { PushablePredicates = [badPredicate] };
 
         var ex = Should.Throw<WebSqlPolicyException>(() =>
-            SubtreeCompiler.Compile(badSubtree, decisions, new CrossSourceOptions { Enabled = true }, Engine));
+            SubtreeCompiler.Compile(badSubtree, decisions, new CrossSourceOptions { Enabled = true }, Engine,
+                Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.Message.ShouldContain("getdate");
         ex.Message.ShouldContain("not permitted");
@@ -515,7 +516,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         var subtreeRequest = plan.StagingRequests.Single(r => r.Subtree != null);
         var subtree = subtreeRequest.Subtree!;
