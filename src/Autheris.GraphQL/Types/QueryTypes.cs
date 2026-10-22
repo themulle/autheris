@@ -674,7 +674,17 @@ public sealed class Query
                 .Build());
         }
 
-        return await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays, callerContext, ct);
+        try
+        {
+            return await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays, callerContext, ct);
+        }
+        catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode)
+                .SetMessage(ex.Message)
+                .Build());
+        }
     }
 
     public async Task<string> ExportGdprDataDisclosureReportPdfBase64Async(

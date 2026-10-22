@@ -258,6 +258,10 @@ public static class GatewayGovernanceServiceExtensions
 
         // Lineage Graph Store, Impact Analyzer & GDPR Exporter
         services.AddSingleton<ILineageGraphStore, LineageGraphStore>();
+        services.AddOptions<Autheris.Domain.Options.GdprReportOptions>() // MISC-11
+            .BindConfiguration(Autheris.Domain.Options.GdprReportOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
         services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
         services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>(sp =>

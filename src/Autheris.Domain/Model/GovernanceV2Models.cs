@@ -209,6 +209,9 @@ public sealed record GdprDisclosureReport(
     int TotalAccessEvents,
     IReadOnlyList<GdprRecipientAccessRecord> DisclosedRecipients,
     IReadOnlyList<string> SensitivityCategories,
-    string LegalBasisNotice
+    string LegalBasisNotice,
+    bool IsComplete = true,
+    string EvidenceLevel = "TableLevel",
+    IReadOnlyList<string>? IncompletenessReasons = null
 );
 
