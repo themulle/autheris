@@ -39,4 +39,19 @@ public sealed class RetryAfterHeaderTests
         root.GetProperty("code").GetString().ShouldBe("TOO_MANY_REQUESTS");
         root.GetProperty("retryAfterSeconds").GetInt32().ShouldBe(12);
     }
+
+    [Fact]
+    public async Task GatewayExceptionHandler_MapsGovernanceStoreNotReady_To503WithRetryAfter_API06()
+    {
+        var handler = new GatewayExceptionHandler(NullLogger<GatewayExceptionHandler>.Instance);
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+
+        var handled = await handler.TryHandleAsync(
+            context, new Autheris.Infrastructure.Persistence.Migrations.GovernanceStoreNotReadyException("governance"), CancellationToken.None);
+
+        handled.ShouldBeTrue();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        context.Response.Headers.RetryAfter.ToString().ShouldNotBeNullOrEmpty();
+    }
 }
