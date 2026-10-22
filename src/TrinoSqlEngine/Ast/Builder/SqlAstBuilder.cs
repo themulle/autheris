@@ -1352,6 +1352,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             }
         }
 
+        EnsureBoundedRepeatLength(name, args);
+
         WindowSpecification? window = null;
         var overCtx = context.over();
         if (overCtx != null && overCtx.windowSpecification() == null)
@@ -1383,6 +1385,23 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
         return new FunctionCallExpression(qName, args, distinct, window, isStar, filter, orderWithin);
+    }
+
+    /// <summary>SQLE-13: the length of lpad/rpad/replicate must be an integer literal up to <see cref="MaxRepeatLength"/> (database memory DoS).</summary>
+    private const long MaxRepeatLength = 4000;
+
+    private static void EnsureBoundedRepeatLength(string name, IReadOnlyList<Expression> args)
+    {
+        if (!name.Equals("lpad", StringComparison.OrdinalIgnoreCase) && !name.Equals("rpad", StringComparison.OrdinalIgnoreCase)
+            && !name.Equals("replicate", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (args.Count < 2 || args[1] is not LiteralExpression { Type: LiteralType.Integer, Value: long length } || length is < 0 or > MaxRepeatLength)
+        {
+            throw Unsupported($"{name.ToLowerInvariant()} with a length that is not an integer literal between 0 and {MaxRepeatLength}");
+        }
     }
 
     public override SqlNode VisitMethodCall(SqlBaseParser.MethodCallContext context)
