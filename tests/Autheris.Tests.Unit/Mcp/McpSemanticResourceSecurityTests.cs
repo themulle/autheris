@@ -149,7 +149,7 @@ public sealed class McpSemanticResourceSecurityTests
     {
         var golden = Substitute.For<IGoldenQueryService>();
         golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<GoldenQuery>>([new GoldenQuery("g1", "sales", "orders", "Orders", "d", "query { x }")]));
+            .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([new GoldenQuery("g1", "sales", "orders", "Orders", "d", "query { x }")]));
         var compiler = Compiler([Table(Orders), Table(Payroll)], Rebac(Orders, Payroll), golden);
 
         var item = await compiler.ReadSemanticResourceAsync(User(), "examples://sales/orders");
