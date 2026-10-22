@@ -41,6 +41,15 @@ public interface IUniversalDocStore
     Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default);
 
     /// <summary>
+    /// Tenant-scoped bundle extraction. With a non-null <paramref name="tenantId"/> only markdown documents are extracted, every
+    /// document is stamped with the tenant/author provenance block (so it is served to that tenant only and marked as untrusted
+    /// user content), and the bundle is rejected as a whole if any document would replace an existing file (official
+    /// documentation or another tenant's document). A null <paramref name="tenantId"/> behaves like the unscoped overload
+    /// (official documentation; cluster administrators only).
+    /// </summary>
+    Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct = default);
+
+    /// <summary>
     /// Scans the physical document store directory, discovers all existing application documents,
     /// and indexes them into the search engine.
     /// </summary>

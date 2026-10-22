@@ -7,6 +7,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Security;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -183,11 +184,17 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return new DepositDocResult(
             Success: true,
             ChunkId: firstChunkId,
-            FilePath: filePath,
+            FilePath: ToRelativeSourcePath(filePath),
             Message: $"Successfully deposited and indexed document '{safeDocId}' for application '{safeAppId}'.");
     }
 
-    public async Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default)
+    public Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default) =>
+        ExtractBundleCoreAsync(appId, zipStream, tenantId: null, authorSid: null, ct);
+
+    public Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct = default) =>
+        ExtractBundleCoreAsync(appId, zipStream, tenantId, authorSid, ct);
+
+    private async Task<DepositDocResult> ExtractBundleCoreAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(zipStream);
         ValidateSafeIdentifier(appId, nameof(appId));
@@ -223,6 +230,18 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 FilePath: null,
                 Message: $"Security violation: Archive entry count ({archive.Entries.Count}) exceeds maximum allowed threshold of {MaxEntries} (Zip bomb protection).",
                 ErrorCode: "ZIP_BOMB_DETECTED");
+        }
+
+        // A tenant bundle only ever adds new markdown documents owned by its tenant: it is validated completely before the first
+        // byte is written, and it never replaces an existing file (official documentation or another tenant's document).
+        var isTenantBundle = tenantId is not null;
+        if (isTenantBundle)
+        {
+            var preflight = PreflightTenantBundle(archive, appId, targetDir, targetDirWithSep);
+            if (preflight is not null)
+            {
+                return preflight;
+            }
         }
 
         var extractedFiles = new List<string>();
@@ -288,6 +307,24 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 Directory.CreateDirectory(parentDir);
             }
 
+            if (isTenantBundle)
+            {
+                // Tenant bundles carry documentation only: manifests, scripts and other assets are not extracted.
+                if (!IsMarkdownFile(entry.Name))
+                {
+                    continue;
+                }
+
+                var tenantWrite = await WriteTenantDocumentAsync(entry, destinationPath, tenantId!, authorSid, ct).ConfigureAwait(false);
+                if (tenantWrite is not null)
+                {
+                    return tenantWrite;
+                }
+
+                extractedFiles.Add(destinationPath);
+                continue;
+            }
+
             entry.ExtractToFile(destinationPath, overwrite: true);
             extractedFiles.Add(destinationPath);
         }
@@ -328,8 +365,132 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return new DepositDocResult(
             Success: true,
             ChunkId: allChunks.Count > 0 ? allChunks[0].Id : null,
-            FilePath: targetDir,
+            FilePath: ToRelativeSourcePath(targetDir),
             Message: $"Bundle applied successfully: {extractedFiles.Count} files unpacked, {allChunks.Count} sections indexed.");
+    }
+
+    private const long MaxTenantDocumentBytes = 5 * 1024 * 1024; // 5 MB per tenant document
+
+    private static bool IsMarkdownFile(string name) => name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Validates every entry of a tenant bundle before anything is written: path safety, size, and that no markdown document
+    /// would replace an existing file. Returns null when the bundle may be extracted, otherwise the failure result.
+    /// </summary>
+    private DepositDocResult? PreflightTenantBundle(ZipArchive archive, string appId, string targetDir, string targetDirWithSep)
+    {
+        long cumulativeUncompressedBytes = 0;
+        foreach (var entry in archive.Entries)
+        {
+            cumulativeUncompressedBytes += entry.Length;
+            if (cumulativeUncompressedBytes > 100L * 1024 * 1024)
+            {
+                _logger.LogError("Zip Bomb detected: cumulative size {Bytes} exceeds limit for tenant bundle '{AppId}'",
+                    cumulativeUncompressedBytes, SanitizeForLog(appId));
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "Security violation: Archive uncompressed size exceeds maximum allowed threshold of 100MB (Zip bomb protection).",
+                    ErrorCode: "ZIP_BOMB_DETECTED");
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.FullName) ||
+                entry.FullName.Contains("..", StringComparison.Ordinal) ||
+                Path.IsPathRooted(entry.FullName) ||
+                !Path.GetFullPath(Path.Combine(targetDir, entry.FullName)).StartsWith(targetDirWithSep, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError("Zip Slip traversal attempt detected for entry '{Entry}' in tenant bundle '{AppId}'",
+                    SanitizeForLog(entry.FullName), SanitizeForLog(appId));
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: $"Security violation: Archive entry '{entry.FullName}' attempts directory traversal outside destination directory.",
+                    ErrorCode: "ZIP_SLIP_ATTEMPT");
+            }
+
+            if (string.IsNullOrEmpty(entry.Name) || !IsMarkdownFile(entry.Name))
+            {
+                continue;
+            }
+
+            if (entry.Length > MaxTenantDocumentBytes)
+            {
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "A document in the bundle exceeds the maximum permitted size of 5 MB.",
+                    ErrorCode: "DOC_TOO_LARGE");
+            }
+
+            var destinationPath = Path.GetFullPath(Path.Combine(targetDir, entry.FullName));
+            if (File.Exists(destinationPath))
+            {
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "Forbidden: the bundle would overwrite an existing document. Overwriting requires ClusterAdmin role.",
+                    ErrorCode: "DOC_OVERWRITE_FORBIDDEN");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Writes one document of a tenant bundle with the tenant provenance block, failing instead of replacing an existing file.
+    /// Returns null on success, otherwise the failure result.
+    /// </summary>
+    private static async Task<DepositDocResult?> WriteTenantDocumentAsync(ZipArchiveEntry entry, string destinationPath, string tenantId, string? authorSid, CancellationToken ct)
+    {
+        string text;
+        using (var memory = new MemoryStream())
+        {
+            await using (var entryStream = entry.Open())
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await entryStream.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+                {
+                    if (memory.Length + read > MaxTenantDocumentBytes)
+                    {
+                        return new DepositDocResult(
+                            Success: false,
+                            ChunkId: null,
+                            FilePath: null,
+                            Message: "A document in the bundle exceeds the maximum permitted size of 5 MB.",
+                            ErrorCode: "DOC_TOO_LARGE");
+                    }
+
+                    memory.Write(buffer, 0, read);
+                }
+            }
+
+            text = new UTF8Encoding(false).GetString(memory.GetBuffer(), 0, (int)memory.Length);
+        }
+
+        var fileContent = DocProvenance.Compose(text, tenantId, authorSid);
+        try
+        {
+            // CreateNew: never replaces a file that appeared after the preflight check.
+            await using var file = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await using var writer = new StreamWriter(file, new UTF8Encoding(false));
+            await writer.WriteAsync(fileContent.AsMemory(), ct).ConfigureAwait(false);
+        }
+        catch (IOException) when (File.Exists(destinationPath))
+        {
+            return new DepositDocResult(
+                Success: false,
+                ChunkId: null,
+                FilePath: null,
+                Message: "Forbidden: the bundle would overwrite an existing document. Overwriting requires ClusterAdmin role.",
+                ErrorCode: "DOC_OVERWRITE_FORBIDDEN");
+        }
+
+        return null;
     }
 
     public async Task<int> SyncExistingDocumentsAsync(CancellationToken ct = default)

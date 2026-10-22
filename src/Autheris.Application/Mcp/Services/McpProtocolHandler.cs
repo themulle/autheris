@@ -482,11 +482,32 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         }
 
         var uri = uriProp.GetString();
-        var principal = BuildPrincipalFromSession(session);
-        var allResources = await _semanticCompiler.GetSemanticResourcesAsync(null, principal, ct).ConfigureAwait(false);
-        var target = allResources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(uri) || session == null)
+        {
+            return CreateErrorResponse(id, -32004, $"Resource '{uri}' not found.");
+        }
 
-        if (target == null)
+        // Same guardrail as the HTTP server (GatewayMcpServer.ReadGuardedSemanticResourceAsync): Casbin ABAC on the semantic catalog,
+        // PII scrubbing, token budget and the MCP_TOOL_EXECUTION audit. The resource list is consent-filtered for the caller; a URI
+        // outside it, a denied read and a failed guardrail all answer alike (no existence oracle).
+        ISemanticMcpCompiler compiler = _semanticCompiler;
+        McpResourceItem? target = null;
+        var result = await _guardrailService.ReadResourceWithGuardrailAsync(
+            uri,
+            [McpSemanticTools.SemanticCatalogTable],
+            async token =>
+            {
+                var principal = BuildPrincipalFromSession(session);
+                var allResources = await compiler.GetSemanticResourcesAsync(null, principal, token).ConfigureAwait(false);
+                target = allResources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new McpResourceNotFoundException(uri);
+                return target.Text;
+            },
+            session,
+            applyTokenBudget: true,
+            ct).ConfigureAwait(false);
+
+        if (result is not { IsSuccess: true } || target == null)
         {
             return CreateErrorResponse(id, -32004, $"Resource '{uri}' not found.");
         }
@@ -500,7 +521,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
               {
                 "uri": "{{EscapeJson(target.Uri)}}",
                 "mimeType": "{{EscapeJson(target.MimeType)}}",
-                "text": "{{EscapeJson(target.Text)}}"
+                "text": "{{EscapeJson(result.ContentJson)}}"
               }
             ]
           }

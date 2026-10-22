@@ -49,13 +49,19 @@ public sealed class DocIngestionEndpointsIntegrationTests : IClassFixture<WebApp
         using var content = new ByteArrayContent(ms.ToArray());
         content.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
 
-        // Act: POST raw zip stream to /api/v1/docs/apps/{appId}/bundle
-        var response = await client.PostAsync("/api/v1/docs/apps/billing-service/bundle", content);
+        // Act: POST raw zip stream to /api/v1/docs/apps/{appId}/bundle. A non-ClusterAdmin bundle never replaces an existing
+        // document and the store directory survives test runs, so every run uses a fresh application id.
+        var response = await client.PostAsync($"/api/v1/docs/apps/billing-{Guid.NewGuid():N}/bundle", content);
 
         // Assert: Must return 200 OK without synchronous I/O or Kestrel errors
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var responseJson = await response.Content.ReadAsStringAsync();
         responseJson.ShouldContain("\"success\":true");
+        using (var resultDoc = JsonDocument.Parse(responseJson))
+        {
+            // No absolute server path in the response.
+            Path.IsPathRooted(resultDoc.RootElement.GetProperty("filePath").GetString()!).ShouldBeFalse();
+        }
 
         // Act: Search for the uploaded document via the new search REST endpoint
         var searchResponse = await client.GetAsync("/api/v1/docs/search?query=Emergency");

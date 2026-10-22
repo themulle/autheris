@@ -74,8 +74,11 @@ public sealed class UniversalDocStoreTests : IDisposable
         var result = await _docStore.DepositDocumentAsync(request);
 
         result.Success.ShouldBeTrue();
+        // The result carries a store-relative path only (never the absolute server path).
         result.FilePath.ShouldNotBeNull();
-        File.Exists(result.FilePath).ShouldBeTrue();
+        Path.IsPathRooted(result.FilePath).ShouldBeFalse();
+        result.FilePath.ShouldBe("billing-service/runbook/payment-gw-timeout.md");
+        File.Exists(Path.Combine(_testRootDir, result.FilePath)).ShouldBeTrue();
 
         // Verify instant discoverability via IDocSearchService
         var searchHits = await _searchService.SearchAsync("PAY_TIMEOUT_504");
