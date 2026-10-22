@@ -157,14 +157,8 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         // 4. Translate Typed Filter Node to Parameterized SQL
+        // VF-06: policy text and parameters are never spliced into the client SQL; the governed rewriter (PlannedTableRead) applies the row policy once.
         var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (decision.RowFilterParameters != null)
-        {
-            foreach (var (k, v) in decision.RowFilterParameters)
-            {
-                parameters[k] = v;
-            }
-        }
 
         int paramCounter = 0;
         string? clientFilterSql = null;
@@ -228,16 +222,6 @@ public sealed partial class GovernedTableReadPlanner
         if (!string.IsNullOrWhiteSpace(seekSql))
         {
             whereClauses.Add(seekSql.StartsWith('(') && seekSql.EndsWith(')') ? seekSql : $"({seekSql})");
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            whereClauses.Add(decision.CombinedRowFilterSql.StartsWith('(') && decision.CombinedRowFilterSql.EndsWith(')') ? decision.CombinedRowFilterSql : $"({decision.CombinedRowFilterSql})");
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql))
-        {
-            whereClauses.Add(decision.MandatoryRowPredicateSql.StartsWith('(') && decision.MandatoryRowPredicateSql.EndsWith(')') ? decision.MandatoryRowPredicateSql : $"({decision.MandatoryRowPredicateSql})");
         }
 
         // 7. Assemble Complete Single-Table SELECT Statement
@@ -451,6 +435,13 @@ public sealed partial class GovernedTableReadPlanner
 
         if (!string.IsNullOrWhiteSpace(node.Field))
         {
+            // VF-06: a tautology ({op: notin, value: []} renders "1 = 1") constrains nothing.
+            if (string.Equals(node.Op?.Trim(), "notin", StringComparison.OrdinalIgnoreCase) &&
+                node.Value is { ValueKind: JsonValueKind.Array } list && list.GetArrayLength() == 0)
+            {
+                return false;
+            }
+
             return string.Equals(node.Field, columnName, StringComparison.OrdinalIgnoreCase);
         }
 
