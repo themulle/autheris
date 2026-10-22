@@ -50,6 +50,9 @@ public sealed class EpochValidationService : IEpochValidationService, IHostedSer
     // already holds the floor and the pending bump), otherwise every revoke would cause a spurious second epoch bump.
     private readonly ConcurrentDictionary<string, int> _ownInvalidationsInFlight = new(StringComparer.OrdinalIgnoreCase);
 
+    // INF-01 R1: Grace period after reconnect during which Redis reads are treated as non-authoritative
+    private DateTimeOffset _reconnectGraceUntil = DateTimeOffset.MinValue;
+
     private const string RollbackLuaScript = @"
 local current = redis.call('GET', KEYS[1])
 local currentNum = tonumber(current)
@@ -107,6 +110,7 @@ end";
         try
         {
             _logger?.LogInformation("Redis connection restored. Evicting local L1 epoch cache to synchronize with cluster (POL-9).");
+            _reconnectGraceUntil = _time.GetUtcNow() + _options.ReconnectEpochGrace;
             _epochs.Clear();
             _lastEpochRefresh.Clear();
             _microCache.Clear();
@@ -201,6 +205,9 @@ end";
                     return (_epochs.GetOrAdd(key, 1), false);
                 }
 
+                var now = _time.GetUtcNow();
+                bool inGrace = now < _reconnectGraceUntil;
+
                 var db = _multiplexer.GetDatabase();
                 var redisKey = (RedisKey)$"{_redisPrefix}epoch:{key}";
                 var redisVal = await db.StringGetAsync(redisKey).ConfigureAwait(false);
@@ -208,8 +215,8 @@ end";
                 // Missing, rolled-back or not-advanced-past-the-floor epochs are lifted (never below anything this node has seen).
                 var rEpoch = await ReconcileEpochAsync(db, key, redisKey, redisVal).ConfigureAwait(false);
                 _epochs[key] = rEpoch;
-                _lastEpochRefresh[key] = _time.GetUtcNow();
-                return (rEpoch, true);
+                _lastEpochRefresh[key] = now;
+                return (rEpoch, !inGrace);
             }
             catch (Exception ex)
             {

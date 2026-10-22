@@ -13,6 +13,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -23,8 +24,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Persistent DuckDB table cache store backed by encrypted local disk files.
+/// INF-05: Persistent DuckDB table cache store backed by native DuckDB encrypted disk files.
 /// Conforms to SEC-BL04-05, SEC-BL04-06, SEC-BL04-07, and SEC-BL04-14.
+/// Generation files are created and accessed via DuckDB native encryption:
+/// ATTACH '<path>' AS g (ENCRYPTION_KEY '<hex(HKDF(KEK, "duckdb-gen-"+epoch))>')
+/// No plaintext generation copy or .enc file is ever written to disk.
 /// </summary>
 public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposable
 {
@@ -33,8 +37,8 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
 
     private readonly TableCacheOptions _options;
     private readonly ILogger<DuckDbPersistentTableCacheStore>? _logger;
-    private readonly byte[] _masterEncryptionKey;
-    private readonly byte[] _derivedDek;
+    private readonly byte[]? _masterEncryptionKey;
+    private readonly byte[] _metadataHmacKey;
     private readonly ConcurrentDictionary<TableIdentifier, TableCacheEntryMetadata> _metadata = new();
     private readonly ConcurrentDictionary<TableIdentifier, DuckDbConnectionPool> _connectionPools = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -44,20 +48,117 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
 
     public DuckDbPersistentTableCacheStore(
         IOptions<TableCacheOptions> options,
+        IKeyVaultSecretProvider? secretProvider = null,
         ILogger<DuckDbPersistentTableCacheStore>? logger = null,
         byte[]? customEncryptionKey = null)
     {
         _options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
         _logger = logger;
 
+        if (_options.Encryption.Enabled)
+        {
+            if (customEncryptionKey != null)
+            {
+                if (customEncryptionKey.Length < 32)
+                {
+                    throw new InvalidOperationException($"The table cache encryption KEK must be at least 32 bytes long (got {customEncryptionKey.Length} bytes).");
+                }
+                _masterEncryptionKey = customEncryptionKey;
+            }
+            else
+            {
+                if (secretProvider == null)
+                {
+                    throw new InvalidOperationException("IKeyVaultSecretProvider is required when table cache encryption is enabled.");
+                }
+
+                if (string.IsNullOrWhiteSpace(_options.Encryption.KeyVaultKeyName))
+                {
+                    throw new InvalidOperationException("Encryption.KeyVaultKeyName must not be empty when table cache encryption is enabled.");
+                }
+
+                byte[]? kekBytes = null;
+                try
+                {
+                    kekBytes = secretProvider.GetSecretBytes(_options.Encryption.KeyVaultKeyName);
+                }
+                catch (Exception ex) when (ex is not InvalidOperationException)
+                {
+                    throw new InvalidOperationException($"Failed to retrieve table cache KEK '{_options.Encryption.KeyVaultKeyName}' from secret provider.", ex);
+                }
+
+                if (kekBytes == null || kekBytes.Length < 32)
+                {
+                    throw new InvalidOperationException($"The table cache encryption KEK '{_options.Encryption.KeyVaultKeyName}' must be at least 32 bytes long (got {kekBytes?.Length ?? 0} bytes).");
+                }
+
+                _masterEncryptionKey = kekBytes;
+            }
+
+            _metadataHmacKey = TableCacheCryptoHelper.DeriveKey(_masterEncryptionKey, info: Encoding.UTF8.GetBytes("tablecache-meta"));
+        }
+        else
+        {
+            _masterEncryptionKey = customEncryptionKey;
+            _metadataHmacKey = Array.Empty<byte>();
+        }
+
         if (!Directory.Exists(_options.PersistentDirectory))
         {
             Directory.CreateDirectory(_options.PersistentDirectory);
         }
 
-        // Derive DEK from KEK using HKDF-SHA256 (SEC-BL04-05)
-        _masterEncryptionKey = customEncryptionKey ?? Encoding.UTF8.GetBytes(_options.Encryption.KeyVaultKeyName.PadRight(32, '0')[..32]);
-        _derivedDek = TableCacheCryptoHelper.DeriveKey(_masterEncryptionKey, info: Encoding.UTF8.GetBytes(_options.Encryption.KeyDerivationContext));
+        CleanupLegacyAndUnencryptedFiles();
+    }
+
+    private void CleanupLegacyAndUnencryptedFiles()
+    {
+        if (!Directory.Exists(_options.PersistentDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            var dirInfo = new DirectoryInfo(_options.PersistentDirectory);
+            // 1. Delete all legacy *.duckdb.enc files
+            foreach (var encFile in dirInfo.EnumerateFiles("*.duckdb.enc", SearchOption.AllDirectories))
+            {
+                try { encFile.Delete(); } catch { }
+            }
+
+            // 2. If encryption is enabled, delete any unencrypted generation file
+            if (_options.Encryption.Enabled)
+            {
+                foreach (var dbFile in dirInfo.EnumerateFiles("generation_*.duckdb", SearchOption.AllDirectories))
+                {
+                    bool isUnencrypted = false;
+                    try
+                    {
+                        using var testConn = new DuckDBConnection("DataSource=:memory:");
+                        testConn.Open();
+                        using var cmd = testConn.CreateCommand();
+                        cmd.CommandText = $"ATTACH '{dbFile.FullName.Replace("'", "''")}' AS test_g; DETACH test_g;";
+                        cmd.ExecuteNonQuery();
+                        isUnencrypted = true;
+                    }
+                    catch
+                    {
+                        // Fails to open without key -> it is encrypted, keep it
+                        isUnencrypted = false;
+                    }
+
+                    if (isUnencrypted)
+                    {
+                        try { dbFile.Delete(); } catch { }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to complete startup cleanup of legacy or unencrypted table cache files.");
+        }
     }
 
     public static string SanitizeIdentifier(string identifier)
@@ -100,6 +201,19 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         return "st_" + GetSafeTableToken(table) + "_" + Math.Max(0, epoch);
     }
 
+    private string GetAttachSql(string dbPath, long epoch)
+    {
+        var escapedPath = dbPath.Replace("'", "''");
+        if (_options.Encryption.Enabled && _masterEncryptionKey != null)
+        {
+            var dek = TableCacheCryptoHelper.DeriveKey(_masterEncryptionKey, info: Encoding.UTF8.GetBytes("duckdb-gen-" + epoch));
+            var dekHex = Convert.ToHexStringLower(dek);
+            return $"ATTACH '{escapedPath}' AS g (ENCRYPTION_KEY '{dekHex}'); USE g;";
+        }
+
+        return $"ATTACH '{escapedPath}' AS g; USE g;";
+    }
+
     public async Task InitializeTableAsync(TableCacheTargetOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -137,10 +251,13 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
             File.Delete(dbPath);
         }
 
-        using (var conn = new DuckDBConnection($"DataSource={dbPath}"))
+        using (var conn = new DuckDBConnection("DataSource=:memory:"))
         {
             await conn.OpenAsync(ct).ConfigureAwait(false);
             using var cmd = conn.CreateCommand();
+            cmd.CommandText = GetAttachSql(dbPath, epoch);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
             cmd.CommandText = $"PRAGMA max_memory='{_options.DefaultMemoryLimitMb}MB';";
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
@@ -166,12 +283,9 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 await InsertBatchAsync(conn, insertBase, sanitizedCols.Count, batch, ct).ConfigureAwait(false);
                 batch.Clear();
             }
-        }
 
-        // SEC-BL04-05: Encrypt persistent disk file at rest
-        if (_options.Encryption.Enabled)
-        {
-            await EncryptFileAtRestAsync(dbPath, ct).ConfigureAwait(false);
+            cmd.CommandText = "CHECKPOINT g; DETACH g;";
+            try { await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch { }
         }
 
         return shadowTable;
@@ -231,18 +345,19 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 throw new InvalidOperationException($"Zero-state protection: shadow staging table '{shadow}' returned 0 rows but active generation has {existing.RowCount} rows.");
             }
 
-            // Decrypt if necessary for active view creation
-            if (_options.Encryption.Enabled)
-            {
-                await EnsureDecryptedFileAsync(dbPath, ct).ConfigureAwait(false);
-            }
-
-            using (var conn = new DuckDBConnection($"DataSource={dbPath}"))
+            var attachSql = GetAttachSql(dbPath, epoch);
+            using (var conn = new DuckDBConnection("DataSource=:memory:"))
             {
                 await conn.OpenAsync(ct).ConfigureAwait(false);
                 using var cmd = conn.CreateCommand();
+                cmd.CommandText = attachSql;
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
                 cmd.CommandText = $"CREATE OR REPLACE VIEW \"{activeView}\" AS SELECT * FROM \"{shadow}\";";
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                cmd.CommandText = "CHECKPOINT g; DETACH g;";
+                try { await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch { }
             }
 
             var meta = new TableCacheEntryMetadata(
@@ -270,7 +385,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 oldPool.Dispose();
             }
 
-            _connectionPools[table] = new DuckDbConnectionPool($"DataSource={dbPath}");
+            _connectionPools[table] = new DuckDbConnectionPool("DataSource=:memory:", attachSql);
 
             // SEC-BL04-06: Write current_epoch.meta and HMAC-SHA256 signature
             await WriteEpochMetadataWithHmacAsync(dir, epoch, meta, ct).ConfigureAwait(false);
@@ -287,7 +402,6 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
     {
         var dir = GetTableDirectory(table);
         var dbPath = Path.Combine(dir, $"generation_{epoch}.duckdb");
-        var encPath = Path.Combine(dir, $"generation_{epoch}.duckdb.enc");
 
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -295,10 +409,6 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
             if (File.Exists(dbPath))
             {
                 try { File.Delete(dbPath); } catch { }
-            }
-            if (File.Exists(encPath))
-            {
-                try { File.Delete(encPath); } catch { }
             }
             await Task.CompletedTask;
         }
@@ -400,7 +510,8 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         var dir = GetTableDirectory(table);
         if (_metadata.TryGetValue(table, out var meta) && File.Exists(meta.InternalStoragePath))
         {
-            var newPool = new DuckDbConnectionPool($"DataSource={meta.InternalStoragePath}");
+            var attachSql = GetAttachSql(meta.InternalStoragePath, meta.GenerationEpoch);
+            var newPool = new DuckDbConnectionPool("DataSource=:memory:", attachSql);
             _connectionPools[table] = newPool;
             return await newPool.LeaseReaderAsync(ct).ConfigureAwait(false);
         }
@@ -450,28 +561,6 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         }
     }
 
-    // SEC-BL04-05 Authenticated AES-256-GCM File Encryption
-    public async Task EncryptFileAtRestAsync(string filePath, CancellationToken ct = default)
-    {
-        if (!File.Exists(filePath)) return;
-        var bytes = await File.ReadAllBytesAsync(filePath, ct).ConfigureAwait(false);
-        var encBytes = TableCacheCryptoHelper.Encrypt(_derivedDek, bytes, associatedData: Encoding.UTF8.GetBytes(Path.GetFileName(filePath)));
-        var encPath = filePath + ".enc";
-        await File.WriteAllBytesAsync(encPath, encBytes, ct).ConfigureAwait(false);
-    }
-
-    public async Task EnsureDecryptedFileAsync(string filePath, CancellationToken ct = default)
-    {
-        var encPath = filePath + ".enc";
-        if (File.Exists(encPath))
-        {
-            var encBytes = await File.ReadAllBytesAsync(encPath, ct).ConfigureAwait(false);
-            // Will throw CryptographicException on byte tampering or integrity violation (SEC-BL04-05)
-            var decrypted = TableCacheCryptoHelper.Decrypt(_derivedDek, encBytes, associatedData: Encoding.UTF8.GetBytes(Path.GetFileName(filePath)));
-            await File.WriteAllBytesAsync(filePath, decrypted, ct).ConfigureAwait(false);
-        }
-    }
-
     // SEC-BL04-06 Metadata HMAC Verification
     private async Task WriteEpochMetadataWithHmacAsync(string dir, long epoch, TableCacheEntryMetadata meta, CancellationToken ct)
     {
@@ -479,7 +568,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         var hmacFile = Path.Combine(dir, "current_epoch.meta.hmac");
 
         var json = JsonSerializer.SerializeToUtf8Bytes(meta);
-        var hmac = TableCacheCryptoHelper.ComputeHmac(_derivedDek, json);
+        var hmac = TableCacheCryptoHelper.ComputeHmac(_metadataHmacKey, json);
 
         await File.WriteAllBytesAsync(metaFile, json, ct).ConfigureAwait(false);
         await File.WriteAllBytesAsync(hmacFile, hmac, ct).ConfigureAwait(false);
@@ -499,7 +588,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         var expectedHmac = await File.ReadAllBytesAsync(hmacFile, ct).ConfigureAwait(false);
 
         // Constant-time HMAC check; throws SecurityException on mismatch (SEC-BL04-06)
-        TableCacheCryptoHelper.VerifyHmacOrThrow(_derivedDek, json, expectedHmac);
+        TableCacheCryptoHelper.VerifyHmacOrThrow(_metadataHmacKey, json, expectedHmac);
 
         return JsonSerializer.Deserialize<TableCacheEntryMetadata>(json)
             ?? throw new InvalidDataException("Deserialized metadata is null");

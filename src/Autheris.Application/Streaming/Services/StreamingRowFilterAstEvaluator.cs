@@ -4,10 +4,12 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
+using Autheris.Domain.Common;
 using TrinoSqlEngine;
 
 /// <summary>
@@ -41,6 +43,14 @@ public static partial class StreamingRowFilterAstEvaluator
     /// evaluation errors all return false (fail-closed).
     /// </summary>
     public static bool Matches(IReadOnlyDictionary<string, object?> payload, string? filterSql)
+        => Matches(payload, filterSql, null);
+
+    /// <summary>
+    /// INF-09: Evaluates whether the given CDC payload matches the SQL row filter, taking collation into account.
+    /// Returns true only when the filter evaluates to SQL TRUE; any comparison where ordinal and case/space-insensitive
+    /// semantics disagree yields UNKNOWN (null) and is treated as false (fail-closed).
+    /// </summary>
+    public static bool Matches(IReadOnlyDictionary<string, object?> payload, string? filterSql, DatabaseDialect? dialect)
     {
         if (string.IsNullOrWhiteSpace(filterSql))
         {
@@ -52,7 +62,7 @@ public static partial class StreamingRowFilterAstEvaluator
             return false;
         }
 
-        var plan = GetOrCompilePlan(filterSql);
+        var plan = GetOrCompilePlan(filterSql, dialect);
         if (plan == null)
         {
             // Unparseable or unsupported filter -> fail-closed for zero-trust security
@@ -70,9 +80,10 @@ public static partial class StreamingRowFilterAstEvaluator
         }
     }
 
-    private static Func<IReadOnlyDictionary<string, object?>, bool?>? GetOrCompilePlan(string filterSql)
+    private static Func<IReadOnlyDictionary<string, object?>, bool?>? GetOrCompilePlan(string filterSql, DatabaseDialect? dialect = null)
     {
-        if (PlanCache.TryGetValue(filterSql, out var cached))
+        var cacheKey = dialect.HasValue ? $"{dialect.Value}:{filterSql}" : filterSql;
+        if (PlanCache.TryGetValue(cacheKey, out var cached))
         {
             return cached;
         }
@@ -101,7 +112,7 @@ public static partial class StreamingRowFilterAstEvaluator
             plan = null;
         }
 
-        PlanCache[filterSql] = plan;
+        PlanCache[cacheKey] = plan;
         return plan;
     }
 
@@ -319,22 +330,48 @@ public static partial class StreamingRowFilterAstEvaluator
             }
 
             val = NormalizeValue(val);
-            bool match = val is string valStr
-                ? strSet.Contains(valStr)
-                : TryConvertToDecimal(val, out decimal d) && numSet.Contains(d);
-
-            if (match)
+            if (val is string valStr)
             {
-                return !isNot;
+                bool ordinalMatch = strSet.Contains(valStr);
+                string trimmedVal = valStr.TrimEnd();
+                bool insensitiveMatch = strSet.Any(s => string.Equals(s.TrimEnd(), trimmedVal, StringComparison.OrdinalIgnoreCase));
+
+                if (ordinalMatch != insensitiveMatch)
+                {
+                    // INF-09: Disagreement between ordinal and case/space-insensitive match yields UNKNOWN (null)
+                    return null;
+                }
+
+                if (ordinalMatch)
+                {
+                    return !isNot;
+                }
+
+                if (listContainsNull)
+                {
+                    return null;
+                }
+
+                return isNot;
             }
 
-            // x IN (..., NULL) without a match is UNKNOWN, as is x NOT IN (..., NULL)
-            if (listContainsNull)
+            if (TryConvertToDecimal(val, out decimal d))
             {
-                return null;
+                bool match = numSet.Contains(d);
+                if (match)
+                {
+                    return !isNot;
+                }
+
+                if (listContainsNull)
+                {
+                    return null;
+                }
+
+                return isNot;
             }
 
-            return isNot;
+            return null;
         };
     }
 
@@ -370,7 +407,9 @@ public static partial class StreamingRowFilterAstEvaluator
         }
         sb.Append('$');
 
-        var compiledRegex = new Regex(sb.ToString(), RegexOptions.IgnoreCase | RegexOptions.Singleline, TimeSpan.FromMilliseconds(200));
+        var regexPattern = sb.ToString();
+        var caseSensitiveRegex = new Regex(regexPattern, RegexOptions.Singleline, TimeSpan.FromMilliseconds(200));
+        var caseInsensitiveRegex = new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Singleline, TimeSpan.FromMilliseconds(200));
 
         return payload =>
         {
@@ -381,8 +420,17 @@ public static partial class StreamingRowFilterAstEvaluator
 
             try
             {
-                bool isMatch = compiledRegex.IsMatch(val.ToString() ?? string.Empty);
-                return isNot ? !isMatch : isMatch;
+                var text = val.ToString() ?? string.Empty;
+                bool matchSensitive = caseSensitiveRegex.IsMatch(text);
+                bool matchInsensitive = caseInsensitiveRegex.IsMatch(text);
+
+                if (matchSensitive != matchInsensitive)
+                {
+                    // INF-09: Disagreement between case-sensitive and case-insensitive LIKE yields UNKNOWN (null)
+                    return null;
+                }
+
+                return isNot ? !matchSensitive : matchSensitive;
             }
             catch (RegexMatchTimeoutException)
             {
@@ -568,12 +616,25 @@ public static partial class StreamingRowFilterAstEvaluator
 
         // Review E-6: no implicit coercion between types. '007' = 7 and '007' = '7' are not true; a mixed-type
         // comparison is UNKNOWN (fail-closed) and strings compare ordinally.
-        int cmp;
         if (left is string sLeft && right is string sRight)
         {
-            cmp = string.CompareOrdinal(sLeft, sRight);
+            int cmpOrdinal = string.CompareOrdinal(sLeft, sRight);
+            int cmpInsensitive = string.Compare(sLeft.TrimEnd(), sRight.TrimEnd(), StringComparison.OrdinalIgnoreCase);
+
+            bool? ordinalVerdict = EvaluateCmp(opText, cmpOrdinal);
+            bool? insensitiveVerdict = EvaluateCmp(opText, cmpInsensitive);
+
+            if (ordinalVerdict == null || insensitiveVerdict == null || ordinalVerdict != insensitiveVerdict)
+            {
+                // INF-09: If ordinal result and case- and trailing-space-insensitive result disagree, result is UNKNOWN (null)
+                return null;
+            }
+
+            return ordinalVerdict;
         }
-        else if (left is bool bLeft && right is bool bRight)
+
+        int cmp;
+        if (left is bool bLeft && right is bool bRight)
         {
             if (opText is not ("=" or "==" or "!=" or "<>")) return null;
             cmp = bLeft == bRight ? 0 : 1;
@@ -587,6 +648,11 @@ public static partial class StreamingRowFilterAstEvaluator
             return null;
         }
 
+        return EvaluateCmp(opText, cmp);
+    }
+
+    private static bool? EvaluateCmp(string opText, int cmp)
+    {
         return opText switch
         {
             "=" or "==" => cmp == 0,

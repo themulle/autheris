@@ -52,9 +52,21 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secretRef);
 
-        if (_inMemorySecrets.TryGetValue(secretRef, out var memorySecret))
+        // INF-11: datasource: references resolve strictly from the server-managed store (_inMemorySecrets).
+        // If not found in the managed store, fail closed immediately without applying URI, alias, config, env, or file fallbacks.
+        if (DatasourceSecretRefPolicy.IsInDatasourceNamespace(secretRef))
         {
-            return memorySecret;
+            if (_inMemorySecrets.TryGetValue(secretRef, out var memorySecret))
+            {
+                return memorySecret;
+            }
+
+            throw new KeyNotFoundException("datasource secret not found");
+        }
+
+        if (_inMemorySecrets.TryGetValue(secretRef, out var nonDatasourceMemorySecret))
+        {
+            return nonDatasourceMemorySecret;
         }
 
         // SC-07: Support file: reference type for container secrets mounted under /run/secrets/
@@ -112,8 +124,10 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
 
         var candidates = new List<string> { secretRef };
 
-        // 1. If secretRef is a URI (e.g. https://my-vault.vault.azure.net/secrets/itsm-webhook-secret)
-        if (Uri.TryCreate(secretRef, UriKind.Absolute, out var uri))
+        // 1. If secretRef is an HTTPS Azure Key Vault URI (e.g. https://my-vault.vault.azure.net/secrets/itsm-webhook-secret)
+        if (Uri.TryCreate(secretRef, UriKind.Absolute, out var uri) &&
+            string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            IsValidVaultHost(uri.Host))
         {
             var segments = uri.Segments
                 .Select(s => s.Trim('/'))
@@ -261,6 +275,32 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
                secretRef.Contains("forwardauth", StringComparison.OrdinalIgnoreCase) ||
                secretRef.Contains("forward-auth", StringComparison.OrdinalIgnoreCase);
     }
+    private bool IsValidVaultHost(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        var configuredSuffixes = _configuration?["Gateway:Secrets:VaultHostSuffixes"];
+        if (!string.IsNullOrWhiteSpace(configuredSuffixes))
+        {
+            var suffixes = configuredSuffixes.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var suffix in suffixes)
+            {
+                var normalized = suffix.StartsWith('.') ? suffix : "." + suffix;
+                if (host.EndsWith(normalized, StringComparison.OrdinalIgnoreCase) || string.Equals(host, suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return host.EndsWith(".vault.azure.net", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(host, "vault.azure.net", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string SanitizeForLog(string value)
     {
         if (string.IsNullOrEmpty(value))

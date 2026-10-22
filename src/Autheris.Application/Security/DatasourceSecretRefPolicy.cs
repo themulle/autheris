@@ -31,9 +31,17 @@ public static class DatasourceSecretRefPolicy
         return $"{Namespace}{domain}:";
     }
 
+    private static readonly string[] OperatorConfigRoots =
+    [
+        "Gateway:",
+        "ConnectionStrings:",
+        "Authentication:"
+    ];
+
     /// <summary>
     /// Validates a client-supplied reference against <paramref name="requiredPrefix"/> (e.g. from
     /// <see cref="DomainPrefix"/>). Null/empty means "server generates"; anything else outside the prefix is rejected.
+    /// Rejects any client reference containing known operator configuration roots in its remainder.
     /// </summary>
     public static void ValidateClientRef(string? secretRef, string requiredPrefix)
     {
@@ -47,6 +55,15 @@ public static class DatasourceSecretRefPolicy
             HasControlOrTraversal(secretRef))
         {
             throw new ArgumentException("Auth.SecretRef must be empty or inside the datasource's own secret namespace.", nameof(secretRef));
+        }
+
+        var remainder = secretRef[requiredPrefix.Length..];
+        foreach (var root in OperatorConfigRoots)
+        {
+            if (remainder.Contains(root, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("Auth.SecretRef must not contain operator configuration root keys.", nameof(secretRef));
+            }
         }
     }
 
