@@ -33,9 +33,15 @@ public partial class PostgreSqlGovernanceRepository
     {
         var cacheKey = table.ToString().ToLowerInvariant();
         var nowTicks = DateTime.UtcNow.Ticks;
-        if (_metadataCache.TryGetValue(cacheKey, out var entry) && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
+        if (_metadataCache.TryGetValue(cacheKey, out var entry) && entry.Metadata != null && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
         {
-            return entry.Metadata;
+            // PERS-17: a hit is served only while the table epoch is unchanged (a write on another replica bumps it); an unreadable
+            // epoch or a mismatch reloads from the database.
+            var currentEpoch = await TryReadTableEpochAsync(entry.Metadata.Table.Id, ct).ConfigureAwait(false);
+            if (currentEpoch.HasValue && currentEpoch.Value == entry.Epoch)
+            {
+                return entry.Metadata;
+            }
         }
 
         Guid? tableId = null;
@@ -94,6 +100,17 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             if (tableEntity == null || !tableId.HasValue) return null;
+
+            // PERS-17: the epoch is read before the metadata, so a concurrent write can only make the cached entry look older.
+            long? loadedEpoch = null;
+            try
+            {
+                loadedEpoch = await ReadTableEpochAsync(conn, tableId.Value, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger?.LogWarning(ex, "The table epoch could not be read; the loaded metadata is not cached.");
+            }
 
             var columns = new List<TableColumn>();
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
@@ -186,8 +203,57 @@ public partial class PostgreSqlGovernanceRepository
             };
             result.ValidateRequiredFilterColumns();
 
-            _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks);
+            if (loadedEpoch.HasValue)
+            {
+                _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks, loadedEpoch.Value);
+            }
+
             return result;
+        }
+    }
+
+    // PERS-17: the table epoch (POLICY_EPOCHS) authorises cache hits across replicas; -1 means the table has no epoch row yet.
+    private static async Task<long> ReadTableEpochAsync(System.Data.Common.DbConnection conn, Guid tableId, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT epoch FROM POLICY_EPOCHS WHERE table_id = @tableId";
+        var p = cmd.CreateParameter();
+        p.ParameterName = "@tableId";
+        p.Value = tableId.ToString();
+        cmd.Parameters.Add(p);
+        var value = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return value is null or DBNull ? -1 : Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
+    {
+        var epochs = new Dictionary<Guid, long>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT table_id, epoch FROM POLICY_EPOCHS";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (Guid.TryParse(reader.GetString(0), out var id))
+            {
+                epochs[id] = Convert.ToInt64(reader.GetValue(1), System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+
+        return epochs;
+    }
+
+    /// <summary>The current epoch, or null when it cannot be read (the cache is then bypassed and the table is loaded from the database).</summary>
+    private async Task<long?> TryReadTableEpochAsync(Guid tableId, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await ReadTableEpochAsync(conn, tableId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "The table epoch could not be read; the metadata cache is bypassed (fail-closed).");
+            return null;
         }
     }
 
@@ -215,9 +281,36 @@ public partial class PostgreSqlGovernanceRepository
             }
         }
 
+        // PERS-17: all epochs in one query; a cached entry is valid only while its epoch is unchanged (unreadable epochs bypass the cache).
+        Dictionary<Guid, long>? epochs = null;
+        try
+        {
+            await using var epochConn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            epochs = await ReadAllTableEpochsAsync(epochConn, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "The table epochs could not be read; the metadata cache is bypassed (fail-closed).");
+        }
+
+        bool TryGetValidCached(Guid tableId, string key, out TableMetadata? metadata)
+        {
+            metadata = null;
+            if (epochs != null &&
+                _metadataCache.TryGetValue(key, out var hit) &&
+                hit.Metadata != null &&
+                DateTime.UtcNow.Ticks - hit.CachedAtTicks < MetadataCacheTtlTicks &&
+                (epochs.TryGetValue(tableId, out var current) ? current : -1) == hit.Epoch)
+            {
+                metadata = hit.Metadata;
+                return true;
+            }
+
+            return false;
+        }
+
         var uncached = tables
-            .Where(t => !(_metadataCache.TryGetValue(t.Identifier.ToString().ToLowerInvariant(), out var cached) &&
-                          DateTime.UtcNow.Ticks - cached.CachedAtTicks < MetadataCacheTtlTicks))
+            .Where(t => !TryGetValidCached(t.Id, t.Identifier.ToString().ToLowerInvariant(), out _))
             .Select(t => t.Id)
             .ToList();
 
@@ -225,11 +318,11 @@ public partial class PostgreSqlGovernanceRepository
         if (uncached.Count == 0)
         {
             result = new List<TableMetadata>(tables.Count);
-            foreach (var (_, t) in tables)
+            foreach (var (tid, t) in tables)
             {
-                if (_metadataCache.TryGetValue(t.ToString().ToLowerInvariant(), out var cached) && cached.Metadata != null)
+                if (TryGetValidCached(tid, t.ToString().ToLowerInvariant(), out var cachedMetadata))
                 {
-                    result.Add(cached.Metadata);
+                    result.Add(cachedMetadata!);
                 }
             }
         }
@@ -413,11 +506,9 @@ public partial class PostgreSqlGovernanceRepository
                 }
 
                 var cacheKey = identifier.ToString().ToLowerInvariant();
-                if (_metadataCache.TryGetValue(cacheKey, out var cached) &&
-                    DateTime.UtcNow.Ticks - cached.CachedAtTicks < MetadataCacheTtlTicks &&
-                    cached.Metadata != null)
+                if (TryGetValidCached(tid, cacheKey, out var cachedMetadata))
                 {
-                    result.Add(cached.Metadata);
+                    result.Add(cachedMetadata!);
                     continue;
                 }
 
@@ -463,7 +554,11 @@ public partial class PostgreSqlGovernanceRepository
                     continue;
                 }
 
-                _metadataCache[cacheKey] = (meta, DateTime.UtcNow.Ticks);
+                if (epochs != null)
+                {
+                    _metadataCache[cacheKey] = (meta, DateTime.UtcNow.Ticks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
+                }
+
                 result.Add(meta);
             }
         }
