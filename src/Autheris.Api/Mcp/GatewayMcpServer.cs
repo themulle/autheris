@@ -92,7 +92,7 @@ public static class GatewayMcpServer
         var switches = context.Services!.GetService<IReadPathSwitches>();
         var cursor = context.Params?.Cursor;
         // The native resources are listed on the first page only; semantic resources follow in pages of descriptors (MCP-14).
-        var resources = string.IsNullOrEmpty(cursor) ? FilterResources(NativeResourceList(), switches) : [];
+        var resources = string.IsNullOrEmpty(cursor) ? FilterResources(NativeResourceList(), switches) : new List<Resource>();
         string? nextCursor = null;
 
         var compiler = context.Services!.GetService<ISemanticMcpCompiler>();
