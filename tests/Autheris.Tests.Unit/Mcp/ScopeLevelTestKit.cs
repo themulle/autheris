@@ -159,7 +159,8 @@ internal static class ScopeLevelTestKit
         IReadOnlyList<Consent> consents,
         IConsentResolutionService? resolver = null,
         ILogger<McpDatasetCatalog>? logger = null,
-        GatewayOptions? gatewayOptions = null)
+        GatewayOptions? gatewayOptions = null,
+        IAuditLogRepository? auditLogRepository = null)
     {
         var profileService = new ColumnValueProfileService();
         var tableRepo = MetadataRepository(table);
@@ -169,7 +170,7 @@ internal static class ScopeLevelTestKit
             tableRepo,
             consentRepo,
             Substitute.For<IGatewayExecutionService>(),
-            auditLogRepository: Substitute.For<IAuditLogRepository>(),
+            auditLogRepository: auditLogRepository ?? Substitute.For<IAuditLogRepository>(),
             // Persisted tiers (issue #111) apply on shared tables in Multi mode: the table under test is shared so tier fixtures stay meaningful.
             options: Options.Create(effectiveOptions),
             profileService: profileService,
