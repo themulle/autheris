@@ -91,6 +91,7 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
     private CompiledSql Compile(string sql, string tenant = "acme") => _engine.Compile(sql.AsMemory(), new CompileRequest
     {
         TargetDialect = TargetSqlDialect.Sqlite,
+        AllowRecursiveCte = true,   // issue #277: the recursive CTE tests opt in; the default request rejects WITH RECURSIVE
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Policy = new GovernancePolicy
         {

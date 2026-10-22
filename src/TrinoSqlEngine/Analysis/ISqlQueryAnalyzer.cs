@@ -38,7 +38,17 @@ public sealed record SqlQueryMetadata(
     bool HasSessionProperties = false,
     bool HasInlineFunctionDefinitions = false,
     IReadOnlyList<JoinColumnReference>? JoinColumnReferences = null,
-    IReadOnlyList<FilterColumnReference>? FilterColumnReferences = null);
+    IReadOnlyList<FilterColumnReference>? FilterColumnReferences = null)
+{
+    /// <summary>Issue #277: the statement contains a <c>WITH RECURSIVE</c> (any nesting level).</summary>
+    public bool HasRecursiveCte { get; init; }
+
+    /// <summary>
+    /// Issue #277 (SEC-277-04): a CTE of a WITH without RECURSIVE names itself in its own body. The name is still reported in
+    /// <see cref="ReferencedTables"/> (unchanged for other consumers); callers reject the statement before any existence-dependent answer.
+    /// </summary>
+    public bool HasNonRecursiveSelfReference { get; init; }
+}
 
 public interface ISqlQueryAnalyzer
 {

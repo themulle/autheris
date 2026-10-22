@@ -105,4 +105,89 @@ public class AnalysisAndMaskingTests
     {
         Assert.EndsWith("LIMIT 25", CompileWithMaxRows("SELECT * FROM orders LIMIT 25"));
     }
+
+    private static HashSet<string> TableNames(SqlQueryMetadata meta) =>
+        meta.ReferencedTables.Select(t => t.TableName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    [Fact]
+    public void Analyze_RecursiveCte_SelfReferenceIsNotAReferencedTable()
+    {
+        var meta = _engine.Analyze("WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r".AsMemory());
+
+        Assert.Empty(meta.ReferencedTables);
+        Assert.True(meta.HasRecursiveCte);
+        Assert.False(meta.HasNonRecursiveSelfReference);
+    }
+
+    [Fact]
+    public void Analyze_RecursiveCte_BaseTablesInAnchorAndRecursiveMemberAreReferenced()
+    {
+        var meta = _engine.Analyze(
+            "WITH RECURSIVE r(id) AS (SELECT id FROM orders UNION ALL SELECT e.id FROM entitlements e JOIN r ON e.parent_id = r.id) SELECT id FROM r".AsMemory());
+
+        Assert.Equal(new[] { "entitlements", "orders" }, TableNames(meta).Order(StringComparer.Ordinal).ToArray());
+        Assert.DoesNotContain("r", TableNames(meta));
+    }
+
+    [Fact]
+    public void Analyze_NonRecursiveCte_SelfReferenceStaysATableAndIsFlagged()
+    {
+        var chain = _engine.Analyze("WITH chain AS (SELECT id FROM chain) SELECT id FROM chain".AsMemory());
+        Assert.Contains("chain", TableNames(chain));
+        Assert.True(chain.HasNonRecursiveSelfReference);
+        Assert.False(chain.HasRecursiveCte);
+
+        var shadow = _engine.Analyze("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders".AsMemory());
+        Assert.Contains("orders", TableNames(shadow));
+        Assert.True(shadow.HasNonRecursiveSelfReference);
+
+        // Shadowed by an inner definition, or a plain reference to an earlier CTE: no self-reference.
+        Assert.False(_engine.Analyze("WITH a AS (WITH a AS (SELECT 1 AS id) SELECT id FROM a) SELECT id FROM a".AsMemory()).HasNonRecursiveSelfReference);
+        Assert.False(_engine.Analyze("WITH a AS (SELECT id FROM orders), b AS (SELECT id FROM a) SELECT id FROM b".AsMemory()).HasNonRecursiveSelfReference);
+    }
+
+    [Fact]
+    public void Analyze_RecursiveCte_CaseVariantSelfReferenceIsInScope()
+    {
+        foreach (string sql in new[]
+        {
+            "WITH RECURSIVE R(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM R",
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM \"R\" WHERE n < 3) SELECT n FROM r"
+        })
+        {
+            var meta = _engine.Analyze(sql.AsMemory());
+            if (sql.Contains("\"R\"", StringComparison.Ordinal))
+            {
+                // A delimited name is compared exactly (INV-11): "R" is not r, so it is a table (the compiler then rejects it).
+                Assert.Contains("R", TableNames(meta));
+            }
+            else
+            {
+                Assert.Empty(meta.ReferencedTables);
+            }
+        }
+    }
+
+    [Fact]
+    public void Analyze_RecursiveCteName_DoesNotLeakIntoSiblingSubqueryWith()
+    {
+        var meta = _engine.Analyze(
+            ("SELECT a.n FROM (WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r) a, " +
+             "(WITH q AS (SELECT 1 AS n) SELECT n FROM r) b").AsMemory());
+
+        Assert.Contains("r", TableNames(meta));
+    }
+
+    [Fact]
+    public void Analyze_MultipleRecursiveCtes_EachSeesItselfAndEarlierNames()
+    {
+        var meta = _engine.Analyze(
+            ("WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM a WHERE n < 2), " +
+             "b(n) AS (SELECT n FROM a UNION ALL SELECT n + 1 FROM b WHERE n < 3) SELECT n FROM b").AsMemory());
+        Assert.Empty(meta.ReferencedTables);
+
+        // No forward visibility: a refers to b before b is defined, so b is a table there.
+        var forward = _engine.Analyze("WITH RECURSIVE a(n) AS (SELECT n FROM b), b(n) AS (SELECT 1) SELECT n FROM a".AsMemory());
+        Assert.Contains("b", TableNames(forward));
+    }
 }

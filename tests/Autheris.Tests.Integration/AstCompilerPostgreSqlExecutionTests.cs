@@ -149,6 +149,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     private CompileRequest Request(string tenant) => new()
     {
         TargetDialect = TargetSqlDialect.PostgreSql,
+        AllowRecursiveCte = true,   // issue #277: the recursive CTE execution tests opt in; the default request rejects WITH RECURSIVE
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Policy = new GovernancePolicy
         {

@@ -55,6 +55,7 @@ public class MaskGuardSkipSecurityTests
         columns ??= new CountingColumns();
         var options = new AstSecurityVisitorOptions
         {
+            AllowRecursiveCte = true,
             MaskedColumns = new Lookup(providerMasksOrders),
             TableColumns = tableColumns ?? columns.Get,
             TablesWithMaskedColumns = setListsOrders
@@ -383,6 +384,7 @@ public class MaskGuardSkipSecurityTests
         var request = new CompileRequest
         {
             TargetDialect = TargetSqlDialect.SqlServer,
+            AllowRecursiveCte = true,
             TokenGuards = SqlTokenSecurityOptions.Strict,
             Policy = new GovernancePolicy
             {
@@ -475,6 +477,7 @@ public class MaskGuardSkipSecurityTests
         return new CompileRequest
         {
             TargetDialect = TargetSqlDialect.SqlServer,
+            AllowRecursiveCte = true,
             TokenGuards = SqlTokenSecurityOptions.Strict,
             Policy = new GovernancePolicy
             {

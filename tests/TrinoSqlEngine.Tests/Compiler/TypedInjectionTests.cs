@@ -181,7 +181,7 @@ public class TypedInjectionTests
     {
         _rowFilters.Predicates[Orders] = RegionEu();
         var typed = NewContext();
-        Assert.Throws<System.Security.SecurityException>(() => Secure("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", typed));
+        Assert.Throws<SqlCompileNotSupportedException>(() => Secure("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", typed));
         typed = NewContext();
         var secured = Secure("WITH orders AS (SELECT id FROM dbo.orders) SELECT id FROM orders", typed);
 

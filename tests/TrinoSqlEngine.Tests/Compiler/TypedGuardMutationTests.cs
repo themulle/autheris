@@ -36,6 +36,7 @@ public class TypedGuardMutationTests
     private CompiledSql Compile(string sql) => _engine.Compile(sql.AsMemory(), new CompileRequest
     {
         TargetDialect = TargetSqlDialect.SqlServer,
+        AllowRecursiveCte = true,
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Statements = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete,
         Policy = new GovernancePolicy

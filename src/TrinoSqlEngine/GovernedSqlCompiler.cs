@@ -167,6 +167,13 @@ internal sealed class GovernedSqlCompiler
         Pass("validate");
         new AstValidationVisitor { CancellationToken = token }.Validate(ast);
 
+        // 4a. issue #277 (SEC-277-03): a recursive WITH inside DML is rejected whatever the request allows (read-only scope). The gate runs
+        // before the security visitor, so no shadow check, catalog lookup or injection precedes it.
+        if (statementClass != SqlStatementClass.Select && ContainsRecursiveWith(ast))
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
+        }
+
         // 4b. time zone conversion (REQ-SQL-130): every call is checked on the USER tree, before simplification (no folding can turn a non-literal
         // into a literal) and before injection (policy and mask expressions never contain the function). A statement whose text does not spell the
         // function name has no call (the builder refuses delimited function names, so the name of a call is always spelled in the text) and skips the
@@ -233,7 +240,7 @@ internal sealed class GovernedSqlCompiler
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
         var parameterSource = new ParameterSource(typed.PolicyValues, ClientNoValues);
         var compiled = (generator is SqlDialectGeneratorBase capabilityAware
-                ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: timeZoneCallsValidated)
+                ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: timeZoneCallsValidated, maxRecursionDepth: request.MaxRecursionDepth)
                 : generator.Generate(secured, parameterSource, token))
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
@@ -273,6 +280,27 @@ internal sealed class GovernedSqlCompiler
         }
 
         return narrowed;
+    }
+
+    private static bool ContainsRecursiveWith(SqlNode root)
+    {
+        var stack = new Stack<SqlNode>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            if (node is WithClause { IsRecursive: true })
+            {
+                return true;
+            }
+
+            foreach (var child in node.EnumerateChildren())
+            {
+                stack.Push(child);
+            }
+        }
+
+        return false;
     }
 
     private static bool TryRehydrate(CompiledSqlTemplate template, TypedPolicyContext typed)
@@ -347,6 +375,7 @@ internal sealed class GovernedSqlCompiler
             TableColumns = name => ColumnNames(typed.Catalog.Resolve(ParseName(name))),
             TablesWithMaskedColumns = CaseInsensitive(request.Policy.TablesWithMaskedColumns),
             EnforcedMaxRows = request.EnforcedMaxRows,
+            AllowRecursiveCte = request.AllowRecursiveCte,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.

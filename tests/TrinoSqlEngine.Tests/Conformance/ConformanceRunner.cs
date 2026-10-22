@@ -32,6 +32,7 @@ internal static class ConformanceRunner
         return new CompileRequest
         {
             TargetDialect = dialect,
+            AllowRecursiveCte = true,
             AllowExperimentalDialect = true,
             TokenGuards = SqlTokenSecurityOptions.Strict,
             Statements = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge,

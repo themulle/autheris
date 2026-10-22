@@ -516,6 +516,35 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         _ => false
     };
 
+    /// <summary>
+    /// Issue #277: SQL Server recurses up to 100 levels by default and silently unbounded with 0. A recursive statement therefore ends with
+    /// <c>OPTION (MAXRECURSION n)</c>, with n the validated request value (never SQL text): error 530 then bounds a runaway.
+    /// </summary>
+    public override void GenerateSql(SqlStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        base.GenerateSql(statement, ref builder, context);
+        if (!context.RecursiveWithEmitted)
+        {
+            return;
+        }
+
+        if (statement is not SelectStatement)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
+        }
+
+        if (context.MaxRecursionDepth is < 1 or > CompileLimits.MaxRecursionDepthLimit)
+        {
+            throw new SqlCompileConfigurationException("The governed SQL compiler requires a valid recursion depth bound.");
+        }
+
+        int start = builder.Length;
+        builder.Append(EmittedSqlInvariantChecker.MaxRecursionTailPrefix);
+        builder.Append(context.MaxRecursionDepth.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(')');
+        context.RegisterRecursionOptionTail(start, builder.Length - start);
+    }
+
     protected override void GenerateWithClause(WithClause with, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append("WITH ");

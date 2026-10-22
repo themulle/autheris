@@ -69,10 +69,43 @@ public static class DmlErrorSanitizer
         if (TryMap(dialect, error) is { } constraint) return constraint;
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
+            // SEC-277-06: the recursion bound of a recursive CTE (SQL Server 530, Oracle ORA-32044) is a resource limit with a fixed message.
+            if (IsRecursionLimit(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.LimitExceeded, dialect);
+        }
+
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
             if (IsDataError(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.DataError, dialect);
         }
 
         return new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, dialect);
+    }
+
+    private static bool IsRecursionLimit(TargetSqlDialect dialect, Exception error) => dialect switch
+    {
+        // 530: the statement terminated, MAXRECURSION was exhausted; the first error and the Errors collection are both checked.
+        TargetSqlDialect.SqlServer => Number(error) == 530 || ErrorsContain(error, 530),
+        // ORA-32044: cycle detected while executing a recursive WITH query
+        TargetSqlDialect.Oracle => Number(error) == 32044 || ErrorsContain(error, 32044),
+        _ => false
+    };
+
+    private static bool ErrorsContain(Exception error, int number)
+    {
+        if (error.GetType().GetProperty("Errors", BindingFlags.Public | BindingFlags.Instance)?.GetValue(error) is not System.Collections.IEnumerable errors)
+        {
+            return false;
+        }
+
+        foreach (object? item in errors)
+        {
+            if (item?.GetType().GetProperty("Number", BindingFlags.Public | BindingFlags.Instance)?.GetValue(item) is int n && n == number)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsDataError(TargetSqlDialect dialect, Exception error) => dialect switch

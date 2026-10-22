@@ -51,6 +51,15 @@ public sealed class SqlEmitterContext
     /// </summary>
     public bool EmitThreePartNames { get; init; }
 
+    /// <summary>
+    /// Issue #277 (SEC-277-05): the validated SQL Server <c>OPTION (MAXRECURSION n)</c> value. It is set by the compiler from the request,
+    /// never from SQL text; the default applies to the legacy string overloads only.
+    /// </summary>
+    public int MaxRecursionDepth { get; init; } = CompileLimits.DefaultMaxRecursionDepth;
+
+    /// <summary>Set by the generator when it emitted a <c>WITH RECURSIVE</c> definition (the keyword itself is dialect specific).</summary>
+    public bool RecursiveWithEmitted { get; set; }
+
     public bool InProjectionContext { get; set; }
     public int IndentLevel { get; set; }
 
@@ -110,6 +119,13 @@ public sealed class SqlEmitterContext
     /// </summary>
     public void RegisterStatementTerminator(int start) =>
         _ranges?.Add(new EmittedRange(start, 1, EmittedRangeKind.StatementTerminator));
+
+    /// <summary>
+    /// Registers the single SQL Server <c>OPTION (MAXRECURSION n)</c> tail at [start, start+length). The emitted-text checker accepts
+    /// exactly this form as the final text of the statement (SEC-277-05).
+    /// </summary>
+    public void RegisterRecursionOptionTail(int start, int length) =>
+        _ranges?.Add(new EmittedRange(start, length, EmittedRangeKind.RecursionOptionTail));
 
     /// <summary>Binds a value (deduplicated by type, origin and value) and returns its marker.</summary>
     public string BindValue(object? value, SqlParameterType type, ParameterOrigin origin, string? columnType = null)

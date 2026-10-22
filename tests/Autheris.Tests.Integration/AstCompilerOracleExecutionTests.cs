@@ -91,6 +91,7 @@ public sealed class AstCompilerOracleExecutionTests
     private CompileRequest Request(string tenant) => new()
     {
         TargetDialect = TargetSqlDialect.Oracle,
+        AllowRecursiveCte = true,   // issue #277: the recursive CTE execution tests opt in; the default request rejects WITH RECURSIVE
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Policy = new GovernancePolicy
         {

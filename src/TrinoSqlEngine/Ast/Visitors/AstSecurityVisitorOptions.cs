@@ -52,4 +52,7 @@ internal sealed record AstSecurityVisitorOptions
     /// </summary>
     public bool RejectWholeRowReferencesInSelect { get; init; } = true;
     public bool EnforceWithCheckOption { get; init; } = true;
+
+    /// <summary>Issue #277 (SEC-277-03): a <c>WITH RECURSIVE</c> compiles only when true. Default false; DML rejects it regardless.</summary>
+    public bool AllowRecursiveCte { get; init; }
 }

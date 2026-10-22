@@ -89,6 +89,18 @@ public sealed record CompileRequest
     /// of the cache key because the compile cache key serializes every public property.
     /// </summary>
     public bool TimeZoneConversionAvailable { get; init; }
+
+    /// <summary>
+    /// Issue #277 (SEC-277-03): <c>WITH RECURSIVE</c> compiles only when the caller opts in. The default is false (fail closed); a
+    /// recursive WITH is rejected independent of this flag inside DML. Part of the cache key like every public property.
+    /// </summary>
+    public bool AllowRecursiveCte { get; init; }
+
+    /// <summary>
+    /// Issue #277 (SEC-277-05): the SQL Server <c>OPTION (MAXRECURSION n)</c> value, 1..<see cref="CompileLimits.MaxRecursionDepthLimit"/>.
+    /// It comes from validated options, never from SQL text; it is validated only when <see cref="AllowRecursiveCte"/> is set.
+    /// </summary>
+    public int MaxRecursionDepth { get; init; } = CompileLimits.DefaultMaxRecursionDepth;
 }
 
 /// <summary>
@@ -109,6 +121,12 @@ public static class CompileLimits
     /// </summary>
     public const int MinimumInputForExpansion = 64;
 
+    /// <summary>Default of <see cref="CompileRequest.MaxRecursionDepth"/>.</summary>
+    public const int DefaultMaxRecursionDepth = 100;
+
+    /// <summary>Upper bound of <see cref="CompileRequest.MaxRecursionDepth"/> (SQL Server accepts 0..32767; 0 means unlimited and is never allowed).</summary>
+    public const int MaxRecursionDepthLimit = 10000;
+
     /// <summary>The request the compiler actually runs: validated, clamped, with the mandatory guards of the dialect.</summary>
     public static CompileRequest Normalize(CompileRequest request)
     {
@@ -121,6 +139,12 @@ public static class CompileLimits
         if (request.MaxExpansionFactor < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(request), "MaxExpansionFactor must be at least 1.");
+        }
+
+        if (request.AllowRecursiveCte && request.MaxRecursionDepth is < 1 or > MaxRecursionDepthLimit)
+        {
+            // SEC-277-05: a zero, negative or oversized bound would disable or widen the runaway guard; a configuration error, fail closed.
+            throw new SqlCompileConfigurationException("The governed SQL compiler requires a valid recursion depth bound.");
         }
 
         var timeout = request.CompileTimeout > MaxCompileTimeout ? MaxCompileTimeout : request.CompileTimeout;
@@ -164,6 +188,12 @@ public sealed class SqlCompileConfigurationException : SecurityException
 {
     public SqlCompileConfigurationException()
         : base("The governed SQL compiler does not allow a security guard to be relaxed per request.")
+    {
+    }
+
+    /// <summary>A fixed, value-free message chosen by the compiler (never request text).</summary>
+    internal SqlCompileConfigurationException(string message)
+        : base(message)
     {
     }
 }

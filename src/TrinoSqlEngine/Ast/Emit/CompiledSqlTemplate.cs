@@ -40,7 +40,8 @@ public sealed record CompiledSqlTemplate(
     ImmutableArray<SecurityPredicateId> AppliedPredicates,
     string CompilerVersion,
     ImmutableArray<TableDependency> Dependencies,
-    int? ExpectedAffectedRows = null)
+    int? ExpectedAffectedRows = null,
+    bool HasRecursiveCte = false)
 {
     public static CompiledSqlTemplate From(string keyMaterial, CompiledSql compiled, ImmutableArray<TableDependency> dependencies) =>
         new(
@@ -52,7 +53,8 @@ public sealed record CompiledSqlTemplate(
             compiled.AppliedPredicates,
             compiled.CompilerVersion,
             dependencies,
-            compiled.ExpectedAffectedRows);
+            compiled.ExpectedAffectedRows,
+            compiled.HasRecursiveCte);
 
     private static ImmutableArray<SqlSlot> ToSlots(ImmutableArray<BoundParameter> parameters)
     {
@@ -94,7 +96,8 @@ public sealed record CompiledSqlTemplate(
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)
         {
-            ExpectedAffectedRows = ExpectedAffectedRows
+            ExpectedAffectedRows = ExpectedAffectedRows,
+            HasRecursiveCte = HasRecursiveCte
         };
     }
 }

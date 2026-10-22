@@ -17,6 +17,9 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly List<string> _functionCalls = new();
     private readonly HashSet<string> _seenFunctionCalls = new(StringComparer.Ordinal);
     private readonly List<string> _tableFunctionCalls = new();
+    private readonly List<string> _definingNonRecursiveCtes = new();
+    private bool _hasRecursiveCte;
+    private bool _hasNonRecursiveSelfReference;
     private bool _hasSessionProperties;
     private bool _hasInlineFunctionDefinitions;
 
@@ -52,7 +55,11 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             HasSessionProperties: _hasSessionProperties,
             HasInlineFunctionDefinitions: _hasInlineFunctionDefinitions,
             JoinColumnReferences: _joinColumnReferences.ToArray(),
-            FilterColumnReferences: _filterColumnReferences.ToArray());
+            FilterColumnReferences: _filterColumnReferences.ToArray())
+        {
+            HasRecursiveCte = _hasRecursiveCte,
+            HasNonRecursiveSelfReference = _hasNonRecursiveSelfReference
+        };
     }
 
     private void Reset()
@@ -68,6 +75,9 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _functionCalls.Clear();
         _seenFunctionCalls.Clear();
         _tableFunctionCalls.Clear();
+        _definingNonRecursiveCtes.Clear();
+        _hasRecursiveCte = false;
+        _hasNonRecursiveSelfReference = false;
         _hasSessionProperties = false;
         _hasInlineFunctionDefinitions = false;
         _joinCount = 0;
@@ -177,10 +187,32 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         }
     }
 
+    public override void EnterNamedQuery(SqlBaseParser.NamedQueryContext context)
+    {
+        string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(context.name.GetText());
+        if ((context.Parent as SqlBaseParser.WithContext)?.RECURSIVE() != null)
+        {
+            // Issue #277 (SEC-277-01): in a WITH RECURSIVE the name is visible in its own body (and in later CTEs, never in earlier ones),
+            // exactly like the compiler's scope. Exit-timing below stays (idempotent add).
+            _hasRecursiveCte = true;
+            _cteScopeStack.Peek().Add(cteKey);
+        }
+        else
+        {
+            // CR-ADG-32: names of non-recursive CTEs whose body is being walked; an unshadowed reference to one is a self-reference.
+            _definingNonRecursiveCtes.Add(cteKey);
+        }
+    }
+
     public override void ExitNamedQuery(SqlBaseParser.NamedQueryContext context)
     {
         // SEC C-02: CTE names are single-part identifiers (folded scope key, never a dotted string).
         string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(context.name.GetText());
+        if ((context.Parent as SqlBaseParser.WithContext)?.RECURSIVE() == null && _definingNonRecursiveCtes.Count > 0)
+        {
+            _definingNonRecursiveCtes.RemoveAt(_definingNonRecursiveCtes.Count - 1);
+        }
+
         _cteScopeStack.Peek().Add(cteKey);
     }
 
@@ -471,10 +503,19 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         var ids = qualifiedNameContext.identifier();
 
         // SEC C-02: Skip only single-part names that resolve to a CTE in the current scope.
-        if (ids != null && ids.Length == 1 &&
-            _cteScopeStack.Peek().Contains(SqlIdentifierHelper.FoldIdentifierForScope(ids[0].GetText())))
+        if (ids != null && ids.Length == 1)
         {
-            return;
+            string key = SqlIdentifierHelper.FoldIdentifierForScope(ids[0].GetText());
+            if (_cteScopeStack.Peek().Contains(key))
+            {
+                return;
+            }
+
+            // Issue #277 (SEC-277-04): keyword-less self-reference; the name stays reported as a table (see SqlQueryMetadata).
+            if (_definingNonRecursiveCtes.Contains(key))
+            {
+                _hasNonRecursiveSelfReference = true;
+            }
         }
 
         string? alias = null;

@@ -20,9 +20,11 @@ public class CteShadowingTests
         TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql, TargetSqlDialect.DuckDb, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks
     }.Select(d => new object[] { d });
 
-    private CompiledSql Compile(string sql, TargetSqlDialect dialect) => _engine.Compile(sql.AsMemory(), new CompileRequest
+    private CompiledSql Compile(string sql, TargetSqlDialect dialect, bool allowRecursive = true, StatementPermissions statements = StatementPermissions.ReadOnly) => _engine.Compile(sql.AsMemory(), new CompileRequest
     {
         TargetDialect = dialect,
+        AllowRecursiveCte = allowRecursive,
+        Statements = statements,
         TokenGuards = SqlTokenSecurityOptions.Strict,
         AllowExperimentalDialect = true,
         Policy = new GovernancePolicy
@@ -133,18 +135,64 @@ public class CteShadowingTests
             "WITH \"Chain\" AS (SELECT 1 AS id), \"chain\" AS (SELECT 2 AS id) SELECT id FROM \"chain\"", dialect));
     }
 
-    /// <summary>CR-ADG-32: a self-reference needs WITH RECURSIVE on every dialect, even where the database would allow it without.</summary>
+    /// <summary>
+    /// CR-ADG-32 / SEC-277-04: a self-reference needs WITH RECURSIVE on every dialect, even where the database would allow it without. The
+    /// answer is the typed "construct not supported" (422), the same type the router's pre-check throws.
+    /// </summary>
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void NonRecursiveWith_SelfReference_IsRejected(TargetSqlDialect dialect)
+    public void NonRecursiveWith_SelfReference_ThrowsConstructNotSupported(TargetSqlDialect dialect)
     {
-        Assert.Throws<System.Security.SecurityException>(() => Compile(
-            "WITH chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c WHERE c.n < 3) SELECT id, n FROM chain", dialect));
-        Assert.Throws<System.Security.SecurityException>(() => Compile(
-            "WITH orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n + 1 FROM orders o WHERE o.n < 3) SELECT id FROM orders", dialect));
-        Assert.Throws<System.Security.SecurityException>(() => Compile(
-            "WITH \"chain\" AS (SELECT id FROM (SELECT id FROM \"chain\") x) SELECT id FROM \"chain\"", dialect));
+        foreach (string sql in new[]
+        {
+            "WITH chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c WHERE c.n < 3) SELECT id, n FROM chain",
+            "WITH orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n + 1 FROM orders o WHERE o.n < 3) SELECT id FROM orders",
+            "WITH \"chain\" AS (SELECT id FROM (SELECT id FROM \"chain\") x) SELECT id FROM \"chain\""
+        })
+        {
+            var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(sql, dialect));
+            Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+        }
     }
+
+    /// <summary>SEC-277-03: the default request does not allow WITH RECURSIVE; the typed rejection comes before every other recursive check.</summary>
+    [Trait("Category", "Security")]
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void RecursiveCte_WhenNotAllowed_ThrowsConstructNotSupported(TargetSqlDialect dialect)
+    {
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(RecursiveChain, dialect, allowRecursive: false));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+    }
+
+    /// <summary>SEC-277-03: a recursive WITH in INSERT, UPDATE, DELETE and MERGE is rejected even when the request allows recursion.</summary>
+    [Trait("Category", "Security")]
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void RecursiveCte_InDml_ThrowsConstructNotSupported(TargetSqlDialect dialect)
+    {
+        const string Recursive = "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r";
+        foreach (string sql in new[]
+        {
+            "INSERT INTO orders (id, status) " + Recursive.Replace("SELECT n FROM r", "SELECT n, 'x' FROM r"),
+            "UPDATE orders SET status = 'x' WHERE id IN (" + Recursive + ")",
+            "DELETE FROM orders WHERE id IN (" + Recursive + ")",
+            "MERGE INTO orders t USING (" + Recursive + ") s ON t.id = s.n WHEN MATCHED THEN UPDATE SET status = 'x'"
+        })
+        {
+            foreach (bool allow in new[] { true, false })
+            {
+                // INSERT ... WITH is already refused by the AST builder; every other class reaches the compiler gate.
+                var error = Record.Exception(() => Compile(sql, dialect, allow, AllDml));
+                Assert.True(
+                    error is SqlCompileNotSupportedException || (sql.StartsWith("INSERT", StringComparison.Ordinal) && error is TrinoSqlEngine.Ast.Builder.AstBuildException),
+                    $"{dialect}/{allow}: {sql} -> {error?.GetType().Name}");
+            }
+        }
+    }
+
+    private const StatementPermissions AllDml =
+        StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
 
     [Theory]
     [MemberData(nameof(Dialects))]

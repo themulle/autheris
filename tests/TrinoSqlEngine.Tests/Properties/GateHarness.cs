@@ -49,6 +49,7 @@ internal sealed record CaseCtx(TargetSqlDialect Dialect, bool StrictGuards, stri
         return new CompileRequest
         {
             TargetDialect = Dialect,
+            AllowRecursiveCte = true,
             TokenGuards = StrictGuards ? SqlTokenSecurityOptions.Strict : SqlTokenSecurityOptions.None,
             AllowExperimentalDialect = true,
             Statements = statements,

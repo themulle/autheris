@@ -624,8 +624,18 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             foreach (var cte in query.With.Ctes)
             {
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
-                var cteMasked = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
-                _cteScopeStack.Peek().Add(cteKey);
+                HashSet<string> cteMasked;
+                if (query.With.IsRecursive)
+                {
+                    _cteScopeStack.Peek().Add(cteKey);
+                    cteMasked = CollectRecursiveCteMaskedColumns(cte, cteKey);
+                }
+                else
+                {
+                    cteMasked = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
+                    _cteScopeStack.Peek().Add(cteKey);
+                }
+
                 if (cteMasked.Count > 0)
                 {
                     _cteMaskedColumns.Peek()[cteKey] = cteMasked;

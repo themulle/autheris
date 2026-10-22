@@ -101,3 +101,13 @@ Docs (`f-dialect-02-ast-sql-compiler.md`): 5.2 CTE bullet (opt-in, analyzer/comp
 
 ### Answers to open questions
 Q-1 no (keep D-2). Q-2 no in-code bound; SEC-277-07/08 apply. Q-3 reject (D-3). Q-4 accepted; T-277-S05/S09/S10 must run at endpoint level on the existing fixture.
+
+## 7. Changelog
+
+- 2026-10-22 (WP-1, Phase 4): plan facts re-verified against `91821d57`; drift and implementation notes:
+  - `INSERT ... WITH ...` is refused earlier by the AST builder (`AstBuildException`, "WITH, ORDER BY or LIMIT on an INSERT source"); UPDATE, DELETE and MERGE reach the compiler gate (`SqlCompileNotSupportedException(Construct)`, checked on the built AST before the security visitor). Both reject independent of `AllowRecursiveCte`.
+  - The DML gate is a pre-pass in `GovernedSqlCompiler` (`ContainsRecursiveWith`), not a visitor flag; the opt-in gate for SELECT is the first check of `AstSecurityVisitor.VisitSelectStatement` (SEC-277-03).
+  - SEC-277-05: the tail is a new `EmittedRangeKind.RecursionOptionTail`; `EmittedSqlInvariantChecker.Check` takes `maxRecursionDepth` and additionally rejects any unregistered `OPTION`/`MAXRECURSION` token (all dialects). `OPTION (RECOMPILE)` after a table parses as an alias with a column list (not a hint) and is emitted delimited.
+  - SEC-277-10: the masked-output set of a recursive CTE is a fixed point over all members, mapped by output position (new `AstSecurityVisitor.RecursiveCte.cs`); unresolvable positions reject (fail closed).
+  - `SqlCompileConfigurationException` gained an internal fixed-message constructor (depth out of range).
+  - Existing recursive tests in `tests/TrinoSqlEngine.Tests` (conformance runner, gate harness, mask-guard and typed-guard suites) and the four `AstCompiler*ExecutionTests` request builders set `AllowRecursiveCte = true`; the SQL Server conformance fixture `cte-006` now ends with `OPTION (MAXRECURSION 100)`.
