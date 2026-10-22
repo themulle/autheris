@@ -122,13 +122,15 @@ public sealed class CostAndQuotaMiddleware
         }
 
         int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
+        int maxExecutionDepth = QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions?.GraphQL);
         int calculatedCost = QueryCostAnalyzerRule.CalculateCost(
             doc,
             context.Schema,
             maxResponseRows: maxResponseRows,
             variableValues: runtimeVariables,
             costOptions: gatewayOptions?.QueryCost,
-            aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation);
+            aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation,
+            maxExecutionDepth: maxExecutionDepth);
 
         int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
         if (gatewayOptions is not null)

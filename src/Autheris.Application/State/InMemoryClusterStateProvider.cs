@@ -21,6 +21,8 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
     private readonly object _budgetLock = new();
     private readonly object _leaseLock = new();
+    private readonly object _slotLock = new();
+    private readonly Dictionary<string, Dictionary<string, DateTimeOffset>> _slots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, LeaseEntry> _leases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _fences = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
@@ -259,6 +261,91 @@ public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
             _owner.ReleaseLease(ResourceKey, _ownerId);
             return ValueTask.CompletedTask;
         }
+    }
+
+    public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(setKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(member);
+
+        lock (_slotLock)
+        {
+            var now = _time.GetUtcNow();
+            if (!_slots.TryGetValue(setKey, out var set))
+            {
+                set = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+                _slots[setKey] = set;
+            }
+
+            var expiredKeys = new List<string>();
+            foreach (var (m, exp) in set)
+            {
+                if (exp <= now)
+                {
+                    expiredKeys.Add(m);
+                }
+            }
+            foreach (var k in expiredKeys)
+            {
+                set.Remove(k);
+            }
+
+            if (set.TryGetValue(member, out _))
+            {
+                set[member] = now.Add(ttl);
+                return ValueTask.FromResult<bool?>(true);
+            }
+
+            if (set.Count >= limit)
+            {
+                return ValueTask.FromResult<bool?>(false);
+            }
+
+            set[member] = now.Add(ttl);
+            return ValueTask.FromResult<bool?>(true);
+        }
+    }
+
+    public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(setKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(member);
+
+        lock (_slotLock)
+        {
+            var now = _time.GetUtcNow();
+            if (_slots.TryGetValue(setKey, out var set))
+            {
+                if (set.TryGetValue(member, out var exp) && exp > now)
+                {
+                    set[member] = now.Add(ttl);
+                    return ValueTask.FromResult(true);
+                }
+                set.Remove(member);
+            }
+
+            return ValueTask.FromResult(false);
+        }
+    }
+
+    public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(setKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(member);
+
+        lock (_slotLock)
+        {
+            if (_slots.TryGetValue(setKey, out var set))
+            {
+                set.Remove(member);
+                if (set.Count == 0)
+                {
+                    _slots.Remove(setKey);
+                }
+            }
+        }
+
+        return ValueTask.CompletedTask;
     }
 
     private sealed class SubscriptionLease : IAsyncDisposable

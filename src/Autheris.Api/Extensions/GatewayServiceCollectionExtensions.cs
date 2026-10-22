@@ -615,7 +615,7 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()
-            .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
+            .TryAddTypeInterceptor<Autheris.GraphQL.Federation.SubgraphFieldMaskingTypeInterceptor>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
             .UseOperationResolver()
@@ -647,6 +647,7 @@ public static class GatewayServiceCollectionExtensions
                     maxRootFields: gatewayOptions.AreQueryLimitsRelaxed
                         ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 200 : 25)
                         : gatewayOptions.GraphQL.MaxRootFieldsPerOperation,
+                    maxExecutionDepth: Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL),
                     aggregateFieldCostWeight: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.AggregateFieldCostWeight
                         ?? Autheris.Domain.Options.AggregationOptions.DefaultAggregateFieldCostWeight,
                     maxGroupByColumns: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.MaxGroupByColumns

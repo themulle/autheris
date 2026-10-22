@@ -466,6 +466,9 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
         public IAsyncDisposable SubscribeAsync<T>(string channel, Func<T, ValueTask> handler, CancellationToken ct = default) => inner.SubscribeAsync(channel, handler, ct);
         public ValueTask<IAsyncDisposable?> TryAcquireLockAsync(string resourceKey, TimeSpan expiry, CancellationToken ct = default) => inner.TryAcquireLockAsync(resourceKey, expiry, ct);
         public ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
+        public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default) => inner.TryAcquireSlotAsync(setKey, member, limit, ttl, ct);
+        public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default) => inner.RenewSlotAsync(setKey, member, ttl, ct);
+        public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default) => inner.ReleaseSlotAsync(setKey, member, ct);
     }
 
     [Fact]

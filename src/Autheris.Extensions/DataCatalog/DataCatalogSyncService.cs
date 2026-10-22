@@ -54,7 +54,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, CancellationToken ct = default)
+    public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
         var client = _clientFactory.GetActiveClient();
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
@@ -84,9 +84,23 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             }
             catch (TableMetadataUnavailableException)
             {
+                if (restrictToTenant != null)
+                {
+                    // No name disclosure when restricted
+                    continue;
+                }
+
                 // SEC-94-01: an unavailable table is never ingested as a new one (its stored masking rules would be lost).
                 warnings.Add($"Table '{tableAsset.Identifier}': skipped, its stored metadata is unavailable (invalid key or index definition).");
                 continue;
+            }
+
+            if (restrictToTenant != null)
+            {
+                if (existing == null || !string.Equals(existing.OwnerTenantId, restrictToTenant.Value.Value, StringComparison.Ordinal))
+                {
+                    continue;
+                }
             }
 
             syncedTables++;

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
     private readonly IHostEnvironment _environment;
     private readonly ILogger<JwtSocketTokenValidator> _logger;
     private readonly IIdentitySubjectResolver? _subjectResolver;
+    private readonly IClaimsTransformation? _claimsTransformation;
     private readonly JsonWebTokenHandler _tokenHandler = new();
 
     public JwtSocketTokenValidator(
@@ -28,13 +30,15 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
         IOptions<GatewayOptions> gatewayOptions,
         IHostEnvironment environment,
         ILogger<JwtSocketTokenValidator> logger,
-        IIdentitySubjectResolver? subjectResolver = null)
+        IIdentitySubjectResolver? subjectResolver = null,
+        IClaimsTransformation? claimsTransformation = null)
     {
         _jwtOptionsMonitor = jwtOptionsMonitor ?? throw new ArgumentNullException(nameof(jwtOptionsMonitor));
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _subjectResolver = subjectResolver;
+        _claimsTransformation = claimsTransformation;
     }
 
     public async Task<(bool IsValid, ClaimsPrincipal? Principal)> ValidateTokenAsync(string token, CancellationToken cancellationToken = default)
@@ -99,6 +103,20 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
                         if (failure != null)
                         {
                             _logger.LogWarning("WebSocket connection rejected: Entra token policy validation failed: {Reason}", failure);
+                            return (false, null);
+                        }
+                    }
+
+                    if (_claimsTransformation != null)
+                    {
+                        try
+                        {
+                            var transformedPrincipal = await _claimsTransformation.TransformAsync(normalizedPrincipal).ConfigureAwait(false);
+                            return (true, transformedPrincipal);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "WebSocket connection rejected: Claims transformation failed: {Reason}", ex.Message);
                             return (false, null);
                         }
                     }

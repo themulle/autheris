@@ -25,58 +25,13 @@ public sealed class SubgraphResultMaskingMiddleware
         _next = next ?? throw new ArgumentNullException(nameof(next));
     }
 
+    [Obsolete("Result masking is now performed at the field level via SubgraphFieldMaskingTypeInterceptor.")]
     public async ValueTask InvokeAsync(RequestContext context)
     {
         await _next(context).ConfigureAwait(false);
-
-        var options = context.RequestServices.GetService<IOptions<GatewayOptions>>();
-        if (options?.Value?.Federation?.Enabled != true ||
-            !options.Value.Federation.EnableResultMasking ||
-            options.Value.IsColumnMaskingDisabled)
-        {
-            return;
-        }
-
-        if (context.Result is OperationResult opResult && opResult.Data is { } originalData && originalData.Value != null)
-        {
-            var masker = context.RequestServices.GetService<ISubgraphResultMasker>();
-            if (masker == null) return;
-
-            HttpContext? httpContext = null;
-            if (context.ContextData.TryGetValue("HttpContext", out var hcObj) && hcObj is HttpContext hc)
-            {
-                httpContext = hc;
-            }
-            else
-            {
-                httpContext = context.RequestServices.GetService<IHttpContextAccessor>()?.HttpContext;
-            }
-
-            var principal = httpContext?.User;
-            var doc = context.OperationDocumentInfo?.Document;
-            var aliasMap = ExtractAliasToFieldMap(doc);
-            var maskedObj = await masker.MaskResultDataAsync(originalData.Value, principal, aliasMap, context.RequestAborted).ConfigureAwait(false);
-
-            if (maskedObj != null)
-            {
-                if (httpContext != null)
-                {
-                    httpContext.Items["MaskingApplied"] = true;
-                }
-                context.ContextData["MaskingApplied"] = true;
-
-                var newData = new OperationResultData(maskedObj, isValueNull: false, originalData.Formatter, originalData.MemoryHolder);
-                var newResult = new OperationResult(
-                    newData,
-                    opResult.Errors ?? System.Collections.Immutable.ImmutableList<HotChocolate.IError>.Empty,
-                    opResult.Extensions ?? HotChocolate.Collections.Immutable.ImmutableOrderedDictionary<string, object?>.Empty);
-                newResult.ContextData = opResult.ContextData;
-                context.Result = newResult;
-            }
-        }
     }
 
-    internal static Dictionary<string, string>? ExtractAliasToFieldMap(HotChocolate.Language.DocumentNode? document)
+    public static Dictionary<string, string>? ExtractAliasToFieldMap(HotChocolate.Language.DocumentNode? document)
     {
         if (document == null) return null;
 
