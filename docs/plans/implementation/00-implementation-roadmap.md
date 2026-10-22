@@ -107,7 +107,7 @@ flowchart TD
 | **Freeze window 3:** WP-ARC-B-11 folder and interface hygiene | **Deferred 📋** (Optional structural move). |
 | WP-ARC-C-09, C-17 remainder, C-18, C-21, C-22 | **COMPLETED & VERIFIED ✅** (`CasbinEnforcementService`/`VirtualFilterAdministrationService`/`TableAccessPolicy` split, `FakeEpochValidationService`, `ScheduledHostedService`, `CatalogDiscoveryService` `IHttpClientFactory`). |
 | WP-FEAT-07a/b, WP-FEAT-05, #77, #79, #80 | **COMPLETED & VERIFIED ✅** (`TrinoMetadataQueryHandler` for `/v1/statement`, `semantic.<model>` virtual views, `IDifferentialPrivacyEngine` opt-in noise & caching in `GovernedAggregationService`, `GovernedChangeDetectionService`, `QueryAnalysisService`, `ColumnValueProfileService` + `SyntheticSampleRowGenerator`; `07c` gRPC Flight SQL deferred per `D-8`). |
-| #75 cross-source GraphQL relations | **REOPENED ⚠️ (not delivered)**: `CrossSourceRelationResolver` is not wired; see [`REQ-FED-01`](../2026-10-16-req-cross-source-all-consumers.md) / [`PLAN-FED-01`](../2026-10-16-plan-cross-source-all-consumers.md). |
+| #75 cross-source GraphQL relations | **COMPLETED & VERIFIED ✅** (PR #212; `CrossSourceRelationResolver` wired into `GovernedTreeQueryService`, gated by `IsCrossSourceEnabled`). |
 | WP-ARC-A-16 | **Skipped ⏭️** (`G-13`: no external plugin compatibility promise yet). |
 
 WP-TS-00..06 (test speed-up) are **COMPLETED & VERIFIED ✅** (`SerialIntegrationCollection` added in `WP-TS-05`).

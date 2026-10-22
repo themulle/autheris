@@ -1,6 +1,6 @@
 # Master Architecture & Implementation Backlog
 
-**Last Updated:** October 20, 2026 · **Branch:** `main` (v1.2.0)  
+**Last Updated:** October 22, 2026 · **Branch:** `main` (v1.2.11)  
 **Role:** Solution Architect & Agent Coordinator  
 **Location:** `docs/plans/00-master-plan-overview.md`  
 **Purpose:** Canonical origin plan, dependency graph, and active track status for all AI agents and engineers working on the Autheris ecosystem.
@@ -32,16 +32,21 @@
 
 | Rank | Item | Size | Status | Next Milestone / Notes |
 |---:|---|:---:|:---:|---|
-| **1** | **Issue #271:** Security Audit Remediation (CI/CD Supply Chain, Audit Retention, 4-Eyes Bypass, Multi-Tenancy Route Guards, MCP AuthZ, SSRF Egress & SQL Hardening) ([`REQ-SEC-271`](2026-10-21-req-issue-271-security-audit.md) / [`PLAN-SEC-271`](2026-10-21-plan-issue-271-security-audit.md)) | M | **COMPLETED & VERIFIED ✅** | All 7 audit findings remediated and verified with unit & integration test coverage (0 errors, 0 warnings). Ready for PR & merge. |
+| **1** | **Security review follow-up to #271** (branch `fix/security-review-open-findings`: four-eyes on admin write paths, tenant-scoped docs, TOTP/ext_authz hardening, epoch durability, BulkStream signing key, REST doc tenant scoping, Casbin multi-value claims; see [`REQ-SEC-271`](2026-10-21-req-issue-271-security-audit.md)) | M | **IMPLEMENTED, NOT BUILT** | Pushed but never compiled or tested (owner request: no build). Next: build, run the full test suite (watch `TreatWarningsAsErrors`), review, open PR. Residual gaps: `REQ-SEC-271-15` (actor pseudonymization key still falls back to `Gateway:Cluster:Secret` and a per-process random key outside Development), `REQ-SEC-271-03` startup rule `RetentionDays < SecurityDays` (superseded by the max-based purge threshold), unscoped `/api/v1/docs/apps` listing. |
 | **2** | **BL-07:** PostgreSQL wire protocol endpoint (native pgwire protocol support for PostgreSQL BI tools) ([`REQ-PG-WIRE-01`](2026-10-16-req-postgres-wire-protocol-endpoint.md)) | L | **PROPOSED** | Conditional go pending owner evaluation. |
 | **3** | **WP-ARC-C-19:** Unit test project physical separation | S | **PLANNED** | Scheduled for next release freeze window. |
 
 ---
 
-### Recently Merged & Released Tracks (v1.2.0–v1.2.7)
+### Recently Merged & Released Tracks (v1.2.0–v1.2.11)
 
 | Item | Document | PR | Summary |
 |---|---|:---:|---|
+| **#276** | n/a | **#276** | Token-efficient catalog retrieval for AI report & app generators (10k tables). |
+| **#274** | n/a | **#274** | Predefined and dbt synthetic samples with unmasked preview in the catalog. |
+| **#271** | [`PLAN-SEC-271`](2026-10-21-plan-issue-271-security-audit.md)<br/>[`REQ-SEC-271`](2026-10-21-req-issue-271-security-audit.md) | **#273** | Security audit remediation (7 findings): fork-PR guard in `docker-publish.yml`, category-aware audit purge threshold, four-eyes fail-closed `GrantPolicy`, tenant route guard, MCP doc/procedure/lineage isolation, TOTP enrollment guard and SSRF-hardened OpenAPI client, metric parenthesis guard and `information_schema.columns` deny filtering. Follow-up gaps in the active track above. |
+| **#267 / #268** | n/a | **#267**, **#268** | Metamorphic policy tests and governance mutation hardening; metamorphic tests for catalog search and GraphQL complexity analysis. |
+| **#269** | n/a | **#269** | Removed legacy symlinks and canonicalized `docs/plans` paths. |
 | **#270** | `PLAN-GOV-270`<br/>`REQ-GOV-270` | **#272** | GraphQL HMAC Pseudonymization Typing & Cross-Channel Schema Parity for Non-String Columns. Batch rule hydration across engines, automatic String projection, HotChocolate schema invalidation. |
 | **BL-03 Wave 2** | `PLAN-SCALE-5000-WAVE2`<br/>`REQ-SCALE-5000-WAVE2` | **#265** | Scale to 5,000 users: Multi-issuer Identity Realm Registry, Role-Resolver with SCIM-store/Graph/AppRoles, SCIM 2.0 receiver, sub-second deprovisioning lock, functional-rights mapping, scoped access policies, and recertification campaigns. |
 | **#257** | `PLAN-OPS-257-256` | **#259** | PoC deployment blockers remediation (Serilog guard resiliency, release pipeline tagging/signing, diagnostic clarity in TableAccessPolicy, and schema 80->83 alignment). |
@@ -68,7 +73,7 @@
 
 | Plan / Category Document | Topic & Scope | Open Requirements & Components | Status | Next Milestone |
 |---|---|---|:---:|---|
-| [`2026-10-21-req-issue-271-security-audit.md`](2026-10-21-req-issue-271-security-audit.md)<br/>`REQ-SEC-271`<br/>Plan: [`2026-10-21-plan-issue-271-security-audit.md`](2026-10-21-plan-issue-271-security-audit.md)<br/>`PLAN-SEC-271` | **Issue #271: Security Audit Remediation (7 Findings)** | Hardening across 7 areas: 01 (CI/CD supply-chain fork-PR trigger guard in `docker-publish.yml`), 02 (Audit retention honouring category-specific `SecurityDays` in `AuditRetentionPurgeWorker`), 03 (Four-eyes bypass remediation in `GrantPolicy` & dbt imports), 04 (Tenant route `{tenantId}` validation filter), 05 (MCP gateway tenant doc isolation, 4-eyes gate for procedures/metrics, lineage filtering), 06 (TOTP step-up & hardened SSRF client for OpenAPI ingestion), 07 (SQL AST optimization fence, metric parenthesis guard, actor HMAC secret). | **IN PROGRESS 🚀** | Phase 1 & 2 active; prioritizing High-severity Findings 01–03. |
+| [`2026-10-21-req-issue-271-security-audit.md`](2026-10-21-req-issue-271-security-audit.md)<br/>`REQ-SEC-271`<br/>Plan: [`2026-10-21-plan-issue-271-security-audit.md`](2026-10-21-plan-issue-271-security-audit.md)<br/>`PLAN-SEC-271` | **Issue #271: Security Audit Remediation (7 Findings)** | Hardening across 7 areas: 01 (CI/CD supply-chain fork-PR trigger guard in `docker-publish.yml`), 02 (Audit retention honouring category-specific `SecurityDays` in `AuditRetentionPurgeWorker`), 03 (Four-eyes bypass remediation in `GrantPolicy` & dbt imports), 04 (Tenant route `{tenantId}` validation filter), 05 (MCP gateway tenant doc isolation, 4-eyes gate for procedures/metrics, lineage filtering), 06 (TOTP step-up & hardened SSRF client for OpenAPI ingestion), 07 (SQL AST optimization fence, metric parenthesis guard, actor HMAC secret). | **MERGED (#273); follow-up IMPLEMENTED, NOT BUILT** | Follow-up on `fix/security-review-open-findings`; build, test and PR it. |
 | [`2026-10-16-req-postgres-wire-protocol-endpoint.md`](2026-10-16-req-postgres-wire-protocol-endpoint.md)<br/>`REQ-PG-WIRE-01` | **BL-07: PostgreSQL Wire Protocol Endpoint** | Native PostgreSQL wire protocol listener allowing direct connectivity from PostgreSQL-compatible BI tools (Tableau, PowerBI, DBeaver) through Autheris's Zero-Trust governance engine. | **PROPOSED** | Owner decision. |
 | [`architecture.md`](architecture.md)<br/>`PLAN-ARCH-REVIEW` | **Solution Architecture Remediation (R0–R6)** | Core architecture reference, clean layering, DI lifetime scoping, AST compilation, and streaming pipeline standards. | **CANONICAL REFERENCE** | Ongoing enforcement. |
 | [`features.md`](features.md)<br/>`PLAN-FEATURES-ROADMAP` | **Analytics & Governance Feature Roadmap** | Feature index for governed aggregations, differential privacy, dbt semantic layer, CDC streams, query analysis, and data masking. | **CANONICAL REFERENCE** | Feature reference. |

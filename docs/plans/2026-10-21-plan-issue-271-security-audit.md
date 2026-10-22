@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-SEC-271`  
 **Date:** 2026-10-21  
-**Status:** COMPLETED & VERIFIED ✅ (Phase 4 TDD & Phase 5 Quality Gate Passed)  
+**Status:** MERGED (PR #273, `b2b1bf2f`). Follow-up hardening is on `fix/security-review-open-findings` (implemented, not built or tested); see the master plan.  
 **Author:** Solution Architect (`csharp-architect`)  
 **Security Lead:** Lead Application Security Expert (`csharp-security-expert`)  
 **Input PRD:** [`REQ-SEC-271`](2026-10-21-req-issue-271-security-audit.md)  
