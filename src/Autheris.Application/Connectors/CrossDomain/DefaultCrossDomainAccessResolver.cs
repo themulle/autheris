@@ -37,8 +37,11 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         TypedPolicySources? typedPolicies = null,
-        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
+        // SR-M-07: access profiles (Strict/Default masking, profile row filters) apply on the OLAP path as on the main data path.
         _typedPolicies = typedPolicies;
         _options = options?.Value ?? new GatewayOptions();
         _policy = new TableAccessPolicy(
@@ -50,6 +53,8 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             clientIpResolver,
             _options,
             mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            accessProfileRepository: accessProfileRepository,
+            accessProfileCache: accessProfileCache,
             rowPolicyFactory: typedPolicies?.RowPolicies,
             maskPolicyFactory: typedPolicies?.MaskPolicies,
             callerAttributes: typedPolicies?.CallerAttributes,

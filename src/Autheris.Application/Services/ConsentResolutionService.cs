@@ -124,7 +124,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         var unconstrainedConsents = aConsents.Where(c => c.RowFilters.Count == 0).ToList();
         var rowConstrainedGroups = unconstrainedConsents.Count > 0
             ? new List<List<Consent>>()
-            : BuildRowFilterGroups(aConsents, dialect);
+            : BuildRowFilterGroups(aConsents);
 
         var columnAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in allReferencedColumns)
@@ -297,21 +297,84 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         return ttl;
     }
 
-    private List<List<Consent>> BuildRowFilterGroups(IReadOnlyList<Consent> allowConsents, DatabaseDialect dialect)
+    /// <summary>
+    /// Groups the row-constrained allow consents for rule 3 (and the scope clearance). Consents share a group only when their typed row
+    /// filters are structurally identical (<see cref="RowFilterFingerprint"/>, compared ordinally), because the maximum column level within a
+    /// group is only sound when every consent of the group grants exactly the same rows. The legacy text was not such a key: every
+    /// <c>USER_ATTRIBUTE</c> leaf renders as the constant <c>1 = 0</c> and the comparison ignored case ('EU' vs 'eu'), so consents with
+    /// different row scopes merged and a column released by one consent became visible in the rows granted only by another.
+    /// A consent whose filter has no fingerprint (an attribute leaf, a subquery or cross-source filter) always gets its own group;
+    /// splitting a group can only lower the resulting level (minimum across groups), never raise it.
+    /// </summary>
+    private static List<List<Consent>> BuildRowFilterGroups(IReadOnlyList<Consent> allowConsents)
     {
-        var groups = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
+        var groups = new List<List<Consent>>();
+        var byFingerprint = new Dictionary<string, List<Consent>>(StringComparer.Ordinal);
         foreach (var consent in allowConsents)
         {
-            var key = _sqlBuilder.BuildCombinedRowFilter(new[] { consent }, Array.Empty<Consent>(), dialect) ?? string.Empty;
-            if (!groups.TryGetValue(key, out var members))
+            var key = RowFilterFingerprint(consent.RowFilters);
+            if (key == null)
+            {
+                groups.Add([consent]);
+                continue;
+            }
+
+            if (!byFingerprint.TryGetValue(key, out var members))
             {
                 members = new List<Consent>();
-                groups[key] = members;
+                byFingerprint[key] = members;
+                groups.Add(members);
             }
+
             members.Add(consent);
         }
 
-        return groups.Values.ToList();
+        return groups;
+    }
+
+    /// <summary>
+    /// An exact, unambiguous (length-prefixed) fingerprint of a consent's typed row filter: per leaf the filter group, the value source, the column,
+    /// the operator, the value type and the literal values, in their stored order. <c>null</c> when the filter cannot be fingerprinted safely:
+    /// no leaf, a <c>USER_ATTRIBUTE</c> leaf (its rows depend on the caller's attribute values, not on stored text), a value source other than
+    /// <c>LITERAL</c>, or a correlated subquery / cross-source set filter. Values are compared ordinally ('EU' and 'eu' are different rows).
+    /// </summary>
+    internal static string? RowFilterFingerprint(IReadOnlyList<ConsentRowFilter>? filters)
+    {
+        if (filters == null || filters.Count == 0)
+        {
+            return null;
+        }
+
+        var builder = new System.Text.StringBuilder();
+        foreach (var filter in filters)
+        {
+            // The builders treat every source other than USER_ATTRIBUTE as a literal; only an explicit (or absent) LITERAL is fingerprinted here.
+            if (filter == null
+                || filter.FilterType != RowFilterType.SimpleColumnPredicate
+                || (!string.IsNullOrEmpty(filter.ValueSource) && !string.Equals(filter.ValueSource, "LITERAL", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            builder.Append('[').Append(filter.FilterGroup.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(']');
+            AppendPart(builder, filter.ColumnName);
+            AppendPart(builder, filter.Operator?.ToUpperInvariant());
+            AppendPart(builder, filter.ValueType);
+            AppendPart(builder, filter.ValueJson);
+        }
+
+        return builder.ToString();
+
+        static void AppendPart(System.Text.StringBuilder sb, string? part)
+        {
+            if (part == null)
+            {
+                sb.Append("-1:");
+                return;
+            }
+
+            sb.Append(part.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(':').Append(part);
+        }
     }
 
     private static ColumnAccessLevel ResolveColumnLevel(

@@ -37,7 +37,14 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
     private readonly TypedPolicySources? _typedPolicies;
 
     private readonly Autheris.Domain.Security.IRestrictedScopePolicy? _restrictedScopes;
+    private readonly IAccessProfileRepository? _accessProfileRepository;
+    private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
 
+    /// <param name="accessProfileRepository">Access profiles (SR-M-07); used when no <paramref name="accessProfileCache"/> is registered.</param>
+    /// <param name="accessProfileCache">
+    /// The shared access profile cache: Strict/Default masking and profile row filters apply on this path exactly as on the main data path.
+    /// Without both, no access profile applies here.
+    /// </param>
     public UnifiedPolicyDecisionPoint(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
@@ -49,9 +56,13 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         TypedPolicySources? typedPolicies = null,
-        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
         _restrictedScopes = restrictedScopes;
+        _accessProfileRepository = accessProfileRepository;
+        _accessProfileCache = accessProfileCache;
         _typedPolicies = typedPolicies;
         _contractManager = contractManager;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
@@ -99,6 +110,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             _options.Value,
             _mandatoryFilters,
             _contractManager,
+            accessProfileRepository: _accessProfileRepository,
+            accessProfileCache: _accessProfileCache,
             rowPolicyFactory: _typedPolicies?.RowPolicies,
             maskPolicyFactory: _typedPolicies?.MaskPolicies,
             restrictedScopes: _restrictedScopes,

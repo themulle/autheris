@@ -160,6 +160,74 @@ public sealed class TypedPolicySourcesWiringTests
         AssertTyped(await Decide(service.AccessPolicy()));
     }
 
+    // ---- SR-M-07: access profiles also apply on the unified PDP and the cross-domain (OLAP) path ------------------------
+
+    private static TableMetadata MetaWithSensitiveColumn() => new()
+    {
+        Identifier = Orders,
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "SQLite", IsActive = true },
+        Columns =
+        [
+            new TableColumn { ColumnName = "id", DataType = "INTEGER" },
+            new TableColumn { ColumnName = "region", DataType = "TEXT" },
+            new TableColumn { ColumnName = "ssn", DataType = "TEXT", IsSensitive = true }
+        ]
+    };
+
+    private static async Task<IAccessProfileRepository> StrictProfileAsync()
+    {
+        var repo = new Autheris.Infrastructure.Persistence.InMemoryAccessProfileRepository();
+        await repo.UpsertProfileAsync(new AccessProfile
+        {
+            ProfileId = "prof-strict-sites",
+            Name = "Strict",
+            TenantId = Tenant,
+            MaskingMode = MaskingPolicyMode.Strict,
+            TargetTables = ["main.orders"],
+            AssignedSubjects = [UserSid.Value],
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        });
+        return repo;
+    }
+
+    [Fact]
+    public async Task UnifiedPolicyDecisionPoint_AppliesTheAccessProfile()
+    {
+        var pdp = new UnifiedPolicyDecisionPoint(Consents(), new ConsentResolutionService(),
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Options.Create(new GatewayOptions()),
+            NullLogger<UnifiedPolicyDecisionPoint>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, typedPolicies: Sources(),
+            accessProfileRepository: await StrictProfileAsync());
+        var context = new SecurityPrincipalContext
+        {
+            UserSid = UserSid,
+            TenantId = Tenant,
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "Bearer"
+        };
+        var meta = MetaWithSensitiveColumn();
+
+        var decision = await pdp.EvaluateAccessAsync(Orders, meta, context, null, CancellationToken.None);
+
+        // Without the profile the sensitive column would only be masked by the catalog default.
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetEffectiveColumnAccess("ssn", meta).ShouldBe(ColumnAccessLevel.Deny);
+    }
+
+    [Fact]
+    public async Task CrossDomainResolver_AppliesTheAccessProfile()
+    {
+        var resolver = new DefaultCrossDomainAccessResolver(Consents(), new ConsentResolutionService(), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            typedPolicies: Sources(), accessProfileRepository: await StrictProfileAsync());
+        var meta = MetaWithSensitiveColumn();
+
+        var decision = await resolver.ResolveAccessAsync(User(), Orders, meta, Tenant);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetEffectiveColumnAccess("ssn", meta).ShouldBe(ColumnAccessLevel.Deny);
+    }
+
     private static Task<TableAccessDecision> Decide(TableAccessPolicy policy) =>
         policy.DecideAsync(new TableAccessQuery(UserSid, Tenant, new HashSet<Sid>(), new HashSet<string>(), Meta()), CancellationToken.None);
 
@@ -245,6 +313,30 @@ public sealed class TypedPolicySourcesWiringTests
 
         FieldsOf(policy, typeof(RowPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
         FieldsOf(policy, typeof(ColumnMaskPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task UnifiedPolicyDecisionPoint_GetsTheAccessProfileCache()
+    {
+        await using var provider = BuildProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var pdp = scope.ServiceProvider.GetRequiredService<IUnifiedPolicyDecisionPoint>();
+
+        FieldsOf(pdp, typeof(Autheris.Application.Policy.Interfaces.IAccessProfileCache)).ShouldHaveSingleItem()
+            .ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>());
+    }
+
+    [Fact]
+    public async Task CrossDomainResolver_PolicyGetsTheAccessProfileCache()
+    {
+        await using var provider = BuildProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var resolver = scope.ServiceProvider.GetRequiredService<ICrossDomainAccessResolver>();
+
+        var policy = FieldsOf(resolver, typeof(TableAccessPolicy)).Single();
+
+        FieldsOf(policy, typeof(Autheris.Application.Policy.Interfaces.IAccessProfileCache)).ShouldHaveSingleItem()
+            .ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>());
     }
 
     [Fact]

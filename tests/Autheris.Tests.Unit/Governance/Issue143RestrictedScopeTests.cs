@@ -406,7 +406,7 @@ public sealed class Issue143RestrictedScopeTests
     {
         var d = Resolve([Allow(IdClear, Rule("grade", ColumnAccessLevel.Clear))], [Restricted]);
 
-        // An access profile with Unmasked writes Clear into the column map (TableAccessPolicy.ApplyProfileToDecision); the restriction still masks.
+        // An access profile with Unmasked writes Clear into the column map (TableAccessPolicy.ApplyProfileMasking); the restriction still masks.
         var unmasked = d with { ColumnAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["grade"] = ColumnAccessLevel.Clear, ["id"] = ColumnAccessLevel.Clear } };
         Level(unmasked).ShouldBe(ColumnAccessLevel.Mask);
 

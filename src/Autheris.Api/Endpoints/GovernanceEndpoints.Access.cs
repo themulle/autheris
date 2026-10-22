@@ -133,8 +133,9 @@ public static partial class GovernanceEndpoints
             return Results.BadRequest(new { error = "validDays must be between 1 and 180." });
         }
 
-        // MaskingMode validation
-        if (!Enum.TryParse<MaskingPolicyMode>(req.MaskingMode, ignoreCase: true, out var mode))
+        // MaskingMode validation. Enum.TryParse also accepts any numeric string (e.g. "7"), so an undefined value is rejected explicitly:
+        // it would otherwise be stored and ranked/applied as an unknown mode.
+        if (!Enum.TryParse<MaskingPolicyMode>(req.MaskingMode, ignoreCase: true, out var mode) || !Enum.IsDefined(mode))
         {
             return Results.BadRequest(new { error = $"Invalid maskingMode '{req.MaskingMode}'. Supported values: Default, Unmasked, Strict." });
         }

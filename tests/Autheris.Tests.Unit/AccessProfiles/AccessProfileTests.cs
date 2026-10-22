@@ -387,7 +387,8 @@ public sealed class AccessProfileTests
         var decision = await policy.DecideAsync(query, CancellationToken.None);
 
         decision.IsAllowed.ShouldBeTrue();
-        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Clear);
+        // An explicit consent Mask is deliberate: Unmasked lifts only the catalog default mask, never a Mask the consents set.
+        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
         decision.GetEffectiveColumnAccess("longitude", meta).ShouldBe(ColumnAccessLevel.Deny);
         decision.GetEffectiveColumnAccess("customer_id", meta).ShouldBe(ColumnAccessLevel.Deny);
         decision.CombinedRowFilterSql.ShouldNotBeNull();
@@ -1165,5 +1166,174 @@ public sealed class AccessProfileTests
         status.ShouldBe(StatusCodes.Status400BadRequest);
         body.ShouldContain(AccessProfileAssignmentRules.TooLong);
         (await inner.GetAllProfilesAsync(TenantLiebherr)).ShouldBeEmpty();
+    }
+
+    // ---------------------------------------------------------------- undefined masking modes
+
+    [Theory]
+    [InlineData("7")]
+    [InlineData("3")]
+    [InlineData("-1")]
+    [InlineData("Strict, Unmasked")]
+    public async Task BulkConsent_UndefinedMaskingMode_IsRejectedAndNothingStored(string mode)
+    {
+        // Enum.TryParse accepts any numeric string; an undefined value must never reach the store.
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = new BulkConsentRequest
+        {
+            Subject = "david",
+            MaskingMode = mode,
+            Tables = ["tem.*"],
+            Justification = "Valid enterprise justification for telemetry exception",
+            ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain("Invalid maskingMode");
+        (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task UndefinedMaskingMode_IsEnforcedAsStrict_NeverAsAnExplicitClear()
+    {
+        var repo = await RepoWithProfileAsync("undefined-mode-user", (MaskingPolicyMode)7);
+        var policy = CreatePolicy(repo);
+        var meta = CreateTelemetryTableMetadata();
+        // A scope-less token, so the restricted-scope clearance does not mask on its own.
+        var query = new TableAccessQuery(new Sid("undefined-mode-user"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta, System.Array.Empty<Claim>());
+
+        var decision = await policy.DecideAsync(query, CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Deny);
+        decision.GetEffectiveColumnAccess("customer_id", meta).ShouldBe(ColumnAccessLevel.Deny);
+        decision.GetEffectiveColumnAccess("crane_id", meta).ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
+    public void UndefinedMaskingMode_RanksAndEnforcesAsStrict()
+    {
+        AccessProfileAssignmentRules.EnforcedMode((MaskingPolicyMode)7).ShouldBe(MaskingPolicyMode.Strict);
+        AccessProfileAssignmentRules.EnforcedMode(MaskingPolicyMode.Unmasked).ShouldBe(MaskingPolicyMode.Unmasked);
+        AccessProfileAssignmentRules.Rank((MaskingPolicyMode)7).ShouldBe(AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Strict));
+        AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Strict).ShouldBeLessThan(AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Default));
+        AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Default).ShouldBeLessThan(AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Unmasked));
+    }
+
+    [Fact]
+    public async Task SqliteStore_UndefinedMaskingMode_IsRefusedOnWrite_AndReadAsStrict()
+    {
+        var connectionString = $"Data Source=governance_mode_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Options.Create(new GatewayOptions
+        {
+            GovernanceDb = new GovernanceDbOptions { ConnectionString = connectionString, Provider = "Sqlite" }
+        });
+        using var sqliteRepo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, logger: NullLogger<SqliteGovernanceRepository>.Instance);
+
+        AccessProfile Profile(MaskingPolicyMode mode) => new()
+        {
+            ProfileId = "prof-mode",
+            Name = "Mode Profile",
+            TenantId = TenantLiebherr,
+            MaskingMode = mode,
+            TargetTables = ["tem.*"],
+            ValidTo = DateTimeOffset.UtcNow.AddDays(10),
+            CreatedBy = "admin@autheris.internal"
+        };
+
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => sqliteRepo.UpsertProfileAsync(Profile((MaskingPolicyMode)7)));
+
+        // A row written before the guard (or by another writer) with a numeric mode is read as the most restrictive mode.
+        await sqliteRepo.UpsertProfileAsync(Profile(MaskingPolicyMode.Default));
+        (await sqliteRepo.GetProfileAsync(TenantLiebherr, "prof-mode"))!.MaskingMode.ShouldBe(MaskingPolicyMode.Default);
+        await using (var raw = new SqliteConnection(connectionString))
+        {
+            await raw.OpenAsync();
+            await using var cmd = raw.CreateCommand();
+            cmd.CommandText = "UPDATE ACCESS_PROFILES SET masking_mode = '7' WHERE profile_id = 'prof-mode'";
+            (await cmd.ExecuteNonQueryAsync()).ShouldBe(1);
+        }
+
+        var fetched = await sqliteRepo.GetProfileAsync(TenantLiebherr, "prof-mode");
+        fetched.ShouldNotBeNull();
+        fetched.MaskingMode.ShouldBe(MaskingPolicyMode.Strict);
+    }
+
+    // ---------------------------------------------------------------- Unmasked lifts only the catalog default mask
+
+    [Fact]
+    public async Task UnmaskedProfile_LiftsOnlyTheCatalogDefaultMask_KeepsConsentMasks()
+    {
+        var repo = await RepoWithProfileAsync("unmasked-lift-user", MaskingPolicyMode.Unmasked);
+        var meta = CreateTelemetryTableMetadata();
+        var consent = TableAccessDecision.Allowed(
+            TelemetryTable,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["latitude"] = ColumnAccessLevel.Mask, // deliberate consent mask (e.g. a Deny-consent mask or an explicit Mask level)
+                ["crane_id"] = ColumnAccessLevel.Mask
+            },
+            rowFilterSql: null,
+            hasUnconstrainedColumnAllow: true);
+        var policy = CreatePolicyWithConsent(repo, consent);
+        var query = new TableAccessQuery(new Sid("unmasked-lift-user"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta, System.Array.Empty<Claim>());
+
+        var decision = await policy.DecideAsync(query, CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetEffectiveColumnAccess("crane_id", meta).ShouldBe(ColumnAccessLevel.Mask);
+        // Implicit Clear masked only because the catalog marks the column sensitive: the Unmasked exception lifts it.
+        decision.GetEffectiveColumnAccess("customer_id", meta).ShouldBe(ColumnAccessLevel.Clear);
+        decision.GetEffectiveColumnAccess("longitude", meta).ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    // ---------------------------------------------------------------- several matching profiles
+
+    [Fact]
+    public async Task SeveralMatchingProfiles_AllRowFiltersApply_MostRestrictiveMaskingWins()
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        await repo.UpsertProfileAsync(new AccessProfile
+        {
+            ProfileId = "prof-a-unmasked",
+            Name = "A",
+            TenantId = TenantLiebherr,
+            MaskingMode = MaskingPolicyMode.Unmasked,
+            TargetTables = ["tem.*"],
+            RowFilterPredicate = "crane_id = 'C1'",
+            AssignedSubjects = ["multi-profile-user"],
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        });
+        await repo.UpsertProfileAsync(new AccessProfile
+        {
+            ProfileId = "prof-b-default",
+            Name = "B",
+            TenantId = TenantLiebherr,
+            MaskingMode = MaskingPolicyMode.Default,
+            TargetTables = ["tem.gps_position"],
+            RowFilterPredicate = "status != 'DELIVERED'",
+            AssignedSubjects = ["multi-profile-user"],
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        });
+
+        var policy = CreatePolicy(repo);
+        var meta = CreateTelemetryTableMetadata();
+        var query = new TableAccessQuery(new Sid("multi-profile-user"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta, System.Array.Empty<Claim>());
+
+        var decision = await policy.DecideAsync(query, CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.CombinedRowFilterSql.ShouldNotBeNull();
+        decision.CombinedRowFilterSql.ShouldContain("crane_id = 'C1'");
+        decision.CombinedRowFilterSql.ShouldContain("status != 'DELIVERED'");
+        decision.CombinedRowFilterSql.ShouldContain(" AND ");
+        // Default (B) is more restrictive than Unmasked (A).
+        decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetEffectiveColumnAccess("crane_id", meta).ShouldBe(ColumnAccessLevel.Clear);
     }
 }
