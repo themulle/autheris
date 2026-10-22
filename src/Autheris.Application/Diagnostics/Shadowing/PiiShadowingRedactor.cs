@@ -209,7 +209,7 @@ public static partial class PiiShadowingRedactor
         }
 
         var tokens = TryLexSql(text);
-        if (tokens != null && TryRedactSqlTokens(text, tokens, out redacted))
+        if (tokens != null && LooksLikeSql(tokens) && TryRedactSqlTokens(text, tokens, out redacted))
         {
             redacted = RedactPiiPatterns(redacted);
             return true;
@@ -231,9 +231,12 @@ public static partial class PiiShadowingRedactor
 
             // Replace back to front on the UTF-8 bytes the parser positions refer to.
             var buffer = new List<byte>(bytes);
-            foreach (var (start, end, replacement) in edits.OrderByDescending(e => e.Start))
+            foreach (var (start, _, replacement) in edits.OrderByDescending(e => e.Start))
             {
-                if (start < 0 || end > buffer.Count || end <= start)
+                // Node end positions are unreliable in HotChocolate.Language (they can run into the next token), so only the
+                // start offset is used and the literal's own token is re-read to find where it ends.
+                var end = start < 0 || start >= bytes.Length ? -1 : start + LiteralLength(bytes.AsSpan(start));
+                if (end <= start || end > buffer.Count)
                 {
                     return false;
                 }
@@ -252,6 +255,26 @@ public static partial class PiiShadowingRedactor
         {
             return false;
         }
+    }
+
+    private static int LiteralLength(ReadOnlySpan<byte> fromLiteralStart)
+    {
+        var reader = new Utf8GraphQLReader(fromLiteralStart);
+        while (reader.Read())
+        {
+            if (reader.Kind != TokenKind.StartOfFile)
+            {
+                // The reader's string tokens end at the closing quote(s), not after them.
+                return reader.Kind switch
+                {
+                    TokenKind.String => reader.End + 1,
+                    TokenKind.BlockString => reader.End + 3,
+                    _ => reader.End
+                };
+            }
+        }
+
+        return -1;
     }
 
     private static void CollectGraphQlLiterals(ISyntaxNode node, List<(int Start, int End, string Replacement)> edits)
@@ -284,6 +307,18 @@ public static partial class PiiShadowingRedactor
         {
             CollectGraphQlLiterals(child, edits);
         }
+    }
+
+    private static readonly HashSet<string> SqlStatementKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SELECT", "WITH", "VALUES", "TABLE", "SHOW", "DESCRIBE", "EXPLAIN"
+    };
+
+    /// <summary>Only statements that start with a SQL statement keyword count as SQL; anything else (e.g. a truncated GraphQL document) is not shadowed.</summary>
+    private static bool LooksLikeSql(List<IToken> tokens)
+    {
+        var first = tokens.FirstOrDefault(t => t.Type is not (SqlBaseLexer.SIMPLE_COMMENT or SqlBaseLexer.BRACKETED_COMMENT));
+        return first?.Text is { } keyword && SqlStatementKeywords.Contains(keyword);
     }
 
     /// <summary>The SQL lexer tokens of <paramref name="text"/>, or null when it contains anything the lexer does not recognise.</summary>
