@@ -336,7 +336,8 @@ public sealed partial class ODataHandler(
         }
 
         // Safe limit handling: default top 100, max 1000
-        var effectiveTop = top.HasValue ? Math.Clamp(top.Value, 1, 1000) : 100;
+        // EXT-19: $top=0 is the standard count probe and returns no rows.
+        var effectiveTop = top.HasValue ? Math.Clamp(top.Value, 0, 1000) : 100;
         var effectiveSkip = skip.HasValue ? Math.Max(0, skip.Value) : 0;
 
         IReadOnlyList<string>? requestedFields = null;
@@ -525,14 +526,18 @@ public sealed partial class ODataHandler(
         }
 
         string? nextLink = null;
-        if (unordered && rows.Count > effectiveTop)
+        if (unordered && effectiveTop > 0 && rows.Count > effectiveTop)
         {
             // Issue #94 (D-10): without an orderable clear column the pages cannot be positioned deterministically. Refuse
             // instead of returning a page that the next one may duplicate or skip. The text names no column.
             return Error(400, "InvalidQueryOption", Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
         }
 
-        if (rows.Count > effectiveTop)
+        if (effectiveTop == 0)
+        {
+            rows = [];
+        }
+        else if (rows.Count > effectiveTop)
         {
             nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, filter, includeCount);
             rows = rows.Take(effectiveTop).ToList();
