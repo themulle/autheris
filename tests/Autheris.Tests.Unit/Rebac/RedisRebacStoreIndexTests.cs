@@ -122,8 +122,8 @@ public sealed class ZanzibarRebacEvaluatorMemoTests
     public async Task SameLookupWithinCheck_HitsStoreOnce()
     {
         var store = Substitute.For<IRebacStore>();
-        var tuple = new RebacTuple("t1", "user:alice", "viewer", "doc:1");
-        store.GetTuplesAsync("t1", "user:alice", "viewer", "doc:1", Arg.Any<CancellationToken>())
+        var tuple = new RebacTuple("t1", "alice", "viewer", "doc:1");
+        store.GetTuplesAsync("t1", "alice", "viewer", "doc:1", Arg.Any<CancellationToken>())
             .Returns(new ValueTask<IReadOnlyList<RebacTuple>>([tuple]));
 
         var options = new GatewayOptions
@@ -140,10 +140,10 @@ public sealed class ZanzibarRebacEvaluatorMemoTests
         var evaluator = new ZanzibarRebacEvaluator(store, Options.Create(options), NullLogger<ZanzibarRebacEvaluator>.Instance);
 
         // Run check
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("t1", "user:alice", "viewer", "doc:1"));
+        var result = await evaluator.CheckAsync(new RebacCheckRequest("t1", "alice", "viewer", "doc:1"));
         result.Allowed.ShouldBeTrue();
 
         // Exactly 1 store call was made for this direct lookup during the evaluation
-        await store.Received(1).GetTuplesAsync("t1", "user:alice", "viewer", "doc:1", Arg.Any<CancellationToken>());
+        await store.Received(1).GetTuplesAsync("t1", "alice", "viewer", "doc:1", Arg.Any<CancellationToken>());
     }
 }
