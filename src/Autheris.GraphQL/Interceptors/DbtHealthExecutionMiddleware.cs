@@ -174,7 +174,10 @@ public sealed class DbtHealthExecutionMiddleware
                     }).ToList());
                 }
 
-                HttpResponseGuard.SetStatus(httpContext, Microsoft.AspNetCore.Http.StatusCodes.Status400BadRequest);
+                if (httpContext != null)
+                {
+                    HttpResponseGuard.SetStatus(httpContext, Microsoft.AspNetCore.Http.StatusCodes.Status400BadRequest);
+                }
                 context.Result = OperationResult.FromError(errBuilder.Build());
                 return;
             }
