@@ -182,10 +182,11 @@ WHERE i.decision = 'Pending' AND c.deadline <= @deadlineUtc";
         return list;
     }
 
-    public async Task UpdateItemDecisionAsync(
+    public async Task<bool> TryUpdateItemDecisionAsync(
         TenantId tenantId,
         string campaignId,
         string itemId,
+        RecertDecision expected,
         RecertDecision decision,
         string decisionBy,
         string? comments = null,
@@ -199,7 +200,8 @@ SET decision = @decision,
     decision_at = @decisionAt,
     decision_by = @decisionBy,
     comments = @comments
-WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId";
+WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId AND decision = @expected";
+        AddParam(cmd, "@expected", expected.ToString());
         AddParam(cmd, "@decision", decision.ToString());
         AddParam(cmd, "@decisionAt", FormatIso(DateTimeOffset.UtcNow));
         AddParam(cmd, "@decisionBy", decisionBy);
@@ -208,7 +210,7 @@ WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId"
         AddParam(cmd, "@campaignId", campaignId);
         AddParam(cmd, "@itemId", itemId);
 
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
     }
 
     // ---------------------------------------------------- HELPERS

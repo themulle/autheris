@@ -1,6 +1,7 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Generic;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
@@ -74,7 +75,13 @@ public static class RecertificationEndpoints
             IRecertificationService service,
             CancellationToken ct) =>
         {
-            var reviewerId = httpContext.User.GetUserSid()?.Value ?? "REVIEWER";
+            // GOV-02: no SID means no reviewer identity; fail closed instead of falling back to a constant.
+            var reviewerId = httpContext.User.GetUserSid()?.Value;
+            if (string.IsNullOrWhiteSpace(reviewerId))
+            {
+                return NoReviewerIdentity();
+            }
+
             try
             {
                 await service.CertifyItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
@@ -83,9 +90,17 @@ public static class RecertificationEndpoints
             catch (SecurityException)
             {
                 return Results.Problem(
-                    detail: "Self-review is strictly forbidden.",
+                    detail: "Only the designated reviewer may decide this item, and self-review is strictly forbidden.",
                     statusCode: StatusCodes.Status403Forbidden,
                     title: "Anti-self-review violation (SEC-SC-15)");
+            }
+            catch (RecertificationConflictException ex)
+            {
+                return Conflict(ex);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
             }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
@@ -98,9 +113,32 @@ public static class RecertificationEndpoints
             IRecertificationService service,
             CancellationToken ct) =>
         {
-            var reviewerId = httpContext.User.GetUserSid()?.Value ?? "REVIEWER";
-            await service.RevokeItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
-            return Results.Ok(new { message = "Item successfully revoked." });
+            var reviewerId = httpContext.User.GetUserSid()?.Value;
+            if (string.IsNullOrWhiteSpace(reviewerId))
+            {
+                return NoReviewerIdentity();
+            }
+
+            try
+            {
+                await service.RevokeItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
+                return Results.Ok(new { message = "Item successfully revoked." });
+            }
+            catch (SecurityException)
+            {
+                return Results.Problem(
+                    detail: "Only the designated reviewer may decide this item.",
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Reviewer not authorised");
+            }
+            catch (RecertificationConflictException ex)
+            {
+                return Conflict(ex);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
 
         group.MapPost("/cycle", async (
@@ -114,4 +152,14 @@ public static class RecertificationEndpoints
 
         return app;
     }
+
+    private static IResult NoReviewerIdentity() => Results.Problem(
+        detail: "The caller has no reviewer identity (SID).",
+        statusCode: StatusCodes.Status403Forbidden,
+        title: "Reviewer identity required");
+
+    private static IResult Conflict(RecertificationConflictException ex) => Results.Problem(
+        detail: ex.Message,
+        statusCode: StatusCodes.Status409Conflict,
+        title: ex.Code);
 }
