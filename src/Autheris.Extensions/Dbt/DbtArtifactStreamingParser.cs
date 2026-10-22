@@ -1,3 +1,4 @@
+using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Domain.Common;
 namespace Autheris.Extensions.Dbt;
@@ -186,14 +187,12 @@ public static class DbtArtifactStreamingParser
 
                 // Meta
                 var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                IReadOnlyList<IReadOnlyDictionary<string, object?>>? syntheticSamples = null;
                 if (node.TryGetProperty("meta", out var metaProp) && metaProp.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var m in metaProp.EnumerateObject())
                     {
                         meta[m.Name] = JsonValueText.From(m.Value);
                     }
-                    syntheticSamples = ExtractSyntheticSamples(metaProp);
                 }
 
                 // R-31: Model-level constraints (foreign_key); issue #94: primary_key and unique
@@ -331,7 +330,7 @@ public static class DbtArtifactStreamingParser
                     columns,
                     dependsOn,
                     contractEnforced
-                ) { SyntheticSamples = syntheticSamples });
+                ) { SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys) });
             }
         }
 
@@ -359,14 +358,12 @@ public static class DbtArtifactStreamingParser
                 }
 
                 var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                IReadOnlyList<IReadOnlyDictionary<string, object?>>? srcSyntheticSamples = null;
                 if (srcNode.TryGetProperty("meta", out var mp) && mp.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var m in mp.EnumerateObject())
                     {
                         meta[m.Name] = JsonValueText.From(m.Value);
                     }
-                    srcSyntheticSamples = ExtractSyntheticSamples(mp);
                 }
 
                 var columns = new Dictionary<string, DbtColumnDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -404,7 +401,7 @@ public static class DbtArtifactStreamingParser
                     columns,
                     [],
                     false
-                ) { SyntheticSamples = srcSyntheticSamples });
+                ) { SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys) });
             }
         }
 
@@ -706,113 +703,95 @@ public static class DbtArtifactStreamingParser
         return parts[^1];
     }
 
-    private static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamples(JsonElement metaProp)
+    private const int MaxSyntheticSampleKeysPerRow = 256;
+    private const int MaxSyntheticSampleStringLength = 1024;
+
+    /// <summary>
+    /// Reads the <c>meta</c> object of a node and extracts inline synthetic samples against the node's columns.
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamplesFromNode(
+        JsonElement node,
+        IReadOnlyCollection<string> modelColumns) =>
+        node.TryGetProperty("meta", out var metaProp) && metaProp.ValueKind == JsonValueKind.Object
+            ? ExtractSyntheticSamples(metaProp, modelColumns)
+            : null;
+
+    /// <summary>
+    /// Extracts inline synthetic sample rows from a dbt <c>meta</c> object (MCP-02). Only inline JSON arrays of
+    /// objects are accepted; string values (including would-be file paths) are never interpreted, so the file system
+    /// is never touched. Rows are capped, keys that are not model columns are dropped, and only scalar values of
+    /// bounded size are kept.
+    /// </summary>
+    internal static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamples(
+        JsonElement metaProp,
+        IReadOnlyCollection<string> modelColumns)
     {
         if (!metaProp.TryGetProperty("synthetic_samples", out var sampleElem) &&
             !metaProp.TryGetProperty("syntheticSamples", out sampleElem) &&
             !metaProp.TryGetProperty("sample_rows", out sampleElem) &&
-            !metaProp.TryGetProperty("sampleRows", out sampleElem) &&
-            !metaProp.TryGetProperty("samples", out sampleElem))
+            !metaProp.TryGetProperty("sampleRows", out sampleElem))
         {
             return null;
         }
 
-        if (sampleElem.ValueKind == JsonValueKind.Array)
+        if (sampleElem.ValueKind != JsonValueKind.Array)
         {
-            var list = new List<IReadOnlyDictionary<string, object?>>();
-            foreach (var item in sampleElem.EnumerateArray())
+            return null;
+        }
+
+        var allowedColumns = new HashSet<string>(modelColumns, StringComparer.OrdinalIgnoreCase);
+        var list = new List<IReadOnlyDictionary<string, object?>>();
+        foreach (var item in sampleElem.EnumerateArray())
+        {
+            if (list.Count >= SyntheticSampleRowGenerator.MaxPredefinedSampleRows)
             {
-                if (item.ValueKind == JsonValueKind.Object)
+                break;
+            }
+
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var keys = 0;
+            foreach (var prop in item.EnumerateObject())
+            {
+                if (++keys > MaxSyntheticSampleKeysPerRow)
                 {
-                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var prop in item.EnumerateObject())
-                    {
+                    break;
+                }
+
+                if (!allowedColumns.Contains(prop.Name))
+                {
+                    continue;
+                }
+
+                switch (prop.Value.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        var text = prop.Value.GetString();
+                        if (text is null || text.Length <= MaxSyntheticSampleStringLength)
+                        {
+                            dict[prop.Name] = text;
+                        }
+                        break;
+                    case JsonValueKind.Number:
+                    case JsonValueKind.True:
+                    case JsonValueKind.False:
+                    case JsonValueKind.Null:
                         dict[prop.Name] = ConvertJsonElement(prop.Value);
-                    }
-                    list.Add(dict);
-                }
-            }
-            return list.Count > 0 ? list : null;
-        }
-
-        if (sampleElem.ValueKind == JsonValueKind.String)
-        {
-            var str = sampleElem.GetString()?.Trim();
-            if (string.IsNullOrWhiteSpace(str)) return null;
-
-            if (str.StartsWith('[') && str.EndsWith(']'))
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(str);
-                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    {
-                        var list = new List<IReadOnlyDictionary<string, object?>>();
-                        foreach (var item in doc.RootElement.EnumerateArray())
-                        {
-                            if (item.ValueKind == JsonValueKind.Object)
-                            {
-                                var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                                foreach (var prop in item.EnumerateObject())
-                                {
-                                    dict[prop.Name] = ConvertJsonElement(prop.Value);
-                                }
-                                list.Add(dict);
-                            }
-                        }
-                        return list.Count > 0 ? list : null;
-                    }
-                }
-                catch
-                {
-                    // Ignore parse error, fallback to path check
+                        break;
                 }
             }
 
-            if (str.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
-                str.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+            if (dict.Count > 0)
             {
-                var filePath = FindFilePath(str);
-                if (filePath != null && File.Exists(filePath))
-                {
-                    try
-                    {
-                        if (filePath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var content = File.ReadAllText(filePath);
-                            using var doc = JsonDocument.Parse(content);
-                            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                            {
-                                var list = new List<IReadOnlyDictionary<string, object?>>();
-                                foreach (var item in doc.RootElement.EnumerateArray())
-                                {
-                                    if (item.ValueKind == JsonValueKind.Object)
-                                    {
-                                        var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                                        foreach (var prop in item.EnumerateObject())
-                                        {
-                                            dict[prop.Name] = ConvertJsonElement(prop.Value);
-                                        }
-                                        list.Add(dict);
-                                    }
-                                }
-                                return list.Count > 0 ? list : null;
-                            }
-                        }
-                        else if (filePath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-                        {
-                            return ParseCsvSamples(filePath);
-                        }
-                    }
-                    catch
-                    {
-                        // File read/parse failure fails gracefully
-                    }
-                }
+                list.Add(dict);
             }
         }
 
-        return null;
+        return list.Count > 0 ? list : null;
     }
 
     private static object? ConvertJsonElement(JsonElement elem) =>
@@ -825,72 +804,4 @@ public static class DbtArtifactStreamingParser
             JsonValueKind.Null => null,
             _ => elem.GetRawText()
         };
-
-    private static string? FindFilePath(string rawPath)
-    {
-        if (Path.IsPathRooted(rawPath))
-        {
-            return File.Exists(rawPath) ? rawPath : null;
-        }
-
-        var candidate1 = Path.Combine(Directory.GetCurrentDirectory(), rawPath);
-        if (File.Exists(candidate1)) return candidate1;
-
-        var candidate2 = Path.Combine(AppContext.BaseDirectory, rawPath);
-        if (File.Exists(candidate2)) return candidate2;
-
-        return null;
-    }
-
-    private static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ParseCsvSamples(string filePath)
-    {
-        try
-        {
-            var lines = File.ReadAllLines(filePath);
-            if (lines.Length < 2) return null;
-
-            var headers = lines[0].Split(',', StringSplitOptions.TrimEntries);
-            var result = new List<IReadOnlyDictionary<string, object?>>();
-
-            for (int i = 1; i < lines.Length; i++)
-            {
-                var line = lines[i].Trim();
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                var parts = line.Split(',', StringSplitOptions.TrimEntries);
-                var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                for (int h = 0; h < headers.Length; h++)
-                {
-                    var val = h < parts.Length ? parts[h] : null;
-                    if (val == null)
-                    {
-                        row[headers[h]] = null;
-                    }
-                    else if (long.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l))
-                    {
-                        row[headers[h]] = l;
-                    }
-                    else if (double.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-                    {
-                        row[headers[h]] = d;
-                    }
-                    else if (bool.TryParse(val, out var b))
-                    {
-                        row[headers[h]] = b;
-                    }
-                    else
-                    {
-                        row[headers[h]] = val.Trim('"');
-                    }
-                }
-                result.Add(row);
-            }
-
-            return result.Count > 0 ? result : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

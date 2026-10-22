@@ -52,6 +52,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
     private readonly Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? _semanticCatalog;
+    private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -80,7 +81,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IReadPathSwitches? switches = null,
         Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null)
+        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null,
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -104,6 +106,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _datasetCatalogAdmin = datasetCatalogAdmin;
         _procedureRegistry = procedureRegistry;
         _semanticCatalog = semanticCatalog;
+        _catalogVisibility = catalogVisibility;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -233,10 +236,17 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             bool docWasMasked = false;
             string scrubbedDocJson = !_options.Value.IsMcpUnmaskedAllowed ? ScrubPiiAndSensitiveData(rawDocJson, out docWasMasked) : rawDocJson;
             bool isError = TryGetExecutorError(rawDocJson, out var docErr);
+            if (!isError)
+            {
+                scrubbedDocJson = await InspectOutputAsync(tool.Name, scrubbedDocJson, sessionContext, cancellationToken, m => docWasMasked |= m).ConfigureAwait(false);
+            }
+
+            // MCP-08: doc tools run under the same per-call token budget as dataset tools.
+            scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated);
             await RecordAuditEventAsync(tool.Name, sessionContext, isError ? "DENY" : "ALLOW",
                 isError ? $"Doc tool returned error ({docErr ?? "ERROR"})." : "Document MCP tool executed successfully under AI guardrails.",
-                docWasMasked, false, Math.Max(1, scrubbedDocJson.Length / 4), cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, IsMasked: docWasMasked);
+                docWasMasked, docTruncated, docTokens, cancellationToken).ConfigureAwait(false);
+            return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, EstimatedTokens: docTokens, IsMasked: docWasMasked, TruncatedDueToBudget: docTruncated);
         }
 
         string? sqlSyntaxError = null;
@@ -391,7 +401,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
                 {
                     var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
+                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                     bool isVisible = visibleTables.Any(t =>
                         t.Identifier.Equals(resolvedTable.Value) ||
                         (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
@@ -454,7 +464,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             {
                 var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
                 var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
-                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                 var visibleKeys = visibleTables.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 queries = queries.Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()))).ToList();
             }
@@ -490,28 +500,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return new McpToolCallResult(IsSuccess: false, ContentJson: scrubbedJson, ErrorMessage: scrubbedJson, IsMasked: wasMasked);
         }
 
-        int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
-        int estimatedTokens = Math.Max(1, scrubbedJson.Length / 4);
-        bool truncated = false;
-
-        if (estimatedTokens > maxTokens)
-        {
-            _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", tool.Name, estimatedTokens, maxTokens);
-            int maxChars = maxTokens * 4;
-            if (scrubbedJson.Length > maxChars)
-            {
-                scrubbedJson = JsonSerializer.Serialize(new
-                {
-                    _meta = new
-                    {
-                        truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
-                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
-                    }
-                });
-                estimatedTokens = Math.Max(1, scrubbedJson.Length / 4);
-                truncated = true;
-            }
-        }
+        scrubbedJson = await InspectOutputAsync(tool.Name, scrubbedJson, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
+        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated);
 
         await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
 
@@ -605,6 +595,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         {
             _logger.LogWarning("SECURITY ALERT [WARN]: AI resource read '{Uri}' is running unmasked (warn_allow_unmasked_ai_access is ACTIVE).", resourceUri);
         }
+
+        text = await InspectOutputAsync(name, text, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
 
         int estimatedTokens = Math.Max(1, text.Length / 4);
         bool truncated = false;

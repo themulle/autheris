@@ -20,7 +20,8 @@ public sealed partial class AiDataGuardrailService
         bool isMasked,
         bool truncated,
         int estimatedTokens,
-        CancellationToken ct)
+        CancellationToken ct,
+        string eventType = "MCP_TOOL_EXECUTION")
     {
         try
         {
@@ -31,7 +32,7 @@ public sealed partial class AiDataGuardrailService
             var entry = new AuditLogEntry
             {
                 TenantId = tenantId,
-                EventType = "MCP_TOOL_EXECUTION",
+                EventType = eventType,
                 ActorSid = actorSid,
                 TargetTable = toolName,
                 Decision = decision,
@@ -174,6 +175,65 @@ public sealed partial class AiDataGuardrailService
         }
         var single = ParseTableIdentifierFromTool(tool, argumentsJson);
         return single == null ? null : [single.Value];
+    }
+
+    /// <summary>
+    /// Output inspection (MCP-09): string values of a tool or resource result that carry a suspected prompt injection are replaced by a
+    /// fixed marker and audited as <c>MCP_OUTPUT_INJECTION_SUSPECTED</c>. The call is never denied, so a poisoned catalog text cannot be
+    /// used to block access.
+    /// </summary>
+    private async Task<string> InspectOutputAsync(
+        string toolName,
+        string json,
+        McpSessionContext sessionContext,
+        CancellationToken ct,
+        Action<bool>? markMasked = null)
+    {
+        var sanitized = _promptGuardrail.SanitizeToolOutput(toolName, json, out var withheld, out var attackType);
+        if (withheld == 0 || sanitized is null)
+        {
+            return json;
+        }
+
+        _logger.LogWarning("Suspected prompt injection withheld from the output of '{ToolName}' ({Count} value(s), {AttackType}).", toolName, withheld, attackType);
+        markMasked?.Invoke(true);
+        await RecordAuditEventAsync(
+            toolName, sessionContext, "ALLOW",
+            $"Output withheld: {withheld} value(s) with suspected prompt injection ({attackType ?? "unknown"}).",
+            true, false, Math.Max(1, sanitized.Length / 4), ct, Autheris.Domain.Audit.AuditEventTypes.McpOutputInjectionSuspected).ConfigureAwait(false);
+        return sanitized;
+    }
+
+    /// <summary>
+    /// Applies the per-call token budget (MCP-08): a result above <c>Mcp.MaxTokensPerCall</c> is replaced by a truncation notice.
+    /// Shared by dataset tools and doc tools so no tool skips the budget.
+    /// </summary>
+    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated)
+    {
+        int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
+        estimatedTokens = Math.Max(1, json.Length / 4);
+        truncated = false;
+
+        if (estimatedTokens > maxTokens)
+        {
+            _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
+            int maxChars = maxTokens * 4;
+            if (json.Length > maxChars)
+            {
+                json = JsonSerializer.Serialize(new
+                {
+                    _meta = new
+                    {
+                        truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
+                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                    }
+                });
+                estimatedTokens = Math.Max(1, json.Length / 4);
+                truncated = true;
+            }
+        }
+
+        return json;
     }
 
     private async Task<IReadOnlyList<TableIdentifier>?> ResolveGraphQlTablesAsync(string? argumentsJson, CancellationToken ct)

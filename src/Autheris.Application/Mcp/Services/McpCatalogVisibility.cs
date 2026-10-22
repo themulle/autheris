@@ -65,6 +65,37 @@ internal static class McpCatalogVisibility
             ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Consent, tier and column visibility (<see cref="VisibleTablesAsync(IReadOnlyList{TableMetadata}, ClaimsPrincipal?, IConsentRepository?, GatewayOptions?, CancellationToken)"/>)
+    /// intersected with the catalog visibility service, which adds the ReBAC step (MCP-14). A table must pass both; without a
+    /// service the first rule alone applies (the service is always registered in a running gateway). The intersection keeps the
+    /// column filtering of the first rule and can only remove tables.
+    /// </summary>
+    public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal? principal,
+        IConsentRepository? consentRepo,
+        GatewayOptions? options,
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility,
+        CancellationToken ct)
+    {
+        var tables = await VisibleTablesAsync(allTables, principal, consentRepo, options, ct).ConfigureAwait(false);
+        if (catalogVisibility is null || tables.Count == 0)
+        {
+            return tables;
+        }
+
+        if (principal is null)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
+        var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(
+            principal, SafeTenantId(principal), Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp);
+        var visible = await catalogVisibility.FilterVisibleAsync(caller, tables.Select(t => t.Identifier).ToList(), ct).ConfigureAwait(false);
+        return tables.Where(t => visible.Contains(t.Identifier)).ToList();
+    }
+
     // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup never sees it.
     internal static TenantId SafeTenantId(ClaimsPrincipal principal)
     {
