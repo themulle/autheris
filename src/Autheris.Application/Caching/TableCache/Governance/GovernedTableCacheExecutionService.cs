@@ -50,7 +50,8 @@ public sealed class GovernedTableCacheExecutionService
 
     private readonly ITableCacheCatalog _catalog;
     private readonly ITableCacheStore _store;
-    private readonly IConsentResolutionService? _consentService;
+    private readonly IConsentResolutionService _consentService;
+    private readonly IColumnMaskingProvider _maskingProvider;
     private readonly IAuditLogRepository _auditRepo;
     private readonly TableCacheOptions _options;
     private readonly TimeProvider _timeProvider;
@@ -61,7 +62,8 @@ public sealed class GovernedTableCacheExecutionService
         ITableCacheStore store,
         IOptions<TableCacheOptions> options,
         IAuditLogRepository auditRepo,
-        IConsentResolutionService? consentService = null,
+        IConsentResolutionService consentService,
+        IColumnMaskingProvider maskingProvider,
         TimeProvider? timeProvider = null,
         ILogger<GovernedTableCacheExecutionService>? logger = null)
     {
@@ -69,7 +71,8 @@ public sealed class GovernedTableCacheExecutionService
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
         _auditRepo = auditRepo ?? throw new ArgumentNullException(nameof(auditRepo));
-        _consentService = consentService;
+        _consentService = consentService ?? throw new ArgumentNullException(nameof(consentService));
+        _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
     }
@@ -79,7 +82,7 @@ public sealed class GovernedTableCacheExecutionService
         string sql,
         TableCacheCallerContext caller,
         IReadOnlyList<string>? requestedColumns = null,
-        IReadOnlyDictionary<string, string>? columnMasks = null,
+        IReadOnlyDictionary<string, MaskingRule>? columnMasks = null,
         bool simulateUpstreamOutage = false,
         CancellationToken ct = default)
     {
@@ -87,6 +90,9 @@ public sealed class GovernedTableCacheExecutionService
         ArgumentNullException.ThrowIfNull(caller);
 
         var stopwatch = Stopwatch.StartNew();
+        var effectiveMasks = columnMasks != null
+            ? new Dictionary<string, MaskingRule>(columnMasks, StringComparer.OrdinalIgnoreCase)
+            : null;
 
         // -------------------------------------------------------------------
         // SEC-BL04-01: Zero-Trust Governance Precedence (Casbin ABAC / ReBAC)
@@ -100,23 +106,29 @@ public sealed class GovernedTableCacheExecutionService
         // -------------------------------------------------------------------
         // SEC-BL04-01 & SEC-BL04-09: Consent Resolution (Fail-Closed)
         // -------------------------------------------------------------------
-        if (_consentService != null)
+        var userSidNullable = caller.Principal.GetUserSid();
+        if (userSidNullable == null)
         {
-            var sid = new Sid(caller.Principal.Identity?.Name ?? "anonymous");
-            var scopes = TokenAccessScope.GetScopeSet(caller.Principal.Claims);
-            var consentDecision = _consentService.ResolveAccess(
-                userSid: sid,
-                subjectGroupSids: new HashSet<Sid>(),
-                userRoles: caller.Roles ?? new HashSet<string>(),
-                table: table,
-                activeConsents: caller.ActiveConsents ?? [],
-                callerScopes: scopes.Count > 0 ? scopes : null);
+            _logger?.LogWarning("SEC-BL04-01 / SEC-BL04-09: Missing user SID for caller.");
+            throw new SecurityException($"{ConsentRequiredCode}: Caller lacks a valid user SID.");
+        }
 
-            if (!consentDecision.IsAllowed)
-            {
-                _logger?.LogWarning("SEC-BL04-01 / SEC-BL04-09: Missing or revoked consent for table '{Table}'.", table);
-                throw new SecurityException($"{ConsentRequiredCode}: Caller lacks valid consent to access table '{table}'.");
-            }
+        var sid = userSidNullable.Value;
+        var scopes = TokenAccessScope.GetScopeSet(caller.Principal.Claims);
+        var consentDecision = _consentService.ResolveAccess(
+            userSid: sid,
+            subjectGroupSids: caller.Principal.GetGroupSids(),
+            userRoles: caller.Roles ?? caller.Principal.GetUserRoles(),
+            table: table,
+            activeConsents: caller.ActiveConsents ?? [],
+            dialect: DatabaseDialect.PostgreSql,
+            allUserSids: caller.Principal.GetAllUserSids(),
+            callerScopes: scopes.Count > 0 ? scopes : null);
+
+        if (!consentDecision.IsAllowed)
+        {
+            _logger?.LogWarning("SEC-BL04-01 / SEC-BL04-09: Missing or revoked consent for table '{Table}'.", table);
+            throw new SecurityException($"{ConsentRequiredCode}: Caller lacks valid consent to access table '{table}'.");
         }
 
         // -------------------------------------------------------------------
@@ -218,7 +230,7 @@ public sealed class GovernedTableCacheExecutionService
                     // -------------------------------------------------------
                     // SEC-BL04-03: Dynamic Column Masking Parity
                     // -------------------------------------------------------
-                    if (columnMasks != null && columnMasks.TryGetValue(colName, out var maskType))
+                    if (effectiveMasks != null && effectiveMasks.TryGetValue(colName, out var rule))
                     {
                         if (!maskedColumnList.Contains(colName))
                         {
@@ -227,18 +239,23 @@ public sealed class GovernedTableCacheExecutionService
 
                         if (val != null)
                         {
-                            if (string.Equals(maskType, "REDACT", StringComparison.OrdinalIgnoreCase))
+                            try
                             {
-                                val = "***-**-****";
+                                var maskedVal = _maskingProvider.MaskValue(colName, val, rule);
+                                if (Equals(maskedVal, val) && !string.Equals(rule.RuleType, "NULLIFY", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _logger?.LogWarning("SEC-BL04-03 unknown mask: provider returned raw value for column {Column} with rule {RuleType}", colName, rule.RuleType);
+                                    val = null;
+                                }
+                                else
+                                {
+                                    val = maskedVal;
+                                }
                             }
-                            else if (string.Equals(maskType, "HASH", StringComparison.OrdinalIgnoreCase))
+                            catch (Exception ex)
                             {
-                                val = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(val.ToString() ?? string.Empty)));
-                            }
-                            else if (string.Equals(maskType, "PARTIAL", StringComparison.OrdinalIgnoreCase))
-                            {
-                                var str = val.ToString() ?? string.Empty;
-                                val = str.Length > 4 ? new string('*', str.Length - 4) + str[^4..] : "****";
+                                _logger?.LogWarning(ex, "SEC-BL04-03 unknown mask: masking provider threw for column {Column} with rule {RuleType}", colName, rule.RuleType);
+                                val = null;
                             }
                         }
                     }

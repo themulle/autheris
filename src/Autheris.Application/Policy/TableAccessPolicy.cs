@@ -281,10 +281,10 @@ public sealed partial class TableAccessPolicy
         }
 
         var consentBypassed = _options?.IsConsentBypassed == true;
-        AccessProfile? profile;
+        IReadOnlyList<AccessProfile> profiles;
         try
         {
-            profile = await ResolveActiveAccessProfileAsync(query, ct).ConfigureAwait(false);
+            profiles = await ResolveActiveAccessProfilesAsync(query, ct).ConfigureAwait(false);
         }
         catch (Autheris.Application.Policy.Exceptions.AccessProfileSourceUnavailableException ex)
         {
@@ -305,30 +305,14 @@ public sealed partial class TableAccessPolicy
             decision = decision with { ScopeClearance = unknown };
         }
 
-        if (profile != null && decision.IsAllowed)
+        if (profiles.Count > 0 && decision.IsAllowed)
         {
-            IRowPolicy? profilePolicy = null;
-            if (_rowPolicyFactory is { CanParseAdminPredicates: true } && !string.IsNullOrWhiteSpace(profile.RowFilterPredicate))
+            // Most restrictive masking mode of the matched profiles; the row filters of all of them are AND-ed. An invalid profile row
+            // filter or conflicting parameters deny the table (fail closed).
+            decision = ApplyAccessProfiles(decision, profiles, query.Metadata);
+            if (!decision.IsAllowed)
             {
-                // WP-X0e: the admin-authored predicate is parsed once into a typed policy; an invalid predicate denies the table
-                // (fail closed). The denial reason never echoes the predicate text.
-                try
-                {
-                    profilePolicy = _rowPolicyFactory.FromAccessProfile(profile.RowFilterPredicate, query.Metadata);
-                }
-                catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
-                {
-                    return TableAccessDecision.Denied(table, "Access profile row filter is invalid (fail-closed).");
-                }
-            }
-
-            try
-            {
-                decision = ApplyProfileToDecision(decision, profile, query.Metadata, profilePolicy);
-            }
-            catch (System.Security.SecurityException)
-            {
-                return TableAccessDecision.Denied(table, "Conflicting row-level security parameters.");
+                return decision;
             }
         }
 

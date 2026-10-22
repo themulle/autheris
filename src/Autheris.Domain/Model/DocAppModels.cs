@@ -33,6 +33,8 @@ public sealed record DocAppSummary(
 
 /// <summary>
 /// Request payload to deposit a document or runbook via MCP or REST.
+/// <see cref="TenantId"/> is the depositing tenant (null for official documentation deposited by a cluster administrator
+/// or shipped with the gateway); <see cref="AuthorSid"/> is the depositing principal.
 /// </summary>
 public sealed record DepositDocRequest(
     string AppId,
@@ -41,7 +43,9 @@ public sealed record DepositDocRequest(
     string Content,
     string? DocId = null,
     string? ErrorCode = null,
-    IReadOnlyList<string>? Tags = null
+    IReadOnlyList<string>? Tags = null,
+    string? TenantId = null,
+    string? AuthorSid = null
 );
 
 /// <summary>

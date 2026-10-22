@@ -114,6 +114,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
 
         var token = CreateJwt([
             new Claim("sub", "S-1-5-21-agent-001"),
+            new Claim("azp", "talos-agent"),
             new Claim("scp", "Agent.Read")
         ]);
 
@@ -131,6 +132,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
 
         var token = CreateJwt([
             new Claim("sub", "spn-app-guid-1234"),
+            new Claim("appid", "spn-app-guid-1234"),
             new Claim("idtyp", "app"),
             new Claim("roles", "Reader")
         ]);
@@ -149,6 +151,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
 
         var token = CreateJwt([
             new Claim("sub", "spn-app-guid-1234"),
+            new Claim("appid", "spn-app-guid-1234"),
             new Claim("idtyp", "app")
         ]);
 

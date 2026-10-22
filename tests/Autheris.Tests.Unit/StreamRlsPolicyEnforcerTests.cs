@@ -349,6 +349,94 @@ public sealed class StreamRlsPolicyEnforcerTests
         result.MaskedPayload["id"].ShouldBe(12);
     }
 
+    // Casbin subject attributes: same fail-closed claim handling as the query path (TableAccessPolicy.BuildClaimAttributes).
+    private async Task<SecurityEvaluationContext> CaptureCasbinContextAsync(params Claim[] extraClaims)
+    {
+        var table = new TableIdentifier("sales", "crm", "customers");
+        var cdcEvent = new CdcEvent(
+            EventId: "evt-attr",
+            Table: table,
+            Operation: CdcOperation.Insert,
+            TenantId: "tenant-a",
+            Before: null,
+            After: new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alice" },
+            Timestamp: DateTimeOffset.UtcNow);
+
+        var claims = new List<Claim> { new("tenant_id", "tenant-a"), new(ClaimTypes.PrimarySid, "S-1-5-ALICE") };
+        claims.AddRange(extraClaims);
+        var subscriber = new ClaimsPrincipal(new ClaimsIdentity(claims));
+
+        SetupMetadata(table, ["id", "name"]);
+        SetupConsentDecision(TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+        _policyEnforcement.HasPolicies(Arg.Any<TenantId>()).Returns(true);
+
+        SecurityEvaluationContext? captured = null;
+        _policyEnforcement.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<SecurityEvaluationContext>();
+                return new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>()));
+            });
+
+        await _sut.EvaluateAndMaskAsync(cdcEvent, subscriber);
+
+        captured.ShouldNotBeNull();
+        return captured;
+    }
+
+    [Fact]
+    public async Task EvaluateAndMaskAsync_MultiValuedClaim_BecomesAmbiguousAttribute_NotLastValue()
+    {
+        var context = await CaptureCasbinContextAsync(new Claim("department", "hr"), new Claim("department", "finance"));
+
+        context.Attributes.ShouldNotBeNull();
+        context.Attributes["department"].ShouldBeOfType<Autheris.Application.Governance.CasbinEnforcementService.AmbiguousAttributeValue>();
+    }
+
+    [Fact]
+    public async Task EvaluateAndMaskAsync_RepeatedIdenticalClaim_StaysSingleValued()
+    {
+        var context = await CaptureCasbinContextAsync(new Claim("department", "hr"), new Claim("department", "hr"));
+
+        context.Attributes.ShouldNotBeNull();
+        context.Attributes["department"].ShouldBe("hr");
+    }
+
+    [Fact]
+    public async Task EvaluateAndMaskAsync_EmptyClaimValue_IsTreatedAsMissing()
+    {
+        var context = await CaptureCasbinContextAsync(new Claim("department", ""), new Claim("region", "  "));
+
+        context.Attributes.ShouldNotBeNull();
+        context.Attributes.ContainsKey("department").ShouldBeFalse();
+        context.Attributes.ContainsKey("region").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluateAndMaskAsync_ActionClaims_AreIgnored_AndGatewayActionWins()
+    {
+        var context = await CaptureCasbinContextAsync(new Claim("action", "write"), new Claim("gql.action", "delete"));
+
+        context.Attributes.ShouldNotBeNull();
+        context.Attributes["action"].ShouldBe("read");
+        context.Attributes.ContainsKey("gql.action").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluateAndMaskAsync_PurposeClaims_FollowQueryPathResolution()
+    {
+        var single = await CaptureCasbinContextAsync(new Claim("purpose", "audit"));
+        single.PurposeId.ShouldBe("audit");
+
+        var fallback = await CaptureCasbinContextAsync(new Claim("purpose_id", "billing"));
+        fallback.PurposeId.ShouldBe("billing");
+
+        var ambiguous = await CaptureCasbinContextAsync(new Claim("purpose", "audit"), new Claim("purpose", "marketing"));
+        ambiguous.PurposeId.ShouldBeNull();
+        ambiguous.Attributes.ShouldNotBeNull();
+        ambiguous.Attributes["purpose"].ShouldBeOfType<Autheris.Application.Governance.CasbinEnforcementService.AmbiguousAttributeValue>();
+    }
+
     [Fact]
     public void StreamingRowFilterAstEvaluator_HighThroughputEvaluation_MatchesAccurately()
     {

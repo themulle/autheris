@@ -50,6 +50,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly TrinoSqlEngine.ISqlEngine? _sqlEngine;
     private readonly IReadPathSwitches? _switches;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
+    private readonly Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? _semanticCatalog;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -76,7 +78,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IGatewayEventBus? eventBus = null,
         TrinoSqlEngine.ISqlEngine? sqlEngine = null,
         IReadPathSwitches? switches = null,
-        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null)
+        Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
+        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -98,6 +102,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _sqlEngine = sqlEngine;
         _switches = switches;
         _datasetCatalogAdmin = datasetCatalogAdmin;
+        _procedureRegistry = procedureRegistry;
+        _semanticCatalog = semanticCatalog;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -199,7 +205,25 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             if (_accessPlanningService != null)
             {
-                return await McpAdminTools.ExecuteAdminToolAsync(tool.Name, request.ArgumentsJson ?? "{}", sessionContext, _accessPlanningService, _datasetCatalogAdmin, cancellationToken).ConfigureAwait(false);
+                var adminResult = await McpAdminTools.ExecuteAdminToolAsync(tool.Name, request.ArgumentsJson ?? "{}", sessionContext, _accessPlanningService, _datasetCatalogAdmin, cancellationToken).ConfigureAwait(false);
+
+                // Every admin tool call leaves an MCP_TOOL_EXECUTION row, the successful (mutating) ones included. The details are fixed
+                // texts: the arguments can carry secrets (inline datasource credentials) and the error is already a fixed message.
+                var adminVerdict = adminResult.IsSuccess ? "allow" : "deny";
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, adminVerdict);
+                McpDiagnostics.RecordGuardrailVerdict(adminVerdict, tool.Name, false, false);
+                await RecordAuditEventAsync(
+                    tool.Name,
+                    sessionContext,
+                    adminResult.IsSuccess ? "ALLOW" : "DENY",
+                    adminResult.IsSuccess
+                        ? $"Admin tool '{tool.Name}' executed by a cluster administrator."
+                        : $"Admin tool '{tool.Name}' was rejected: {adminResult.ErrorMessage ?? "ERROR"}",
+                    false,
+                    false,
+                    Math.Max(1, (adminResult.ContentJson?.Length ?? 0) / 4),
+                    cancellationToken).ConfigureAwait(false);
+                return adminResult;
             }
         }
 
@@ -254,7 +278,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         bool isSelfAccessTool = string.Equals(tool.Name, McpDatasetTools.DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
                                 string.Equals(tool.Name, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase);
 
-        if (resolvedTables == null && !isSelfAccessTool && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
+        if (resolvedTables == null && !isSelfAccessTool &&
+            (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) || McpDatasetTools.IsDatasetTool(tool.Name)))
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -274,17 +299,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             if (_policyEnforcementService != null && _options.Value.Casbin.Enabled && !_options.Value.IsMcpAuthBypassed && !isSchemaTool)
             {
-                var userSidStr = !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId;
-                var groupSids = sessionContext.GroupSids is { Count: > 0 } ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray() : [];
-                var clientIp = !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp)
-                    ? parsedIp : System.Net.IPAddress.None;
-
-                var secContext = new SecurityEvaluationContext(
-                    UserSid: new Sid(userSidStr), GroupSids: groupSids, Tenant: new TenantId(sessionContext.TenantId),
-                    TargetTable: effectiveTable, RequestedColumns: [], ClientIp: clientIp,
-                    Timestamp: DateTimeOffset.UtcNow, PurposeId: "MCP_AI_AGENT_QUERY");
-
-                var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, cancellationToken).ConfigureAwait(false);
+                var userSidStr = CallerSidOf(sessionContext);
+                var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(BuildSecurityContext(sessionContext, effectiveTable), cancellationToken).ConfigureAwait(false);
                 if (!policyDecision.IsAllowed)
                 {
                     activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
@@ -308,11 +324,28 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         var needsFourEyesCheck = ToolReadsDatasetRows(tool);
-        foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? resolvedTables ?? [] : [])
+
+        // call_procedure and query_metrics: the ABAC object above is a pseudo table (procedure.dbo.<name>, the semantic catalog) that
+        // never carries the four-eyes flag. The gate below runs on the real tables behind the call instead; unresolvable is fail-closed.
+        IReadOnlyList<TableIdentifier>? fourEyesTables = resolvedTables;
+        var gatesUnderlyingTables = needsFourEyesCheck && _tableMetadataRepository != null && ReadsThroughUnderlyingTables(tool);
+        if (gatesUnderlyingTables)
+        {
+            fourEyesTables = await ResolveUnderlyingTablesAsync(tool, request.ArgumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+            if (fourEyesTables == null)
+            {
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+                _logger.LogWarning("Zero-Trust Fail-Closed: Could not resolve the tables behind MCP tool '{ToolName}'. Denying execution.", tool.Name);
+                await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Tool execution denied: the tables behind the call could not be resolved (fail-closed).", false, false, 0, cancellationToken).ConfigureAwait(false);
+                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
+            }
+        }
+
+        foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? fourEyesTables ?? [] : [])
         {
             if (_tableMetadataRepository == null || resolvedTable == null ||
-                resolvedTable.Value.Equals(McpDatasetTools.CatalogTable) ||
-                resolvedTable.Value.Equals(McpSemanticTools.SemanticCatalogTable))
+                resolvedTable.Value.Equals(McpDatasetTools.CatalogTable))
             {
                 continue;
             }
@@ -330,7 +363,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 unavailable = true;
             }
 
-            if (unavailable || (meta != null && !meta.Table.IsActive))
+            // A table behind a procedure or metric without catalog metadata cannot be classified: same answer as an inactive one.
+            if (unavailable || (meta == null && gatesUnderlyingTables) || (meta != null && !meta.Table.IsActive))
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -478,5 +512,108 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         McpDiagnostics.RecordGuardrailVerdict(verdict, tool.Name, wasMasked, false);
 
         return new McpToolCallResult(IsSuccess: true, ContentJson: scrubbedJson, EstimatedTokens: estimatedTokens, IsMasked: wasMasked, TruncatedDueToBudget: truncated);
+    }
+
+    /// <summary>Audit and metric label of a resource read (the audit row names the URI where a tool call names the tool).</summary>
+    internal static string ResourceAuditName(string resourceUri) => "resources/read " + resourceUri;
+
+    public async ValueTask<McpToolCallResult> ReadResourceWithGuardrailAsync(
+        string resourceUri,
+        IReadOnlyList<TableIdentifier> targetTables,
+        Func<CancellationToken, Task<string>> readContent,
+        McpSessionContext sessionContext,
+        bool applyTokenBudget = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceUri);
+        ArgumentNullException.ThrowIfNull(targetTables);
+        ArgumentNullException.ThrowIfNull(readContent);
+        ArgumentNullException.ThrowIfNull(sessionContext);
+
+        var name = ResourceAuditName(resourceUri);
+        var notFound = new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Resource '{resourceUri}' not found.");
+
+        using var activity = McpDiagnostics.ActivitySource.StartActivity($"gen_ai.resource {resourceUri}", ActivityKind.Internal);
+        activity?.SetTag(McpDiagnostics.GenAiSystemKey, "autheris_mcp");
+        activity?.SetTag(McpDiagnostics.GenAiOperationNameKey, "resource_read");
+        activity?.SetTag(McpDiagnostics.GenAiToolCallIdKey, sessionContext.SessionId);
+        activity?.SetTag(McpDiagnostics.GenAiClientIdKey, sessionContext.ServicePrincipalId);
+
+        // Fail closed: a read without a target is never treated as unrestricted.
+        if (targetTables.Count == 0)
+        {
+            activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+            await RecordAuditEventAsync(name, sessionContext, "DENY", "Unresolvable target table for resource read (fail-closed).", false, false, 0, cancellationToken).ConfigureAwait(false);
+            return notFound;
+        }
+
+        // Same Casbin ABAC request as the equivalent tool call, on every table the resource discloses.
+        if (_policyEnforcementService != null && _options.Value.Casbin.Enabled && !_options.Value.IsMcpAuthBypassed)
+        {
+            foreach (var table in targetTables)
+            {
+                var decision = await _policyEnforcementService.EvaluatePolicyAsync(BuildSecurityContext(sessionContext, table), cancellationToken).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                    _logger.LogWarning("Casbin ABAC policy denied AI Agent '{Principal}' resource read '{Uri}' (target: '{TargetTable}') in tenant '{TenantId}'.",
+                        sessionContext.ServicePrincipalId, resourceUri, table, sessionContext.TenantId);
+                    await RecordAuditEventAsync(name, sessionContext, "DENY", $"Access denied by Casbin ABAC policy: {string.Join("; ", decision.DeniedReasons)}", false, false, 0, cancellationToken).ConfigureAwait(false);
+
+                    if (_eventBus != null)
+                    {
+                        await _eventBus.PublishAsync(new PolicyDeniedEvent(
+                            EventId: Guid.NewGuid().ToString("N"), SubjectSid: CallerSidOf(sessionContext), Action: "resources/read",
+                            Resource: table.ToString(), Reason: PolicyDeniedEvent.DefaultReasonCode,
+                            Timestamp: DateTimeOffset.UtcNow, TenantId: sessionContext.TenantId,
+                            ReasonCode: PolicyDeniedEvent.DefaultReasonCode), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    // Denied and unknown resources answer alike (no existence oracle).
+                    return notFound;
+                }
+            }
+        }
+
+        string rawText;
+        try
+        {
+            rawText = await readContent(cancellationToken).ConfigureAwait(false);
+        }
+        catch (McpResourceNotFoundException)
+        {
+            activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+            await RecordAuditEventAsync(name, sessionContext, "DENY", "Resource not found or not visible to the caller.", false, false, 0, cancellationToken).ConfigureAwait(false);
+            return notFound;
+        }
+
+        bool shouldMask = !_options.Value.IsMcpUnmaskedAllowed;
+        bool wasMasked = false;
+        string text = shouldMask ? ScrubPiiAndSensitiveData(rawText ?? string.Empty, out wasMasked) : rawText ?? string.Empty;
+        if (!shouldMask)
+        {
+            _logger.LogWarning("SECURITY ALERT [WARN]: AI resource read '{Uri}' is running unmasked (warn_allow_unmasked_ai_access is ACTIVE).", resourceUri);
+        }
+
+        int estimatedTokens = Math.Max(1, text.Length / 4);
+        bool truncated = false;
+        int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
+        if (applyTokenBudget && estimatedTokens > maxTokens && text.Length > maxTokens * 4)
+        {
+            _logger.LogWarning("Resource '{Uri}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", resourceUri, estimatedTokens, maxTokens);
+            const string marker = "\n\n[TRUNCATED DUE TO MCP TOKEN BUDGET] Use the search and schema tools to narrow the result.";
+            text = string.Concat(text.AsSpan(0, Math.Max(0, (maxTokens * 4) - marker.Length)), marker.AsSpan());
+            estimatedTokens = Math.Max(1, text.Length / 4);
+            truncated = true;
+        }
+
+        await RecordAuditEventAsync(name, sessionContext, "ALLOW", "Resource read under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
+
+        var verdict = wasMasked ? "masked" : "allow";
+        activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, verdict);
+        activity?.SetTag(McpDiagnostics.GenAiGuardrailPiiDetectedKey, wasMasked);
+        activity?.SetTag(McpDiagnostics.GenAiUsageOutputTokensKey, estimatedTokens);
+
+        return new McpToolCallResult(IsSuccess: true, ContentJson: text, EstimatedTokens: estimatedTokens, IsMasked: wasMasked, TruncatedDueToBudget: truncated);
     }
 }

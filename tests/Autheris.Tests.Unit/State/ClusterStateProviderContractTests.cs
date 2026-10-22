@@ -109,6 +109,26 @@ public abstract class ClusterStateProviderContractTests
 
         delivered.ShouldBe(1);
     }
+
+    [Fact]
+    public async Task TryAcquireSlot_ConcurrentAcquires_RespectLimit()
+    {
+        var provider = CreateProvider();
+        const string setKey = "contract:slot:concurrent";
+        const int limit = 5;
+        const int totalCallers = 25;
+
+        var tasks = Enumerable.Range(0, totalCallers).Select(async i =>
+        {
+            await Task.Yield();
+            return await provider.TryAcquireSlotAsync(setKey, $"member-{i}", limit, TimeSpan.FromMinutes(2));
+        });
+
+        var results = await Task.WhenAll(tasks);
+
+        results.Count(r => r == true).ShouldBe(limit);
+        results.Count(r => r == false).ShouldBe(totalCallers - limit);
+    }
 }
 
 public sealed class InMemoryClusterStateProviderContractTests : ClusterStateProviderContractTests

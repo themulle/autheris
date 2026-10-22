@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Interfaces;
 
-public partial class SqlServerGovernanceRepository : IFunctionalRightRepository, IAccessPolicyRepository
+public partial class SqlServerGovernanceRepository : IFunctionalRightRepository
 {
     private RightsAndPoliciesStore? _rightsAndPoliciesStore;
 
@@ -36,23 +36,4 @@ public partial class SqlServerGovernanceRepository : IFunctionalRightRepository,
 
     public Task DeleteMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, CancellationToken ct = default) =>
         RightsAndPoliciesInstance.DeleteMappingAsync(tenantId, realmId, groupOrRole, functionalRight, ct);
-
-    // ---------------------------------------------------- ACCESS POLICIES
-    public Task<IReadOnlyList<AccessPolicy>> GetPoliciesAsync(TenantId tenantId, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.GetPoliciesAsync(tenantId, ct);
-
-    public Task<AccessPolicy?> GetPolicyByIdAsync(TenantId tenantId, string policyId, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.GetPolicyByIdAsync(tenantId, policyId, ct);
-
-    public Task CreatePolicyAsync(AccessPolicy policy, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.CreatePolicyAsync(policy, ct);
-
-    public Task UpdatePolicyAsync(AccessPolicy policy, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.UpdatePolicyAsync(policy, ct);
-
-    public Task DeletePolicyAsync(TenantId tenantId, string policyId, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.DeletePolicyAsync(tenantId, policyId, ct);
-
-    public Task<IReadOnlyList<AccessPolicy>> GetActivePoliciesForGranteesAsync(TenantId tenantId, string realmId, IReadOnlyCollection<string> groupIds, IReadOnlyCollection<string> roles, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.GetActivePoliciesForGranteesAsync(tenantId, realmId, groupIds, roles, ct);
 }

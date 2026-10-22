@@ -124,7 +124,7 @@ public sealed class DisabledReadPathObserverMiddlewareTests
         var (mw, log, time, _) = Build();
         const string sid = "S-1-5-21-111-222-333-1001";
 
-        for (int i = 0; i < 5; i++) await mw.InvokeAsync(Ctx("/api/v1/data/secret-table?token=abc", "POST", sid, "?token=abc"));
+        for (int i = 0; i < 5; i++) await mw.InvokeAsync(Ctx("/api/v1/data/secret-table?token=supersecretqueryvalue999", "POST", sid, "?token=supersecretqueryvalue999"));
 
         log.Lines.Count.ShouldBe(1);
         var line = log.Lines[0];
@@ -133,7 +133,7 @@ public sealed class DisabledReadPathObserverMiddlewareTests
         line.ShouldNotContain(sid);
         line.ShouldNotContain("secret-table");
         line.ShouldNotContain("token");
-        line.ShouldNotContain("abc");
+        line.ShouldNotContain("supersecretqueryvalue999");
         line.ShouldNotContain("/api/v1");
 
         time.Advance(TimeSpan.FromSeconds(61));

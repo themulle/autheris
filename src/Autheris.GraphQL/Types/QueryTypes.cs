@@ -657,11 +657,11 @@ public sealed class Query
             : null;
         Sid? sid = !string.IsNullOrWhiteSpace(subjectSid) ? new Sid(subjectSid) : (Sid?)null;
 
-        bool canAccessForeignReports = callerContext.Roles.Any(r =>
+        bool isClusterAdmin = callerContext.IsClusterAdmin;
+        bool canAccessForeignReports = isClusterAdmin || callerContext.Roles.Any(r =>
             r.Equals("PrivacyAdmin", StringComparison.OrdinalIgnoreCase) ||
             r.Equals("DataProtectionOfficer", StringComparison.OrdinalIgnoreCase) ||
-            r.Equals("GovernanceAdmin", StringComparison.OrdinalIgnoreCase) ||
-            r.Equals("ClusterAdmin", StringComparison.OrdinalIgnoreCase));
+            r.Equals("GovernanceAdmin", StringComparison.OrdinalIgnoreCase));
 
         // Effective SID: If subjectSid is omitted, default to callerContext.UserSid unless caller is a privacy officer
         var effectiveSid = sid ?? (canAccessForeignReports ? (Sid?)null : callerContext.UserSid);
@@ -713,7 +713,7 @@ public sealed class Query
         }
 
         bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
-        bool isClusterAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
+        bool isClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
         return new CallerSecurityContext(
             userSid,

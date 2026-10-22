@@ -56,6 +56,10 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
+        if (gatewayOptions.Value?.Rebac?.PerCheckMemoMaxEntries <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(gatewayOptions), "PerCheckMemoMaxEntries must be greater than 0.");
+        }
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _eventBus = eventBus;
 
@@ -113,7 +117,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ReBAC cluster generation bump or publish failed for tenant {Tenant}. Entering degraded state.", tenant);
+                _logger.LogError(ex, "ReBAC cluster generation bump or publish failed for tenant {Tenant}. Entering degraded state.", ForLog(tenant));
                 _degradedTenants[tenant] = true;
                 InvalidateLocal(tenant);
                 throw;
@@ -127,7 +131,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         _tenantGenerationCache.TryRemove(tenant, out _);
         if (_cache.TryRemove(tenant, out _))
         {
-            _logger.LogDebug("F-SEC-04 ReBAC invalidated decision cache for tenant {Tenant}", tenant);
+            _logger.LogDebug("F-SEC-04 ReBAC invalidated decision cache for tenant {Tenant}", ForLog(tenant));
         }
         return tenant;
     }
@@ -158,7 +162,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read ReBAC generation counter for tenant {Tenant}. Cache validation failed-closed to cache miss.", tenant);
+            _logger.LogWarning(ex, "Failed to read ReBAC generation counter for tenant {Tenant}. Cache validation failed-closed to cache miss.", ForLog(tenant));
             return null;
         }
     }
@@ -181,8 +185,16 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             return RebacCheckResult.Denied;
         }
 
+        // EP-08: Canonicalize request.User; invalid subject forms fail-closed to Denied.
+        var parsedUser = RebacSubject.Parse(request.User);
+        if (!parsedUser.IsValid)
+        {
+            return RebacCheckResult.Denied;
+        }
+        var canonicalUser = parsedUser.Canonical;
+
         var tenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
-        var cacheKey = $"{request.User}#{request.Relation}@{request.Object}";
+        var cacheKey = $"{canonicalUser}#{request.Relation}@{request.Object}";
 
         var isDegraded = _degradedTenants.ContainsKey(tenant);
         long? currentGen = null;
@@ -205,16 +217,19 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         var onStack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visitedFailed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tracker = new ExpiryTracker();
-        var maxDepth = _gatewayOptions.Value.Rebac.MaxTraversalDepth;
+        var rebacOptions = _gatewayOptions.Value.Rebac;
+        var maxDepth = rebacOptions.MaxTraversalDepth;
+        var memoMaxEntries = rebacOptions.PerCheckMemoMaxEntries;
+        var memo = new Dictionary<(string? User, string? Relation, string? Obj), IReadOnlyList<RebacTuple>>();
 
         try
         {
-            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false);
+            var allowed = await TraverseAndEvaluateAsync(tenant, canonicalUser, request.Relation, request.Object, depth: 0, maxDepth, onStack, visitedFailed, tracker, memo, memoMaxEntries, ct).ConfigureAwait(false);
 
             // 3. Store in cache (only if not degraded and generation is known)
             if (!isDegraded && currentGen.HasValue)
             {
-                var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
+                var ttl = rebacOptions.CacheTtlSeconds;
                 var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
                 if (allowed && tracker.Earliest is { } tupleExpiry && tupleExpiry < expiry)
                 {
@@ -228,7 +243,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", request.User, request.Relation, request.Object, tenant);
+            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", ForLog(canonicalUser), ForLog(request.Relation), ForLog(request.Object), ForLog(tenant));
             return RebacCheckResult.Denied;
         }
     }
@@ -318,6 +333,8 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         HashSet<string> onStack,
         HashSet<string> visitedFailed,
         ExpiryTracker tracker,
+        Dictionary<(string? User, string? Relation, string? Obj), IReadOnlyList<RebacTuple>> memo,
+        int memoMaxEntries,
         CancellationToken ct)
     {
         if (ct.IsCancellationRequested) return false;
@@ -335,7 +352,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         {
             _logger.LogWarning(
                 "F-SEC-04 ReBAC recursion depth {Depth} exceeded max {MaxDepth} for {User}#{Rel}@{Obj}. Decision: Denied.",
-                depth, maxDepth, user, relation, obj);
+                depth, maxDepth, ForLog(user), ForLog(relation), ForLog(obj));
             return false;
         }
 
@@ -348,7 +365,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         if (!onStack.Add(visitKey))
         {
             // True cycle detected on current call stack! Fail-closed
-            _logger.LogWarning("F-SEC-04 ReBAC cyclic relationship detected: {CycleKey}. Decision: Denied.", visitKey);
+            _logger.LogWarning("F-SEC-04 ReBAC cyclic relationship detected: {CycleKey}. Decision: Denied.", ForLog(visitKey));
             return false;
         }
 
@@ -357,7 +374,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
             // WP-SC-16: expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
             var now = DateTimeOffset.UtcNow;
-            var directTuples = await _store.GetTuplesAsync(tenantId, user, relation, obj, ct).ConfigureAwait(false);
+            var directTuples = await GetTuplesWithMemoAsync(memo, memoMaxEntries, tenantId, user, relation, obj, ct).ConfigureAwait(false);
             var direct = directTuples
                 .Where(t => !t.IsExpired(now) && !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase))
                 .ToList();
@@ -378,7 +395,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
                 foreach (var parentRel in parents)
                 {
-                    if (await TraverseAndEvaluateAsync(tenantId, user, parentRel, obj, depth + 1, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false))
+                    if (await TraverseAndEvaluateAsync(tenantId, user, parentRel, obj, depth + 1, maxDepth, onStack, visitedFailed, tracker, memo, memoMaxEntries, ct).ConfigureAwait(false))
                     {
                         return true;
                     }
@@ -387,7 +404,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
             // 3. User-set expansion: Does user belong to a group that has this relation?
             // E.g., user is "user:alice", check if there's a tuple (tenantId, group, relation, obj) and alice is member of group
-            var objectTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: relation, obj: obj, ct).ConfigureAwait(false);
+            var objectTuples = await GetTuplesWithMemoAsync(memo, memoMaxEntries, tenantId, user: null, relation: relation, obj: obj, ct).ConfigureAwait(false);
             foreach (var t in objectTuples)
             {
                 if (string.IsNullOrWhiteSpace(t.User) || t.IsExpired(now))
@@ -405,7 +422,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
                         var groupObj = parts[0];
                         var groupRel = parts[1];
                         // Check if current user has 'groupRel' on 'groupObj'
-                        if (await TraverseAndEvaluateAsync(tenantId, user, groupRel, groupObj, depth + 1, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false))
+                        if (await TraverseAndEvaluateAsync(tenantId, user, groupRel, groupObj, depth + 1, maxDepth, onStack, visitedFailed, tracker, memo, memoMaxEntries, ct).ConfigureAwait(false))
                         {
                             tracker.Note(t.ExpiresAt);
                             return true;
@@ -416,7 +433,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
             // 4. Hierarchical parent delegation: Does 'obj' have a parent that grants access?
             // E.g. tuple (tenantId, parentObj, "parent", obj) -> check if user has relation on parentObj
-            var parentTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: "parent", obj: obj, ct).ConfigureAwait(false);
+            var parentTuples = await GetTuplesWithMemoAsync(memo, memoMaxEntries, tenantId, user: null, relation: "parent", obj: obj, ct).ConfigureAwait(false);
             foreach (var pt in parentTuples)
             {
                 var parentEntity = pt.User; // In parent relation, User column stores the parent entity identifier
@@ -426,7 +443,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
                     continue;
                 }
 
-                if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false))
+                if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, onStack, visitedFailed, tracker, memo, memoMaxEntries, ct).ConfigureAwait(false))
                 {
                     tracker.Note(pt.ExpiresAt);
                     return true;
@@ -440,6 +457,29 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         {
             onStack.Remove(visitKey);
         }
+    }
+
+    private async ValueTask<IReadOnlyList<RebacTuple>> GetTuplesWithMemoAsync(
+        Dictionary<(string? User, string? Relation, string? Obj), IReadOnlyList<RebacTuple>> memo,
+        int memoMaxEntries,
+        string tenantId,
+        string? user,
+        string? relation,
+        string? obj,
+        CancellationToken ct)
+    {
+        var key = (user, relation, obj);
+        if (memo.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var results = await _store.GetTuplesAsync(tenantId, user, relation, obj, ct).ConfigureAwait(false);
+        if (memo.Count < memoMaxEntries)
+        {
+            memo[key] = results;
+        }
+        return results;
     }
 
     private void InitializeDefaultInheritance()
@@ -462,4 +502,6 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             RegisterInheritance("can_query", "editor", "owner");
         }
     }
+
+    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
 }

@@ -19,6 +19,7 @@ public sealed class ReadPathSwitchOptionsValidator : IValidateOptions<GatewayOpt
 {
     private static readonly string[] ToolGroupKeys = ["Catalog", "Query", "Api", "Access"];
     private static readonly string[] DataEndpointKeys = ["Enabled"];
+    private static readonly string[] BulkStreamKeys = ["Enabled", "SigningKey"];
 
     private readonly IConfiguration? _configuration;
 
@@ -85,7 +86,7 @@ public sealed class ReadPathSwitchOptionsValidator : IValidateOptions<GatewayOpt
         var bulkStream = restApi.GetSection("BulkStream");
         if (bulkStream.Exists())
         {
-            CheckNode(bulkStream, $"{root}:RestApi:BulkStream", DataEndpointKeys, failures);
+            CheckNode(bulkStream, $"{root}:RestApi:BulkStream", BulkStreamKeys, failures);
             CheckSwitch(bulkStream, "Enabled", $"{root}:RestApi:BulkStream:Enabled", failures);
         }
 

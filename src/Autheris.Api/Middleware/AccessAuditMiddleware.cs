@@ -59,6 +59,7 @@ public sealed class AccessAuditMiddleware
         auditContext.TraceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
 
         var exceptionOccurred = false;
+        int? exceptionStatus = null;
         try
         {
             await _next(context).ConfigureAwait(false);
@@ -66,6 +67,7 @@ public sealed class AccessAuditMiddleware
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
             exceptionOccurred = true;
+            exceptionStatus = GatewayExceptionStatusMapper.ClientClosedRequest;
             if (!auditContext.IsHandled)
             {
                 auditContext.Error("CLIENT_ABORTED", AuditEventTypes.QueryExecutionError);
@@ -75,19 +77,20 @@ public sealed class AccessAuditMiddleware
         catch (Exception ex)
         {
             exceptionOccurred = true;
+            exceptionStatus = GatewayExceptionStatusMapper.Resolve(ex);
             if (!auditContext.IsHandled)
             {
-                auditContext.Error(ex.Message, AuditEventTypes.QueryExecutionError);
+                auditContext.Error(AuditExceptionCode.For(ex), AuditEventTypes.QueryExecutionError);
             }
             throw;
         }
         finally
         {
-            await FinalizeAuditAsync(context, auditWriter, auditContext, exceptionOccurred).ConfigureAwait(false);
+            await FinalizeAuditAsync(context, auditWriter, auditContext, exceptionOccurred, exceptionStatus).ConfigureAwait(false);
         }
     }
 
-    private async Task FinalizeAuditAsync(HttpContext context, IAuditWriter auditWriter, AuditContext auditContext, bool exceptionOccurred)
+    private async Task FinalizeAuditAsync(HttpContext context, IAuditWriter auditWriter, AuditContext auditContext, bool exceptionOccurred, int? statusOverride = null)
     {
         if (auditContext.IsHandled)
         {
@@ -102,7 +105,7 @@ public sealed class AccessAuditMiddleware
         }
 
         var policy = endpoint?.Metadata.GetMetadata<AuditPolicy>();
-        int statusCode = context.Response.StatusCode;
+        int statusCode = statusOverride ?? context.Response.StatusCode;
 
         // Router-produced 4xx (404/405/400...) on unrouted paths are scanner noise: never persist a chain row with a
         // client-chosen target. 401/403/429 and any exception/5xx path keep the regular audit behaviour (fail-closed).
@@ -128,19 +131,22 @@ public sealed class AccessAuditMiddleware
 
         if (statusCode == StatusCodes.Status401Unauthorized)
         {
-            auditContext.Deny("UNAUTHORIZED", AuditEventTypes.AuthFailed);
+            auditContext.Deny(auditContext.ReasonCode ?? "UNAUTHORIZED", AuditEventTypes.AuthFailed);
         }
         else if (statusCode == StatusCodes.Status403Forbidden)
         {
-            auditContext.Deny("FORBIDDEN", AuditEventTypes.AuthzEndpointDenied);
+            auditContext.Deny(auditContext.ReasonCode ?? "FORBIDDEN", AuditEventTypes.AuthzEndpointDenied);
         }
         else if (statusCode == StatusCodes.Status429TooManyRequests)
         {
-            auditContext.Deny("RATE_LIMIT_EXCEEDED", AuditEventTypes.RateLimitExceeded);
+            auditContext.Deny(auditContext.ReasonCode ?? "RATE_LIMIT_EXCEEDED", AuditEventTypes.RateLimitExceeded);
         }
         else if (statusCode >= 500 && auditContext.Decision != "DENY")
         {
-            auditContext.Error($"HTTP_{statusCode}", AuditEventTypes.QueryExecutionError);
+            if (string.IsNullOrEmpty(auditContext.ReasonCode))
+            {
+                auditContext.Error($"HTTP_{statusCode}", AuditEventTypes.QueryExecutionError);
+            }
         }
         else if (isDelegated && statusCode >= StatusCodes.Status400BadRequest && statusCode < 500 && auditContext.Decision == "ALLOW")
         {

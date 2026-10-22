@@ -133,8 +133,9 @@ public static partial class GovernanceEndpoints
             return Results.BadRequest(new { error = "validDays must be between 1 and 180." });
         }
 
-        // MaskingMode validation
-        if (!Enum.TryParse<MaskingPolicyMode>(req.MaskingMode, ignoreCase: true, out var mode))
+        // MaskingMode validation. Enum.TryParse also accepts any numeric string (e.g. "7"), so an undefined value is rejected explicitly:
+        // it would otherwise be stored and ranked/applied as an unknown mode.
+        if (!Enum.TryParse<MaskingPolicyMode>(req.MaskingMode, ignoreCase: true, out var mode) || !Enum.IsDefined(mode))
         {
             return Results.BadRequest(new { error = $"Invalid maskingMode '{req.MaskingMode}'. Supported values: Default, Unmasked, Strict." });
         }
@@ -240,13 +241,6 @@ public static partial class GovernanceEndpoints
         {
             return Results.Json(
                 new { error = grantDecision.ErrorCode, message = grantDecision.Reason, maxValidTo = grantDecision.MaxValidTo },
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
-        if (grantDecision.RequiresFourEyes)
-        {
-            return Results.Json(
-                new { error = GrantErrorCodes.FourEyesRequired, message = "Bulk grant of sensitive or unmasked access requires independent four-eyes approver(s) and cannot be self-approved." },
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
@@ -471,6 +465,13 @@ public static partial class GovernanceEndpoints
         // Route (b): an individual Unmasked grant needs the data owner (or delegate) of every matched table.
         if (profile.MaskingMode == MaskingPolicyMode.Unmasked && subjectType == AccessProfileSubjectType.User && assignment.Kind == AccessProfileAssignmentKind.Standard)
         {
+            // EP-01: Individual unmasked assignment may only be approved for concrete patterns (no wildcard)
+            if (profile.HasWildcardPattern)
+            {
+                return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = "Individual unmasked assignments cannot be approved for wildcard target tables." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var owners = context.RequestServices.GetService<IDataOwnershipRepository>();
             var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
             if (owners == null || metaRepo == null)
@@ -481,6 +482,14 @@ public static partial class GovernanceEndpoints
             var matched = (await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false))
                 .Where(t => profile.MatchesTable(t.Identifier))
                 .ToList();
+
+            // EP-01: At least one table must match
+            if (matched.Count == 0)
+            {
+                return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = "No catalogued tables match the profile target tables." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             foreach (var table in matched)
             {
                 if (!await owners.IsAuthorizedApproverForTableAsync(table.Identifier, new Sid(callerSid), ct).ConfigureAwait(false))

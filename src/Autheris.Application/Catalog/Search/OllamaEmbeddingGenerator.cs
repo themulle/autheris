@@ -16,6 +16,10 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
     private readonly int _dimensions;
     private readonly ILogger<OllamaEmbeddingGenerator>? _logger;
     private readonly bool _isValid;
+    private readonly TimeSpan _syncTimeout;
+
+    /// <summary>Upper bound for the synchronous <see cref="GenerateNormalizedEmbedding"/> path (search falls back to BM25 after it).</summary>
+    public static readonly TimeSpan DefaultSyncTimeout = TimeSpan.FromSeconds(5);
 
     public int EmbeddingDimensions => _dimensions;
     public string ModelIdentifier => $"ollama:{_model}";
@@ -26,7 +30,8 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
         string? model = "nomic-embed-text",
         int dimensions = 384,
         HttpClient? httpClient = null,
-        ILogger<OllamaEmbeddingGenerator>? logger = null)
+        ILogger<OllamaEmbeddingGenerator>? logger = null,
+        TimeSpan? syncTimeout = null)
     {
         _endpoint = endpoint ?? string.Empty;
         _model = string.IsNullOrWhiteSpace(model) ? "nomic-embed-text" : model;
@@ -34,6 +39,7 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
         _httpClient = httpClient;
         _logger = logger;
         _isValid = ValidateEndpoint(_endpoint);
+        _syncTimeout = syncTimeout is { } t && t > TimeSpan.Zero ? t : DefaultSyncTimeout;
     }
 
     public static bool ValidateEndpoint(string endpoint)
@@ -72,12 +78,20 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
             return ReadOnlyMemory<float>.Empty;
         }
 
-        // Synchronous generation via Async call with timeout or empty fallback
+        // The synchronous interface member cannot take a caller token: bound the blocking wait with a timeout token that also
+        // cancels the HTTP call, and run the async call on the thread pool so no captured synchronization context can deadlock.
+        // Prefer GenerateNormalizedEmbeddingsAsync (CatalogSearchEngine.SearchAsync) wherever the call chain is async.
         try
         {
-            var task = GenerateNormalizedEmbeddingsAsync(new[] { text }, CancellationToken.None);
-            var results = task.GetAwaiter().GetResult();
+            using var cts = new CancellationTokenSource(_syncTimeout);
+            var token = cts.Token;
+            var results = Task.Run(() => GenerateNormalizedEmbeddingsAsync([text], token), token).GetAwaiter().GetResult();
             return results.Count > 0 ? results[0] : ReadOnlyMemory<float>.Empty;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger?.LogWarning(ex, "Ollama embedding generation exceeded {TimeoutMs} ms; degrading to BM25.", _syncTimeout.TotalMilliseconds);
+            return ReadOnlyMemory<float>.Empty;
         }
         catch (Exception ex)
         {
@@ -100,6 +114,8 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
         var results = new List<ReadOnlyMemory<float>>(texts.Count);
         foreach (var text in texts)
         {
+            ct.ThrowIfCancellationRequested();
+
             // Secret scrubbing on outgoing prompt
             var cleanText = SecretScrubber.Redact(text);
             try
@@ -122,6 +138,11 @@ public sealed class OllamaEmbeddingGenerator : ICatalogEmbeddingGenerator
                         continue;
                     }
                 }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Caller cancellation (or the sync-path timeout) ends the batch instead of degrading every remaining text.
+                throw;
             }
             catch (Exception ex)
             {

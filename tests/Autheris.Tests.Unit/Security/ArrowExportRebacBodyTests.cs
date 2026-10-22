@@ -33,7 +33,7 @@ using Xunit;
 public sealed class ArrowExportRebacBodyTests
 {
     private const string Tenant = "tenant-1";
-    private const string User = "user:alice";
+    private const string User = "alice";
 
     private static async Task<IServiceProvider> CreateServicesAsync(params string[] viewerTables)
     {

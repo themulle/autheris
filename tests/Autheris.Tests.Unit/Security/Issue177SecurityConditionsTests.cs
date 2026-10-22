@@ -58,12 +58,26 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
             }
             return [new()];
         }
+
+        public static long RowsToReport { get; set; }
+
+        // Reports rows like the catalog list resolvers do (request-level "AutherisRowsReturned").
+        public List<Order> GetReportedOrders(HotChocolate.Resolvers.IResolverContext context, int first = 10)
+        {
+            ResolverExecuted = true;
+            context.ContextData["AutherisRowsReturned"] = RowsToReport;
+            return [new()];
+        }
+
+        // A nullable root field that always fails: the result carries data of the other root fields plus an error.
+        public string? GetBroken() => throw new InvalidOperationException("Deliberately failing root field.");
     }
 
     public Issue177SecurityConditionsTests()
     {
         SecurityTestQuery.ResolverExecuted = false;
         SecurityTestQuery.ThrowException = false;
+        SecurityTestQuery.RowsToReport = 0;
         CatalogRelationRegistry.Clear();
     }
 
@@ -71,6 +85,7 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
     {
         SecurityTestQuery.ResolverExecuted = false;
         SecurityTestQuery.ThrowException = false;
+        SecurityTestQuery.RowsToReport = 0;
         CatalogRelationRegistry.Clear();
     }
 
@@ -305,5 +320,64 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
         await rateLimiter.DidNotReceiveWithAnyArgs().ReserveCostQuotaAsync(default!, default, default!, default);
         await rateLimiter.DidNotReceiveWithAnyArgs().CheckCostQuotaAsync(default!, default, default!, default);
         await rateLimiter.DidNotReceiveWithAnyArgs().SettleCostQuotaAsync(default!, default, default, default!, default);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_SEC_GOV177_08_UnvalidatedApiKeyHeader_DoesNotCountAsAuthenticated()
+    {
+        // SEC-GOV177-08: an arbitrary X-API-Key header is not a validated identity and must not pass the authentication gate.
+        var rateLimiter = Substitute.For<IRateLimiterService>();
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity());
+        httpContext.Request.Headers["X-API-Key"] = "random-unregistered-key-" + Guid.NewGuid();
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+
+        var gatewayOptions = new GatewayOptions(); // IsAnonymousAccessAllowed == false
+        var executor = CreateExecutor(rateLimiter, accessor, gatewayOptions);
+
+        var result = await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ orders(first: 10) { id } }").Build());
+
+        httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
+        result.ExpectOperationResult().Errors![0].Code.ShouldBe("AUTH_NOT_AUTHENTICATED");
+        SecurityTestQuery.ResolverExecuted.ShouldBeFalse();
+        await rateLimiter.DidNotReceiveWithAnyArgs().ReserveCostQuotaAsync(default!, default, default!, default);
+        await rateLimiter.DidNotReceiveWithAnyArgs().SettleCostQuotaAsync(default!, default, default, default!, default);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_SEC_GOV177_09_PartialFailure_ChargesProducedRows_FailureFeeOnlyAsFloor()
+    {
+        // SEC-GOV177-07: a deliberately failing second root field must not reduce a 1000-row query to the failure fee.
+        var limiter = new Autheris.Infrastructure.RateLimiting.InMemoryRateLimiterService();
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "mallory")], "TestAuth"));
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+
+        var gatewayOptions = new GatewayOptions();
+        gatewayOptions.QueryCost.BaseCost = 2;
+        gatewayOptions.QueryCost.FailureFee = 5;
+        gatewayOptions.RateLimiting.ClientTiers.TierLimits["Standard"] = new()
+        {
+            TokenRefillRatePerSecond = 0.0,
+            MaxTokensCapacity = 1000
+        };
+
+        var executor = CreateExecutor(limiter, accessor, gatewayOptions);
+        SecurityTestQuery.RowsToReport = 1000;
+
+        var result = await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ reportedOrders(first: 10) { id } broken }").Build());
+        var opRes = result.ExpectOperationResult();
+        (opRes.Errors?.Count ?? 0).ShouldBeGreaterThan(0);
+        SecurityTestQuery.ResolverExecuted.ShouldBeTrue();
+
+        // 2 + ceil(1000 * 0.5) + depth, clamped to the Standard MaxCostPerQuery (250) - not the failure fee (5).
+        httpContext.Response.Headers["X-Query-Cost-Actual"].ToString().ShouldBe("250");
+
+        var tierResolver = new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, Options.Create(gatewayOptions));
+        var clientCtx = await tierResolver.ResolveAsync(httpContext.User, null, null);
+        var balanceCheck = await limiter.ReserveCostQuotaAsync(clientCtx.SubjectId, 0, clientCtx.Policy, CancellationToken.None);
+        balanceCheck.RemainingTokens.ShouldBe(750);
     }
 }

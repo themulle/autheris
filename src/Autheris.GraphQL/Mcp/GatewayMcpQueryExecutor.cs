@@ -191,7 +191,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     ? new Sid(sessionContext.UserSid)
                     : new Sid(sessionContext.ServicePrincipalId);
 
-                var groupSids = sessionContext.GroupSids != null && sessionContext.GroupSids.Count > 0
+                // SR-M-08: an app-only session (no user SID) carries no group SIDs, exactly like its principal.
+                var groupSids = !string.IsNullOrWhiteSpace(sessionContext.UserSid) && sessionContext.GroupSids != null && sessionContext.GroupSids.Count > 0
                     ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
                     : Array.Empty<Sid>();
 
@@ -647,56 +648,36 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     /// <summary>
     /// SG-09: Build authenticated ClaimsPrincipal from active MCP session preserving actual caller identity.
     /// Sets sub and NameIdentifier to the user identity (UserSid) while maintaining service principal in client_id and azp.
+    /// SR-M-08: the claims are those of <see cref="McpProtocolHandler.BuildPrincipalFromSession"/> (the principal of every other MCP
+    /// path): an app-only session (no user SID) keeps the application identity, carries the identity-kind marker and no group SIDs.
+    /// Only <c>sub</c>, <c>client_id</c>/<c>azp</c> and the <c>McpAuth</c> scheme are added here.
     /// </summary>
     internal static ClaimsPrincipal BuildPrincipal(McpSessionContext sessionContext)
     {
+        ArgumentNullException.ThrowIfNull(sessionContext);
+
         var effectiveUserId = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
             ? sessionContext.UserSid
             : sessionContext.ServicePrincipalId;
 
-        var claims = new List<Claim>
+        var sessionPrincipal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
+        var claims = new List<Claim>(sessionPrincipal.Claims);
+        // SG-09: sub is always the session subject, never a token claim carried in the additional claims.
+        claims.RemoveAll(c => c.Type == "sub");
+        if (!string.IsNullOrWhiteSpace(effectiveUserId))
         {
-            new(ClaimTypes.NameIdentifier, effectiveUserId),
-            new("sub", effectiveUserId),
-            new("tenant_id", sessionContext.TenantId)
-        };
-
-        if (!string.IsNullOrWhiteSpace(sessionContext.UserSid))
-        {
-            claims.Add(new Claim(ClaimTypes.PrimarySid, sessionContext.UserSid));
+            claims.Add(new Claim("sub", effectiveUserId));
         }
 
         if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
             !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
         {
+            claims.RemoveAll(c => c.Type is "client_id" or "azp");
             claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
             claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
         }
 
-        if (sessionContext.Roles != null && sessionContext.Roles.Count > 0)
-        {
-            foreach (var role in sessionContext.Roles)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, role));
-            }
-        }
-
-        if (sessionContext.GroupSids != null)
-        {
-            foreach (var groupSid in sessionContext.GroupSids)
-            {
-                claims.Add(new Claim(ClaimTypes.GroupSid, groupSid));
-            }
-        }
-
-        if (sessionContext.AdditionalClaims != null)
-        {
-            foreach (var (k, v) in sessionContext.AdditionalClaims)
-            {
-                claims.Add(new Claim(k, v));
-            }
-        }
-
+        // The claims are re-issued on a new identity (ClaimsIdentity clones them, issuers included, so the read-only marker survives).
         var identity = new ClaimsIdentity(claims, Autheris.Application.Identity.Attributes.CallerAttributeSchemeGate.McpAuthScheme);
         if (sessionContext.IsReadOnly)
         {

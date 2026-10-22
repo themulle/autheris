@@ -61,6 +61,33 @@ public sealed partial class AiDataGuardrailService
         }
     }
 
+    /// <summary>The subject of a session for ABAC and audit: the user SID, or the application identity of an app-only session.</summary>
+    private static string CallerSidOf(McpSessionContext sessionContext) =>
+        !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId;
+
+    /// <summary>
+    /// The Casbin ABAC request of a session for one target table. SR-M-08: an app-only session (no user SID) is evaluated without group
+    /// SIDs, exactly like its principal (<see cref="McpProtocolHandler.BuildPrincipalFromSession"/>).
+    /// </summary>
+    private static SecurityEvaluationContext BuildSecurityContext(McpSessionContext sessionContext, TableIdentifier targetTable)
+    {
+        var groupSids = !string.IsNullOrWhiteSpace(sessionContext.UserSid) && sessionContext.GroupSids is { Count: > 0 }
+            ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
+            : [];
+        var clientIp = !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp)
+            ? parsedIp : System.Net.IPAddress.None;
+
+        return new SecurityEvaluationContext(
+            UserSid: new Sid(CallerSidOf(sessionContext)), GroupSids: groupSids, Tenant: new TenantId(sessionContext.TenantId),
+            TargetTable: targetTable, RequestedColumns: [], ClientIp: clientIp,
+            Timestamp: DateTimeOffset.UtcNow, PurposeId: "MCP_AI_AGENT_QUERY");
+    }
+
+    /// <summary>
+    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>) or the bare
+    /// legacy shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
+    /// nothing else). Both are audited as DENY and returned with <c>isError: true</c>.
+    /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
         errorCode = null;
@@ -69,6 +96,12 @@ public sealed partial class AiDataGuardrailService
         {
             using var doc = JsonDocument.Parse(resultJson);
             var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && IsLegacyErrorShape(root, out var legacyCode))
+            {
+                errorCode = legacyCode;
+                return true;
+            }
+
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("isError", out var isErrorProp) || isErrorProp.ValueKind != JsonValueKind.True)
             {
                 return false;
@@ -84,6 +117,32 @@ public sealed partial class AiDataGuardrailService
         {
             return false;
         }
+    }
+
+    private static bool IsLegacyErrorShape(JsonElement root, out string? errorCode)
+    {
+        errorCode = null;
+        string? error = null;
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, "error", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String)
+            {
+                error = prop.Value.GetString();
+            }
+            else if (!(string.Equals(prop.Name, "message", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String))
+            {
+                return false;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return false;
+        }
+
+        // Only a code-like value (no blanks, short) is reported as the code; a free-text error is reported as ERROR.
+        errorCode = error.Length <= 64 && !error.Any(char.IsWhiteSpace) ? error : "ERROR";
+        return true;
     }
 
     internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(
@@ -102,6 +161,12 @@ public sealed partial class AiDataGuardrailService
         if (string.Equals(tool.Name, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase))
         {
             return McpDataTargetResolver.ResolveInvokeApiTables(argumentsJson, sqlEngine, defaultDataSourceName);
+        }
+        if (string.Equals(tool.Name, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            // Every requested dataset ('dataset' and each 'datasets' entry) is an ABAC target, parsed exactly as the executor parses
+            // them; malformed or unresolvable arguments are null (fail closed).
+            return McpDatasetTools.TableSchemaTargets(argumentsJson);
         }
         if (tool.TargetTable == null && !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) && !IsBuiltInTableTool(tool.Name))
         {
@@ -139,6 +204,169 @@ public sealed partial class AiDataGuardrailService
             return false;
         }
         return true;
+    }
+
+    /// <summary>Tools whose rows come from tables other than their ABAC object (a procedure, a semantic metric).</summary>
+    private static bool ReadsThroughUnderlyingTables(McpToolDefinition tool) =>
+        tool.Name.Equals(McpDatasetTools.CallProcedure, StringComparison.OrdinalIgnoreCase) ||
+        tool.Name.Equals(McpSemanticTools.QueryMetrics, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The real tables a <c>call_procedure</c> or <c>query_metrics</c> call reads, for the four-eyes / inactive / visibility gate.
+    /// Null (fail closed) when they cannot be resolved; empty when the call names nothing the executor could run.
+    /// </summary>
+    private Task<IReadOnlyList<TableIdentifier>?> ResolveUnderlyingTablesAsync(
+        McpToolDefinition tool,
+        string? argumentsJson,
+        McpSessionContext sessionContext,
+        CancellationToken ct) =>
+        tool.Name.Equals(McpDatasetTools.CallProcedure, StringComparison.OrdinalIgnoreCase)
+            ? Task.FromResult(ResolveProcedureTables(argumentsJson))
+            : ResolveMetricTablesAsync(argumentsJson, sessionContext, ct);
+
+    /// <summary>
+    /// The tables of a registered procedure, exactly the set its visibility stage consent-checks (GovernedProcedureExecutionService):
+    /// the validated referenced tables of an Active procedure plus its result table, each keyed under the procedure's catalog domain.
+    /// Unknown and non-Active procedures resolve to no tables alike (the executor refuses both).
+    /// </summary>
+    private IReadOnlyList<TableIdentifier>? ResolveProcedureTables(string? argumentsJson)
+    {
+        var name = McpDatasetTools.ProcedureNameArgument(argumentsJson);
+        if (name == null || _procedureRegistry == null)
+        {
+            return null;
+        }
+
+        if (!_procedureRegistry.TryGet(name, out var registered) || registered == null)
+        {
+            // An unknown procedure runs nothing (the executor answers NOT_FOUND); denying here instead would answer unknown and
+            // hidden procedures differently (SEC-GOV153-02 existence oracle).
+            return [];
+        }
+
+        if (registered.State != ProcedureState.Active)
+        {
+            // A non-Active procedure reads nothing: the executor refuses it (NOT_FOUND, or unavailable only for callers that may
+            // see it). Denying here would answer it differently from an unknown procedure (SEC-GOV153-02 existence oracle).
+            return [];
+        }
+
+        var definition = registered.Definition;
+        var keys = new List<string>();
+        if (registered.Validation != null)
+        {
+            keys.AddRange(registered.Validation.ReferencedTables);
+        }
+
+        if (definition.ResultTable != null && !keys.Contains(definition.ResultTable, StringComparer.OrdinalIgnoreCase))
+        {
+            keys.Add(definition.ResultTable);
+        }
+
+        if (keys.Count == 0)
+        {
+            return null;
+        }
+
+        var tables = new List<TableIdentifier>(keys.Count);
+        foreach (var key in keys)
+        {
+            if (!TryParseProcedureTable(definition.CatalogDomain, key, out var tableId))
+            {
+                return null;
+            }
+
+            if (!tables.Contains(tableId))
+            {
+                tables.Add(tableId);
+            }
+        }
+
+        return tables;
+    }
+
+    /// <summary>Same key-to-table mapping as the procedure visibility stage; a malformed key is unresolvable.</summary>
+    private static bool TryParseProcedureTable(string catalogDomain, string key, out TableIdentifier tableId)
+    {
+        try
+        {
+            return TableIdentifier.TryParse(catalogDomain + "." + key, out tableId) || TableIdentifier.TryParse(key, out tableId);
+        }
+        catch (ArgumentException)
+        {
+            tableId = default;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The base tables of the requested metrics in the caller's semantic catalog partition, resolved like the metric query service
+    /// does (metric -> semantic model -> active base table). Any metric, model or table that does not resolve is fail-closed.
+    /// </summary>
+    private async Task<IReadOnlyList<TableIdentifier>?> ResolveMetricTablesAsync(string? argumentsJson, McpSessionContext sessionContext, CancellationToken ct)
+    {
+        IReadOnlyList<string> metricNames;
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            metricNames = doc.RootElement.ValueKind == JsonValueKind.Object ? McpSemanticTools.MetricNamesArgument(doc.RootElement) : [];
+        }
+        catch (JsonException)
+        {
+            // The executor rejects the call without reading data.
+            return [];
+        }
+
+        if (metricNames.Count == 0)
+        {
+            return [];
+        }
+
+        if (_semanticCatalog == null || _tableMetadataRepository == null)
+        {
+            return null;
+        }
+
+        var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+        if (Autheris.Application.Dbt.Services.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is not { } tenant)
+        {
+            return null;
+        }
+
+        var models = await _semanticCatalog.ListSemanticModelsAsync(tenant, ct).ConfigureAwait(false);
+        var resolver = new Autheris.Application.Dbt.Services.SemanticBaseTableResolver(_tableMetadataRepository);
+        var tables = new List<TableIdentifier>();
+        foreach (var metricName in metricNames)
+        {
+            var metric = await _semanticCatalog.GetMetricAsync(metricName.Trim(), tenant, ct).ConfigureAwait(false);
+            if (metric == null)
+            {
+                return null;
+            }
+
+            DbtSemanticModel model;
+            try
+            {
+                (model, _) = Autheris.Application.Analytics.SemanticMetricQueryService.ResolveModelAndMeasures(metric, models);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                return null;
+            }
+
+            var baseTable = await resolver.TryResolveAsync(model, isVisible: null, ct).ConfigureAwait(false);
+            if (baseTable == null)
+            {
+                return null;
+            }
+
+            if (!tables.Contains(baseTable.Identifier))
+            {
+                tables.Add(baseTable.Identifier);
+            }
+        }
+
+        return tables;
     }
 
     private static TableIdentifier? ParseTableIdentifierFromTool(McpToolDefinition tool, string? argumentsJson = null)

@@ -4,12 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Mesh.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// F-ARCH-11: Envoy External Authorization (ext_authz) endpoints and Istio CRD manifest exporter.
@@ -27,17 +30,10 @@ public static class EnvoyExtAuthzEndpoints
         // is a catch-all over every method; the suffix is the original request path.
         app.MapMethods("/api/v1/envoy/check/{**originalPath}", new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" }, async (
             HttpContext context,
-            IEnvoyExtAuthzService authzService) =>
+            IEnvoyExtAuthzService authzService,
+            IOptions<GatewayOptions> gatewayOptions) =>
         {
-            var method = context.Request.Headers.TryGetValue("X-Original-Method", out var om) && om.Count > 0
-                ? om[0]!
-                : context.Request.Method;
-
-            var path = context.Request.Headers.TryGetValue("X-Original-URI", out var ou) && ou.Count > 0
-                ? ou[0]!
-                : (context.Request.RouteValues.TryGetValue("originalPath", out var op) && op is string suffix && suffix.Length > 0
-                    ? "/" + suffix + context.Request.QueryString.Value
-                    : context.Request.Path.Value ?? "/");
+            var (method, path) = ResolveOriginalRequest(context, gatewayOptions.Value.EnvoyExtAuthz);
 
             var headerMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in context.Request.Headers)
@@ -128,5 +124,29 @@ public static class EnvoyExtAuthzEndpoints
         }).WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataExport);
 
         return app;
+    }
+
+    /// <summary>
+    /// Security review: <c>X-Original-Method</c> / <c>X-Original-URI</c> describe the request being authorised and are
+    /// only honoured when the raw TCP peer (captured before forwarded headers are applied) is in the dedicated
+    /// <see cref="EnvoyExtAuthzOptions"/> allowlist, not the shared ForwardAuth/ReverseProxy trusted proxies. Empty
+    /// allowlist (default) = never trusted. Any other caller is decided on the route suffix and the real method, so it
+    /// cannot obtain an ALLOW for a different (e.g. read-only) request than the one it sends.
+    /// </summary>
+    internal static (string Method, string Path) ResolveOriginalRequest(HttpContext context, EnvoyExtAuthzOptions? options)
+    {
+        var trustedPeer = options != null && options.IsTrustedPeer(TrustedProxyPeer.GetRawRemoteIp(context));
+
+        var method = trustedPeer && context.Request.Headers.TryGetValue("X-Original-Method", out var om) && om.Count > 0 && !string.IsNullOrWhiteSpace(om[0])
+            ? om[0]!
+            : context.Request.Method;
+
+        var path = trustedPeer && context.Request.Headers.TryGetValue("X-Original-URI", out var ou) && ou.Count > 0 && !string.IsNullOrWhiteSpace(ou[0])
+            ? ou[0]!
+            : (context.Request.RouteValues.TryGetValue("originalPath", out var op) && op is string suffix && suffix.Length > 0
+                ? "/" + suffix + context.Request.QueryString.Value
+                : context.Request.Path.Value ?? "/");
+
+        return (method, path);
     }
 }

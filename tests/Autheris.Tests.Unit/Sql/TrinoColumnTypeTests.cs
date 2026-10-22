@@ -132,7 +132,7 @@ public sealed class TrinoColumnTypeTests
                 ColumnDescriptions: [new SqlResultColumn("_col0", typeof(long)), new SqlResultColumn("created", typeof(DateTimeOffset))]));
 
         using var manager = new WebSqlStatementManager(scopeFactory, NullLogger<WebSqlStatementManager>.Instance);
-        var status = await manager.SubmitOrWaitAsync(request, user, tenant, TimeSpan.FromSeconds(5));
+        var status = await manager.SubmitOrWaitAsync(request, user, new Sid("u"), tenant, TimeSpan.FromSeconds(5));
 
         status.State.ShouldBe("FINISHED");
         status.ColumnTypes!.Select(t => t.Name).ShouldBe(["bigint", "timestamp(3) with time zone"]);

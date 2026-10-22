@@ -412,6 +412,37 @@ public sealed class Wave2MarketFeaturesTests
         Assert.Equal("BulkAnalytics", httpContext.Response.Headers["X-Resource-Group-Tier"].ToString());
     }
 
+    // Security review: X-Workload-Tier may only downgrade below the path-resolved tier, never raise it (admins excepted).
+    [Theory]
+    [InlineData("/odata/v4/Invoices", "Agent", null, ResourceGroupTier.BulkAnalytics)]
+    [InlineData("/odata/v4/Invoices", "AutonomousAgents", "StandardUser", ResourceGroupTier.BulkAnalytics)]
+    [InlineData("/mcp/tools", "Interactive", "StandardUser", ResourceGroupTier.AutonomousAgents)]
+    [InlineData("/mcp/tools", "Bulk", null, ResourceGroupTier.BulkAnalytics)]
+    [InlineData("/api/query", "Agent", null, ResourceGroupTier.AutonomousAgents)]
+    [InlineData("/api/query", "Interactive", null, ResourceGroupTier.Interactive)]
+    [InlineData("/odata/v4/Invoices", "Agent", "GovernanceAdmin", ResourceGroupTier.AutonomousAgents)]
+    [InlineData("/odata/v4/Invoices", "Interactive", "ClusterAdmin", ResourceGroupTier.Interactive)]
+    [InlineData("/odata/v4/Invoices", "unknown-tier", null, ResourceGroupTier.BulkAnalytics)]
+    public void ResourceGroupMiddleware_WorkloadTierHeader_NeverRaisesAboveResolvedTier(
+        string requestPath, string headerTier, string? role, ResourceGroupTier expectedTier)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Path = requestPath;
+        httpContext.Request.Headers["X-Workload-Tier"] = headerTier;
+        httpContext.User = role == null
+            ? new ClaimsPrincipal(new ClaimsIdentity())
+            : new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, role)], "TestAuth"));
+
+        Assert.Equal(expectedTier, ResourceGroupMiddleware.ClassifyWorkloadTier(httpContext));
+    }
+
+    [Fact]
+    public void ResourceGroupMiddleware_PrivilegeRank_OrdersInteractiveAboveAgentsAboveBulk()
+    {
+        Assert.True(ResourceGroupMiddleware.PrivilegeRank(ResourceGroupTier.Interactive) < ResourceGroupMiddleware.PrivilegeRank(ResourceGroupTier.AutonomousAgents));
+        Assert.True(ResourceGroupMiddleware.PrivilegeRank(ResourceGroupTier.AutonomousAgents) < ResourceGroupMiddleware.PrivilegeRank(ResourceGroupTier.BulkAnalytics));
+    }
+
     [Theory]
     [InlineData("", "domain", "table", "query")]
     [InlineData("id", "", "table", "query")]

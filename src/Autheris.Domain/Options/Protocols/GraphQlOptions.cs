@@ -36,6 +36,9 @@ public sealed class GraphQLOptions
 
     /// <summary>GQL-4: maximum number of open CDC subscriptions per subject (tenant + SID).</summary>
     [Range(1, 1000)] public int MaxSubscriptionsPerSubject { get; init; } = 10;
+
+    /// <summary>GQL-10: maximum number of open CDC subscriptions across the tenant in the cluster.</summary>
+    [Range(1, 100000)] public int MaxSubscriptionsPerTenant { get; init; } = 500;
     [Range(100, 1000000)] public int MaxAggregateRowBudget { get; init; } = 50000;
     [Range(0, 10000)] public int MaxAllowedOffset { get; init; } = 10000;
     public List<string> TrustedOrigins { get; init; } = [];

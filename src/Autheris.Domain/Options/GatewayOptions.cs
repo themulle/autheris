@@ -38,6 +38,7 @@ public sealed class GatewayOptions
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
     public TotpOptions Totp { get; init; } = new();
+    public EnvoyExtAuthzOptions EnvoyExtAuthz { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public CrossSourceOptions CrossSource { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
@@ -68,6 +69,7 @@ public sealed class GatewayOptions
     [Required] public FieldSunsettingOptions FieldSunsetting { get; init; } = new();
     [Required] public QueryCostOptions QueryCost { get; init; } = new();
     [Required] public GovernanceOptions Governance { get; init; } = new();
+    [Required] public DatabricksOptions Databricks { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".

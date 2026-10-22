@@ -55,11 +55,13 @@ public static class FusionGatewayExtensions
     }
 
     /// <summary>
-    /// Adds the Hot Chocolate Fusion Subgraph Router and result masking middleware to the GraphQL executor builder.
+    /// Adds the Hot Chocolate Fusion Subgraph Router and result masking interceptor to the GraphQL executor builder.
     /// </summary>
     public static IRequestExecutorBuilder AddFusionResultMasking(
         this IRequestExecutorBuilder builder)
     {
-        return builder.UseRequest<SubgraphResultMaskingMiddleware>();
+        return builder
+            .TryAddTypeInterceptor<SubgraphFieldMaskingTypeInterceptor>()
+            .AddDiagnosticEventListener<SubgraphMaskingDiagnosticEventListener>();
     }
 }

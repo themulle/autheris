@@ -91,7 +91,10 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        bool isAuthenticated = principal?.Identity?.IsAuthenticated == true || !string.IsNullOrWhiteSpace(apiKey);
+        // SEC-GOV177-08: only a validated identity (authenticated principal) passes this gate. The X-API-Key header is
+        // never validated here (unregistered keys fall back to the anonymous IP bucket in the tier resolver), so its mere
+        // presence must not count as authenticated; a registered key only selects the quota tier.
+        bool isAuthenticated = principal?.Identity?.IsAuthenticated == true;
         if (!isAuthenticated && gatewayOptions?.IsAnonymousAccessAllowed != true)
         {
             HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status401Unauthorized);
@@ -119,13 +122,15 @@ public sealed class CostAndQuotaMiddleware
         }
 
         int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
+        int maxExecutionDepth = QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions?.GraphQL);
         int calculatedCost = QueryCostAnalyzerRule.CalculateCost(
             doc,
             context.Schema,
             maxResponseRows: maxResponseRows,
             variableValues: runtimeVariables,
             costOptions: gatewayOptions?.QueryCost,
-            aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation);
+            aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation,
+            maxExecutionDepth: maxExecutionDepth);
 
         int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
         if (gatewayOptions is not null)
@@ -211,8 +216,10 @@ public sealed class CostAndQuotaMiddleware
                 context.Result is not OperationResult op ||
                 (op.Errors is not null && op.Errors.Count > 0))
             {
-                // SEC-GOV177-03: Mandatory minimum fee on client abort or execution failure
-                actualCost = Math.Max(gatewayOptions?.QueryCost?.BaseCost ?? 1, gatewayOptions?.QueryCost?.FailureFee ?? 1);
+                // SEC-GOV177-03: Mandatory minimum fee on client abort or execution failure.
+                // SEC-GOV177-07: the failure fee is only a floor. A partial result (e.g. a successful 1000-row root field next
+                // to a deliberately failing one) is charged for the data it produced, so an error cannot refund real work.
+                actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
             }
             else
             {
@@ -221,8 +228,8 @@ public sealed class CostAndQuotaMiddleware
         }
         catch
         {
-            // SEC-GOV177-03: Mandatory minimum fee on exception
-            actualCost = Math.Max(gatewayOptions?.QueryCost?.BaseCost ?? 1, gatewayOptions?.QueryCost?.FailureFee ?? 1);
+            // SEC-GOV177-03: Mandatory minimum fee on exception (SEC-GOV177-07: rows already produced are still charged).
+            actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
             throw;
         }
         finally
@@ -263,6 +270,56 @@ public sealed class CostAndQuotaMiddleware
                 HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", limitResult.RemainingTokens.ToString(CultureInfo.InvariantCulture));
             }
         }
+    }
+
+    /// <summary>
+    /// SEC-GOV177-03 / SEC-GOV177-07: settlement of a failed, aborted or partially failed request. The failure fee
+    /// (at least BaseCost) is the floor; when data was produced, the actual cost of that data is charged if it is higher.
+    /// </summary>
+    internal static int ComputeFailedCost(
+        RequestContext context,
+        QueryCostOptions? costOptions,
+        ClientQuotaPolicy policy)
+    {
+        int failureFee = Math.Max(costOptions?.BaseCost ?? 1, costOptions?.FailureFee ?? 1);
+        if (!HasProducedData(context))
+        {
+            return failureFee;
+        }
+
+        int computed;
+        try
+        {
+            computed = ComputeActualCost(context, costOptions, policy);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Counting must never turn a failed request into a free one; the caller still settles at least the failure fee.
+            computed = failureFee;
+        }
+
+        return Math.Max(failureFee, computed);
+    }
+
+    /// <summary>True when the request produced result data (a data payload, or rows reported by the resolvers).</summary>
+    internal static bool HasProducedData(RequestContext context)
+    {
+        if (context.Result is OperationResult opResult && opResult.Data is not null)
+        {
+            return true;
+        }
+
+        if (context.ContextData.TryGetValue("AutherisRowsReturned", out var rObj))
+        {
+            return rObj switch
+            {
+                long rLong => rLong > 0,
+                int rInt => rInt > 0,
+                _ => false
+            };
+        }
+
+        return false;
     }
 
     internal static int ComputeActualCost(

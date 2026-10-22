@@ -19,7 +19,7 @@ public static class ScimUsersEndpoints
     public static IEndpointRouteBuilder MapScimUsersEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/scim/v2/{realmId}/Users")
-            .RequireAuthorization(GatewayAuthSchemes.Scim);
+            .RequireAuthorization(GatewayPolicies.Scim);
 
         group.MapGet("", async (
             string realmId,

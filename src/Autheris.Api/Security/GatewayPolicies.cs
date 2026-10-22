@@ -6,6 +6,7 @@ using Autheris.Application.Security;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 
 /// <summary>
 /// SEC M-03 & K-K10: Enterprise Named Authorization Policies and RBAC integration.
@@ -35,6 +36,13 @@ public static class GatewayPolicies
     public const string MetricsScraper = "MetricsScraper";
     public const string McpCaller = "McpCaller";
 
+    /// <summary>
+    /// Security review: SCIM provisioning endpoints. Authenticates only with the SCIM secret scheme and requires the
+    /// dedicated provisioner role (a SCIM secret holder is not a ClusterAdmin).
+    /// </summary>
+    public const string Scim = "Scim";
+    public const string ScimProvisionerRole = "SCIM_PROVISIONER";
+
     public static readonly string[] GovernanceAdminRoles = ["GovernanceAdmin", "ClusterAdmin"];
     public static readonly string[] ApproverRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "ClusterAdmin"];
     public static readonly string[] ClusterAdminRoles = ["ClusterAdmin"];
@@ -48,6 +56,7 @@ public static class GatewayPolicies
     public static readonly string[] AuditorOrAboveRoles = ["SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "ClusterAdmin"];
     public static readonly string[] DataStewardOrAdminRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
     public static readonly string[] McpCallerRoles = ["AiAgent", "McpCaller", "Developer", "Consumer", "DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
+    public static readonly string[] ScimProvisionerRoles = [ScimProvisionerRole];
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
@@ -111,6 +120,40 @@ public static class GatewayPolicies
         options.AddPolicy(McpCaller, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ctx.User.Identity?.IsAuthenticated == true));
+
+        // Security review: previously RequireAuthorization(GatewayAuthSchemes.Scim) referenced a non-existent policy.
+        // Only an identity issued by the SCIM scheme carrying the provisioner role is accepted, so a user token with a
+        // forged or mapped "SCIM_PROVISIONER" role from another scheme does not satisfy it.
+        // Furthermore, the authenticated realm must match the route {realmId}.
+        options.AddPolicy(Scim, policy => policy
+            .AddAuthenticationSchemes(GatewayAuthSchemes.Scim)
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => IsScimProvisioner(ctx.User))
+            .RequireAssertion(MatchesRouteRealm));
+    }
+
+    /// <summary>True when the principal has an authenticated SCIM-scheme identity with the provisioner role and no other roles.</summary>
+    public static bool IsScimProvisioner(ClaimsPrincipal? principal) =>
+        principal?.Identities.Any(i =>
+            i.IsAuthenticated &&
+            string.Equals(i.AuthenticationType, GatewayAuthSchemes.Scim, StringComparison.Ordinal) &&
+            i.HasClaim(i.RoleClaimType, ScimProvisionerRole) &&
+            !i.Claims.Any(c => c.Type == i.RoleClaimType && !string.Equals(c.Value, ScimProvisionerRole, StringComparison.Ordinal))) == true;
+
+    /// <summary>
+    /// Defense-in-depth: enforces that the identity's autheris:realm claim matches the route realmId when invoked in an HTTP context.
+    /// </summary>
+    internal static bool MatchesRouteRealm(AuthorizationHandlerContext ctx)
+    {
+        if (ctx.Resource is HttpContext httpContext &&
+            httpContext.Request.RouteValues.TryGetValue("realmId", out var routeRealmObj) &&
+            routeRealmObj?.ToString() is { Length: > 0 } routeRealm)
+        {
+            var tokenRealm = ctx.User.FindFirst("autheris:realm")?.Value;
+            return string.Equals(routeRealm, tokenRealm, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
     }
 
     /// <summary>Roles that satisfy a named role policy (used for diagnostics only).</summary>
@@ -131,6 +174,7 @@ public static class GatewayPolicies
             AuditorOrAbove => AuditorOrAboveRoles,
             DataStewardOrAdmin => DataStewardOrAdminRoles,
             McpCaller => McpCallerRoles,
+            Scim => ScimProvisionerRoles,
             _ => []
         };
         return roles.Length > 0;

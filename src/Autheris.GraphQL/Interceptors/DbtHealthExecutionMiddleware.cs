@@ -85,14 +85,25 @@ public sealed class DbtHealthExecutionMiddleware
         // 2. Check health for each referenced model
         foreach (var modelName in referencedModels)
         {
-            var tableId = new TableIdentifier("default", "default", modelName);
+            var tenant = principal.GetTenantId();
+            var tableId = new TableIdentifier(tenant.Value, "default", modelName);
             var health = await _circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted).ConfigureAwait(false);
+            if (health.Status == DbtModelHealthStatus.Healthy && !string.Equals(tenant.Value, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                var defaultTableId = new TableIdentifier("default", "default", modelName);
+                var defaultHealth = await _circuitBreaker.GetTableHealthAsync(defaultTableId, context.RequestAborted).ConfigureAwait(false);
+                if (defaultHealth.Status != DbtModelHealthStatus.Healthy)
+                {
+                    tableId = defaultTableId;
+                    health = defaultHealth;
+                }
+            }
 
             if (health.Status == DbtModelHealthStatus.Quarantined || health.Status == DbtModelHealthStatus.Degraded)
             {
                 bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
                                     principal?.IsInRole("DataOwner") == true ||
-                                    principal?.IsInRole("ClusterAdmin") == true;
+                                    Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
                 if (!isPrivileged)
                 {
@@ -143,13 +154,14 @@ public sealed class DbtHealthExecutionMiddleware
             {
                 bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
                                     principal?.IsInRole("DataOwner") == true ||
-                                    principal?.IsInRole("ClusterAdmin") == true;
+                                    Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
                 var errBuilder = ErrorBuilder.New()
                     .SetMessage($"The requested table/model '{modelName}' is quarantined due to failed dbt tests.")
                     .SetCode("TABLE_IN_QUARANTINE")
                     .SetExtension("table", modelName)
-                    .SetExtension("dbtHealthStatus", "Quarantined");
+                    .SetExtension("dbtHealthStatus", "Quarantined")
+                    .SetExtension("httpStatusCode", 400);
 
                 if (isPrivileged)
                 {
@@ -163,6 +175,10 @@ public sealed class DbtHealthExecutionMiddleware
                     }).ToList());
                 }
 
+                if (httpContext != null)
+                {
+                    HttpResponseGuard.SetStatus(httpContext, Microsoft.AspNetCore.Http.StatusCodes.Status400BadRequest);
+                }
                 context.Result = OperationResult.FromError(errBuilder.Build());
                 return;
             }

@@ -27,6 +27,12 @@ public sealed class RebacOptions
     public bool EnforceOnStreaming { get; init; } = false;
 
     /// <summary>
+    /// INF-15: Maximum number of entries in the per-check memo during graph traversal recursion.
+    /// </summary>
+    [Range(1, 10_000)]
+    public int PerCheckMemoMaxEntries { get; init; } = 256;
+
+    /// <summary>
     /// POL-6: also require the ReBAC relation <c>can_query</c> on OData, GraphQL, WebSQL and stored procedures.
     /// Off by default: the evaluator denies every table without tuples, so enable it only once tuples are maintained.
     /// The unified PDP (MCP-RAG, DuckDB OLAP) checks ReBAC whenever <see cref="Enabled"/> is true.

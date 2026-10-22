@@ -74,20 +74,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
         // 2. Zero-Trust Verification: Ensure request originates from a trusted reverse proxy / Ingress
         if (forwardAuthOptions.RequireTrustedProxy)
         {
-            IPAddress? rawRemoteIp = null;
-            if (Context.Items.TryGetValue("OriginalTcpRemoteIp", out var origIpObj))
-            {
-                if (origIpObj is IPAddress origIp)
-                {
-                    rawRemoteIp = origIp;
-                }
-                else if (origIpObj is string origIpStr && IPAddress.TryParse(origIpStr, out var parsedIp))
-                {
-                    rawRemoteIp = parsedIp;
-                }
-            }
-
-            rawRemoteIp ??= Context.Connection.RemoteIpAddress;
+            var rawRemoteIp = TrustedProxyPeer.GetRawRemoteIp(Context);
             var remoteIp = rawRemoteIp ?? (_isDevelopment ? IPAddress.Loopback : null);
 
             if (remoteIp == null)

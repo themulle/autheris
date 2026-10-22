@@ -90,7 +90,7 @@ public sealed class RebacHttpEndpointSecurityTests
         var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
         var sp = CreateServiceProvider(store, evaluator);
 
-        await store.AddTupleAsync(new RebacTuple("tenant-acme", "user:alice", "reader", "dataset:dataset-42"));
+        await store.AddTupleAsync(new RebacTuple("tenant-acme", "alice", "reader", "dataset:dataset-42"));
 
         var httpContext = CreateHttpContext(
             sp,
@@ -238,7 +238,7 @@ public sealed class RebacHttpEndpointSecurityTests
         var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
         var sp = CreateServiceProvider(store, evaluator);
 
-        await store.AddTupleAsync(new RebacTuple("tenant-a", "user:alice", "reader", "dataset:ds-77"));
+        await store.AddTupleAsync(new RebacTuple("tenant-a", "alice", "reader", "dataset:ds-77"));
 
         // Alice attempts to access dataset:ds-77 in tenant-b
         var httpContext = CreateHttpContext(

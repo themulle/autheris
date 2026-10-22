@@ -20,7 +20,11 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
     private readonly ILogger<AuditChainIntegrityMonitor> _logger;
     private readonly TimeProvider _time;
 
-    private int _state; // 0 = not verified yet, 1 = intact, 2 = violated, 3 = verification failed with an error
+    // Chain state: 0 = not verified yet, 1 = intact, 2 = violated. A violation is latched: only a later run that completes and finds
+    // the chain intact clears it. A run that throws never overwrites the chain state (an attacker who can make the verification fail
+    // must not be able to hide a detected violation); it only sets _lastRunFailed.
+    private int _state;
+    private int _lastRunFailed;
     private long _lastCheckedUtcTicks;
 
     public AuditChainIntegrityMonitor(
@@ -38,8 +42,11 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
     /// <summary>True once a verification found the chain broken. Stays true until a later run finds it intact.</summary>
     public bool IsViolated => Volatile.Read(ref _state) == 2;
 
-    /// <summary>True when the last run could not complete (e.g. database unreachable); the chain state is unknown.</summary>
-    public bool LastRunFailed => Volatile.Read(ref _state) == 3;
+    /// <summary>
+    /// True when the last run could not complete (e.g. database unreachable); the current chain state is unknown. A violation detected
+    /// earlier stays reported by <see cref="IsViolated"/>.
+    /// </summary>
+    public bool LastRunFailed => Volatile.Read(ref _lastRunFailed) == 1;
 
     public DateTimeOffset? LastCheckedAt
     {
@@ -58,6 +65,7 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
             bool intact = await _auditRepository.VerifyAuditHashChainAsync(ct).ConfigureAwait(false);
             Interlocked.Exchange(ref _lastCheckedUtcTicks, _time.GetUtcNow().UtcTicks);
             Volatile.Write(ref _state, intact ? 1 : 2);
+            Volatile.Write(ref _lastRunFailed, 0);
 
             if (intact)
             {
@@ -76,7 +84,8 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
         }
         catch (Exception ex)
         {
-            Volatile.Write(ref _state, 3);
+            // The chain state (in particular a latched violation) is kept; only the failure of this run is recorded.
+            Volatile.Write(ref _lastRunFailed, 1);
             _logger.LogError(ex, "Audit hash chain verification could not be completed.");
             return false;
         }

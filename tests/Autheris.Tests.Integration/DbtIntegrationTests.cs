@@ -19,8 +19,8 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
       "nodes": {
         "model.analytics.monthly_revenue": {
           "name": "monthly_revenue",
-          "database": "corp_dw",
-          "schema": "finance",
+          "database": "default",
+          "schema": "default",
           "description": "Monthly revenue model",
           "config": { "materialized": "table" },
           "contract": { "enforced": true },
@@ -52,6 +52,7 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {
+            builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
@@ -238,6 +239,11 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         }
         """;
 
+        // 0. Sync manifest so that models and test target mappings are registered
+        var syncContent = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
+        var syncResponse = await client.PostAsync("/api/extensions/dbt/sync", syncContent);
+        syncResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+
         // 1. Post run_results.json
         var content = new StringContent(sampleRunResults, Encoding.UTF8, "application/json");
         var postResponse = await client.PostAsync("/api/extensions/dbt/run-results", content);
@@ -267,6 +273,24 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
+
+        // 0. Sync manifest so that models and test target mappings are registered
+        var sampleManifest = """
+        {
+          "nodes": {
+            "model.analytics.finance_table_1": {
+              "name": "finance_table_1",
+              "database": "default",
+              "schema": "default",
+              "description": "Finance table",
+              "config": { "materialized": "table" },
+              "columns": {}
+            }
+          }
+        }
+        """;
+        var syncResponse = await client.PostAsync("/api/extensions/dbt/sync", new StringContent(sampleManifest, Encoding.UTF8, "application/json"));
+        syncResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // 1. Post failing run_results for finance_table_1
         var sampleRunResults = """

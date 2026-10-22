@@ -16,6 +16,6 @@ public interface IDataCatalogClient
 
 public interface IDataCatalogSyncService
 {
-    Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, CancellationToken ct = default);
+    Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default);
     Task<TableMetadata?> EnrichOrReferenceTableAsync(TableIdentifier table, CancellationToken ct = default);
 }

@@ -237,61 +237,85 @@ public sealed class ResourceGroupMiddleware
         return "ip:" + (context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
     }
 
-    private static ResourceGroupTier ClassifyWorkloadTier(HttpContext context)
+    /// <summary>
+    /// Resolves the tier from the path (<c>/mcp</c> agents, <c>/odata</c> bulk, else interactive). A client-chosen
+    /// <c>X-Workload-Tier</c> header is only honoured when it does not raise the caller above that resolved tier
+    /// (security review: anti-noisy-neighbor, SEC-02); ClusterAdmin / GovernanceAdmin may request any tier.
+    /// </summary>
+    internal static ResourceGroupTier ClassifyWorkloadTier(HttpContext context)
     {
-        var path = context.Request.Path;
-        var isMcp = path.StartsWithSegments("/mcp");
-        var isOData = path.StartsWithSegments("/odata");
+        var resolved = ResolvePathTier(context.Request.Path);
 
-        // 1. Explicit Client Header
-        if (context.Request.Headers.TryGetValue("X-Workload-Tier", out var headerVal))
+        if (!context.Request.Headers.TryGetValue("X-Workload-Tier", out var headerVal) ||
+            ParseRequestedTier(headerVal.ToString()) is not { } requested)
         {
-            var headerStr = headerVal.ToString().Trim();
-            if (headerStr.Equals("AutonomousAgent", StringComparison.OrdinalIgnoreCase) ||
-                headerStr.Equals("AutonomousAgents", StringComparison.OrdinalIgnoreCase) ||
-                headerStr.Equals("Agent", StringComparison.OrdinalIgnoreCase))
-            {
-                return ResourceGroupTier.AutonomousAgents;
-            }
-
-            if (headerStr.Equals("BulkAnalytics", StringComparison.OrdinalIgnoreCase) ||
-                headerStr.Equals("Analytics", StringComparison.OrdinalIgnoreCase) ||
-                headerStr.Equals("Bulk", StringComparison.OrdinalIgnoreCase))
-            {
-                return ResourceGroupTier.BulkAnalytics;
-            }
-
-            if (headerStr.Equals("Interactive", StringComparison.OrdinalIgnoreCase))
-            {
-                // Anti-Noisy-Neighbor Security Guard (SEC-02):
-                // Do not allow automated /mcp or /odata paths to promote themselves to Interactive
-                // unless caller has elevated ClusterAdmin or GovernanceAdmin role!
-                if (!isMcp && !isOData)
-                {
-                    return ResourceGroupTier.Interactive;
-                }
-
-                if (context.User.IsInRole("ClusterAdmin") || context.User.IsInRole("GovernanceAdmin"))
-                {
-                    return ResourceGroupTier.Interactive;
-                }
-
-                // Fall through to path-determined tier below
-            }
+            return resolved;
         }
 
-        // 2. Path-based classification
-        if (isMcp)
+        if (PrivilegeRank(requested) >= PrivilegeRank(resolved))
+        {
+            return requested;
+        }
+
+        if (context.User.IsInRole("ClusterAdmin") || context.User.IsInRole("GovernanceAdmin"))
+        {
+            return requested;
+        }
+
+        // A more privileged tier than the resolved one is ignored.
+        return resolved;
+    }
+
+    private static ResourceGroupTier ResolvePathTier(PathString path)
+    {
+        if (path.StartsWithSegments("/mcp"))
         {
             return ResourceGroupTier.AutonomousAgents;
         }
 
-        if (isOData)
+        if (path.StartsWithSegments("/odata"))
         {
             return ResourceGroupTier.BulkAnalytics;
         }
 
-        // 3. Default to Interactive
         return ResourceGroupTier.Interactive;
     }
+
+    internal static ResourceGroupTier? ParseRequestedTier(string? header)
+    {
+        var headerStr = header?.Trim() ?? string.Empty;
+        if (headerStr.Equals("AutonomousAgent", StringComparison.OrdinalIgnoreCase) ||
+            headerStr.Equals("AutonomousAgents", StringComparison.OrdinalIgnoreCase) ||
+            headerStr.Equals("Agent", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResourceGroupTier.AutonomousAgents;
+        }
+
+        if (headerStr.Equals("BulkAnalytics", StringComparison.OrdinalIgnoreCase) ||
+            headerStr.Equals("Analytics", StringComparison.OrdinalIgnoreCase) ||
+            headerStr.Equals("Bulk", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResourceGroupTier.BulkAnalytics;
+        }
+
+        if (headerStr.Equals("Interactive", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResourceGroupTier.Interactive;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Privilege order of the tiers by their default capacity (concurrency 50 / 10 / 5, shortest queue timeout first):
+    /// Interactive (0) is the most privileged, then AutonomousAgents (1), then BulkAnalytics (2). A higher rank is a
+    /// downgrade and may always be chosen by the client.
+    /// </summary>
+    internal static int PrivilegeRank(ResourceGroupTier tier) => tier switch
+    {
+        ResourceGroupTier.Interactive => 0,
+        ResourceGroupTier.AutonomousAgents => 1,
+        ResourceGroupTier.BulkAnalytics => 2,
+        _ => int.MaxValue
+    };
 }

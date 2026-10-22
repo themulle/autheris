@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.DataApi;
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -39,6 +40,88 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
         };
     }
 
+    private const string Tenant = "tenant-1";
+    private const string Caller = "S-1-5-21-caller";
+
+    private static string IssueCursor(
+        IReadOnlyDictionary<string, object?> pkValues,
+        TableMetadata metadata,
+        BulkTableStreamRequest request,
+        IKeysetCursorEncoder? encoder = null,
+        string tenant = Tenant,
+        string caller = Caller)
+    {
+        // Exactly what TableStreamEndpoints does when it issues nextCursor.
+        var context = KeysetCursorContextFactory.ForBulkStream(tenant, metadata, metadata.PrimaryKeyColumns, caller, request);
+        return (encoder ?? new KeysetCursorEncoder()).EncodeCursor(pkValues, context);
+    }
+
+    [Fact]
+    public void PlanKeysetStream_CursorIssuedForSameContext_DecodesWithInjectedEncoder()
+    {
+        var encoder = new KeysetCursorEncoder("bulk-stream-signing-key-for-tests-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
+        var metadata = CreateTableMetadata(primaryKeys: ["id"]);
+        var decision = CreateAllowedDecision(metadata.Identifier);
+        var request = new BulkTableStreamRequest(Select: ["id", "status"], Limit: 10);
+        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 7 }, metadata, request, encoder);
+
+        var planned = planner.PlanKeysetStream(request with { Cursor = cursor, Limit = 20 }, metadata, decision, Tenant, Caller);
+
+        planned.Parameters["@cursor_0"].ShouldBe(7);
+    }
+
+    [Fact]
+    public void PlanKeysetStream_CursorReplayedAcrossTenantCallerTableOrRequest_FailsClosed()
+    {
+        var encoder = new KeysetCursorEncoder("bulk-stream-signing-key-for-tests-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
+        var metadata = CreateTableMetadata(primaryKeys: ["id"]);
+        var decision = CreateAllowedDecision(metadata.Identifier);
+        using var statusJson = JsonDocument.Parse("\"open\"");
+        using var otherStatusJson = JsonDocument.Parse("\"closed\"");
+        var request = new BulkTableStreamRequest(
+            Select: ["id", "status"],
+            Filter: new TypedFilterNode(Field: "status", Op: "eq", Value: statusJson.RootElement),
+            Limit: 10);
+        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 7 }, metadata, request, encoder);
+        var continuation = request with { Cursor = cursor };
+
+        // Other tenant
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation, metadata, decision, "tenant-2", Caller));
+
+        // Other caller
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation, metadata, decision, Tenant, "S-1-5-21-other"));
+
+        // Missing tenant / caller binding
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation, metadata, decision));
+
+        // Other table with the same key shape
+        var otherTable = CreateTableMetadata(primaryKeys: ["id"]) with { Identifier = new TableIdentifier("sales", "dbo", "invoices") };
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation, otherTable, CreateAllowedDecision(otherTable.Identifier), Tenant, Caller));
+
+        // Other schema
+        var otherSchema = CreateTableMetadata(primaryKeys: ["id"]) with { Identifier = new TableIdentifier("sales", "archive", "orders") };
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation, otherSchema, CreateAllowedDecision(otherSchema.Identifier), Tenant, Caller));
+
+        // Other filter
+        var otherFilter = continuation with { Filter = new TypedFilterNode(Field: "status", Op: "eq", Value: otherStatusJson.RootElement) };
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(otherFilter, metadata, decision, Tenant, Caller));
+
+        // Dropped filter
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation with { Filter = null }, metadata, decision, Tenant, Caller));
+
+        // Other projection
+        Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(continuation with { Select = ["id", "amount"] }, metadata, decision, Tenant, Caller));
+
+        // Other signing key
+        var otherKeyPlanner = new GovernedTableReadPlanner(new KeysetCursorEncoder("a-different-bulk-stream-signing-key-987654321"));
+        Should.Throw<InvalidCursorException>(() => otherKeyPlanner.PlanKeysetStream(continuation, metadata, decision, Tenant, Caller));
+
+        // Identical context still decodes
+        planner.PlanKeysetStream(continuation, metadata, decision, Tenant, Caller).Parameters["@cursor_0"].ShouldBe(7);
+    }
+
     private static TableAccessDecision CreateAllowedDecision(TableIdentifier table, Dictionary<string, ColumnAccessLevel>? columnAccess = null, string? rowFilterSql = null)
     {
         return TableAccessDecision.Allowed(
@@ -54,15 +137,12 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
         var planner = new GovernedTableReadPlanner();
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var decision = CreateAllowedDecision(metadata.Identifier);
-        var encoder = new KeysetCursorEncoder();
-        var cursor = encoder.EncodeCursor(new Dictionary<string, object?> { ["id"] = 100 });
-
         var request = new BulkTableStreamRequest(
             Select: ["id", "status"],
-            Cursor: cursor,
             Limit: 50);
+        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 100 }, metadata, request);
 
-        var planned = planner.PlanKeysetStream(request, metadata, decision);
+        var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, metadata, decision, Tenant, Caller);
 
         planned.Sql.ShouldContain("SELECT \"id\", \"status\"");
         planned.Sql.ShouldContain("FROM sales.dbo.orders");
@@ -78,18 +158,14 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
         var planner = new GovernedTableReadPlanner();
         var metadata = CreateTableMetadata(primaryKeys: ["tenant_id", "id"]);
         var decision = CreateAllowedDecision(metadata.Identifier);
-        var encoder = new KeysetCursorEncoder();
-        var cursor = encoder.EncodeCursor(new Dictionary<string, object?>
+        var request = new BulkTableStreamRequest(Limit: 1000);
+        var cursor = IssueCursor(new Dictionary<string, object?>
         {
             ["tenant_id"] = "corp",
             ["id"] = 500
-        });
+        }, metadata, request);
 
-        var request = new BulkTableStreamRequest(
-            Cursor: cursor,
-            Limit: 1000);
-
-        var planned = planner.PlanKeysetStream(request, metadata, decision);
+        var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, metadata, decision, Tenant, Caller);
 
         planned.Sql.ShouldContain("WHERE ((\"tenant_id\" > @cursor_0) OR (\"tenant_id\" = @cursor_0 AND \"id\" > @cursor_1))");
         planned.Sql.ShouldContain("ORDER BY \"tenant_id\" ASC, \"id\" ASC");
@@ -104,9 +180,6 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
         var planner = new GovernedTableReadPlanner();
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var decision = CreateAllowedDecision(metadata.Identifier);
-        var encoder = new KeysetCursorEncoder();
-        var cursor = encoder.EncodeCursor(new Dictionary<string, object?> { ["id"] = 200 });
-
         using var statusJson = JsonDocument.Parse("\"completed\"");
         using var amountJson = JsonDocument.Parse("50.0");
 
@@ -119,10 +192,10 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
 
         var request = new BulkTableStreamRequest(
             Filter: filter,
-            Cursor: cursor,
             Limit: 100);
+        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 200 }, metadata, request);
 
-        var planned = planner.PlanKeysetStream(request, metadata, decision);
+        var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, metadata, decision, Tenant, Caller);
 
         planned.Sql.ShouldContain("WHERE (\"status\" = @p0 AND \"amount\" > @p1) AND (\"id\" > @cursor_0)");
         planned.Parameters["@p0"].ShouldBe("completed");

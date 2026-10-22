@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Dbt;
@@ -19,6 +20,12 @@ using Xunit;
 
 public sealed class DbtTests
 {
+    private static readonly TenantId CallerTenant = new("postgres");
+
+    // The direct governance import runs as the calling governance administrator, never as the sync.
+    private static readonly DbtGovernanceImportCaller Caller =
+        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), CallerTenant);
+
     private const string SampleDbtManifestJson = """
     {
       "metadata": {
@@ -474,7 +481,9 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestWithRelationshipsJson));
-        var (models, relationships, _) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
+        var parsed = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
+        var models = parsed.Models;
+        var relationships = parsed.Relationships;
 
         models.Count.ShouldBe(2);
         relationships.Count.ShouldBeGreaterThanOrEqualTo(1);
@@ -608,7 +617,7 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(governanceJson));
-        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false);
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
 
         result.Success.ShouldBeTrue();
         result.UpdatedTablesCount.ShouldBe(1);
@@ -676,7 +685,7 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(validJson));
-        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false);
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
 
         result.Success.ShouldBeTrue();
         result.MaskingRulesCount.ShouldBe(0);
@@ -697,12 +706,12 @@ public sealed class DbtTests
         """;
 
         using var badStream = new MemoryStream(Encoding.UTF8.GetBytes(unknownRuleJson));
-        var ex = await Should.ThrowAsync<ArgumentException>(() => service.IngestGovernanceStreamAsync(badStream, dryRun: false));
+        var ex = await Should.ThrowAsync<ArgumentException>(() => service.IngestGovernanceStreamAsync(badStream, Caller, dryRun: false));
         ex.Message.ShouldContain("SUPER_SECRET_ALGO");
     }
 
     [Fact]
-    public async Task DbtMetadataIngestionService_B02_ReplaceMode_RemovesOmittedRules_AndTracksCounts()
+    public async Task DbtMetadataIngestionService_B02_ReplaceMode_RejectsRemovalOfOmittedRules_AndWritesNothing()
     {
         var proposalRepo = Substitute.For<IDbtProposalRepository>();
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
@@ -756,16 +765,216 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(replaceJson));
-        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false, replace: true);
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false, replace: true);
+
+        // Fail closed: removing col_b's rule is a relaxation, so the whole import is rejected and nothing is written.
+        result.Success.ShouldBeFalse();
+        result.RemovedMaskingRulesCount.ShouldBe(1);
+        result.ErrorMessage.ShouldNotBeNull();
+        result.ErrorMessage.ShouldContain("col_b");
+        result.ErrorMessage.ShouldContain("proposal workflow");
+
+        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
+    private static TableMetadata GovernanceTable(string tableName, string sensitivity, IReadOnlyDictionary<string, MaskingRule>? rules = null, bool sensitiveColumn = false) => new()
+    {
+        Identifier = new TableIdentifier("postgres", "analytics", tableName),
+        Table = new Table
+        {
+            Id = Guid.NewGuid(),
+            SourceName = "postgres",
+            SchemaName = "analytics",
+            TableName = tableName,
+            Sensitivity = sensitivity
+        },
+        Columns =
+        [
+            new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = sensitiveColumn }
+        ],
+        ColumnMaskingRules = rules ?? new Dictionary<string, MaskingRule>()
+    };
+
+    private static (DbtMetadataIngestionService Service, ITableMetadataRepository Repo) GovernanceService(params TableMetadata[] tables)
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        foreach (var table in tables)
+        {
+            metadataRepo.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
+        }
+
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables.ToList());
+        var service = new DbtMetadataIngestionService(
+            Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
+        return (service, metadataRepo);
+    }
+
+    [Theory]
+    [InlineData("\"masking_rule\": \"MASK_EMAIL\"")]
+    [InlineData("\"masking_rule\": null")]
+    [InlineData("\"masking_rule\": \"none\"")]
+    public async Task DbtMetadataIngestionService_GovernanceImport_RejectsAWeakenedOrRemovedMaskingRule_AndWritesNoTable(string ruleJson)
+    {
+        var clean = GovernanceTable("clean", "NORMAL");
+        var nullified = GovernanceTable("customers", "NORMAL", new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "NULLIFY" } });
+        var (service, metadataRepo) = GovernanceService(clean, nullified);
+
+        var json = $$"""
+        {
+          "classifications": [
+            { "database": "postgres", "schema": "analytics", "table": "clean", "columns": { "email": { "masking_rule": "REDACT" } } },
+            { "database": "postgres", "schema": "analytics", "table": "customers", "columns": { "email": { {{ruleJson}} } } }
+          ]
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        // Same ratchet as ApproveProposalAsync; the valid change on "clean" is not written either (all or nothing).
+        result.Success.ShouldBeFalse();
+        (result.RelaxedMaskingRulesCount + result.RemovedMaskingRulesCount).ShouldBe(1);
+        result.ErrorMessage!.ShouldContain("customers.email");
+        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_GovernanceImport_AppliesATightenedMaskingRule()
+    {
+        var table = GovernanceTable("customers", "NORMAL", new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "MASK_EMAIL" } });
+        var (service, metadataRepo) = GovernanceService(table);
+
+        const string json = """
+        { "classifications": [ { "database": "postgres", "schema": "analytics", "table": "customers", "columns": { "email": { "masking_rule": "NULLIFY" } } } ] }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false, replace: true);
 
         result.Success.ShouldBeTrue();
         result.MaskingRulesCount.ShouldBe(1);
-        result.RemovedMaskingRulesCount.ShouldBe(1);
-
         await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m =>
-            m.ColumnMaskingRules.ContainsKey("col_a") &&
-            !m.ColumnMaskingRules.ContainsKey("col_b")
-        ), Arg.Any<CancellationToken>());
+            m.ColumnMaskingRules["email"].RuleType == "NULLIFY"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_GovernanceImport_RejectsLoweredTableAndColumnSensitivity()
+    {
+        var table = GovernanceTable("customers", "CONFIDENTIAL", sensitiveColumn: true);
+        var (service, metadataRepo) = GovernanceService(table);
+
+        const string json = """
+        { "classifications": [ { "database": "postgres", "schema": "analytics", "table": "customers", "sensitivity": "PUBLIC",
+                                 "columns": { "email": { "sensitivity": "LOW" } } } ] }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        result.Success.ShouldBeFalse();
+        result.Warnings.ShouldContain(w => w.Contains("Table 'postgres.analytics.customers'") && w.Contains("sensitivity 'PUBLIC'"));
+        result.Warnings.ShouldContain(w => w.Contains("customers.email") && w.Contains("sensitivity 'LOW'"));
+        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
+    // An empty stored table sensitivity is the implicit NORMAL: lowering it to PUBLIC/LOW is rejected like lowering an explicit NORMAL.
+    [Theory]
+    [InlineData("", "PUBLIC")]
+    [InlineData("   ", "LOW")]
+    [InlineData("NORMAL", "PUBLIC")]
+    public async Task DbtMetadataIngestionService_GovernanceImport_RejectsLoweringAnImplicitNormalTableSensitivity(string stored, string incoming)
+    {
+        var table = GovernanceTable("customers", stored);
+        var (service, metadataRepo) = GovernanceService(table);
+
+        var json = $$"""
+        { "classifications": [ { "database": "postgres", "schema": "analytics", "table": "customers", "sensitivity": "{{incoming}}" } ] }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        result.Success.ShouldBeFalse();
+        result.Warnings.ShouldContain(w => w.Contains("Table 'postgres.analytics.customers'") && w.Contains($"sensitivity '{incoming}'") && w.Contains("'NORMAL'"));
+        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("\"required_filter_columns\": [\"tenant_id\"]", false, false)]
+    [InlineData("\"required_filter_columns\": []", false, false)]
+    [InlineData("\"required_filter_column_groups\": [[\"client_id\"]]", false, false)]
+    [InlineData("\"required_filter_column_groups\": [[\"client_id\", \"year\"], [\"region\"]]", false, false)]
+    [InlineData("\"description\": \"no requirements given\"", true, false)]
+    [InlineData("\"description\": \"no requirements given\"", false, true)]
+    [InlineData("\"required_filter_columns\": [\"client_id\", \"tenant_id\", \"year\"], \"required_filter_column_groups\": [[\"client_id\", \"year\"], [\"client_id\", \"year\", \"month\"]]", true, true)]
+    public async Task DbtMetadataIngestionService_GovernanceImport_RequiredFilterColumnsAndGroups_MayOnlyBeTightened(string requirementJson, bool replace, bool expectedSuccess)
+    {
+        var baseTable = GovernanceTable("customers", "NORMAL");
+        var table = baseTable with
+        {
+            Table = baseTable.Table with
+            {
+                RequiredFilterColumns = ["client_id", "tenant_id"],
+                RequiredFilterColumnGroups = [["client_id", "year"]]
+            }
+        };
+        var (service, metadataRepo) = GovernanceService(table);
+        var json = $$"""
+        { "classifications": [ { "database": "postgres", "schema": "analytics", "table": "customers", {{requirementJson}} } ] }
+        """;
+
+        using var dryStream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var dry = await service.IngestGovernanceStreamAsync(dryStream, Caller, dryRun: true, replace: replace);
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false, replace: replace);
+
+        // Fail closed: removing a required column / group (also by omission in replace mode) or adding a weaker alternative group
+        // rejects the import, identically in a dry run; adding requirements is applied.
+        dry.Success.ShouldBe(expectedSuccess);
+        result.Success.ShouldBe(expectedSuccess);
+        if (expectedSuccess)
+        {
+            await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        }
+        else
+        {
+            result.ErrorMessage!.ShouldContain("required filter column");
+            await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        }
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_GovernanceImport_RejectsTheSyncActor()
+    {
+        var (service, _) = GovernanceService(GovernanceTable("customers", "NORMAL"));
+        var syncCaller = new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true), CallerTenant);
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("{}"));
+        await Should.ThrowAsync<ArgumentException>(() => service.IngestGovernanceStreamAsync(stream, syncCaller));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task DbtMetadataIngestionService_GovernanceImport_AcceptsAForeignPayloadTenantOnlyForClusterAdmin(bool isClusterAdmin, bool expectedSuccess)
+    {
+        var (service, _) = GovernanceService();
+        var caller = Caller with { IsClusterAdmin = isClusterAdmin };
+
+        const string json = """
+            {"access_profiles":{"david":{"tenant":"tenant_other","scope":"lwetem_prod.*.*","uncovered":"deny",
+              "grantee":{"type":"user","sid":"S-1-5-21-LWE-DAVID"},
+              "bindings":[{"filter":"nicht_ausgelieferte_krane","target":"lwetem_prod.*.*.client_id"}]}}}
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, caller, dryRun: true);
+
+        result.Success.ShouldBe(expectedSuccess);
+        if (!expectedSuccess)
+        {
+            result.ErrorMessage!.ShouldContain("tenant_other");
+        }
     }
 
     [Fact]
@@ -811,7 +1020,7 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(routineJson));
-        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false);
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
 
         result.Success.ShouldBeTrue();
         result.Warnings.Count.ShouldBe(2);

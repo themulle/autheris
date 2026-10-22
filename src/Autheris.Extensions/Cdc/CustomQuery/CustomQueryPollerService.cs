@@ -158,7 +158,28 @@ public class CustomQueryPollerService : ClusterPartitionedService
         var (sourceRows, nextVector) = await ProcessBatchRowsAsync(stream, poller, rawRows, vector, ct).ConfigureAwait(false);
         if (sourceRows.Count == 0)
         {
-            // All rows were duplicates; if the vector advanced, we can still persist the advanced vector
+            // EXT-09: When all rows were duplicates, persist the advanced vector if it changed; otherwise touch polled
+            if (!nextVector.Equals(vector))
+            {
+                var emptyBatch = new CdcAppendBatch(
+                    stream.Id,
+                    "query_poller",
+                    tableId,
+                    fencingToken,
+                    stream.HeadOffset,
+                    NewWatermark: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Events: [],
+                    ImageWrites: [],
+                    WatermarkState: nextVector.ToJson());
+
+                await _streamStore.AppendAsync(emptyBatch, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await _streamStore.TouchPolledAsync(stream.Id, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                _logger.LogWarning("Poller batch for stream '{StreamId}' fully duplicate without vector progress.", stream.Id);
+            }
+
             return 0;
         }
 
@@ -253,7 +274,7 @@ public class CustomQueryPollerService : ClusterPartitionedService
             var operation = CdcOperationClassifier.ClassifyRow(row, poller.SoftDelete, prior, poller.Watermarks);
 
             // Deduplication: if payload is identical to prior image and not a delete, suppress
-            if (operation != CdcOperation.Delete && prior != null && CdcOperationClassifier.IsPayloadIdentical(row, prior))
+            if (operation != CdcOperation.Delete && prior != null && CdcOperationClassifier.IsPayloadIdentical(row, prior, poller.Watermarks))
             {
                 // Advance vector monotonically even on suppressed row
                 candidateVector = AdvanceVectorFor(candidateVector, poller.Watermarks, row);

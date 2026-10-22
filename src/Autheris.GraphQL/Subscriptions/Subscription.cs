@@ -131,7 +131,8 @@ public sealed class Subscription
             tableId,
             services.GetService<ITableAccessResolver>(),
             services.GetRequiredService<IAuditLogRepository>(),
-            ct).ConfigureAwait(false);
+            ct,
+            guardCts).ConfigureAwait(false);
 
         var sourceStream = eventChannel.SubscribeAsync(topic, guardCts.Token);
 

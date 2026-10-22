@@ -94,7 +94,7 @@ public sealed class RebacGraphQLSecurityTests
         var options = Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true } });
         var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
 
-        await store.AddTupleAsync(new RebacTuple("tenant-acme", "user:alice", "viewer", "document:doc-101"));
+        await store.AddTupleAsync(new RebacTuple("tenant-acme", "alice", "viewer", "document:doc-101"));
 
         var httpContext = CreateHttpContext("user:alice", "tenant-acme");
         var executor = await CreateExecutorAsync(store, evaluator, httpContext);
@@ -141,7 +141,7 @@ public sealed class RebacGraphQLSecurityTests
         var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
 
         // User alice is member of group:finance
-        await store.AddTupleAsync(new RebacTuple("tenant-corp", "user:alice", "member", "group:finance"));
+        await store.AddTupleAsync(new RebacTuple("tenant-corp", "alice", "member", "group:finance"));
         // group:finance#member is viewer on folder:reports
         await store.AddTupleAsync(new RebacTuple("tenant-corp", "group:finance#member", "viewer", "folder:reports"));
         // folder:reports is parent of document:doc-202
@@ -168,7 +168,7 @@ public sealed class RebacGraphQLSecurityTests
         var options = Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true } });
         var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
 
-        await store.AddTupleAsync(new RebacTuple("tenant-a", "user:alice", "viewer", "document:doc-303"));
+        await store.AddTupleAsync(new RebacTuple("tenant-a", "alice", "viewer", "document:doc-303"));
 
         // Alice attempts to execute query in context of tenant-b
         var httpContext = CreateHttpContext("user:alice", "tenant-b");

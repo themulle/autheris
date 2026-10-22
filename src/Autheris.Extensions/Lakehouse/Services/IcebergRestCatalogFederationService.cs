@@ -332,6 +332,8 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         string? abacRowFilter = null;
         if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenant))
         {
+            // Same attribute map as the query path (TableAccessPolicy.BuildClaimAttributes): action claims are ignored, empty values are
+            // missing, and a claim type with several distinct values is ambiguous (fail closed) instead of keeping the last value.
             var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var claim in principal.Claims)
             {
@@ -340,8 +342,10 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
                 {
                     continue;
                 }
-                attributes[claim.Type] = claim.Value;
+
+                Autheris.Application.Governance.CasbinEnforcementService.AddClaimAttribute(attributes, claim.Type, claim.Value);
             }
+
             attributes["action"] = "read";
 
             var secContext = new SecurityEvaluationContext(
@@ -352,7 +356,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
                 RequestedColumns: tableMeta.Columns.Select(c => c.ColumnName).ToList(),
                 ClientIp: _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None,
                 Timestamp: now,
-                PurposeId: principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value,
+                PurposeId: ResolvePurpose(principal.Claims),
                 Attributes: attributes);
 
             var abac = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct).ConfigureAwait(false);
@@ -378,4 +382,27 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         return tableMeta;
     }
+
+    /// <summary>
+    /// Purpose of the caller, resolved like TableAccessPolicy.BuildClaimAttributes: the first claim type with a non-empty value wins
+    /// (purpose before purpose_id); several distinct values of it give no purpose (fail closed).
+    /// </summary>
+    private static string? ResolvePurpose(IEnumerable<Claim> claims)
+    {
+        var list = claims as IReadOnlyCollection<Claim> ?? claims.ToList();
+        var values = DistinctClaimValues(list, "purpose");
+        if (values.Count == 0)
+        {
+            values = DistinctClaimValues(list, "purpose_id");
+        }
+
+        return values.Count == 1 ? values[0] : null;
+    }
+
+    private static List<string> DistinctClaimValues(IEnumerable<Claim> claims, string type) =>
+        claims
+            .Where(c => c.Type == type && !string.IsNullOrWhiteSpace(c.Value))
+            .Select(c => c.Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 }

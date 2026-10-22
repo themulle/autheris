@@ -64,4 +64,20 @@ public interface IDistributedClusterStateProvider
     /// <see cref="ClusterStateUnavailableException"/>.
     /// </summary>
     ValueTask<IDistributedLease?> TryAcquireLeaseAsync(string resourceKey, TimeSpan ttl, CancellationToken ct = default);
+
+    /// <summary>
+    /// GQL-10: Atomically attempts to acquire an expiring slot member in setKey if count of active (unexpired) slots &lt; limit.
+    /// Returns true if acquired, false if at limit, or null if store is unreachable.
+    /// </summary>
+    ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default);
+
+    /// <summary>
+    /// GQL-10: Renews the slot member expiry by ttl. Returns true if renewed, false if not found / expired.
+    /// </summary>
+    ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default);
+
+    /// <summary>
+    /// GQL-10: Releases the slot member from setKey.
+    /// </summary>
+    ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default);
 }

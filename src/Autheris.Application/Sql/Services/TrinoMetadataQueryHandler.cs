@@ -60,6 +60,20 @@ public static class TrinoMetadataQueryHandler
         => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions: null, ct);
 
     /// <summary>Same as above with the deployment options (tenancy mode and shared tables) for the catalog visibility rule.</summary>
+    public static Task<GovernedSqlResult?> TryExecuteAsync(
+        string? rawSql,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        ITableMetadataRepository? metadataRepository,
+        IConsentRepository? consentRepository,
+        GatewayOptions? gatewayOptions,
+        CancellationToken ct = default)
+        => TryExecuteAsync(rawSql, user, tenantId, metadataRepository, consentRepository, gatewayOptions, consentResolver: null, ct);
+
+    /// <summary>
+    /// Same as above with the data-path consent resolver for <c>information_schema.columns</c>
+    /// (<c>null</c> = a default <see cref="ConsentResolutionService"/>).
+    /// </summary>
     public static async Task<GovernedSqlResult?> TryExecuteAsync(
         string? rawSql,
         ClaimsPrincipal user,
@@ -67,6 +81,7 @@ public static class TrinoMetadataQueryHandler
         ITableMetadataRepository? metadataRepository,
         IConsentRepository? consentRepository,
         GatewayOptions? gatewayOptions,
+        IConsentResolutionService? consentResolver,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(rawSql) || metadataRepository == null)
@@ -231,26 +246,27 @@ public static class TrinoMetadataQueryHandler
 
         // information_schema.columns
         var colRows = new List<IReadOnlyDictionary<string, object?>>();
-        var userSid = user.GetUserSid();
-        foreach (var table in visibleTables
+        var columnTables = visibleTables
             .Where(t => MatchesFilter(filters, "table_catalog", t.Identifier.Domain) &&
                         MatchesFilter(filters, "table_schema", t.Identifier.Schema) &&
                         MatchesFilter(filters, "table_name", t.Identifier.TableName))
             .OrderBy(t => t.Identifier.Domain, StringComparer.OrdinalIgnoreCase)
             .ThenBy(t => t.Identifier.Schema, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(t => t.Identifier.TableName, StringComparer.OrdinalIgnoreCase))
+            .ThenBy(t => t.Identifier.TableName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Security review: Deny columns must be hidden for every subject the data path evaluates (user SID, group SIDs and
+        // roles), not only for consents issued directly to the user. The subject set is gathered exactly like
+        // CatalogVisibility does and loaded in one batch call for all tables (no per-table query).
+        var columnSubjects = columnTables.Count > 0 ? await LoadColumnSubjectsAsync(user, tenantId, consentRepository, ct).ConfigureAwait(false) : null;
+        var resolver = consentResolver ?? new ConsentResolutionService();
+        var callerScopes = CatalogColumnAccessResolver.ForResolver(Autheris.Domain.Security.TokenAccessScope.GetScopeSet(user.Claims));
+
+        foreach (var table in columnTables)
         {
-            HashSet<string>? deniedColumns = null;
-            if (consentRepository != null && userSid != null)
-            {
-                var consents = await consentRepository.GetActiveConsentsForSubjectsAsync([userSid.Value], table.Identifier, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-                deniedColumns = consents
-                    .Where(c => c.IsActive(DateTimeOffset.UtcNow))
-                    .SelectMany(c => c.ColumnRules ?? [])
-                    .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny)
-                    .Select(cr => cr.ColumnName)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            }
+            var deniedColumns = columnSubjects != null
+                ? ResolveDeniedColumns(table, columnSubjects, resolver, callerScopes)
+                : null;
 
             int pos = 1;
             for (int i = 0; i < table.Columns.Count; i++)
@@ -276,6 +292,77 @@ public static class TrinoMetadataQueryHandler
 
         string[] colNames = ["table_catalog", "table_schema", "table_name", "column_name", "ordinal_position", "is_nullable", "data_type"];
         return new GovernedSqlResult(rawSql, colNames, colRows, colRows.Count, sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>The caller's consent subjects and their active consents grouped by table (input of the column filter).</summary>
+    private sealed record ColumnSubjects(
+        Sid UserSid,
+        IReadOnlySet<Sid> GroupSids,
+        IReadOnlySet<string> Roles,
+        IReadOnlyDictionary<TableIdentifier, List<Consent>> ConsentsByTable);
+
+    private static async Task<ColumnSubjects?> LoadColumnSubjectsAsync(
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        IConsentRepository? consentRepository,
+        CancellationToken ct)
+    {
+        // Same subject set as CatalogVisibility.VisibleTablesAsync: user SID (or identity name), group SIDs and roles.
+        var userSid = user.GetUserSid() ?? (!string.IsNullOrWhiteSpace(user.Identity?.Name) ? new Sid(user.Identity.Name) : (Sid?)null);
+        if (consentRepository == null || userSid == null)
+        {
+            return null;
+        }
+
+        var groupSids = user.GetGroupSids();
+        var roles = user.GetUserRoles();
+        var now = DateTimeOffset.UtcNow;
+        var consents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
+            groupSids.Append(userSid.Value).ToList(), roles, now, tenantId, ct).ConfigureAwait(false);
+
+        var byTable = consents
+            .Where(c => c.IsActive(now))
+            .GroupBy(c => c.TableIdentifier)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        return new ColumnSubjects(userSid.Value, groupSids, roles, byTable);
+    }
+
+    /// <summary>
+    /// Columns to hide: every Deny column rule of a consent applicable to the caller's subjects and, when the data-path
+    /// resolver allows the table, every column it resolves to <see cref="ColumnAccessLevel.Deny"/> (only ever lowers).
+    /// </summary>
+    private static HashSet<string> ResolveDeniedColumns(
+        TableMetadata table,
+        ColumnSubjects subjects,
+        IConsentResolutionService resolver,
+        IReadOnlySet<string>? callerScopes)
+    {
+        if (!subjects.ConsentsByTable.TryGetValue(table.Identifier, out var tableConsents) || tableConsents.Count == 0)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var denied = tableConsents
+            .SelectMany(c => c.ColumnRules ?? [])
+            .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny)
+            .Select(cr => cr.ColumnName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var decision = resolver.ResolveAccess(
+            subjects.UserSid, subjects.GroupSids, subjects.Roles, table.Identifier, tableConsents, table.Dialect, allUserSids: null, callerScopes);
+        if (decision is { IsAllowed: true })
+        {
+            foreach (var column in table.Columns)
+            {
+                if (decision.GetEffectiveColumnAccess(column.ColumnName, table) == ColumnAccessLevel.Deny)
+                {
+                    denied.Add(column.ColumnName);
+                }
+            }
+        }
+
+        return denied;
     }
 
     private static string NormalizeSql(string sql)

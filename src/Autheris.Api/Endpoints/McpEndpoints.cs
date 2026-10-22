@@ -223,7 +223,8 @@ public static class McpEndpoints
         var roles = isAuthenticated
             ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : RolesWithoutUntrustedClusterAdmin(principal))
             : new List<string>();
-        var groupSids = isAuthenticated
+        // SR-M-08: group SIDs are user-level grants; an app-only identity (no user SID) carries none on any MCP path.
+        var groupSids = isAuthenticated && !string.IsNullOrWhiteSpace(userSid)
             ? (securityContext != null ? securityContext.GroupSids.Select(s => s.Value).ToList() : principal.GetGroupSids().Select(s => s.Value).ToList())
             : new List<string>();
         var clientIp = securityContext?.ClientIp?.ToString()
@@ -240,7 +241,9 @@ public static class McpEndpoints
                             c.Type != ClaimTypes.Role &&
                             c.Type != ClaimTypes.GroupSid &&
                             c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType &&
-                            c.Type != CallerAttributeSchemeGate.MarkerClaimType)
+                            c.Type != CallerAttributeSchemeGate.MarkerClaimType &&
+                            // SR-M-08: raw role/group claims ("roles", "groups", "wids", ...) stay out; the session carries the vetted ones.
+                            Autheris.Application.Mcp.Services.McpProtocolHandler.IsAllowedAdditionalClaimType(c.Type))
                 .GroupBy(c => c.Type, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
             : null;

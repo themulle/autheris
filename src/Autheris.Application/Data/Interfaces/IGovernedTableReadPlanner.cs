@@ -94,11 +94,15 @@ public interface IGovernedTableReadPlanner
 
     /// <summary>
     /// PLAN-DATA-178: Plans a bulk keyset streaming query against a single table using monotonic keyset cursor seek.
-    /// Rejects joins, subqueries, and raw SQL injection.
+    /// Rejects joins, subqueries, and raw SQL injection. A supplied cursor is verified against the context built by
+    /// <see cref="KeysetCursorContextFactory.ForBulkStream"/> from <paramref name="tenantId"/>, <paramref name="callerSid"/>,
+    /// the table, its key and the request filter/projection; a cursor issued for any other context is rejected.
     /// </summary>
     PlannedTableRead PlanKeysetStream(
         BulkTableStreamRequest request,
         TableMetadata metadata,
-        TableAccessDecision decision);
+        TableAccessDecision decision,
+        string? tenantId = null,
+        string? callerSid = null);
 }
 

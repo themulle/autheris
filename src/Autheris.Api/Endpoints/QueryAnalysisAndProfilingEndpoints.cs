@@ -91,27 +91,29 @@ public static class QueryAnalysisAndProfilingEndpoints
             return SafeErrorResults.BadRequest("INVALID_ANALYSIS_REQUEST", "At least one query item is required.", httpContext);
         }
 
+        // A target subject or target roles make the request a simulation, whatever subject id is sent (the caller's own SID included):
+        // the roles are asserted by the client, so the simulation privilege is required before any synthetic identity is built.
+        var hasTargetSubject = !string.IsNullOrWhiteSpace(request.TargetSubjectId);
+        var hasTargetRoles = request.TargetRoles is { Count: > 0 };
         ClaimsPrincipal? targetPrincipal = null;
-        if (!string.IsNullOrWhiteSpace(request.TargetSubjectId))
+        if (hasTargetSubject || hasTargetRoles)
         {
-            var claims = new List<Claim>
+            if (!QueryAnalysisService.HasSimulatePrivilege(httpContext.User))
             {
-                new(ClaimTypes.NameIdentifier, request.TargetSubjectId),
-                new(ClaimTypes.Name, request.TargetSubjectId)
-            };
-
-            if (request.TargetRoles != null)
-            {
-                foreach (var role in request.TargetRoles)
-                {
-                    if (!string.IsNullOrWhiteSpace(role))
-                    {
-                        claims.Add(new Claim(ClaimTypes.Role, role));
-                    }
-                }
+                return SafeErrorResults.Problem(
+                    StatusCodes.Status403Forbidden,
+                    "FORBIDDEN",
+                    "Evaluating queries for a target principal requires the 'governance:simulate' or 'GovernanceAdmin' role.",
+                    httpContext);
             }
 
-            targetPrincipal = new ClaimsPrincipal(new ClaimsIdentity(claims, "SimulatedTarget"));
+            if (!hasTargetSubject)
+            {
+                return SafeErrorResults.BadRequest("INVALID_ANALYSIS_REQUEST", "TargetRoles requires TargetSubjectId.", httpContext);
+            }
+
+            // Administrator and simulation roles in TargetRoles are dropped; the service never applies administrator semantics to a target.
+            targetPrincipal = QueryAnalysisService.CreateSimulatedTargetPrincipal(request.TargetSubjectId!, request.TargetRoles);
         }
 
         try

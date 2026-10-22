@@ -7,6 +7,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Security;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -144,49 +145,37 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return Task.FromResult<DocAppManifest?>(null);
     }
 
+    public Task<bool> DocumentExistsAsync(DepositDocRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (_, _, _, _, filePath) = ResolveDocumentPath(request);
+        return Task.FromResult(File.Exists(filePath));
+    }
+
     public async Task<DepositDocResult> DepositDocumentAsync(DepositDocRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ValidateSafeIdentifier(request.AppId, nameof(request.AppId));
-
-        var docId = !string.IsNullOrWhiteSpace(request.DocId)
-            ? request.DocId.Trim()
-            : Slugify(request.Title);
-
-        ValidateSafeIdentifier(docId, nameof(docId));
-
-        var safeAppId = Path.GetFileName(request.AppId);
-        var safeDocId = Path.GetFileName(docId);
-        var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
-
-        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
-            ? _rootPath
-            : _rootPath + Path.DirectorySeparatorChar;
-
-        var targetCategoryDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId, categoryName));
-        if (!targetCategoryDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Invalid category directory path.", nameof(request));
-        }
+        var (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath) = ResolveDocumentPath(request);
 
         Directory.CreateDirectory(targetCategoryDir);
 
-        var filePath = Path.GetFullPath(Path.Combine(targetCategoryDir, $"{safeDocId}.md"));
-        if (!filePath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException("Invalid document file path.", nameof(request));
-        }
+        // A tenant deposit records its tenant and author as a provenance block in the same write as the content, so the
+        // document keeps its owner across restarts (startup sync) and is never promoted to official documentation.
+        var fileContent = DocProvenance.Compose(request.Content, request.TenantId, request.AuthorSid);
+        await File.WriteAllTextAsync(filePath, fileContent, ct).ConfigureAwait(false);
 
-        await File.WriteAllTextAsync(filePath, request.Content, ct).ConfigureAwait(false);
+        // Index exactly what a later sync of the file would index (same body, same provenance).
+        var (body, tenantId, authorSid) = DocProvenance.Parse(fileContent);
 
         // Index in-memory for instant discovery (< 100ms)
         var chunks = await _ingestor.IngestMarkdownContentAsync(
-            request.Content,
+            body,
             safeDocId,
             safeAppId,
             request.Category,
-            filePath,
+            ToRelativeSourcePath(filePath),
             ct).ConfigureAwait(false);
+        chunks = WithProvenance(chunks, tenantId, authorSid ?? request.AuthorSid);
 
         await _searchService.IndexChunksAsync(chunks, ct).ConfigureAwait(false);
 
@@ -195,11 +184,17 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return new DepositDocResult(
             Success: true,
             ChunkId: firstChunkId,
-            FilePath: filePath,
+            FilePath: ToRelativeSourcePath(filePath),
             Message: $"Successfully deposited and indexed document '{safeDocId}' for application '{safeAppId}'.");
     }
 
-    public async Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default)
+    public Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default) =>
+        ExtractBundleCoreAsync(appId, zipStream, tenantId: null, authorSid: null, ct);
+
+    public Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct = default) =>
+        ExtractBundleCoreAsync(appId, zipStream, tenantId, authorSid, ct);
+
+    private async Task<DepositDocResult> ExtractBundleCoreAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(zipStream);
         ValidateSafeIdentifier(appId, nameof(appId));
@@ -235,6 +230,18 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 FilePath: null,
                 Message: $"Security violation: Archive entry count ({archive.Entries.Count}) exceeds maximum allowed threshold of {MaxEntries} (Zip bomb protection).",
                 ErrorCode: "ZIP_BOMB_DETECTED");
+        }
+
+        // A tenant bundle only ever adds new markdown documents owned by its tenant: it is validated completely before the first
+        // byte is written, and it never replaces an existing file (official documentation or another tenant's document).
+        var isTenantBundle = tenantId is not null;
+        if (isTenantBundle)
+        {
+            var preflight = PreflightTenantBundle(archive, appId, targetDir, targetDirWithSep);
+            if (preflight is not null)
+            {
+                return preflight;
+            }
         }
 
         var extractedFiles = new List<string>();
@@ -300,6 +307,24 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 Directory.CreateDirectory(parentDir);
             }
 
+            if (isTenantBundle)
+            {
+                // Tenant bundles carry documentation only: manifests, scripts and other assets are not extracted.
+                if (!IsMarkdownFile(entry.Name))
+                {
+                    continue;
+                }
+
+                var tenantWrite = await WriteTenantDocumentAsync(entry, destinationPath, tenantId!, authorSid, ct).ConfigureAwait(false);
+                if (tenantWrite is not null)
+                {
+                    return tenantWrite;
+                }
+
+                extractedFiles.Add(destinationPath);
+                continue;
+            }
+
             entry.ExtractToFile(destinationPath, overwrite: true);
             extractedFiles.Add(destinationPath);
         }
@@ -320,7 +345,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 var category = ResolveCategoryFromPath(relativePath);
                 try
                 {
-                    var chunks = await _ingestor.IngestMarkdownFileAsync(canonicalFile, safeAppId, category, ct).ConfigureAwait(false);
+                    var chunks = await IngestStoredFileAsync(canonicalFile, safeAppId, category, ct).ConfigureAwait(false);
                     allChunks.AddRange(chunks);
                 }
                 catch (Exception ex)
@@ -340,8 +365,132 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return new DepositDocResult(
             Success: true,
             ChunkId: allChunks.Count > 0 ? allChunks[0].Id : null,
-            FilePath: targetDir,
+            FilePath: ToRelativeSourcePath(targetDir),
             Message: $"Bundle applied successfully: {extractedFiles.Count} files unpacked, {allChunks.Count} sections indexed.");
+    }
+
+    private const long MaxTenantDocumentBytes = 5 * 1024 * 1024; // 5 MB per tenant document
+
+    private static bool IsMarkdownFile(string name) => name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Validates every entry of a tenant bundle before anything is written: path safety, size, and that no markdown document
+    /// would replace an existing file. Returns null when the bundle may be extracted, otherwise the failure result.
+    /// </summary>
+    private DepositDocResult? PreflightTenantBundle(ZipArchive archive, string appId, string targetDir, string targetDirWithSep)
+    {
+        long cumulativeUncompressedBytes = 0;
+        foreach (var entry in archive.Entries)
+        {
+            cumulativeUncompressedBytes += entry.Length;
+            if (cumulativeUncompressedBytes > 100L * 1024 * 1024)
+            {
+                _logger.LogError("Zip Bomb detected: cumulative size {Bytes} exceeds limit for tenant bundle '{AppId}'",
+                    cumulativeUncompressedBytes, SanitizeForLog(appId));
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "Security violation: Archive uncompressed size exceeds maximum allowed threshold of 100MB (Zip bomb protection).",
+                    ErrorCode: "ZIP_BOMB_DETECTED");
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.FullName) ||
+                entry.FullName.Contains("..", StringComparison.Ordinal) ||
+                Path.IsPathRooted(entry.FullName) ||
+                !Path.GetFullPath(Path.Combine(targetDir, entry.FullName)).StartsWith(targetDirWithSep, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError("Zip Slip traversal attempt detected for entry '{Entry}' in tenant bundle '{AppId}'",
+                    SanitizeForLog(entry.FullName), SanitizeForLog(appId));
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: $"Security violation: Archive entry '{entry.FullName}' attempts directory traversal outside destination directory.",
+                    ErrorCode: "ZIP_SLIP_ATTEMPT");
+            }
+
+            if (string.IsNullOrEmpty(entry.Name) || !IsMarkdownFile(entry.Name))
+            {
+                continue;
+            }
+
+            if (entry.Length > MaxTenantDocumentBytes)
+            {
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "A document in the bundle exceeds the maximum permitted size of 5 MB.",
+                    ErrorCode: "DOC_TOO_LARGE");
+            }
+
+            var destinationPath = Path.GetFullPath(Path.Combine(targetDir, entry.FullName));
+            if (File.Exists(destinationPath))
+            {
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: "Forbidden: the bundle would overwrite an existing document. Overwriting requires ClusterAdmin role.",
+                    ErrorCode: "DOC_OVERWRITE_FORBIDDEN");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Writes one document of a tenant bundle with the tenant provenance block, failing instead of replacing an existing file.
+    /// Returns null on success, otherwise the failure result.
+    /// </summary>
+    private static async Task<DepositDocResult?> WriteTenantDocumentAsync(ZipArchiveEntry entry, string destinationPath, string tenantId, string? authorSid, CancellationToken ct)
+    {
+        string text;
+        using (var memory = new MemoryStream())
+        {
+            await using (var entryStream = entry.Open())
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await entryStream.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+                {
+                    if (memory.Length + read > MaxTenantDocumentBytes)
+                    {
+                        return new DepositDocResult(
+                            Success: false,
+                            ChunkId: null,
+                            FilePath: null,
+                            Message: "A document in the bundle exceeds the maximum permitted size of 5 MB.",
+                            ErrorCode: "DOC_TOO_LARGE");
+                    }
+
+                    memory.Write(buffer, 0, read);
+                }
+            }
+
+            text = new UTF8Encoding(false).GetString(memory.GetBuffer(), 0, (int)memory.Length);
+        }
+
+        var fileContent = DocProvenance.Compose(text, tenantId, authorSid);
+        try
+        {
+            // CreateNew: never replaces a file that appeared after the preflight check.
+            await using var file = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await using var writer = new StreamWriter(file, new UTF8Encoding(false));
+            await writer.WriteAsync(fileContent.AsMemory(), ct).ConfigureAwait(false);
+        }
+        catch (IOException) when (File.Exists(destinationPath))
+        {
+            return new DepositDocResult(
+                Success: false,
+                ChunkId: null,
+                FilePath: null,
+                Message: "Forbidden: the bundle would overwrite an existing document. Overwriting requires ClusterAdmin role.",
+                ErrorCode: "DOC_OVERWRITE_FORBIDDEN");
+        }
+
+        return null;
     }
 
     public async Task<int> SyncExistingDocumentsAsync(CancellationToken ct = default)
@@ -371,18 +520,10 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    var content = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
-                    var docId = Path.GetFileNameWithoutExtension(file);
                     var relativePath = Path.GetRelativePath(dir, file);
                     var category = ResolveCategoryFromPath(relativePath);
 
-                    var chunks = await _ingestor.IngestMarkdownContentAsync(
-                        content,
-                        docId,
-                        appId,
-                        category,
-                        file,
-                        ct).ConfigureAwait(false);
+                    var chunks = await IngestStoredFileAsync(file, appId, category, ct).ConfigureAwait(false);
 
                     allChunks.AddRange(chunks);
                 }
@@ -403,6 +544,83 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             totalIndexed, appDirs.Length);
 
         return totalIndexed;
+    }
+
+    /// <summary>
+    /// The validated target of a deposit (shared by <see cref="DepositDocumentAsync"/> and <see cref="DocumentExistsAsync"/>, so the
+    /// existence check sees exactly the file a deposit would write).
+    /// </summary>
+    private (string SafeAppId, string SafeDocId, string CategoryName, string CategoryDir, string FilePath) ResolveDocumentPath(DepositDocRequest request)
+    {
+        ValidateSafeIdentifier(request.AppId, nameof(request.AppId));
+
+        var docId = !string.IsNullOrWhiteSpace(request.DocId)
+            ? request.DocId.Trim()
+            : Slugify(request.Title);
+
+        ValidateSafeIdentifier(docId, nameof(docId));
+
+        var safeAppId = Path.GetFileName(request.AppId);
+        var safeDocId = Path.GetFileName(docId);
+        var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
+
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _rootPath
+            : _rootPath + Path.DirectorySeparatorChar;
+
+        var targetCategoryDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId, categoryName));
+        if (!targetCategoryDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid category directory path.", nameof(request));
+        }
+
+        var filePath = Path.GetFullPath(Path.Combine(targetCategoryDir, $"{safeDocId}.md"));
+        if (!filePath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid document file path.", nameof(request));
+        }
+
+        return (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath);
+    }
+
+    /// <summary>
+    /// Indexes a markdown file of the store: the provenance block (if any) is stripped from the content and applied to the
+    /// chunks, and the recorded source path is relative to the store root (never an absolute server path).
+    /// </summary>
+    private async Task<IReadOnlyList<DocChunk>> IngestStoredFileAsync(string file, string appId, DocCategory category, CancellationToken ct)
+    {
+        var fileContent = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
+        var (body, tenantId, authorSid) = DocProvenance.Parse(fileContent);
+        var docId = Path.GetFileNameWithoutExtension(file);
+
+        var chunks = await _ingestor.IngestMarkdownContentAsync(
+            body,
+            docId,
+            appId,
+            category,
+            ToRelativeSourcePath(file),
+            ct).ConfigureAwait(false);
+
+        return WithProvenance(chunks, tenantId, authorSid);
+    }
+
+    private string ToRelativeSourcePath(string fullPath) =>
+        DocProvenance.ToSafeSourcePath(Path.GetRelativePath(_rootPath, fullPath));
+
+    private static IReadOnlyList<DocChunk> WithProvenance(IReadOnlyList<DocChunk> chunks, string? tenantId, string? authorSid)
+    {
+        if (tenantId is null && authorSid is null)
+        {
+            return chunks;
+        }
+
+        var result = new List<DocChunk>(chunks.Count);
+        foreach (var chunk in chunks)
+        {
+            result.Add(chunk with { TenantId = tenantId, AuthorSid = authorSid });
+        }
+
+        return result;
     }
 
     private static DocCategory ResolveCategoryFromPath(string relativePath)

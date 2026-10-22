@@ -46,12 +46,12 @@ public sealed class RebacSeedHostedService : IHostedService
         if (tuplesToSeed.Count == 0 && _environment?.IsDevelopment() == true)
         {
             tuplesToSeed.AddRange([
-                new("default", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+                new("default", "david", "viewer", "table:lakehouse.dbo.orders"),
                 new("default", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders"),
-                new("default", "user:david", "viewer", "table:sales.public.orders"),
+                new("default", "david", "viewer", "table:sales.public.orders"),
                 new("default", "S-1-5-21-LWE-DAVID", "viewer", "table:sales.public.orders"),
-                new("default", "user:david", "viewer", "table:sales.crm.contacts"),
-                new("tenant_lwe", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+                new("default", "david", "viewer", "table:sales.crm.contacts"),
+                new("tenant_lwe", "david", "viewer", "table:lakehouse.dbo.orders"),
                 new("tenant_lwe", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders")
             ]);
         }

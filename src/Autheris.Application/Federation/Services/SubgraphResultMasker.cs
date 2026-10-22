@@ -44,7 +44,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
     }
 
     /// <summary>Per-request classification state: catalog map, config overrides and the fail-closed flag.</summary>
-    private sealed class MaskContext
+    public sealed class MaskContext
     {
         public static readonly MaskContext Empty = new(new Dictionary<string, MaskingRule?>(), new Dictionary<string, MaskingRule?>(), false);
 
@@ -92,7 +92,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         var failClosedScalars = _options.Value.Federation.DefaultMaskUnknownSensitiveScalars;
         if (_catalog == null)
         {
-            return new MaskContext(new Dictionary<string, MaskingRule?>(), config, false);
+            return new MaskContext(new Dictionary<string, MaskingRule?>(), config, failClosedScalars);
         }
 
         try
@@ -118,6 +118,9 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
             return new MaskContext(new Dictionary<string, MaskingRule?>(), config, failClosedScalars);
         }
     }
+
+    public ValueTask<MaskContext> CreateMaskContextAsync(ClaimsPrincipal? principal, CancellationToken cancellationToken = default)
+        => BuildContextAsync(principal, cancellationToken);
 
     public async ValueTask<object?> MaskResultDataAsync(
         object? data,
@@ -149,10 +152,81 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         return Array.IndexOf(parts, added) >= 0 ? existing : existing + "|" + added;
     }
 
-    private bool IsAdmin(ClaimsPrincipal? principal)
+    public bool IsAdmin(ClaimsPrincipal? principal)
     {
         if (principal == null) return false;
         return _roleEvaluator.HasAnyRole(principal, AdminRoles);
+    }
+
+    public object? MaskLeaf(string responseName, string fieldName, string? parentType, object? value, MaskContext ctx)
+        => MaskLeaf(responseName, fieldName, parentType, value, ctx, out _);
+
+    public object? MaskLeaf(string responseName, string fieldName, string? parentType, object? value, MaskContext ctx, out bool masked)
+    {
+        if (value == null)
+        {
+            masked = false;
+            return null;
+        }
+
+        var fedOptions = _options.Value.Federation;
+        if (!fedOptions.EnableResultMasking || _options.Value.IsColumnMaskingDisabled)
+        {
+            masked = false;
+            return value;
+        }
+
+        MaskingRule rule;
+        var shouldMask = false;
+
+        // 1. Check schema field name
+        if (!string.IsNullOrEmpty(fieldName) && ClassifyName(fieldName, ctx, out rule))
+        {
+            shouldMask = true;
+        }
+        // 2. Check response name (alias or field name)
+        else if (!string.IsNullOrEmpty(responseName) && ClassifyName(responseName, ctx, out rule))
+        {
+            shouldMask = true;
+        }
+        // 3. Fail-closed: mask every non-identifier scalar leaf
+        else if (ctx.MaskUnknownScalars && IsScalarLeaf(value) && !IsIdentifierName(fieldName) && !IsIdentifierName(responseName))
+        {
+            rule = RedactMaskRule;
+            shouldMask = true;
+        }
+        else
+        {
+            rule = RedactMaskRule;
+            shouldMask = false;
+        }
+
+        if (!shouldMask)
+        {
+            masked = false;
+            return value;
+        }
+
+        if (value is IEnumerable list && value is not string)
+        {
+            var resultList = new List<object?>();
+            foreach (var item in list)
+            {
+                if (item == null)
+                {
+                    resultList.Add(null);
+                }
+                else
+                {
+                    resultList.Add(_maskingProvider.MaskValue(responseName, item, rule));
+                }
+            }
+            masked = true;
+            return resultList;
+        }
+
+        masked = true;
+        return _maskingProvider.MaskValue(responseName, value, rule);
     }
 
     public object? MaskResultData(object? data, ClaimsPrincipal? principal)

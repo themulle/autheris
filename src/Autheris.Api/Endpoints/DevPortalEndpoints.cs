@@ -54,6 +54,13 @@ public static class DevPortalEndpoints
                           ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                           ?? "developer";
 
+            // Security review (TOTP TOFU): a first enrollment requires a fresh interactive sign-in (not in Development).
+            var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "begin", ct).ConfigureAwait(false);
+            if (firstEnrollment.Rejection != null)
+            {
+                return firstEnrollment.Rejection;
+            }
+
             // SR-M-01: the seed is generated and kept server-side (pending, bound to the user); the page never sends it back.
             var enrollment = await enrollmentService.BeginEnrollmentAsync(userSid, $"{userSid}@autheris.local", "Autheris Gateway", ct).ConfigureAwait(false);
             if (enrollment == null)
@@ -61,7 +68,7 @@ public static class DevPortalEndpoints
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
 
-            var requiresCurrentCode = await enrollmentService.HasActiveSecretAsync(userSid, ct).ConfigureAwait(false);
+            var requiresCurrentCode = !firstEnrollment.IsFirstEnrollment;
             var svg = SvgQrCodeGenerator.GenerateSvg(enrollment.QrCodeUri);
 
             var formattedSecret = string.Join(" ", Enumerable.Range(0, Math.Max(1, enrollment.SecretBase32.Length / 4))
@@ -109,8 +116,22 @@ public static class DevPortalEndpoints
                 return Results.BadRequest(new { error = "Code is required." });
             }
 
+            // Security review (TOTP TOFU): checked again on activation, the pending seed alone does not prove a fresh sign-in.
+            // The verify window covers the pending-seed lifetime, so an enrollment admitted at "begin" is not re-failed here.
+            var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "verify", ct).ConfigureAwait(false);
+            if (firstEnrollment.Rejection != null)
+            {
+                return firstEnrollment.Rejection;
+            }
+
             var outcome = await enrollmentService.CompleteEnrollmentAsync(
                 userSid, code, string.IsNullOrWhiteSpace(currentCode) ? null : currentCode, ct).ConfigureAwait(false);
+
+            if (outcome == TotpEnrollmentOutcome.Completed && firstEnrollment.IsFirstEnrollment)
+            {
+                // Required audit (fail closed): an unavailable audit store aborts with 503 via the gateway exception handler.
+                await TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, userSid, ct).ConfigureAwait(false);
+            }
 
             return outcome switch
             {

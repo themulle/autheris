@@ -277,10 +277,21 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        string? tenantId = null,
+        TenantId tenantId,
         CancellationToken ct = default)
     {
-        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId, AccessPlanKind.Access, null, ct).ConfigureAwait(false);
+        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId.Value, AccessPlanKind.Access, (plan, token) =>
+        {
+            foreach (var grant in plan.Request.Grants)
+            {
+                var parsed = RebacSubject.Parse(grant.Principal);
+                if (!parsed.IsValid)
+                {
+                    throw new SecurityException($"Invalid ReBAC principal '{grant.Principal}' in access plan.");
+                }
+            }
+            return Task.CompletedTask;
+        }, ct).ConfigureAwait(false);
 
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
 
@@ -288,17 +299,20 @@ public class AccessPlanningService : IAccessPlanningService
         var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
         EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, _time.GetUtcNow());
 
-        // SR-H-02: the caller's tenant scopes the ReBAC tuples and audit; the dataset domain is only the legacy fallback.
-        var effectiveTenantId = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
+        // EP-04: the caller's tenant strictly scopes the ReBAC tuples and audit; no Domain or default fallback.
+        var effectiveTenantId = tenantId.Value;
         var tuples = new List<RebacTuple>();
 
         foreach (var grant in stored.Request.Grants)
         {
-            tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", "can_query", $"table:{stored.Request.DatasetId}") { ExpiresAt = grant.ValidUntil });
+            var parsed = RebacSubject.Parse(grant.Principal);
+            var canonicalPrincipal = parsed.Canonical;
+
+            tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, "can_query", $"table:{stored.Request.DatasetId}") { ExpiresAt = grant.ValidUntil });
 
             foreach (var (column, access) in grant.Columns)
             {
-                tuples.Add(new RebacTuple(effectiveTenantId, $"user:{grant.Principal}", $"access:{access}", $"column:{stored.Request.DatasetId}.{column}") { ExpiresAt = grant.ValidUntil });
+                tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, $"access:{access}", $"column:{stored.Request.DatasetId}.{column}") { ExpiresAt = grant.ValidUntil });
             }
         }
 
@@ -450,22 +464,20 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        string? tenantId = null,
+        TenantId tenantId,
         CancellationToken ct = default)
     {
         var admin = RowFilterAdmin;
-        var callerTenant = NormalizeTenant(tenantId);
+        var callerTenant = tenantId.Value;
 
         // Validation against the CURRENT caps and the optimistic concurrency check happen before the token is consumed.
-        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId, AccessPlanKind.RowFilterEvaluation, async (plan, token) =>
+        var stored = await ConsumeConfirmedPlanAsync(request, adminSid, callerTenant, AccessPlanKind.RowFilterEvaluation, async (plan, token) =>
         {
             var change = plan.RowFilterEvaluation ?? throw new SecurityException("The plan carries no row filter evaluation change.");
             RowFilterEvaluationPreview? current;
             if (change.RowFilterId is { } ruleId)
             {
-                var tenant = NormalizeTenant(plan.TenantId ?? callerTenant)
-                    ?? throw new SecurityException("A tenant context is required to change a rule level setting.");
-                current = await admin.ValidateRuleAsync(ruleId, new TenantId(tenant), change.After, token).ConfigureAwait(false);
+                current = await admin.ValidateRuleAsync(ruleId, tenantId, change.After, token).ConfigureAwait(false);
             }
             else
             {
@@ -490,15 +502,13 @@ public class AccessPlanningService : IAccessPlanningService
         if (applied.RowFilterId is { } id)
         {
             level = "rule";
-            var tenant = new TenantId(NormalizeTenant(stored.TenantId ?? callerTenant)!);
-            result = await admin.SetRuleAsync(id, tenant, applied.After, actor, ct).ConfigureAwait(false);
+            result = await admin.SetRuleAsync(id, tenantId, applied.After, actor, ct).ConfigureAwait(false);
         }
         else
         {
             level = "object";
-            var tenant = NormalizeTenant(stored.TenantId ?? callerTenant) is { } t ? new TenantId(t) : TenantId.LegacySingleTenant;
             var settings = applied.After == RowFilterEvaluationSettings.Inherit ? null : applied.After;
-            result = await admin.SetObjectAsync(ParseStoredTable(applied.Table), settings, actor, tenant, ct).ConfigureAwait(false);
+            result = await admin.SetObjectAsync(ParseStoredTable(applied.Table), settings, actor, tenantId, ct).ConfigureAwait(false);
         }
 
         if (result is null)
@@ -576,7 +586,7 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var callerTenant = NormalizeTenant(tenantId);
-        if (stored.TenantId != null && callerTenant != null &&
+        if (stored.TenantId == null || callerTenant == null ||
             !string.Equals(stored.TenantId, callerTenant, StringComparison.Ordinal))
         {
             throw new SecurityException("Plan belongs to a different tenant.");
@@ -614,6 +624,75 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         return stored;
+    }
+
+    // ---- Mutating MCP administrator operations (two-phase confirmation, ADR-03) ----
+
+    public async Task<AdminPlanAccessResult> PlanAdminOperationAsync(
+        string operation,
+        string target,
+        string argumentsDigest,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        ArgumentException.ThrowIfNullOrWhiteSpace(argumentsDigest);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
+
+        var now = _time.GetUtcNow();
+        var planId = $"plan_{Guid.NewGuid():N}";
+        var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
+        var result = new AdminPlanAccessResult(
+            planId,
+            target,
+            [],
+            [$"Confirms the administrator operation '{operation}' on '{target}'. Confirm with TOTP, then repeat the call with the same arguments, the planId and the confirmation token."],
+            now.Add(planTtl));
+
+        // The plan carries no grants: ApplyAccessAsync rejects it by its kind, and the operation runs only through ConsumeAdminOperationAsync.
+        var stored = new StoredAccessPlan(
+            result,
+            new AdminPlanAccessRequest(target, [], string.Empty),
+            adminSid,
+            TenantId: NormalizeTenant(tenantId),
+            PlanKind: AccessPlanKind.AdminOperation,
+            AdminOperation: new AdminOperationPlan(operation, argumentsDigest));
+
+        if (!await _store.TrySavePlanAsync(stored, planTtl, _planOptions.MaxPendingPlansPerAdmin, ct).ConfigureAwait(false))
+        {
+            throw new SecurityException(
+                $"Too many pending access plans for this administrator (limit {_planOptions.MaxPendingPlansPerAdmin}). Apply or wait for existing plans to expire.");
+        }
+
+        return result;
+    }
+
+    public async Task ConsumeAdminOperationAsync(
+        AdminApplyAccessRequest request,
+        string operation,
+        string argumentsDigest,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(argumentsDigest);
+
+        // The binding is checked before the token is consumed, so a mismatched call does not burn the confirmation.
+        await ConsumeConfirmedPlanAsync(request, adminSid, tenantId, AccessPlanKind.AdminOperation, (plan, _) =>
+        {
+            var bound = plan.AdminOperation;
+            if (bound is null ||
+                !string.Equals(bound.Operation, operation, StringComparison.Ordinal) ||
+                !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(bound.ArgumentsDigest ?? string.Empty), Encoding.UTF8.GetBytes(argumentsDigest)))
+            {
+                throw new SecurityException("The confirmed plan does not match this operation and its arguments.");
+            }
+
+            return Task.CompletedTask;
+        }, ct).ConfigureAwait(false);
     }
 
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(

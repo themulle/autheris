@@ -58,8 +58,11 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
 
         using var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
+        // A tenant administrator may add but never replace a document; the store directory survives test runs, so use a fresh id.
+        var docId = $"overview-{Guid.NewGuid():N}";
+
         // Act
-        var response = await client.PutAsync("/api/v1/docs/apps/orders-service/documents/architecture/overview", content);
+        var response = await client.PutAsync($"/api/v1/docs/apps/orders-service/documents/architecture/{docId}", content);
 
         // Assert
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -67,9 +70,9 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
         receivedEvent.ShouldNotBeNull();
         receivedEvent.AppId.ShouldBe("orders-service");
         receivedEvent.Category.ShouldBe("architecture");
-        receivedEvent.DocId.ShouldBe("overview");
+        receivedEvent.DocId.ShouldBe(docId);
         receivedEvent.Title.ShouldBe("Orders Service Architecture");
-        receivedEvent.RelativePath.ShouldBe("orders-service/architecture/overview");
+        receivedEvent.RelativePath.ShouldBe($"orders-service/architecture/{docId}");
     }
 
     [Fact]

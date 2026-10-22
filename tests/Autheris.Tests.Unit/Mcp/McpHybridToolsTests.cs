@@ -148,6 +148,50 @@ public sealed class McpHybridToolsTests
     }
 
     [Fact]
+    public async Task SR_M_08_RawRoleAndGroupClaims_InAdditionalClaims_DoNotReachThePrincipal()
+    {
+        var session = new McpSessionContext(
+            "s1", "client-app-id", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            UserSid: null,
+            Roles: ["Reader"],
+            GroupSids: [],
+            AdditionalClaims: new Dictionary<string, string>
+            {
+                ["groups"] = "group-admins",
+                ["groupsid"] = "S-1-5-21-ADMINS",
+                ["Roles"] = "ClusterAdmin",
+                ["role"] = "GovernanceAdmin",
+                ["wids"] = "62e90394-69f5-4237-9190-012177145e10",
+                ["department"] = "sales"
+            });
+
+        var principal = await CaptureQuerySqlPrincipalAsync(session);
+
+        principal.GetGroupSids().ShouldBeEmpty();
+        principal.GetUserRoles().ShouldHaveSingleItem().ShouldBe("Reader");
+        principal.FindFirst("wids").ShouldBeNull();
+        principal.FindFirst("department")?.Value.ShouldBe("sales");
+    }
+
+    [Theory]
+    [InlineData("groups", false)]
+    [InlineData("GROUPS", false)]
+    [InlineData("groupsid", false)]
+    [InlineData("roles", false)]
+    [InlineData("role", false)]
+    [InlineData("wids", false)]
+    [InlineData("http://schemas.microsoft.com/ws/2008/06/identity/claims/groups", false)]
+    [InlineData(ClaimTypes.Role, false)]
+    [InlineData(ClaimTypes.GroupSid, false)]
+    [InlineData(McpProtocolHandler.IdentityKindClaimType, false)]
+    [InlineData("department", true)]
+    [InlineData("oid", true)]
+    public void SR_M_08_AdditionalClaimTypeFilter(string claimType, bool allowed)
+    {
+        McpProtocolHandler.IsAllowedAdditionalClaimType(claimType).ShouldBe(allowed);
+    }
+
+    [Fact]
     public async Task ToolExecution_QueryDataset_DelegatesToGovernedDataQueryService()
     {
         var handler = new McpToolExecutionHandler(
@@ -349,12 +393,67 @@ public sealed class McpHybridToolsTests
 
         _lineageGraphStore.GetNode("sales.public.orders")
             .Returns(new LineageNode("sales.public.orders", "Orders Dataset", LineageNodeType.Table, ["analytics.sales_mrr"], "OrderTeam", "team@orders.com"));
+        StubVisibleDataset(new TableIdentifier("sales", "public", "orders"));
+        StubVisibleDataset(new TableIdentifier("default", "analytics", "sales_mrr"));
 
         var args = JsonSerializer.Serialize(new { dataset = "sales.public.orders" });
         var resultJson = await handler.ExecuteToolAsync(tool, args, session);
 
         resultJson.ShouldContain("sales.public.orders");
         resultJson.ShouldContain("analytics.sales_mrr");
+    }
+
+    private void StubVisibleDataset(TableIdentifier table) =>
+        _catalogDiscoveryService.GetDatasetDetailAsync(table, Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
+            .Returns(new CatalogDatasetDetail(
+                DatasetId: table.ToString(),
+                Domain: table.Domain,
+                Schema: table.Schema,
+                Table: table.TableName,
+                Columns: [],
+                PrimaryKeys: [],
+                Sensitivity: "Internal",
+                IsActive: true));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("tenant-1")]
+    public async Task ToolExecution_GetDataLineage_DatasetHiddenFromTheCaller_IsNotFound(string? nodeTenant)
+    {
+        var handler = new McpToolExecutionHandler(
+            _sqlExecutionService, _dataQueryService, _catalogDiscoveryService, _apiDispatcherService, _lineageGraphStore, _metadataRepo);
+        var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.GetDataLineage);
+
+        // Tenant-less or same-tenant node, but the catalog does not show the dataset to the caller (GetDatasetDetailAsync is null).
+        _lineageGraphStore.GetNode("hr.public.salaries")
+            .Returns(new LineageNode("hr.public.salaries", "PayrollNodeName", LineageNodeType.Table, ["hr.public.bonus"], "HR", TenantId: nodeTenant));
+
+        var resultJson = await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { dataset = "hr.public.salaries" }), CreateSessionContext("user:frank", "tenant-1"));
+
+        resultJson.ShouldContain("\"hasLineage\":false");
+        resultJson.ShouldContain("No lineage graph found");
+        resultJson.ShouldNotContain("PayrollNodeName");
+        resultJson.ShouldNotContain("hr.public.bonus");
+    }
+
+    [Fact]
+    public async Task ToolExecution_GetDataLineage_DropsDownstreamNodesTheCallerCannotSee()
+    {
+        var handler = new McpToolExecutionHandler(
+            _sqlExecutionService, _dataQueryService, _catalogDiscoveryService, _apiDispatcherService, _lineageGraphStore, _metadataRepo);
+        var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.GetDataLineage);
+
+        _lineageGraphStore.GetNode("sales.public.orders")
+            .Returns(new LineageNode("sales.public.orders", "Orders", LineageNodeType.Table, ["sales.public.revenue", "hr.public.commissions", "dashboard-42"]));
+        StubVisibleDataset(new TableIdentifier("sales", "public", "orders"));
+        StubVisibleDataset(new TableIdentifier("sales", "public", "revenue"));
+
+        var resultJson = await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { dataset = "sales.public.orders" }), CreateSessionContext("user:frank", "tenant-1"));
+
+        resultJson.ShouldContain("\"hasLineage\":true");
+        resultJson.ShouldContain("sales.public.revenue");
+        resultJson.ShouldNotContain("hr.public.commissions");
+        resultJson.ShouldNotContain("dashboard-42");
     }
 
     [Fact]

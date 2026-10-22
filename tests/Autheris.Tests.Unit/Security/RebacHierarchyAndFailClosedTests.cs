@@ -57,11 +57,11 @@ public sealed class RebacHierarchyAndFailClosedTests
         // Arrange
         // Structure tuple: schema:sales.analytics is parent of table:sales.analytics.orders
         await _store.AddTupleAsync(new RebacTuple("sales", "schema:sales.analytics", "parent", "table:sales.analytics.orders"));
-        // Permission tuple: user:alice can_query schema:sales.analytics
-        await _store.AddTupleAsync(new RebacTuple("sales", "user:alice", "can_query", "schema:sales.analytics"));
+        // Permission tuple: alice can_query schema:sales.analytics
+        await _store.AddTupleAsync(new RebacTuple("sales", "alice", "can_query", "schema:sales.analytics"));
 
         // Act
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("sales", "user:alice", "can_query", "table:sales.analytics.orders"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("sales", "alice", "can_query", "table:sales.analytics.orders"));
 
         // Assert
         result.Allowed.ShouldBeTrue();
@@ -74,11 +74,11 @@ public sealed class RebacHierarchyAndFailClosedTests
         // Structure tuples: domain:sales parent schema:sales.analytics, schema:sales.analytics parent table:sales.analytics.orders
         await _store.AddTupleAsync(new RebacTuple("sales", "domain:sales", "parent", "schema:sales.analytics"));
         await _store.AddTupleAsync(new RebacTuple("sales", "schema:sales.analytics", "parent", "table:sales.analytics.orders"));
-        // Permission tuple: user:bob can_query domain:sales
-        await _store.AddTupleAsync(new RebacTuple("sales", "user:bob", "can_query", "domain:sales"));
+        // Permission tuple: bob can_query domain:sales
+        await _store.AddTupleAsync(new RebacTuple("sales", "bob", "can_query", "domain:sales"));
 
         // Act
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("sales", "user:bob", "can_query", "table:sales.analytics.orders"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("sales", "bob", "can_query", "table:sales.analytics.orders"));
 
         // Assert
         result.Allowed.ShouldBeTrue();
@@ -92,10 +92,10 @@ public sealed class RebacHierarchyAndFailClosedTests
         await _store.AddTupleAsync(new RebacTuple("d2", "schema:d2.raw", "parent", "table:d2.raw.orders"));
 
         // Alice is granted on schema:d1.raw in d1
-        await _store.AddTupleAsync(new RebacTuple("d1", "user:alice", "can_query", "schema:d1.raw"));
+        await _store.AddTupleAsync(new RebacTuple("d1", "alice", "can_query", "schema:d1.raw"));
 
         // Act: Alice attempts to query d2.raw.orders in tenant d2
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("d2", "user:alice", "can_query", "table:d2.raw.orders"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("d2", "alice", "can_query", "table:d2.raw.orders"));
 
         // Assert: Access must be denied
         result.Allowed.ShouldBeFalse();
@@ -105,7 +105,7 @@ public sealed class RebacHierarchyAndFailClosedTests
     public async Task ZanzibarEvaluator_NoTuplesForTenant_FailsClosed()
     {
         // Act: Query tenant with zero tuples
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("empty-tenant", "user:alice", "can_query", "table:empty-tenant.schema.orders"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("empty-tenant", "alice", "can_query", "table:empty-tenant.schema.orders"));
 
         // Assert
         result.Allowed.ShouldBeFalse();
@@ -122,7 +122,7 @@ public sealed class RebacHierarchyAndFailClosedTests
         var evaluator = new ZanzibarRebacEvaluator(store, Options.Create(_options), NullLogger<ZanzibarRebacEvaluator>.Instance);
 
         // Act
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("sales", "user:alice", "can_query", "table:sales.analytics.orders"));
+        var result = await evaluator.CheckAsync(new RebacCheckRequest("sales", "alice", "can_query", "table:sales.analytics.orders"));
 
         // Assert
         result.Allowed.ShouldBeFalse();
@@ -139,7 +139,7 @@ public sealed class RebacHierarchyAndFailClosedTests
         var evaluator = new ZanzibarRebacEvaluator(failingStore, Options.Create(_options), NullLogger<ZanzibarRebacEvaluator>.Instance);
 
         // Act
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("sales", "user:alice", "can_query", "table:sales.analytics.orders"));
+        var result = await evaluator.CheckAsync(new RebacCheckRequest("sales", "alice", "can_query", "table:sales.analytics.orders"));
 
         // Assert: Must fail-closed and return Denied
         result.Allowed.ShouldBeFalse();
@@ -153,7 +153,7 @@ public sealed class RebacHierarchyAndFailClosedTests
         await _store.AddTupleAsync(new RebacTuple("sales", "table:sales.analytics.orders", "parent", "schema:sales.analytics"));
 
         // Act
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("sales", "user:alice", "can_query", "table:sales.analytics.orders"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("sales", "alice", "can_query", "table:sales.analytics.orders"));
 
         // Assert
         result.Allowed.ShouldBeFalse();
@@ -173,10 +173,10 @@ public sealed class RebacHierarchyAndFailClosedTests
         await _store.AddTupleAsync(new RebacTuple("t", "obj:3", "parent", "obj:4"));
         await _store.AddTupleAsync(new RebacTuple("t", "obj:2", "parent", "obj:3"));
         await _store.AddTupleAsync(new RebacTuple("t", "obj:1", "parent", "obj:2"));
-        await _store.AddTupleAsync(new RebacTuple("t", "user:alice", "can_query", "obj:1"));
+        await _store.AddTupleAsync(new RebacTuple("t", "alice", "can_query", "obj:1"));
 
         // Act
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("t", "user:alice", "can_query", "obj:4"));
+        var result = await evaluator.CheckAsync(new RebacCheckRequest("t", "alice", "can_query", "obj:4"));
 
         // Assert
         result.Allowed.ShouldBeFalse();

@@ -129,6 +129,15 @@ public static partial class WebSqlEndpoints
                 throw new GatewayNotImplementedException("WebSQL statement manager is not configured.");
             }
 
+            var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
+            if (string.IsNullOrWhiteSpace(callerIdentity))
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await httpContext.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A canonical user identity is required." }, ct);
+                return;
+            }
+            var owner = new Sid(callerIdentity);
+
             var timeout = trinoWaitTimeout ?? TimeSpan.FromSeconds(5);
             try
             {
@@ -137,7 +146,7 @@ public static partial class WebSqlEndpoints
                     RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino),
                     Transport = "Trino"
                 };
-                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, tenantId, timeout, ct);
+                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, owner, tenantId, timeout, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);
                 return;
             }
@@ -413,11 +422,20 @@ public static partial class WebSqlEndpoints
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
         var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
+        var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
+        if (string.IsNullOrWhiteSpace(callerIdentity))
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A canonical user identity is required." }, ct);
+            return;
+        }
+        var owner = new Sid(callerIdentity);
+
         var waitTimeout = TryParseWaitTimeout(httpContext.Request) ?? TimeSpan.FromSeconds(5);
 
         try
         {
-            var status = await statementManager.GetStatusOrWaitAsync(statementId, user, tenantId, waitTimeout, ct);
+            var status = await statementManager.GetStatusOrWaitAsync(statementId, user, owner, tenantId, waitTimeout, ct);
             await WriteTrinoStatementResponseAsync(httpContext, status, ct);
         }
         catch (KeyNotFoundException)
@@ -450,6 +468,15 @@ public static partial class WebSqlEndpoints
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
         var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
+        var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
+        if (string.IsNullOrWhiteSpace(callerIdentity))
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A canonical user identity is required." }, ct);
+            return;
+        }
+        var owner = new Sid(callerIdentity);
+
         if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
             !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
         {
@@ -463,7 +490,7 @@ public static partial class WebSqlEndpoints
 
         try
         {
-            bool canceled = await statementManager.CancelStatementAsync(statementId, user, tenantId, ct);
+            bool canceled = await statementManager.CancelStatementAsync(statementId, user, owner, tenantId, ct);
             if (!canceled)
             {
                 httpContext.Response.StatusCode = StatusCodes.Status404NotFound;

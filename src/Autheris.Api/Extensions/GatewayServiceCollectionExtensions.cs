@@ -153,6 +153,10 @@ public static class GatewayServiceCollectionExtensions
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<CrossSourceOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(_ => new ReadPathSwitchOptionsValidator(configuration));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new BulkStreamSigningKeyOptionsValidator(
+                environment,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<BulkStreamSigningKeyOptionsValidator>>()));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new CoLocationOptionsValidator(
                 configuration,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<CoLocationOptionsValidator>>()));
@@ -571,6 +575,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>()
             .BindConfiguration(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName);
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmOptionsValidator>();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmsScimOptionsValidator>();
         services.AddSingleton<WebSocketAuthInterceptor>();
 
         var gqlBuilder = services
@@ -610,7 +615,7 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()
-            .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
+            .TryAddTypeInterceptor<Autheris.GraphQL.Federation.SubgraphFieldMaskingTypeInterceptor>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
             .UseOperationResolver()
@@ -642,6 +647,7 @@ public static class GatewayServiceCollectionExtensions
                     maxRootFields: gatewayOptions.AreQueryLimitsRelaxed
                         ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 200 : 25)
                         : gatewayOptions.GraphQL.MaxRootFieldsPerOperation,
+                    maxExecutionDepth: Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL),
                     aggregateFieldCostWeight: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.AggregateFieldCostWeight
                         ?? Autheris.Domain.Options.AggregationOptions.DefaultAggregateFieldCostWeight,
                     maxGroupByColumns: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.MaxGroupByColumns

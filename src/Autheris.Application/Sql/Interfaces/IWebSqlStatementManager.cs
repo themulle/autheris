@@ -34,6 +34,7 @@ public interface IWebSqlStatementManager
     Task<StatementExecutionStatus> SubmitOrWaitAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
+        Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
         CancellationToken ct = default);
@@ -45,6 +46,7 @@ public interface IWebSqlStatementManager
     Task<StatementExecutionStatus> GetStatusOrWaitAsync(
         string statementId,
         ClaimsPrincipal user,
+        Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
         CancellationToken ct = default);
@@ -55,6 +57,7 @@ public interface IWebSqlStatementManager
     Task<bool> CancelStatementAsync(
         string statementId,
         ClaimsPrincipal user,
+        Sid owner,
         TenantId tenantId,
         CancellationToken ct = default);
 }
