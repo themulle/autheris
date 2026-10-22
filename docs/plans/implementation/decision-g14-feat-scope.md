@@ -1,7 +1,7 @@
 # Decision Record G-14: Scope of the Analytics Work Packages (#28, #37, #38)
 
 **Decided:** 2026-10-14 by the product owner. All recommendations of the reconciliation between
-[`impl-features-analytics.md`](impl-features-analytics.md) and the bodies of GitHub issues #28, #37 and #38 are adopted.
+the features analytics plan (removed after completion) and the bodies of GitHub issues #28, #37 and #38 are adopted.
 **Effect:** G-14 is resolved; WP-FEAT-03, 04, 06a/b and the new WPs below join Wave 4 (lane L2: B-07 → FEAT-03 → FEAT-04 →
 FEAT-06a → FEAT-06b → FEAT-06c → FEAT-08). Where this record and the scope plan differ, this record wins.
 

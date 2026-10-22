@@ -3,7 +3,7 @@
 **ID:** `REQ-PROTO-PGWIRE` · **Date:** 2026-10-16 · **Branch:** `feat/scale-5000-users`
 **Role:** Product Manager (Phase 1 of the 6-phase lifecycle) · **Status:** PROPOSED 📝 (awaiting owner decision on the open questions in section 13)
 **Input:** Owner-supplied comparison (German) of two ways to expose a PostgreSQL wire protocol endpoint with DuckDB.NET execution: Option 1 (pure C# in-process server) and Option 2 (Rust sidecar using the `pgwire` crate).
-**Companion analyses:** [`2026-10-16-analysis-scale-5000-users-performance.md`](2026-10-16-analysis-scale-5000-users-performance.md) (H-6 Basic-auth cost, NAT limiter), [`2026-10-16-analysis-scale-5000-users-governance.md`](2026-10-16-analysis-scale-5000-users-governance.md).
+**Companion analyses:** the scale-5000 performance and governance analyses were removed after completion (see git history; H-6 Basic-auth cost, NAT limiter).
 
 All source paths are relative to `src/` unless stated otherwise.
 

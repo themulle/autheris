@@ -11,11 +11,6 @@ This document puts every item from the category plans into one global order. Arc
 | Scope plan | WP prefix | Status | Covers |
 |---|---|---|
 | [`impl-security-wave-c-2.md`](impl-security-wave-c-2.md) | `WP-SEC2` | **COMPLETED & VERIFIED ✅** (`SEC2-01..09` delivered; legacy deprecation shims removed) | SR-D-06..09 |
-| [`impl-arch-r0-r2-trust-ha-eventing.md`](impl-arch-r0-r2-trust-ha-eventing.md) | `WP-ARC-A` | **COMPLETED & VERIFIED ✅** (`R-1..R-4`, `A-01..A-15` delivered; `A-16` skipped per `G-13`) | R0, R2; themes T2 (audit), T5 (HA), T6 (eventing) |
-| [`impl-arch-r1-r3-pipeline-persistence.md`](impl-arch-r1-r3-pipeline-persistence.md) | `WP-ARC-B` | **COMPLETED & VERIFIED ✅** (`B-01..B-10`, `B-12..B-14` delivered; `B-11` optional folder move deferred) | R1, R3; themes T1, T3, T4 |
-| [`impl-arch-r4-r6-api-perf-hygiene.md`](impl-arch-r4-r6-api-perf-hygiene.md) | `WP-ARC-C` | **COMPLETED & VERIFIED ✅** (`C-01..C-18`, `C-20..C-22` delivered; `C-19` test-project split deferred to freeze window) | R4–R6; themes T7–T10 |
-| [`impl-features-analytics.md`](impl-features-analytics.md) | `WP-FEAT` | **COMPLETED & VERIFIED ✅** (`WP-FEAT-01..07b` delivered; `07c` gRPC deferred per `D-8`, HTTP+IPC documented via `WP-DOC-01`) | #28, #37, #38 Stage 2/3, #75, #77, #79, #80 |
-| [`impl-test-suite-speedup.md`](impl-test-suite-speedup.md) | `WP-TS` | **COMPLETED & VERIFIED ✅** (`WP-TS-00..06` delivered, including `SerialIntegrationCollection` in `WP-TS-05`) | CI test wall-clock time |
 
 Security Wave C (SR-L-01..24) is delivered; its first scope plan (`impl-security-wave-c-1.md`) was removed because no open work remained.
 
@@ -77,7 +72,7 @@ flowchart TD
 ### Cross-cutting items
 
 - **SQL compiler gate:** Resolved 2026-10-15 — all 18 entries in `accepted-differences.json` reviewed and approved ([`PLAN-SQLGATE-CUTOVER-03`](../2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)).
-- **CI duration:** `WP-TS-00..06` (TRX artifacts, shared DB containers, 4-way integration sharding, parallel Spark job, Cecil cache, `SerialIntegrationCollection`, parallel SQL compiler gate) delivered ([`impl-test-suite-speedup.md`](impl-test-suite-speedup.md)).
+- **CI duration:** `WP-TS-00..06` (TRX artifacts, shared DB containers, 4-way integration sharding, parallel Spark job, Cecil cache, `SerialIntegrationCollection`, parallel SQL compiler gate) delivered (`impl-test-suite-speedup.md`).
 - **Catalog owner tenant (G-11, second half):** Resolved — `OwnerTenantId` added to `TableMetadata` and baseline schema `0001`.
 
 ### Wave 4: Analytics, R2 High Availability and Carry-Overs

@@ -5,7 +5,7 @@
 **Status:** COMPLETED & VERIFIED ✅  
 **Last Updated:** 2026-10-15 · **Baseline:** `main` at `3d519e95`  
 **Parent Plan:** [`00-master-plan-overview.md`](00-master-plan-overview.md)  
-**Implementation Plan:** [`implementation/impl-features-analytics.md`](implementation/impl-features-analytics.md); global order in [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)  
+**Implementation Plan:** delivered and removed (see git history); global order in [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)  
 **Scope:** Analytics, federation, incremental sync, static query analysis, and value profiling feature streams (#28, #37, #38, #75, #77, #79, #80).
 
 ---
