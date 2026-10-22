@@ -148,7 +148,11 @@ public class ReadOnlyTokenTests
     public void Token_WithoutScopesAndWithoutRoles_IsRejected()
     {
         var bareToken = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim("oid", "55555555-5555-5555-5555-555555555555"), new Claim("preferred_username", "bob@corp.example")],
+            [
+                new Claim("oid", "55555555-5555-5555-5555-555555555555"),
+                new Claim("azp", "talos-app"),
+                new Claim("preferred_username", "bob@corp.example")
+            ],
             "Bearer"));
 
         var error = EntraTokenPolicy.Apply(bareToken, new EntraIdAuthOptions(), Resolver);

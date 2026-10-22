@@ -27,7 +27,14 @@ public sealed class ScimAuthenticationHandlerTests
         _optionsMonitor.Get(Arg.Any<string>()).Returns(new AuthenticationSchemeOptions());
 
         _realmOptions = new IdentityRealmsOptions();
-        _realmOptions.Scim.PrimarySecret = ExpectedSecret;
+        _realmOptions.Realms["workforce-entra"] = new IdentityRealmConfigOptions
+        {
+            Provisioning = RealmProvisioningMode.Scim,
+            Scim = new ScimRealmSecretOptions
+            {
+                PrimarySecret = ExpectedSecret
+            }
+        };
 
         _realmOptionsMonitor = Substitute.For<IOptionsMonitor<IdentityRealmsOptions>>();
         _realmOptionsMonitor.CurrentValue.Returns(_realmOptions);
@@ -78,7 +85,11 @@ public sealed class ScimAuthenticationHandlerTests
     [Fact]
     public async Task ScimAuthenticationHandler_RealmsConfigured_RejectsRealmWithoutScimProvisioning()
     {
-        _realmOptions.Realms["workforce-entra"] = new IdentityRealmConfigOptions { Provisioning = RealmProvisioningMode.Scim };
+        _realmOptions.Realms["workforce-entra"] = new IdentityRealmConfigOptions
+        {
+            Provisioning = RealmProvisioningMode.Scim,
+            Scim = new ScimRealmSecretOptions { PrimarySecret = ExpectedSecret }
+        };
         _realmOptions.Realms["partners"] = new IdentityRealmConfigOptions { Provisioning = RealmProvisioningMode.Jit };
 
         (await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/workforce-entra/Users")).Succeeded.ShouldBeTrue();
@@ -104,5 +115,89 @@ public sealed class ScimAuthenticationHandlerTests
 
         result.Succeeded.ShouldBeFalse();
         result.Failure.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_SecretOfRealmA_OnRealmBPath_Rejects()
+    {
+        const string secretA = "SecretForRealmA_12345678901234567890";
+        const string secretB = "SecretForRealmB_12345678901234567890";
+
+        _realmOptions.Realms["realm-a"] = new IdentityRealmConfigOptions
+        {
+            Provisioning = RealmProvisioningMode.Scim,
+            Scim = new ScimRealmSecretOptions { PrimarySecret = secretA }
+        };
+        _realmOptions.Realms["realm-b"] = new IdentityRealmConfigOptions
+        {
+            Provisioning = RealmProvisioningMode.Scim,
+            Scim = new ScimRealmSecretOptions { PrimarySecret = secretB }
+        };
+
+        var result = await RunAuthenticateAsync($"Bearer {secretA}", "/scim/v2/realm-b/Users");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Failure.ShouldNotBeNull();
+        result.Failure!.Message.ShouldNotContain("realm-b");
+        result.Failure.Message.ShouldNotContain(secretA);
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_NoRealmsConfigured_Rejects()
+    {
+        _realmOptions.Realms.Clear();
+
+        var result = await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/workforce-entra/Users");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Failure.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_PathWithoutRealm_Rejects()
+    {
+        var result = await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/Users");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Failure.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_RealmWithoutSecret_Rejects()
+    {
+        _realmOptions.Realms["no-secret-realm"] = new IdentityRealmConfigOptions
+        {
+            Provisioning = RealmProvisioningMode.Scim,
+            Scim = new ScimRealmSecretOptions { PrimarySecret = null, SecondarySecret = null }
+        };
+
+        var result = await RunAuthenticateAsync($"Bearer {ExpectedSecret}", "/scim/v2/no-secret-realm/Users");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Failure.ShouldNotBeNull();
+        result.Failure!.Message.ShouldNotContain("no-secret-realm");
+    }
+
+    [Fact]
+    public async Task ScimAuthenticationHandler_SecondarySecretOfRealm_Authenticates()
+    {
+        const string secondarySecret = "SecondarySecret12345678901234567890";
+        _realmOptions.Realms["workforce-entra"] = new IdentityRealmConfigOptions
+        {
+            Provisioning = RealmProvisioningMode.Scim,
+            Scim = new ScimRealmSecretOptions
+            {
+                PrimarySecret = ExpectedSecret,
+                SecondarySecret = secondarySecret
+            }
+        };
+
+        var result = await RunAuthenticateAsync($"Bearer {secondarySecret}", "/scim/v2/workforce-entra/Users");
+
+        result.Succeeded.ShouldBeTrue();
+        result.Principal.ShouldNotBeNull();
+        result.Principal!.Identity?.Name.ShouldBe("scim-client:workforce-entra");
+        result.Principal.HasClaim("autheris:realm", "workforce-entra").ShouldBeTrue();
+        result.Principal.IsInRole(GatewayPolicies.ScimProvisionerRole).ShouldBeTrue();
     }
 }

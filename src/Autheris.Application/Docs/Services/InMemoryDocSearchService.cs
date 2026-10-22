@@ -60,6 +60,12 @@ public sealed class InMemoryDocSearchService : IDocSearchService
             return Task.FromResult<IReadOnlyList<DocSearchResult>>(Array.Empty<DocSearchResult>());
         }
 
+        var rawQuery = query.Trim().ToLowerInvariant();
+        if (rawQuery.Length >= 2 && !terms.Contains(rawQuery, StringComparer.OrdinalIgnoreCase))
+        {
+            terms.Add(rawQuery);
+        }
+
         var results = new List<DocSearchResult>();
 
         foreach (var chunk in _chunks.Values)

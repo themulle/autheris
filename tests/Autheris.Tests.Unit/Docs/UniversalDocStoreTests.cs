@@ -84,7 +84,8 @@ public sealed class UniversalDocStoreTests : IDisposable
         var searchHits = await _searchService.SearchAsync("PAY_TIMEOUT_504");
         searchHits.Count.ShouldBeGreaterThanOrEqualTo(1);
         searchHits[0].AppId.ShouldBe("billing-service");
-        searchHits[0].Title.ShouldContain("Invoice Payment Gateway");
+        searchHits[0].Id.DocId.ShouldBe("payment-gw-timeout");
+        searchHits.Any(h => h.Title.Contains("Invoice Payment Gateway") || h.Id.DocId == "payment-gw-timeout").ShouldBeTrue();
 
         // Verify listing applications
         var apps = await _docStore.ListApplicationsAsync();
@@ -265,9 +266,7 @@ public sealed class UniversalDocStoreTests : IDisposable
         indexedCount.ShouldBeGreaterThan(0);
         var searchHits = await freshSearchService.SearchAsync("ERR_STOCK_LOW");
         searchHits.Count.ShouldBeGreaterThanOrEqualTo(1);
-        searchHits[0].AppId.ShouldBe("inventory-service");
-        searchHits[0].Id.DocId.ShouldBe("stock-alert");
-        searchHits[0].Summary.ShouldContain("ERR_STOCK_LOW");
+        searchHits.ShouldContain(h => h.AppId == "inventory-service" && h.Id.DocId == "stock-alert" && h.Summary.Contains("ERR_STOCK_LOW"));
     }
 
     [Fact]

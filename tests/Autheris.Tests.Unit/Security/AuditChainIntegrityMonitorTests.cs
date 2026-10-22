@@ -134,8 +134,8 @@ public sealed class AuditChainIntegrityMonitorTests
         var component = AuditChainComponent(report);
         component.IsHealthy.ShouldBeFalse();
         component.Description!.ShouldContain("unknown");
-        component.Description.ShouldNotContain("db-internal");
-        component.Description.ShouldNotContain("secret");
+        component.Description!.ShouldNotContain("db-internal");
+        component.Description!.ShouldNotContain("secret");
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public sealed class AuditChainIntegrityMonitorTests
         var component = System.Linq.Enumerable.Single(report.Components, c => c.Name == "GovernanceDb");
         component.IsHealthy.ShouldBeFalse();
         component.Description!.ShouldNotContain("db-internal");
-        component.Description.ShouldNotContain("secret");
+        component.Description!.ShouldNotContain("secret");
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public sealed class AuditChainIntegrityMonitorTests
         var component = System.Linq.Enumerable.Single(metrics.Components, c => c.ComponentName == "HealthCheckService");
         component.Status.ShouldBe("Unhealthy");
         component.Details!.ShouldNotContain("db-internal");
-        component.Details.ShouldNotContain("secret");
+        component.Details!.ShouldNotContain("secret");
     }
 
     [Fact]

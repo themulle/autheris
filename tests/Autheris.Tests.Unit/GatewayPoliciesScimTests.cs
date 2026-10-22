@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Autheris.Api.Security;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -14,14 +15,14 @@ namespace Autheris.Tests.Unit;
 [Trait("Category", "Security")]
 public sealed class GatewayPoliciesScimTests
 {
-    private static async Task<bool> AuthorizeAsync(ClaimsPrincipal user)
+    private static async Task<bool> AuthorizeAsync(ClaimsPrincipal user, HttpContext? resource = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddAuthorization(GatewayPolicies.Configure);
         await using var provider = services.BuildServiceProvider();
         var authz = provider.GetRequiredService<IAuthorizationService>();
-        return (await authz.AuthorizeAsync(user, GatewayPolicies.Scim)).Succeeded;
+        return (await authz.AuthorizeAsync(user, resource, GatewayPolicies.Scim)).Succeeded;
     }
 
     private static ClaimsPrincipal Principal(string authenticationType, params string[] roles)
@@ -60,4 +61,46 @@ public sealed class GatewayPoliciesScimTests
     [Fact]
     public async Task Scim_Anonymous_Fails()
         => (await AuthorizeAsync(new ClaimsPrincipal(new ClaimsIdentity()))).ShouldBeFalse();
+
+    [Fact]
+    public async Task ScimPolicy_RealmClaimDiffersFromRoute_Denied()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.RouteValues["realmId"] = "realm-b";
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.Role, GatewayPolicies.ScimProvisionerRole),
+            new Claim("autheris:realm", "realm-a")
+        }, GatewayAuthSchemes.Scim));
+
+        (await AuthorizeAsync(principal, httpContext)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ScimPolicy_RealmClaimMatchesRoute_Succeeds()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.RouteValues["realmId"] = "realm-a";
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.Role, GatewayPolicies.ScimProvisionerRole),
+            new Claim("autheris:realm", "realm-a")
+        }, GatewayAuthSchemes.Scim));
+
+        (await AuthorizeAsync(principal, httpContext)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Scim_ScimSchemeWithExtraneousRole_Fails()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.Role, GatewayPolicies.ScimProvisionerRole),
+            new Claim(ClaimTypes.Role, "ClusterAdmin")
+        }, GatewayAuthSchemes.Scim));
+
+        (await AuthorizeAsync(principal)).ShouldBeFalse();
+    }
 }

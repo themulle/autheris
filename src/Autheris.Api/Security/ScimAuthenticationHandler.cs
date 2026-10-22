@@ -60,15 +60,24 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
             }
         }
 
-        realmId ??= _realmOptions.CurrentValue.DefaultRealm ?? "workforce-entra";
+        if (string.IsNullOrWhiteSpace(realmId))
+        {
+            return Task.FromResult(AuthenticateResult.Fail("Missing SCIM realm identifier in request path."));
+        }
 
-        var scimOpts = _realmOptions.CurrentValue.Scim;
-        var primary = scimOpts.PrimarySecret;
-        var secondary = scimOpts.SecondarySecret;
+        var options = _realmOptions.CurrentValue;
+        if (!IsScimRealm(options, realmId) || !options.Realms.TryGetValue(realmId, out var realmConfig))
+        {
+            return Task.FromResult(AuthenticateResult.Fail("SCIM provisioning is not enabled for the requested realm."));
+        }
+
+        var scimSecrets = realmConfig.Scim;
+        var primary = scimSecrets?.PrimarySecret;
+        var secondary = scimSecrets?.SecondarySecret;
 
         if (string.IsNullOrWhiteSpace(primary) && string.IsNullOrWhiteSpace(secondary))
         {
-            return Task.FromResult(AuthenticateResult.Fail("SCIM authentication is not configured with secrets."));
+            return Task.FromResult(AuthenticateResult.Fail("SCIM authentication is not configured with secrets for the requested realm."));
         }
 
         // Constant-time validation
@@ -77,14 +86,6 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
         if (!isValid)
         {
             return Task.FromResult(AuthenticateResult.Fail("Invalid SCIM bearer token or standard user token supplied on SCIM endpoint."));
-        }
-
-        // Security review: the realm comes from the URL. When realms are configured, only realms provisioned via SCIM
-        // can be targeted. NOTE: the SCIM secrets are global (not bound to a realm), so a secret holder can still
-        // provision every SCIM realm; per-realm secrets would need a configuration extension.
-        if (!IsScimRealm(_realmOptions.CurrentValue, realmId))
-        {
-            return Task.FromResult(AuthenticateResult.Fail("SCIM provisioning is not enabled for the requested realm."));
         }
 
         // Security review: the secret holder gets only the dedicated provisioner role, never ClusterAdmin.
@@ -106,13 +107,13 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
     }
 
     /// <summary>
-    /// True when no realms are configured (legacy single-realm setup) or the realm is configured with SCIM provisioning.
+    /// True when the realm is configured with SCIM provisioning.
     /// </summary>
     internal static bool IsScimRealm(IdentityRealmsOptions options, string realmId)
     {
-        if (options.Realms.Count == 0)
+        if (options == null || options.Realms.Count == 0 || string.IsNullOrWhiteSpace(realmId))
         {
-            return true;
+            return false;
         }
 
         return options.Realms.TryGetValue(realmId, out var realm) &&

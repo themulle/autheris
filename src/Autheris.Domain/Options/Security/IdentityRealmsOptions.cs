@@ -30,14 +30,19 @@ public sealed class IdentityRealmConfigOptions
     public RealmGroupSource GroupSource { get; set; } = RealmGroupSource.Resolver;
     public List<string> ResolverChain { get; set; } = ["scim-store"];
     public RealmProvisioningMode Provisioning { get; set; } = RealmProvisioningMode.Scim;
+    public ScimRealmSecretOptions? Scim { get; set; }
     public List<string> AllowedGatewayRoles { get; set; } = [];
     public bool Delegable { get; set; }
 }
 
-public sealed class ScimOptions
+public sealed class ScimRealmSecretOptions
 {
     public string? PrimarySecret { get; set; }
     public string? SecondarySecret { get; set; }
+}
+
+public sealed class ScimOptions
+{
     public List<string> AllowedIpRanges { get; set; } = [];
     public bool EnableMassChangeProtection { get; set; } = true;
     public double MassChangeThresholdPercentage { get; set; } = 10.0;

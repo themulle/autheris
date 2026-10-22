@@ -47,4 +47,29 @@ public sealed class AuditArchitectureTests
         violations.ShouldBeEmpty(
             $"L-5 Violation: Found classes with optional/nullable IAuditLogRepository:\n{string.Join("\n", violations)}");
     }
+
+    [Fact]
+    public void AccessAuditMiddleware_DoesNotReferenceExceptionMessage()
+    {
+        var root = FindRepositoryRoot();
+        var middlewarePath = Path.Combine(root, "src", "Autheris.Api", "Middleware", "AccessAuditMiddleware.cs");
+        var content = System.IO.File.ReadAllText(middlewarePath);
+
+        content.ShouldNotContain(".Message");
+        content.ShouldNotContain("ex.ToString()");
+        content.ShouldNotContain("e.ToString()");
+        content.ShouldNotContain("exception.ToString()");
+        content.ShouldNotContain("InnerException");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "Autheris.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("Repository root not found.");
+    }
 }

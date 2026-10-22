@@ -575,6 +575,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>()
             .BindConfiguration(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName);
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmOptionsValidator>();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmsScimOptionsValidator>();
         services.AddSingleton<WebSocketAuthInterceptor>();
 
         var gqlBuilder = services

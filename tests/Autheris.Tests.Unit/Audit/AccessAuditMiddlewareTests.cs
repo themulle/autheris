@@ -139,7 +139,127 @@ public sealed class AccessAuditMiddlewareTests
         thrown.Message.ShouldBe("Database crashed");
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("ERROR");
-        recorded.DetailsJson.ShouldContain("Database crashed");
+        recorded.DetailsJson.ShouldContain("InvalidOperationException");
+        recorded.DetailsJson.ShouldNotContain("Database crashed");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExceptionWithPiiMessage_MessageNeverInDetailsJson()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        var auditContext = new AuditContext();
+        context.Features.Set(auditContext);
+
+        var middleware = CreateMiddleware(_ => throw new InvalidOperationException("duplicate key (alice@corp.com)"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.DetailsJson.ShouldNotContain("duplicate key");
+        recorded.DetailsJson.ShouldNotContain("alice@corp.example");
+        recorded.DetailsJson.ShouldNotContain("alice@corp.com");
+        recorded.DetailsJson.ShouldContain("InvalidOperationException");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UnhandledException_RecordsMappedStatus500NotDefault200()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        var auditContext = new AuditContext();
+        context.Features.Set(auditContext);
+
+        var middleware = CreateMiddleware(_ => throw new InvalidOperationException("boom"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.DetailsJson.ShouldContain("\"statusCode\":500");
+        recorded.DetailsJson.ShouldNotContain("\"statusCode\":200");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TimeoutException_RecordsStatus504()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        var auditContext = new AuditContext();
+        context.Features.Set(auditContext);
+
+        var middleware = CreateMiddleware(_ => throw new TimeoutException("Database timeout"));
+
+        await Should.ThrowAsync<TimeoutException>(() =>
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe("ERROR");
+        recorded.DetailsJson.ShouldContain("\"statusCode\":504");
+        recorded.DetailsJson.ShouldContain("TimeoutException");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_GatewaySecurityException_RecordsDenyWithMappedStatus()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        var auditContext = new AuditContext();
+        context.Features.Set(auditContext);
+
+        var middleware = CreateMiddleware(_ => throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access denied", "ACCESS_DENIED"));
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() =>
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe("DENY");
+        recorded.DetailsJson.ShouldContain("\"statusCode\":403");
+        recorded.DetailsJson.ShouldContain("ACCESS_DENIED");
+    }
+
+    private sealed class ExceptionWithMaliciousErrorCode : Exception
+    {
+        public string ErrorCode => "MALICIOUS_CODE\nWith raw data and spaces";
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ErrorCodeWithIllegalChars_FallsBackToTypeName()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        var auditContext = new AuditContext();
+        context.Features.Set(auditContext);
+
+        var middleware = CreateMiddleware(_ => throw new ExceptionWithMaliciousErrorCode());
+
+        await Should.ThrowAsync<ExceptionWithMaliciousErrorCode>(() =>
+            middleware.InvokeAsync(context, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.DetailsJson.ShouldNotContain("MALICIOUS_CODE");
+        recorded.DetailsJson.ShouldContain("ExceptionWithMaliciousErrorCode");
     }
 
     [Fact]

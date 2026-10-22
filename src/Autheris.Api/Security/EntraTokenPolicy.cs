@@ -31,17 +31,32 @@ public static class EntraTokenPolicy
             .Select(c => c.Value)
             .ToList();
 
-        // 1. Tokens without scp and without roles cannot access the API.
-        // Also detects and rejects ID-tokens passed as access tokens (which lack scp/roles).
-        if (scopes.Count == 0 && roles.Count == 0)
-        {
-            return "Token without scopes ('scp') or roles ('roles') is not accepted as an API access token.";
-        }
-
-        // 2. Reject ID tokens explicitly: if token has 'nonce' claim typical of ID tokens.
+        // 1. Reject ID tokens explicitly: if token has 'nonce' claim typical of ID tokens.
         if (principal.HasClaim(c => c.Type == "nonce"))
         {
             return "ID tokens are not accepted as access tokens.";
+        }
+
+        // 2. Access-token shape: reject unless azp (v2) or appid (v1) is present and non-empty.
+        // Entra ID tokens never carry either.
+        var azp = principal.FindFirst("azp")?.Value;
+        var appid = principal.FindFirst("appid")?.Value;
+        if (string.IsNullOrWhiteSpace(azp) && string.IsNullOrWhiteSpace(appid))
+        {
+            return "Token is not an Entra access token (missing 'azp'/'appid').";
+        }
+
+        // 3. Optional idtyp claim: if present, must be 'app' or 'user'.
+        var idtyp = principal.FindFirst("idtyp")?.Value;
+        if (idtyp != null && !string.Equals(idtyp, "app", StringComparison.OrdinalIgnoreCase) && !string.Equals(idtyp, "user", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Token has an invalid 'idtyp' claim.";
+        }
+
+        // 4. Tokens without scp and without roles cannot access the API.
+        if (scopes.Count == 0 && roles.Count == 0)
+        {
+            return "Token without scopes ('scp') or roles ('roles') is not accepted as an API access token.";
         }
 
         // Delegated Entra tokens always carry scp; only tokens without it can be app-only.
@@ -56,8 +71,8 @@ public static class EntraTokenPolicy
             // Client ID allowlist check (if configured)
             if (options.AllowedClientIds.Count > 0)
             {
-                var clientId = principal.FindFirst("azp")?.Value
-                    ?? principal.FindFirst("appid")?.Value
+                var clientId = azp
+                    ?? appid
                     ?? principal.FindFirst("client_id")?.Value;
 
                 if (string.IsNullOrWhiteSpace(clientId) ||
@@ -77,6 +92,11 @@ public static class EntraTokenPolicy
             }
 
             return null;
+        }
+
+        if (scopes.Count == 0)
+        {
+            return "Delegated tokens require 'scp'.";
         }
 
         var readOnlyScopes = options.GetEffectiveReadOnlyScopes();

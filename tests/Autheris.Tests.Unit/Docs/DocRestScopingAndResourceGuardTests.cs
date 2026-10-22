@@ -240,7 +240,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
 
         ok.ShouldBeFalse();
         tenantId.ShouldBeNull();
-        denied.ShouldBeAssignableTo<IStatusCodeHttpResult>().StatusCode.GetValueOrDefault().ShouldBe(StatusCodes.Status403Forbidden);
+        denied!.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode.GetValueOrDefault().ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
 
         ok.ShouldBeFalse();
         tenantId.ShouldBeNull();
-        denied.ShouldBeAssignableTo<IStatusCodeHttpResult>().StatusCode.GetValueOrDefault().ShouldBe(StatusCodes.Status403Forbidden);
+        denied!.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode.GetValueOrDefault().ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]
@@ -263,7 +263,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
 
         ok.ShouldBeFalse();
         tenantId.ShouldBeNull();
-        denied.ShouldBeAssignableTo<IStatusCodeHttpResult>().StatusCode.GetValueOrDefault().ShouldBe(StatusCodes.Status403Forbidden);
+        denied!.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode.GetValueOrDefault().ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]
