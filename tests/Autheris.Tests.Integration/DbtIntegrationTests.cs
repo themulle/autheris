@@ -274,6 +274,24 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
 
+        // 0. Sync manifest so that models and test target mappings are registered
+        var sampleManifest = """
+        {
+          "nodes": {
+            "model.analytics.finance_table_1": {
+              "name": "finance_table_1",
+              "database": "default",
+              "schema": "default",
+              "description": "Finance table",
+              "config": { "materialized": "table" },
+              "columns": {}
+            }
+          }
+        }
+        """;
+        var syncResponse = await client.PostAsync("/api/extensions/dbt/sync", new StringContent(sampleManifest, Encoding.UTF8, "application/json"));
+        syncResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+
         // 1. Post failing run_results for finance_table_1
         var sampleRunResults = """
         {

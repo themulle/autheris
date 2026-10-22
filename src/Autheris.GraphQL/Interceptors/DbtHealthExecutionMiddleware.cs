@@ -160,7 +160,8 @@ public sealed class DbtHealthExecutionMiddleware
                     .SetMessage($"The requested table/model '{modelName}' is quarantined due to failed dbt tests.")
                     .SetCode("TABLE_IN_QUARANTINE")
                     .SetExtension("table", modelName)
-                    .SetExtension("dbtHealthStatus", "Quarantined");
+                    .SetExtension("dbtHealthStatus", "Quarantined")
+                    .SetExtension("httpStatusCode", 400);
 
                 if (isPrivileged)
                 {
