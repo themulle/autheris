@@ -368,14 +368,14 @@ internal sealed class SqliteBaselineSchema
                 subject_type TEXT NOT NULL DEFAULT 'User',
                 assigned_at TEXT NOT NULL,
                 expires_at TEXT,
-                subject_norm TEXT,
+                subject_norm TEXT NOT NULL,
                 created_by TEXT,
                 approved_by TEXT,
                 approved_at TEXT,
                 justification TEXT,
                 kind TEXT NOT NULL DEFAULT 'Standard',
                 renewal_count INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (tenant_id, profile_id, subject_type, subject),
+                PRIMARY KEY (tenant_id, profile_id, subject_type, subject_norm),
                 FOREIGN KEY (tenant_id, profile_id) REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
             );
 
