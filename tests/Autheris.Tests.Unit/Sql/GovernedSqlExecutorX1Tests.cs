@@ -39,6 +39,14 @@ public sealed class GovernedSqlExecutorX1Tests
 
     private sealed class FakeDbException(string message) : DbException(message);
 
+    private sealed class FakeNumberedDbException(string message, int number) : DbException(message)
+    {
+        public int Number { get; } = number;
+    }
+
+    private const string RecursiveSql =
+        "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id + 1 FROM t WHERE id < 3) SELECT id FROM t";
+
     private static ClaimsPrincipal Writer() =>
         new(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
@@ -59,9 +67,9 @@ public sealed class GovernedSqlExecutorX1Tests
         };
     }
 
-    private static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null, int timeoutSeconds = 30) => new()
+    private static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null, int timeoutSeconds = 30, bool allowRecursive = false) => new()
     {
-        WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows, ExecutionTimeoutSeconds = timeoutSeconds },
+        WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows, ExecutionTimeoutSeconds = timeoutSeconds, AllowRecursiveCte = allowRecursive },
         Audit = new AuditOptions { StoreCompiledSql = storeCompiledSql },
         DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = hmacRef ?? string.Empty },
         DataSources = new SqlDataSourceOptions
@@ -74,7 +82,7 @@ public sealed class GovernedSqlExecutorX1Tests
     };
 
     /// <summary>Compiles a statement through the real governed pipeline (catalog, policies, engine) for a source type.</summary>
-    private static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null)
+    private static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null, bool allowRecursive = false)
     {
         var table = Orders(sourceType);
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -87,7 +95,7 @@ public sealed class GovernedSqlExecutorX1Tests
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
-            Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType)), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType, allowRecursive: allowRecursive)), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
@@ -482,6 +490,65 @@ public sealed class GovernedSqlExecutorX1Tests
         using var json = System.Text.Json.JsonDocument.Parse(h.Audit.Single(e => e.EventType == "WEBSQL_QUERY").DetailsJson);
         json.RootElement.GetProperty("compiledSql").GetString().ShouldBe(compiled.Sql);
         json.RootElement.GetProperty("compiledSql").GetString()!.ShouldNotContain(Tenant);   // markers only: no values by construction
+    }
+
+    [Fact]
+    public async Task Audit_RecursiveStatement_HasRecursiveCteField()
+    {
+        var compiled = await CompileAsync("Sqlite", RecursiveSql, allowRecursive: true);
+        var h = CreateHarness("Sqlite", options: Gateway("Sqlite", allowRecursive: true));
+
+        await ExecuteAsync(h, compiled);
+
+        using var json = System.Text.Json.JsonDocument.Parse(h.Audit.Single(e => e.EventType == "WEBSQL_QUERY").DetailsJson);
+        json.RootElement.GetProperty("recursiveCte").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Audit_NonRecursiveStatement_HasNoRecursiveCteField()
+    {
+        var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");
+        var h = CreateHarness("Sqlite");
+
+        await ExecuteAsync(h, compiled);
+
+        h.Audit.Single(e => e.EventType == "WEBSQL_QUERY").DetailsJson.ShouldNotContain("recursiveCte");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task RecursiveCte_Runaway_ReleasesConnectionAndAuditsFlag()
+    {
+        var compiled = await CompileAsync("Sqlite", RecursiveSql, allowRecursive: true);
+        var h = CreateHarness("Sqlite", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new TimeoutException("runaway recursion") },
+            options: Gateway("Sqlite", allowRecursive: true));
+
+        await Should.ThrowAsync<TimeoutException>(() => ExecuteAsync(h, compiled));
+
+        var error = h.Audit.Single(e => e.EventType == "QUERY_EXECUTION_ERROR");
+        using var json = System.Text.Json.JsonDocument.Parse(error.DetailsJson);
+        json.RootElement.GetProperty("recursiveCte").GetBoolean().ShouldBeTrue();
+        h.Connection.Transactions.ShouldAllBe(t => t.Commits + t.Rollbacks > 0);   // no transaction is left open: the connection is released
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_277_09_RecursionLimit_AuditsFlagAndStableCode_WithoutDriverText()
+    {
+        const string DriverText = "The maximum recursion 100 has been exhausted (secret_schema.secret_table)";
+        var compiled = await CompileAsync("SqlServer", RecursiveSql, allowRecursive: true);
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeNumberedDbException(DriverText, 530) },
+            options: Gateway("SqlServer", allowRecursive: true));
+
+        var ex = await Should.ThrowAsync<GovernedSqlException>(() => ExecuteAsync(h, compiled));
+
+        ex.Code.ShouldBe("SQL_LIMIT_EXCEEDED");
+        ex.Message.ShouldNotContain("secret_table");
+        var error = h.Audit.Single(e => e.EventType == "QUERY_EXECUTION_ERROR");
+        error.DetailsJson.ShouldContain("SQL_LIMIT_EXCEEDED");
+        error.DetailsJson.ShouldContain("\"recursiveCte\":true");
+        error.DetailsJson.ShouldNotContain("secret_table");
+        h.Log.Lines.ShouldNotContain(l => l.Contains("secret_table"));   // SEC-277-06: not even the server-side log carries the driver message
     }
 
     [Fact]

@@ -103,6 +103,18 @@ internal static class SecurityRegressionCatalog
         new("SQL-4", LegacyIdKind.Compiler, "HMAC masked columns compile on the AST path",
             Array.Empty<string>(), new[] { "Autheris.Tests.Unit/Security/AstCompilerHmacSql4Tests.cs" },
             ElsewhereAstTests: new[] { "Autheris.Tests.Unit/Security/AstCompilerHmacSql4Tests.cs#AstCompiler_HmacMaskedColumn_IsRewritten" }),
+        new("SEC-277", LegacyIdKind.Compiler, "WITH RECURSIVE: opt-in gate, scope parity, catalog-name shadowing, MAXRECURSION tail, mask tracking, error mapping",
+            Array.Empty<string>(),
+            new[] { "TrinoSqlEngine.Tests/Compiler/RecursiveCteGovernanceTests.cs", "TrinoSqlEngine.Tests/Compiler/DmlErrorSanitizerRecursionTests.cs" },
+            ElsewhereAstTests: new[]
+            {
+                "TrinoSqlEngine.Tests/Compiler/RecursiveCteGovernanceTests.cs#Analyzer_Compiler_ScopeParity_RecursiveCorpus_NoCompilerTableMissingFromAnalyzer",
+                "TrinoSqlEngine.Tests/Compiler/RecursiveCteGovernanceTests.cs#RecursiveCte_NameShadowsCatalogTable_Variants_AreRejected",
+                "TrinoSqlEngine.Tests/Compiler/RecursiveCteGovernanceTests.cs#RecursiveCte_Disabled_RejectedBeforeShadowCheckAndTableLookup",
+                "TrinoSqlEngine.Tests/Compiler/RecursiveCteGovernanceTests.cs#SqlServer_MaxRecursionTail_OnlyExactFormAccepted",
+                "TrinoSqlEngine.Tests/Compiler/RecursiveCteGovernanceTests.cs#RecursiveCte_MaskedColumnThroughRecursion_PredicateAndAggregateGuardsReject",
+                "TrinoSqlEngine.Tests/Compiler/DmlErrorSanitizerRecursionTests.cs#ProviderError_530_32044_ResponseAndAuditContainNoDriverText"
+            }),
         new("SQL-5", LegacyIdKind.Compiler, "the catalog part of a three-part name",
             T(nameof(AstSecurityRegressionTests.SQL5_ACatalogPart_IsNeverEmitted_AndEveryTableReferenceIsSecured)),
             new[] { "Autheris.Tests.Unit/Security/WebSqlCaseCollisionSql2Tests.cs", "Autheris.Tests.Unit/Security/SecurityReviewRemediationCoverageTests.cs" },

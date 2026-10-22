@@ -15,7 +15,13 @@ public enum EmittedRangeKind
     ConstantFragment,
 
     /// <summary>The single statement-terminating semicolon that SQL Server requires after MERGE (SEC-ADG-08 c).</summary>
-    StatementTerminator
+    StatementTerminator,
+
+    /// <summary>
+    /// The single final <c>OPTION (MAXRECURSION n)</c> tail of a SQL Server recursive SELECT (SEC-277-05). Skipped after it is proved to be
+    /// exactly this text with the validated depth.
+    /// </summary>
+    RecursionOptionTail
 }
 
 /// <summary>A region of the emitted text the emitter registered as structural (see plan 3.4).</summary>
@@ -42,13 +48,17 @@ public static class EmittedSqlInvariantChecker
 {
     public const int MaxEmittedSqlLength = 1 << 20;
 
+    /// <summary>The text before n of the only query hint the gateway emits (SQL Server, recursive SELECT; SEC-277-05).</summary>
+    public const string MaxRecursionTailPrefix = " OPTION (MAXRECURSION ";
+
     public static void Check(
         string sql,
         TargetSqlDialect dialect,
         ImmutableArray<BoundParameter> parameters,
         IReadOnlyList<EmittedRange> ranges,
         bool structuralOnly = false,
-        SqlStatementClass statementClass = SqlStatementClass.Select)
+        SqlStatementClass statementClass = SqlStatementClass.Select,
+        int maxRecursionDepth = 0)
     {
         ArgumentNullException.ThrowIfNull(sql);
         ArgumentNullException.ThrowIfNull(ranges);
@@ -66,6 +76,7 @@ public static class EmittedSqlInvariantChecker
         var sorted = new EmittedRange[ranges.Count];
         for (int r = 0; r < sorted.Length; r++) sorted[r] = ranges[r];
         VerifyTerminator(sql, dialect, statementClass, sorted);
+        VerifyRecursionTail(sql, dialect, statementClass, sorted, maxRecursionDepth);
         Array.Sort(sorted, static (a, b) => a.Start.CompareTo(b.Start));
 
         var markersInText = new HashSet<string>(parameters.Length + 4, StringComparer.Ordinal);
@@ -73,7 +84,9 @@ public static class EmittedSqlInvariantChecker
         int i = 0;
         while (i < sql.Length)
         {
-            if (TryFindRange(sorted, i, out var range) && range.Kind is EmittedRangeKind.ConstantFragment or EmittedRangeKind.StatementTerminator && range.Start == i)
+            if (TryFindRange(sorted, i, out var range) &&
+                range.Kind is EmittedRangeKind.ConstantFragment or EmittedRangeKind.StatementTerminator or EmittedRangeKind.RecursionOptionTail &&
+                range.Start == i)
             {
                 i = range.Start + range.Length;
                 continue;
@@ -103,6 +116,12 @@ public static class EmittedSqlInvariantChecker
                 int start = i;
                 while (i < sql.Length && IsTokenChar(sql[i])) i++;
                 var token = sql.AsSpan(start, i - start);
+                if (token.Equals("OPTION", StringComparison.OrdinalIgnoreCase) || token.Equals("MAXRECURSION", StringComparison.OrdinalIgnoreCase))
+                {
+                    // SEC-277-05: a query hint is never emitted except as the registered recursion tail (skipped above).
+                    throw new EmittedSqlInvariantViolationException("unregistered-query-hint", start);
+                }
+
                 if (!structuralOnly && char.IsAsciiDigit(token[0]) && !IsNumericAllowed(sorted, start, i - start))
                 {
                     throw new EmittedSqlInvariantViolationException("unregistered-numeric-token", start);
@@ -173,6 +192,29 @@ public static class EmittedSqlInvariantChecker
                 range.Length != 1 || range.Start != sql.Length - 1 || sql[range.Start] != ';')
             {
                 throw new EmittedSqlInvariantViolationException("unregistered-terminator", range.Start);
+            }
+        }
+    }
+
+    /// <summary>
+    /// SEC-277-05: the only accepted query hint is one final <c>OPTION (MAXRECURSION n)</c> on a SQL Server SELECT, registered by the
+    /// generator, with n equal to the validated depth (1..<see cref="CompileLimits.MaxRecursionDepthLimit"/>). A second tail, another
+    /// dialect, another n or text that does not end the statement is rejected.
+    /// </summary>
+    private static void VerifyRecursionTail(string sql, TargetSqlDialect dialect, SqlStatementClass statementClass, EmittedRange[] ranges, int maxRecursionDepth)
+    {
+        int count = 0;
+        foreach (var range in ranges)
+        {
+            if (range.Kind != EmittedRangeKind.RecursionOptionTail) continue;
+            count++;
+            string expected = string.Concat(MaxRecursionTailPrefix, maxRecursionDepth.ToString(System.Globalization.CultureInfo.InvariantCulture), ")");
+            if (dialect != TargetSqlDialect.SqlServer || statementClass != SqlStatementClass.Select || count > 1 ||
+                maxRecursionDepth is < 1 or > CompileLimits.MaxRecursionDepthLimit ||
+                range.Start < 0 || range.Length != expected.Length || range.Start + range.Length != sql.Length ||
+                !sql.AsSpan(range.Start, range.Length).SequenceEqual(expected))
+            {
+                throw new EmittedSqlInvariantViolationException("unregistered-recursion-option", range.Start);
             }
         }
     }

@@ -58,6 +58,8 @@ public sealed class AstCompilerPostgreSqlFixture : IAsyncLifetime
             INSERT INTO public.events VALUES
                 (1, 'acme', '2019-06-01 10:00:00', 1.50), (2, 'acme', '2024-03-15 00:00:00', 2.50), (3, 'other', '2019-01-01 00:00:00', 3.50);
             INSERT INTO public.entitlements VALUES (1, 'acme', 1), (2, 'other', 2), (3, 'acme', 6), (4, 'ACME', 3);
+            CREATE TABLE public.org (id integer PRIMARY KEY, tenantid citext NOT NULL, parentid integer);
+            INSERT INTO public.org VALUES (1, 'acme', NULL), (2, 'acme', 1), (3, 'acme', 1), (4, 'acme', 2), (5, 'other', NULL), (6, 'other', 5);
             CREATE SCHEMA evil;
             CREATE TABLE evil.orders (id integer PRIMARY KEY, tenantid text, region text, status text, amount numeric(18,2), email text);
             INSERT INTO evil.orders VALUES (99, 'acme', 'EU', 'decoy', 1, 'decoy@evil.example');
@@ -103,6 +105,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     private static readonly TableIdentity Orders = new("public", "orders");
     private static readonly TableIdentity Entitlements = new("public", "entitlements");
     private static readonly TableIdentity OrdersIcu = new("public", "orders_icu");
+    private static readonly TableIdentity Org = new("public", "org");
 
     private readonly AstCompilerPostgreSqlFixture _fx;
     private readonly FastSqlEngine _engine = new();
@@ -126,7 +129,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         new TableCatalogEntry(new TableIdentity("public", "events"), ImmutableArray.Create(
             new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("created_at", "timestamp"),
             new CatalogColumn("amount", "numeric(18,2)")), "tenantid", 1),
-        new TableCatalogEntry(OrdersIcu, ImmutableArray.Create(new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "text")), "tenantid", 1)
+        new TableCatalogEntry(OrdersIcu, ImmutableArray.Create(new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "text")), "tenantid", 1),
+        new TableCatalogEntry(Org, ImmutableArray.Create(
+            new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("parentid", "integer")), "tenantid", 1)
     }, "public");
 
     private sealed class Policies : IPolicyPredicateProvider, IColumnMaskProvider
@@ -149,6 +154,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     private CompileRequest Request(string tenant) => new()
     {
         TargetDialect = TargetSqlDialect.PostgreSql,
+        AllowRecursiveCte = true,   // issue #277: the recursive CTE execution tests opt in; the default request rejects WITH RECURSIVE
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Policy = new GovernancePolicy
         {
@@ -160,13 +166,14 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     };
 
     private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null,
-        Func<NpgsqlConnection, Task>? prepare = null, bool translateDates = false)
+        Func<NpgsqlConnection, Task>? prepare = null, bool translateDates = false, int? commandTimeoutSeconds = null)
     {
         var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = new NpgsqlConnection(_fx.ConnectionString);
         await conn.OpenAsync();
         if (prepare != null) await prepare(conn);
         await using var cmd = conn.CreateCommand();
+        if (commandTimeoutSeconds is { } timeout) cmd.CommandTimeout = timeout;
         _binder.Bind(cmd, compiled, client ?? new Dictionary<string, object?>());
         var rows = new List<object?[]>();
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -314,6 +321,48 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(
             "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM orders WHERE n < 3) SELECT id FROM orders",
             "acme"));
+    }
+
+    // ---- issue #277: recursive CTE hierarchy walk and bounds ----
+
+    [Fact]
+    public async Task RecursiveCte_HierarchyWalk_ReturnsSameRowsAsUnsecuredQuery()
+    {
+        var secured = (await RunAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parentid IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parentid = w.id) SELECT id FROM w", "acme")).Select(r => Convert.ToInt32(r[0])).OrderBy(i => i).ToList();
+
+        await using var conn = new NpgsqlConnection(_fx.ConnectionString);
+        await conn.OpenAsync();
+        await using var raw = conn.CreateCommand();
+        raw.CommandText = """
+            WITH RECURSIVE w(id) AS (SELECT id FROM public.org WHERE parentid IS NULL AND tenantid = 'acme'
+                UNION ALL SELECT o.id FROM public.org o JOIN w ON o.parentid = w.id WHERE o.tenantid = 'acme')
+            SELECT id FROM w ORDER BY id
+            """;
+        var unsecured = new List<int>();
+        await using (var reader = await raw.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync()) unsecured.Add(reader.GetInt32(0));
+        }
+
+        secured.ShouldBe(unsecured);
+        secured.ShouldBe(new List<int> { 1, 2, 3, 4 });
+        (await RunAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parentid IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parentid = w.id) SELECT id FROM w", "other")).Select(r => Convert.ToInt32(r[0])).OrderBy(i => i).ShouldBe(new List<int> { 5, 6 });
+    }
+
+    [Fact]
+    public async Task RecursiveCte_CounterToThree_ReturnsThreeRows() =>
+        (await RunAsync("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t", "acme")).Select(r => Convert.ToInt32(r[0])).OrderBy(i => i).ShouldBe(new List<int> { 1, 2, 3 });
+
+    [Fact]
+    public async Task RecursiveCte_OuterAggregateOverRunaway_IsBounded()
+    {
+        const int TimeoutSeconds = 2;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var ex = await Should.ThrowAsync<NpgsqlException>(() => RunAsync("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c", "acme", commandTimeoutSeconds: TimeoutSeconds));
+
+        Autheris.Application.Common.DataAccessErrorClassifier.Classify(ex).ShouldBe(Autheris.Application.Common.DataAccessErrorKind.Timeout);
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(TimeoutSeconds + 3));
     }
 
     [Theory]

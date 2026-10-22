@@ -50,6 +50,12 @@ public sealed record CompiledSql(
     public int? ExpectedAffectedRows { get; internal init; }
 
     /// <summary>
+    /// Issue #277 (SEC-277-09): true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit
+    /// audits like the first compile.
+    /// </summary>
+    public bool HasRecursiveCte { get; init; }
+
+    /// <summary>
     /// CR-ADG-35: true for an INSERT with check-option semantics. The executor must run the statement inside a transaction and call
     /// <see cref="DmlCheckOption.Enforce"/> with the affected row count before it commits; a difference rolls the transaction back.
     /// </summary>

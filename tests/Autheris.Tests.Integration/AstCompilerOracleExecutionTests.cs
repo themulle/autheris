@@ -45,6 +45,8 @@ public sealed class AstCompilerOracleExecutionTests
 {
     private static readonly TableIdentity Orders = new(AstCompilerOracleFixture.AppUser, "ORDERS");
     private static readonly TableIdentity Entitlements = new(AstCompilerOracleFixture.AppUser, "ENTITLEMENTS");
+    private static readonly TableIdentity Org = new(AstCompilerOracleFixture.AppUser, "ORG");
+    private static readonly TableIdentity Cyc = new(AstCompilerOracleFixture.AppUser, "CYC");
 
     private readonly AstCompilerOracleFixture _fx;
     private readonly FastSqlEngine _engine = new();
@@ -68,7 +70,11 @@ public sealed class AstCompilerOracleExecutionTests
             "TENANT_ID", 1),
         new TableCatalogEntry(Entitlements, ImmutableArray.Create(
             new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANT_ID", "VARCHAR2(64)"), new CatalogColumn("ORDER_ID", "NUMBER(10)")),
-            "TENANT_ID", 1)
+            "TENANT_ID", 1),
+        new TableCatalogEntry(Org, ImmutableArray.Create(
+            new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANT_ID", "VARCHAR2(64)"), new CatalogColumn("PARENT_ID", "NUMBER(10)")), "TENANT_ID", 1),
+        new TableCatalogEntry(Cyc, ImmutableArray.Create(
+            new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANT_ID", "VARCHAR2(64)"), new CatalogColumn("PARENT_ID", "NUMBER(10)")), "TENANT_ID", 1)
     }, AstCompilerOracleFixture.AppUser);
 
     private sealed class Policies : IPolicyPredicateProvider, IColumnMaskProvider
@@ -91,6 +97,7 @@ public sealed class AstCompilerOracleExecutionTests
     private CompileRequest Request(string tenant) => new()
     {
         TargetDialect = TargetSqlDialect.Oracle,
+        AllowRecursiveCte = true,   // issue #277: the recursive CTE execution tests opt in; the default request rejects WITH RECURSIVE
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Policy = new GovernancePolicy
         {
@@ -101,12 +108,13 @@ public sealed class AstCompilerOracleExecutionTests
         }
     };
 
-    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, bool translateDates = false)
+    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, bool translateDates = false, int? commandTimeoutSeconds = null)
     {
         var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = await _factory.CreateOpenConnectionAsync(Options());
         await _sessions.InitializeSessionAsync(conn, "Oracle", new TenantId("tenant-" + Guid.NewGuid().ToString("N")[..8]), requireTransaction: false);
         await using var cmd = conn.CreateCommand();
+        if (commandTimeoutSeconds is { } timeout) cmd.CommandTimeout = timeout;
         _binder.Bind(cmd, compiled, client ?? new Dictionary<string, object?>());
         var rows = new List<object?[]>();
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -272,6 +280,53 @@ public sealed class AstCompilerOracleExecutionTests
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(
             "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM orders WHERE n < 3) SELECT id FROM orders",
             "acme"));
+    }
+
+    // ---- issue #277: recursive CTE hierarchy walk and bounds ----
+
+    [Fact]
+    public async Task RecursiveCte_HierarchyWalk_ReturnsSameRowsAsUnsecuredQuery()
+    {
+        var secured = Ids(await RunAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parent_id = w.id) SELECT id FROM w", "acme"));
+
+        // The unsecured baseline sums the ids of the same walk with an explicit tenant filter (raw driver use stays in the fixture).
+        var unsecuredSum = await _fx.RawHostileSessionCountAsync(
+            "SELECT SUM(id) FROM (WITH w(id) AS (SELECT id FROM org WHERE parent_id IS NULL AND tenant_id = 'acme' " +
+            "UNION ALL SELECT o.id FROM org o JOIN w ON o.parent_id = w.id WHERE o.tenant_id = 'acme') SELECT id FROM w)");
+
+        secured.ShouldBe(new List<int> { 1, 2, 3, 4 });
+        secured.Sum().ShouldBe(unsecuredSum);
+        Ids(await RunAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parent_id = w.id) SELECT id FROM w", "other")).ShouldBe(new List<int> { 5, 6 });
+    }
+
+    [Fact]
+    public async Task RecursiveCte_CounterToThree_ReturnsThreeRows() =>
+        Ids(await RunAsync("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t", "acme")).ShouldBe(new List<int> { 1, 2, 3 });
+
+    [Fact]
+    public async Task RecursiveCte_OuterAggregateOverRunaway_IsBounded()
+    {
+        const int TimeoutSeconds = 3;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var ex = await Should.ThrowAsync<OracleException>(() => RunAsync("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c", "acme", commandTimeoutSeconds: TimeoutSeconds));
+
+        // Oracle stops an endless recursion itself (ORA-32044, mapped to the fixed limit error); failing that, the command timeout ends it.
+        var bounded = Autheris.Application.Common.DataAccessErrorClassifier.Classify(ex) == Autheris.Application.Common.DataAccessErrorKind.Timeout
+                      || DmlErrorSanitizer.Map(TargetSqlDialect.Oracle, ex).Code == GovernedSqlErrorCodes.LimitExceeded;
+        bounded.ShouldBeTrue(ex.Message);
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(TimeoutSeconds + 3));
+    }
+
+    [Fact]
+    public async Task RecursiveCte_CyclicData_MapsCycleErrorToLimitExceeded()
+    {
+        var ex = await Should.ThrowAsync<OracleException>(() => RunAsync(
+            "WITH RECURSIVE w(id) AS (SELECT id FROM cyc WHERE id = 1 UNION ALL SELECT c.id FROM cyc c JOIN w ON c.parent_id = w.id) SELECT id FROM w",
+            "acme", commandTimeoutSeconds: 30));
+
+        ex.Number.ShouldBe(32044);
+        DmlErrorSanitizer.Map(TargetSqlDialect.Oracle, ex).Code.ShouldBe(GovernedSqlErrorCodes.LimitExceeded);
     }
 
     [Fact]

@@ -78,7 +78,11 @@ public static class CompileRequestFactory
             MaxExpansionFactor = DefaultMaxExpansionFactor,
             AllowedFunctions = allowedFunctions.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ClientLists = clientLists ?? TrinoSqlEngine.Ast.Emit.ClientListShapes.Empty,
-            TimeZoneConversionAvailable = timeZoneConversionAvailable
+            TimeZoneConversionAvailable = timeZoneConversionAvailable,
+            // Issue #277 (SEC-277-03/-11): the only place that reads the flag; every governed compile (WebSQL, MCP, subtree) goes through here.
+            // Virtual filters, row-policy fragments and stored endpoints never build their own CompileRequest, so they cannot enable it.
+            AllowRecursiveCte = options.AllowRecursiveCte,
+            MaxRecursionDepth = options.MaxRecursionDepth
         };
     }
 }

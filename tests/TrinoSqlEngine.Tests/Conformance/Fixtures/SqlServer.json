@@ -5151,7 +5151,7 @@
       "Group": "cte",
       "Sql": "WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 10) SELECT n FROM r",
       "Outcome": "ok",
-      "Expected": "WITH [r] ([n]) AS (SELECT @p0 UNION ALL SELECT [n] + @p0 FROM [r] WHERE [n] < @p1) SELECT [n] FROM [r]",
+      "Expected": "WITH [r] ([n]) AS (SELECT @p0 UNION ALL SELECT [n] + @p0 FROM [r] WHERE [n] < @p1) SELECT [n] FROM [r] OPTION (MAXRECURSION 100)",
       "Parameters": [
         {
           "Marker": "@p0",

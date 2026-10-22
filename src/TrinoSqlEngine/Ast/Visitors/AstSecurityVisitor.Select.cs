@@ -28,6 +28,12 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         WithClause? with = null;
         if (node.With != null)
         {
+            // Issue #277 (SEC-277-03): the opt-in gate is the first check of a recursive WITH, before the ambiguity and catalog-name checks.
+            if (node.With.IsRecursive && !_options.AllowRecursiveCte)
+            {
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
+            }
+
             _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), CteScopeComparer));
             _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(_cteMaskedColumns.Peek(), CteScopeComparer));
             var ctes = new List<CommonTableExpression>();
@@ -35,15 +41,21 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             {
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
                 EnsureCteNameIsUnambiguous(cteKey);
-                var cteMaskedCols = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
+                HashSet<string> cteMaskedCols;
                 if (node.With.IsRecursive)
                 {
                     // CR-ADG-29: a recursive CTE sees its own name in its body (self-reference); the base tables of the anchor
                     // and recursive members are still secured. A name that is also a catalog table is ambiguous and rejected.
                     EnsureRecursiveCteIsNotACatalogTable(cte.Name);
                     _cteScopeStack.Peek().Add(cteKey);
+                    // SEC-277-10: computed with the name in scope, over every member, by output position.
+                    cteMaskedCols = CollectRecursiveCteMaskedColumns(cte, cteKey);
                     if (cteMaskedCols.Count > 0)
                         _cteMaskedColumns.Peek()[cteKey] = cteMaskedCols;
+                }
+                else
+                {
+                    cteMaskedCols = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
                 }
 
                 // Non-recursive: visit the CTE body BEFORE adding the name to the scope (Exit-timing, SEC-CTE & SEC C-02)

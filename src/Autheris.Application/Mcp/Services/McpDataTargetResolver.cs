@@ -18,6 +18,9 @@ internal static class McpDataTargetResolver
     private const string DataApiPrefix = "/api/v1/data";
     private const string StatementEndpoint = "/api/v1/statement";
 
+    /// <summary>The <c>SyntaxError</c> value of <see cref="TryResolveSqlTables"/> that denotes an unsupported construct (not a parse error).</summary>
+    internal const string ConstructNotSupportedMarker = TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported;
+
     /// <summary>Stand-in for a tool call that reads no table (for example <c>SELECT 1</c>); still checked by ABAC.</summary>
     internal static readonly TableIdentifier SqlNoTable = new("governance", "sql", "query");
 
@@ -35,6 +38,14 @@ internal static class McpDataTargetResolver
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
             var metadata = engine.Analyze(sql.AsMemory());
+
+            // SEC-277-04: a keyword-less self-reference would be resolved as a table below (existence-dependent ABAC answer). It is refused
+            // from the analysis alone, with a fixed, catalog-independent marker the guardrail turns into SQL_CONSTRUCT_NOT_SUPPORTED.
+            if (metadata.HasNonRecursiveSelfReference)
+            {
+                return (null, ConstructNotSupportedMarker);
+            }
+
             if (metadata.ReferencedTables.Count == 0)
             {
                 return ([SqlNoTable], null);

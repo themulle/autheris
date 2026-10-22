@@ -278,7 +278,7 @@ public sealed partial class GovernedSqlExecutor
             {
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
-                var detailsJson = new AuditDetailsBuilder()
+                var deniedDetails = new AuditDetailsBuilder()
                     .WithField("originalSql", redactedOriginalSql)
                     .WithField("originalSqlHash", originalSqlHash)
                     .WithField("dataSource", auditDs)
@@ -288,8 +288,13 @@ public sealed partial class GovernedSqlExecutor
                         SecurityException => "SECURITY_VIOLATION",
                         _ => reason
                     })
-                    .WithField("error", reason)
-                    .Build();
+                    .WithField("error", reason);
+                if (dmlContext.HasRecursiveCte)
+                {
+                    deniedDetails.WithField("recursiveCte", true);   // SEC-277-09
+                }
+
+                var detailsJson = deniedDetails.Build();
 
                 await _auditWriter.RecordAsync(new AuditLogEntry
                 {
@@ -537,14 +542,19 @@ public sealed partial class GovernedSqlExecutor
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
                 // SEC-X1-12: the stable code and the exception type, never ex.Message (a driver message can carry key values).
-                var detailsJson = new AuditDetailsBuilder()
+                var failureDetails = new AuditDetailsBuilder()
                     .WithField("originalSql", redactedOriginalSql)
                     .WithField("originalSqlHash", originalSqlHash)
                     .WithField("dataSource", dsName)
                     .WithField("reasonCode", (ex is OperationCanceledException && ct.IsCancellationRequested) ? "CLIENT_ABORTED" : ex.GetType().Name)
                     .WithField("errorCode", ErrorCodeOf(reported))
-                    .WithField("errorType", ex.GetType().Name)
-                    .Build();
+                    .WithField("errorType", ex.GetType().Name);
+                if (compiled.HasRecursiveCte)
+                {
+                    failureDetails.WithField("recursiveCte", true);   // SEC-277-09: failure, timeout and limit audits carry the flag too
+                }
+
+                var detailsJson = failureDetails.Build();
 
                 // Best effort: the statement's own error surface wins over a failing audit store (counted as tier=best_effort).
                 await _auditWriter.RecordBestEffortAsync(new AuditLogEntry
@@ -619,7 +629,10 @@ public sealed partial class GovernedSqlExecutor
             return null;
         }
 
-        if (clientListsBound)
+        var mapped = DmlErrorSanitizer.Map(dialect, error);
+
+        // SEC-277-06: a recursion limit (SQL Server 530, Oracle ORA-32044) is logged by type and number only, never with the driver message.
+        if (clientListsBound || mapped.Code == GovernedSqlErrorCodes.LimitExceeded)
         {
             // SEC-128-07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
             // the exception object (message, inner exceptions) is not logged when a client list is bound; its type and number are.
@@ -633,7 +646,7 @@ public sealed partial class GovernedSqlExecutor
                 dataSourceName, dialect, Activity.Current?.TraceId.ToString());
         }
 
-        return DmlErrorSanitizer.Map(dialect, error);
+        return mapped;
     }
 
     private static bool IsProviderError(Exception error)
@@ -832,6 +845,11 @@ public sealed partial class GovernedSqlExecutor
         fields["compiler_version"] = compiled.CompilerVersion;
         fields["dialect"] = compiled.Dialect.ToString();
         fields["bind_count"] = compiled.Parameters.Length;
+        if (compiled.HasRecursiveCte)
+        {
+            fields["recursiveCte"] = true;   // SEC-277-09: written only for recursive statements (also on a template cache hit)
+        }
+
         AddListAuditField(fields, compiled, clientValues);
         fields["sql.compiled_digest"] = _digester.Compute(compiled);
         if (_options.Value.Audit.StoreCompiledSql)
@@ -888,6 +906,11 @@ public sealed partial class GovernedSqlExecutor
             ["reason"] = reason,
             ["synthetic"] = synthetic
         };
+        if (compiled is null && dmlContext.HasRecursiveCte)
+        {
+            fields["recursiveCte"] = true;   // SEC-277-09: a rejection before the compile still carries the flag
+        }
+
         if (compiled is not null)
         {
             AddCompiledAuditFields(fields, compiled);

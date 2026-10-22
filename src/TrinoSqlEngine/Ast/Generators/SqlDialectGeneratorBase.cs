@@ -43,14 +43,14 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// Generates with the capabilities the compiler resolved for the request (the bind limit comes from them, not from a second lookup in
     /// the default table), so the capability provider of the compiler governs the whole pipeline.
     /// </summary>
-    internal CompiledSql Generate(SqlStatement statement, ParameterSource values, DialectCapabilities capabilities, CancellationToken cancellationToken, bool timeZoneCallsValidated = false)
+    internal CompiledSql Generate(SqlStatement statement, ParameterSource values, DialectCapabilities capabilities, CancellationToken cancellationToken, bool timeZoneCallsValidated = false, int maxRecursionDepth = CompileLimits.DefaultMaxRecursionDepth)
     {
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(capabilities);
 
         cancellationToken.ThrowIfCancellationRequested();
-        var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken) { TimeZoneCallsValidated = timeZoneCallsValidated };
+        var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken) { TimeZoneCallsValidated = timeZoneCallsValidated, MaxRecursionDepth = maxRecursionDepth };
         Span<char> initialBuffer = stackalloc char[512];
         var builder = new ValueStringBuilder(initialBuffer);
         string sql;
@@ -82,7 +82,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         };
         if (!CompilerHooks.IsDisabled(SecurityControl.EmittedTextChecker))
         {
-            EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass);
+            EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass, context.MaxRecursionDepth);
         }
 
         return new CompiledSql(
@@ -91,7 +91,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             TargetDialect,
             statementClass,
             ImmutableArray<SecurityPredicateId>.Empty,
-            CompilerInfo.Version);
+            CompilerInfo.Version)
+        {
+            HasRecursiveCte = context.RecursiveWithEmitted
+        };
     }
 
     /// <summary>
@@ -214,6 +217,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         ExecutionStackGuard.Ensure();
         if (statement.With != null)
         {
+            if (statement.With.IsRecursive) context.RecursiveWithEmitted = true;
             GenerateWithClause(statement.With, ref builder, context);
             builder.Append(' ');
         }

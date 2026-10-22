@@ -204,6 +204,17 @@ public class PolicyExpressionParserTests
                 Ctx(b => b.Catalog = Catalog())));
     }
 
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("EXISTS (WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 5) SELECT 1 FROM r)")]
+    [InlineData("EXISTS (SELECT 1 FROM entitlements e WHERE e.orderid IN (WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 5) SELECT x FROM r))")]
+    [InlineData("EXISTS (WITH r AS (SELECT 1 AS x) SELECT 1 FROM r)")]
+    public void RecursiveCte_VirtualFilterAndRowPolicyFragment_AreRejected(string fragment)
+    {
+        // SEC-277-11: a policy / virtual-filter fragment is never a place for a CTE; the opt-in switch of the user statement does not reach it.
+        Assert.ThrowsAny<System.Security.SecurityException>(() => NewParser().Parse(fragment, Ctx(b => b.Catalog = Catalog())));
+    }
+
     // ---- cache (SEC-ADG-20) ----
 
     [Fact]

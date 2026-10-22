@@ -27,7 +27,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // while the gateway would treat a catalog-named reference as a secured physical scan).
         if (node.Name.IsSimple && !_cteScopeStack.Peek().Contains(scopeKey) && _definingNonRecursiveCtes.Contains(scopeKey))
         {
-            throw new SecurityException("A CTE that references itself requires WITH RECURSIVE.");
+            // Issue #277 (SEC-277-04): the same typed answer as the router's pre-check (422); fixed text, no CTE or table name.
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "CTE self-reference without WITH RECURSIVE");
         }
 
         // SEC C-02: Only simple (unqualified) names in CTE scope are considered CTEs

@@ -7,7 +7,7 @@ using Xunit;
 
 /// <summary>
 /// CTE scoping of the governed compile path. Covered elsewhere (Compiler/CteShadowingTests): self-reference in a non-recursive WITH
-/// (<c>NonRecursiveWith_SelfReference_IsRejected</c>), a qualified reference inside a CTE body
+/// (<c>NonRecursiveWith_SelfReference_ThrowsConstructNotSupported</c>), a qualified reference inside a CTE body
 /// (<c>CteShadowingPhysicalName_StillSecuresTheQualifiedPhysicalTableInsideTheBody</c>) and quoted/unquoted case variants
 /// (<c>QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured</c>, SEC C-02).
 /// </summary>

@@ -41,6 +41,30 @@ public sealed class CompileRequestFactoryTests
     [InlineData(TargetSqlDialect.Oracle)]
     public void Create_MapsTargetDialect(TargetSqlDialect dialect) => Create(dialect).TargetDialect.ShouldBe(dialect);
 
+    [Trait("Category", "Security")]
+    [Fact]
+    public void Create_MapsRecursionOptions()
+    {
+        var request = CompileRequestFactory.Create(
+            Policy(), TargetSqlDialect.SqlServer, new WebSqlOptions { AllowRecursiveCte = true, MaxRecursionDepth = 250 },
+            isDml: false, 10, new HashSet<string> { "lower" });
+
+        request.AllowRecursiveCte.ShouldBeTrue();
+        request.MaxRecursionDepth.ShouldBe(250);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void SEC_277_11_CompileRequest_DefaultsAreDisabled()
+    {
+        var request = Create();
+
+        request.AllowRecursiveCte.ShouldBeFalse();
+        request.MaxRecursionDepth.ShouldBe(CompileLimits.DefaultMaxRecursionDepth);
+        new WebSqlOptions().AllowRecursiveCte.ShouldBeFalse();
+        new WebSqlOptions().MaxRecursionDepth.ShouldBe(100);
+    }
+
     [Fact]
     public void Create_MapsEnforcedMaxRows() => Create(maxRows: 1001).EnforcedMaxRows.ShouldBe(1001);
 
