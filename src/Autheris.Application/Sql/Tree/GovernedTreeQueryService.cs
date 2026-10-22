@@ -836,23 +836,39 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
     private static void ValidateTreeBudget(TreeQueryNode root, int maxBudget)
     {
-        long estimatedRows = EstimateRows(root, 1, isList: true);
+        long estimatedRows = EstimateRows(root, 1, isList: true, maxBudget);
         if (estimatedRows > maxBudget)
         {
             throw new GatewayInvalidQueryException($"The query exceeds the aggregate row budget of {maxBudget} across nested relations (estimated worst-case rows: {estimatedRows}).");
         }
     }
 
-    private static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList = true)
+    /// <summary>
+    /// SQLA-01: worst-case row estimate with saturating arithmetic (an overflow yields <see cref="long.MaxValue"/>, which is always over budget)
+    /// that stops descending as soon as the running total exceeds <paramref name="cap"/>. A non-positive limit counts as the maximum page size.
+    /// </summary>
+    internal static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList, long cap)
     {
-        long currentRows = isList ? parentMultiplier * Math.Max(1, node.Limit) : parentMultiplier;
+        long limit = node.Limit < 1 ? TreeSqlCompiler.MaxLimit : node.Limit;
+        long currentRows = isList ? SaturatingMultiply(parentMultiplier, limit) : parentMultiplier;
         long total = currentRows;
         foreach (var rel in node.Relations)
         {
-            total += EstimateRows(rel.Child, currentRows, rel.IsList);
+            if (total > cap)
+            {
+                break;
+            }
+
+            total = SaturatingAdd(total, EstimateRows(rel.Child, currentRows, rel.IsList, cap));
         }
+
         return total;
     }
+
+    private static long SaturatingMultiply(long a, long b) =>
+        a <= 0 || b <= 0 ? 0 : a > long.MaxValue / b ? long.MaxValue : a * b;
+
+    private static long SaturatingAdd(long a, long b) => a > long.MaxValue - b ? long.MaxValue : a + b;
 
     /// <summary>
     /// R-GQL-10: Microsoft.Data.Sqlite binds DateTimeOffset as "yyyy-MM-dd HH:mm:ss+00:00" (space). ISO-8601 text values
