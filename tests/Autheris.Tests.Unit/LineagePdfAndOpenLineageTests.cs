@@ -30,13 +30,19 @@ public class LineagePdfAndOpenLineageTests
         }
     }
 
+    /// <summary>Hand-written fake: a mocking proxy cannot implement the <c>ReadOnlySpan</c> parameters of the signer.</summary>
+    private sealed class FixedSigner : IAuditAnchorSigner
+    {
+        public string Sign(ReadOnlySpan<byte> data) => "abc123sig";
+
+        public bool Verify(ReadOnlySpan<byte> data, string signature) => signature == "abc123sig";
+    }
+
     [Fact]
     public void GdprAuditReportPdfExporter_ShouldGenerateValidPdfDocumentAndAuditSeal()
     {
         // Arrange
-        var signer = Substitute.For<IAuditAnchorSigner>();
-        signer.Sign(default).ReturnsForAnyArgs("abc123sig");
-        var exporter = new GdprAuditReportPdfExporter(signer);
+        var exporter = new GdprAuditReportPdfExporter(new FixedSigner());
         var report = new GdprDisclosureReport(
             TargetTable: "finance.dbo.salary",
             SubjectSid: "S-1-5-21-employee-42",

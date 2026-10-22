@@ -434,7 +434,7 @@ public sealed class McpDatasetToolWiringTests
     public async Task Executor_InvalidDatasetId_IsAnInvalidParamsError()
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns<McpDatasetSample>(_ => throw new ArgumentException("The dataset id must have the form 'domain.schema.table'."));
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"orders"}""", Session());
@@ -447,7 +447,7 @@ public sealed class McpDatasetToolWiringTests
     public async Task Executor_DeniedRead_IsForbidden()
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns<McpDatasetSample>(_ => throw new GatewayForbiddenException());
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders"}""", Session());

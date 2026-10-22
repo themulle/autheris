@@ -145,13 +145,13 @@ public sealed class CatalogGraphQlMapTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task FragmentBomb30Levels_CompletesUnder1s_ReturnsDistinctTables()
+    public async Task FragmentBomb25Levels_CompletesUnder1s_ReturnsDistinctTables()
     {
-        // MCP-11: every level spreads the next one twice; without memoisation this is 2^30 expansions.
+        // MCP-11: every level spreads the next one twice; without memoisation this is 2^25 expansions. The chain stays below MaxSelectionDepth (32), which counts fragment nesting.
         var customers = (await _map.GetTableAsync(Customers))!;
         var relationField = customers.Relations.Single().Field;
-        var fragments = string.Join("\n", Enumerable.Range(0, 30).Select(i => $"fragment F{i} on crm_dbo_customers {{ ...F{i + 1} ...F{i + 1} }}"));
-        var document = $"query Q {{ crm_dbo_customers {{ ...F0 }} }}\n{fragments}\nfragment F30 on crm_dbo_customers {{ id {relationField} {{ amount }} }}";
+        var fragments = string.Join("\n", Enumerable.Range(0, 25).Select(i => $"fragment F{i} on crm_dbo_customers {{ ...F{i + 1} ...F{i + 1} }}"));
+        var document = $"query Q {{ crm_dbo_customers {{ ...F0 }} }}\n{fragments}\nfragment F25 on crm_dbo_customers {{ id {relationField} {{ amount }} }}";
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var tables = await _map.ResolveDocumentTablesAsync(document);
