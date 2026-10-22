@@ -386,6 +386,65 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
     }
 
+    /// <summary>
+    /// Issue #280: the client parameters plus the gateway-generated parameters of a planned read, for name normalization only.
+    /// Fail-closed: a gateway map on a non-planned read, a collision, a list value, a reserved or non-<c>__gql_tf_</c> name, or too many
+    /// parameters throws. Messages never carry a name or a value.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?>? MergeGatewayParameters(GovernedSqlQueryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var gateway = request.GatewayParameters;
+        if (gateway == null || gateway.Count == 0)
+        {
+            return request.Parameters;
+        }
+
+        if (!request.PlannedTableRead)
+        {
+            throw new System.Security.SecurityException("Gateway parameters require a planned table read (fail-closed).");
+        }
+
+        if (gateway.Count > Autheris.Application.Sql.Tree.TreeSqlCompiler.MaxParameters)
+        {
+            throw new System.Security.SecurityException("Too many gateway parameters (fail-closed).");
+        }
+
+        var tfPrefix = Autheris.Application.Sql.Tree.TreeFilterClauseBuilder.ParameterPrefix.TrimStart('@');
+        var merged = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (request.Parameters != null)
+        {
+            foreach (var (name, value) in request.Parameters)
+            {
+                merged.TryAdd(name.TrimStart('@'), value);
+            }
+        }
+
+        foreach (var (name, value) in gateway)
+        {
+            var trimmed = name.TrimStart('@');
+            if (string.IsNullOrEmpty(trimmed) ||
+                !trimmed.StartsWith(tfPrefix, StringComparison.OrdinalIgnoreCase) ||
+                Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(trimmed) ||
+                Autheris.Application.Sql.ListParameters.ListParameterNormalizer.IsListCandidate(value) ||
+                !IsGatewayScalar(value))
+            {
+                throw new InvalidOperationException("A gateway parameter is not a scalar planned-read parameter.");
+            }
+
+            if (!merged.TryAdd(trimmed, value))
+            {
+                throw new System.Security.SecurityException("A statement parameter name is bound twice (fail-closed).");
+            }
+        }
+
+        return merged;
+    }
+
+    private static bool IsGatewayScalar(object? value) =>
+        value is null or string or decimal or Guid or DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan ||
+        (value.GetType() is { IsPrimitive: true } or { IsEnum: true });
+
     internal static string NormalizeClientParameters(
         string sql,
         IReadOnlyDictionary<string, object?>? parameters,

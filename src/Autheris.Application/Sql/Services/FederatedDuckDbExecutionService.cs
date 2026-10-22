@@ -261,6 +261,11 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
         }
 
+        if (request.GatewayParameters is { Count: > 0 })
+        {
+            throw new WebSqlPolicyException("Gateway-planned parameters are not supported on the federated path.");
+        }
+
         GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
         if (request.Sql.Contains(GovernedSqlExecutionService.ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
         {

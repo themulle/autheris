@@ -248,7 +248,8 @@ public sealed partial class GovernedSqlExecutor
 
         GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
 
-        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out var referencedNames);
+        var bindNames = GovernedSqlExecutionService.MergeGatewayParameters(request);
+        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, bindNames, out var referencedNames);
 
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
@@ -675,11 +676,29 @@ public sealed partial class GovernedSqlExecutor
     {
         var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var parameters = request.Parameters;
-        if (parameters == null)
+        if (parameters != null)
         {
-            return values;
+            AddClientValues(request, parameters, referenced, values);
         }
 
+        // Issue #280: gateway-generated parameters of a planned read (typed scalars, validated by MergeGatewayParameters). Add, not the
+        // indexer: a duplicate name throws instead of overwriting a client value.
+        foreach (var (name, value) in request.GatewayParameters ?? EmptyParameters)
+        {
+            values.Add(name.TrimStart('@'), value);
+        }
+
+        return values;
+    }
+
+    private static readonly IReadOnlyDictionary<string, object?> EmptyParameters = new Dictionary<string, object?>();
+
+    private void AddClientValues(
+        GovernedSqlQueryRequest request,
+        IReadOnlyDictionary<string, object?> parameters,
+        IReadOnlySet<string> referenced,
+        Dictionary<string, object?> values)
+    {
         var limits = ListParameterLimits.From(_options.Value.WebSql);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int lists = 0;
@@ -724,8 +743,6 @@ public sealed partial class GovernedSqlExecutor
                 _ => ListParameterNormalizer.Normalize(value!, limits, null)
             });
         }
-
-        return values;
     }
 
     /// <summary>
