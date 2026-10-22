@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -30,14 +31,19 @@ public sealed class SqlDataMaskingProvider
     private readonly ILogger? _logger;
     private readonly MaskSpecRenderer _renderer = new();
 
+    private static readonly TimeSpan KeyRetryBackoff = TimeSpan.FromSeconds(30);
+    private readonly object _keyLock = new();
+    private readonly TimeProvider _timeProvider;
     private byte[]? _masterHmacKey;
-    private bool _masterHmacKeyResolved;
+    private DateTimeOffset _keyRetryNotBefore = DateTimeOffset.MinValue;
 
     public SqlDataMaskingProvider(
         IOptions<GatewayOptions> options,
         IKeyVaultSecretProvider? secretProvider = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _secretProvider = secretProvider;
         _logger = logger;
@@ -450,32 +456,58 @@ public sealed class SqlDataMaskingProvider
         };
     }
 
+    /// <summary>
+    /// SQLA-03: resolves the master HMAC key under a lock. A key is cached only after a successful fetch; a failed resolve is
+    /// retried after <see cref="KeyRetryBackoff"/> instead of disabling HMAC pseudonymization for the life of the process.
+    /// </summary>
     private byte[]? GetMasterHmacKey()
     {
-        if (_masterHmacKeyResolved)
+        var cached = Volatile.Read(ref _masterHmacKey);
+        if (cached != null)
         {
-            return _masterHmacKey;
+            return cached;
         }
 
-        _masterHmacKeyResolved = true;
-        var secretRef = _options.Value.DataMasking.HmacSecretKeyVaultRef;
-        if (_secretProvider == null || string.IsNullOrWhiteSpace(secretRef))
+        lock (_keyLock)
         {
-            _logger?.LogWarning("WebSQL HMAC masking key is not resolvable (no secret provider or secret reference); HMAC columns are redacted.");
-            return null;
-        }
+            if (_masterHmacKey != null)
+            {
+                return _masterHmacKey;
+            }
 
-        try
-        {
-            var key = _secretProvider.GetSecretBytes(secretRef);
-            _masterHmacKey = key is { Length: > 0 } ? key : null;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
-        {
-            _logger?.LogWarning("WebSQL HMAC masking secret could not be resolved; HMAC columns are redacted.");
-            _masterHmacKey = null;
-        }
+            var now = _timeProvider.GetUtcNow();
+            if (now < _keyRetryNotBefore)
+            {
+                return null;
+            }
 
-        return _masterHmacKey;
+            var secretRef = _options.Value.DataMasking.HmacSecretKeyVaultRef;
+            byte[]? key = null;
+            if (_secretProvider == null || string.IsNullOrWhiteSpace(secretRef))
+            {
+                _logger?.LogWarning("WebSQL HMAC masking key is not resolvable (no secret provider or secret reference); HMAC columns are redacted.");
+            }
+            else
+            {
+                try
+                {
+                    var fetched = _secretProvider.GetSecretBytes(secretRef);
+                    key = fetched is { Length: > 0 } ? fetched : null;
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
+                {
+                    _logger?.LogWarning("WebSQL HMAC masking secret could not be resolved; HMAC columns are redacted.");
+                }
+            }
+
+            if (key == null)
+            {
+                _keyRetryNotBefore = now + KeyRetryBackoff;
+                return null;
+            }
+
+            Volatile.Write(ref _masterHmacKey, key);
+            return key;
+        }
     }
 }
