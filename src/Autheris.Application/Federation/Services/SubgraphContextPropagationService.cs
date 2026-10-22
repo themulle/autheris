@@ -124,7 +124,11 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
             var nonce = Guid.NewGuid().ToString("N");
             var methodStr = request.Method.Method;
-            var pathStr = request.RequestUri?.AbsolutePath ?? string.Empty;
+            // VF-09: the signed "path" is the path AND the query string (GraphQL GET requests carry query/variables there).
+            var requestUri = request.RequestUri;
+            var pathStr = requestUri == null
+                ? string.Empty
+                : requestUri.IsAbsoluteUri ? requestUri.PathAndQuery : requestUri.OriginalString;
 
             // SR-M-18: bind the request body via SHA-256 and sign an unambiguous length-prefixed v2 form.
             string bodyHash;

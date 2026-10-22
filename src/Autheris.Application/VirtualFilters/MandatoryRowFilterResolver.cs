@@ -195,6 +195,13 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     private readonly ITableMetadataRepository? _catalog;
     private readonly SqlDataSourceOptions? _dataSources;
     private long _memoGeneration = -1;
+    private long _memoClearedAtTick = Environment.TickCount64;
+
+    /// <summary>
+    /// VF-08: the memo is keyed by the virtual filter generation only, so catalog changes (tenant columns, table columns, source type)
+    /// do not invalidate it. Entries therefore live at most this long.
+    /// </summary>
+    internal TimeSpan MemoTtl { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <param name="snapshots">Current filters and profiles.</param>
     /// <param name="predicates">Builds the SQL of one applying filter.</param>
@@ -234,8 +241,11 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             return MandatoryFilterOutcome.None;
         }
 
-        if (Interlocked.Exchange(ref _memoGeneration, snapshot.Generation) != snapshot.Generation)
+        var nowTick = Environment.TickCount64;
+        var generationChanged = Interlocked.Exchange(ref _memoGeneration, snapshot.Generation) != snapshot.Generation;
+        if (generationChanged || nowTick - Interlocked.Read(ref _memoClearedAtTick) >= (long)MemoTtl.TotalMilliseconds)
         {
+            Interlocked.Exchange(ref _memoClearedAtTick, nowTick);
             _memo.Clear();
             TargetPatternMatcher.ClearCache();
         }
