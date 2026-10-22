@@ -552,11 +552,11 @@ public static partial class GovernanceEndpoints
             {
                 report = await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
             }
-            catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException ex)
+            catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException)
             {
                 // MISC-11: no table scope means no honest report; never a report that implies completeness.
                 return Results.Json(
-                    new { error = Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode, message = ex.Message },
+                    new { error = Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode, message = "The GDPR report scope cannot be resolved: name the table that holds the data subject's data." },
                     statusCode: StatusCodes.Status422UnprocessableEntity);
             }
 

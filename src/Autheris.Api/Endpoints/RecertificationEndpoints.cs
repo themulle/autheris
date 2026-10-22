@@ -169,7 +169,7 @@ public static class RecertificationEndpoints
         title: "Reviewer identity required");
 
     private static IResult Conflict(RecertificationConflictException ex) => Results.Problem(
-        detail: ex.Message,
+        detail: "The request conflicts with the current state of the recertification item or campaign.",
         statusCode: StatusCodes.Status409Conflict,
         title: ex.Code);
 }

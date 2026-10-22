@@ -142,8 +142,8 @@ public sealed partial class CallerAttributeArchitectureTests
         {
             ["src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs"] = "effective-filters explanation for administrators: shows the constant",
             ["src/Autheris.Application/Analytics/NoisyCacheKey.cs"] = "noisy cache key (#112 SEC-112-12/-26): hashes the predicate text with the bound caller-attribute values and the Generation; an unresolved attribute skips the cache",
-            ["src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs"] = "copies the decision, which carries the typed policy; aggregation compiles through the typed path",
             ["src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
+            ["src/Autheris.Application/Data/Relations/CrossSourceRelationResolver.cs"] = "cross-source child read: an applying Virtual Filter refuses the request (VF-02, presence check; no row evaluation of the text)",
             ["src/Autheris.Application/Data/Services/GovernedTableReadPlanner.Keyset.cs"] = "keyset pagination query planner: appends mandatory row predicate to WHERE clause",
             ["src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs"] = "an applying Virtual Filter denies (ext_authz cannot enforce row filters)",
             ["src/Autheris.Application/Policy/TableAccessPolicy.cs"] = "the decision point: a caller attribute outcome without a typed predicate denies the table (BC-129-05)",
