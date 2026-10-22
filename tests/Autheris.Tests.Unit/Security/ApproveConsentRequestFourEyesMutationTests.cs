@@ -111,6 +111,22 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         return (approval, ownership, consents, metadata);
     }
 
+    [Fact]
+    public async Task ApproveConsentRequest_HighSensitivityWithoutFlag_FirstCallWithColumnMasking_IsRejected()
+    {
+        var meta = CreateMetadata("HIGH", requiresFourEyes: false);
+        var req = CreateRequest(meta, "PENDING");
+        var (approval, ownership, consents, metadata) = CreateRepositories(meta, req);
+
+        var ex = await Should.ThrowAsync<GraphQLException>(() => new Mutation().ApproveConsentRequestAsync(
+            req.Id, null, approval, ownership, consents, metadata, CreateAccessor(), null!, columnMasking: Masking()));
+
+        ex.Errors.ShouldContain(e => e.Code == "BAD_REQUEST" && e.Message.Contains("four-eyes"));
+        await approval.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default);
+        await approval.DidNotReceiveWithAnyArgs().ExecuteAtomicApprovalWithConsentAsync(default, default!, default!, default!, default!, default);
+        await consents.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
+    }
+
     [Theory]
     [InlineData("HIGH", false)]
     [InlineData("RESTRICTED", false)]

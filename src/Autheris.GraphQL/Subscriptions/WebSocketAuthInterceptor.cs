@@ -45,6 +45,8 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
     private readonly TimeSpan _revalidationInterval;
     private readonly GatewayOptions? _gatewayOptions;
     private readonly RevocationWatchPolicy _revocationWatchPolicy;
+    private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
+    private readonly IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>? _realmOptions;
 
 
     public WebSocketAuthInterceptor(
@@ -54,7 +56,9 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         TimeSpan? maxSessionLifetime = null,
         ITokenRevocationService? revocationService = null,
         IOptions<GatewayOptions>? options = null,
-        IOptions<RevocationWatchOptions>? revocationWatchOptions = null)
+        IOptions<RevocationWatchOptions>? revocationWatchOptions = null,
+        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null,
+        IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>? realmOptions = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tokenValidator = tokenValidator;
@@ -65,6 +69,8 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         _revocationWatchPolicy = RevocationWatchPolicy.From(revocationWatchOptions);
         var seconds = options?.Value?.GraphQL?.SubscriptionRevalidationSeconds ?? 0;
         _revalidationInterval = seconds > 0 ? TimeSpan.FromSeconds(seconds) : DefaultRevalidationInterval;
+        _realmRegistry = realmRegistry;
+        _realmOptions = realmOptions;
     }
 
     public override async ValueTask<ConnectionStatus> OnConnectAsync(
@@ -131,13 +137,18 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                         ? tid
                         : (httpUser != null ? httpUser.GetTenantId() : TenantId.LegacySingleTenant);
 
-                    if (isHttpAuthenticated && upgradeTenant != TenantId.LegacySingleTenant &&
-                        tokenTenant != TenantId.LegacySingleTenant && upgradeTenant != tokenTenant)
+                    if (isHttpAuthenticated && upgradeTenant != tokenTenant)
                     {
                         _logger.LogWarning(
                             "WebSocket connection_init rejected: Token tenant '{TokenTenant}' does not match upgrade tenant '{UpgradeTenant}'.",
                             tokenTenant, upgradeTenant);
                         return ConnectionStatus.Reject("Cross-tenant token mismatch");
+                    }
+
+                    if (!isHttpAuthenticated && tokenTenant == TenantId.LegacySingleTenant && IsMultiTenantConfigured())
+                    {
+                        _logger.LogWarning("WebSocket connection_init rejected: Token tenant unresolved in multi-tenant gateway.");
+                        return ConnectionStatus.Reject("Token tenant unresolved");
                     }
 
                     var upgradeSid = httpUser?.GetUserSid();
@@ -527,6 +538,28 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         }
 
         return null;
+    }
+
+    private bool IsMultiTenantConfigured()
+    {
+        if (_realmRegistry != null)
+        {
+            var realms = _realmRegistry.GetAllRealms();
+            if (realms.Any(r => !r.IsImplicitLegacy && r.TenantBinding != null && (r.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.ClaimMapped || (r.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.Fixed && r.TenantBinding.FixedTenantId != TenantId.LegacySingleTenant))))
+            {
+                return true;
+            }
+        }
+
+        if (_realmOptions?.Value?.Realms is { Count: > 0 } configRealms)
+        {
+            if (configRealms.Values.Any(r => (!string.IsNullOrWhiteSpace(r.FixedTenantId) && !string.Equals(r.FixedTenantId, TenantId.LegacySingleTenant.Value, StringComparison.OrdinalIgnoreCase)) || !string.IsNullOrWhiteSpace(r.TenantClaimName)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static string? ExtractToken(IReadOnlyDictionary<string, object?> dict)

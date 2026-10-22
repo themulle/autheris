@@ -1133,6 +1133,8 @@ public sealed class Mutation
         bool dryRun = false,
         [Service] IDataCatalogSyncService catalogSyncService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        [Service] Autheris.Application.Interfaces.IAuditLogRepository? auditLog = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -1145,15 +1147,136 @@ public sealed class Mutation
         }
 
         var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin") && !roles.Contains("DeveloperAdmin"))
+        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (!isClusterAdmin && !roles.Contains("GovernanceAdmin"))
         {
+            TenantId denyTenant;
+            try
+            {
+                denyTenant = principal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+                denyTenant = TenantId.LegacySingleTenant;
+            }
+
+            var denyEntry = new AuditLogEntry
+            {
+                TenantId = denyTenant,
+                EventType = AuditEventTypes.DataCatalogSync,
+                ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-ANONYMOUS"),
+                TargetTable = string.Empty,
+                Decision = "DENY",
+                TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { dryRun, reason = "ForbiddenRole" })
+            };
+
+            if (auditWriter != null)
+            {
+                await auditWriter.RecordRequiredAsync(denyEntry, ct).ConfigureAwait(false);
+            }
+            else if (auditLog != null)
+            {
+                await auditLog.RecordAuditEventAsync(denyEntry, ct).ConfigureAwait(false);
+            }
+
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
                 .SetMessage("Only governance or cluster administrators may synchronize the data catalog.")
                 .Build());
         }
 
-        var result = await catalogSyncService.SyncCatalogAsync(dryRun, ct);
+        TenantId? restrictToTenant = null;
+        if (!isClusterAdmin)
+        {
+            try
+            {
+                restrictToTenant = principal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+                var denyEntry = new AuditLogEntry
+                {
+                    TenantId = TenantId.LegacySingleTenant,
+                    EventType = AuditEventTypes.DataCatalogSync,
+                    ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                    TargetTable = string.Empty,
+                    Decision = "DENY",
+                    TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { dryRun, reason = "InvalidTenant" })
+                };
+
+                if (auditWriter != null)
+                {
+                    await auditWriter.RecordRequiredAsync(denyEntry, ct).ConfigureAwait(false);
+                }
+                else if (auditLog != null)
+                {
+                    await auditLog.RecordAuditEventAsync(denyEntry, ct).ConfigureAwait(false);
+                }
+
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("FORBIDDEN")
+                    .SetMessage("No valid tenant in the authentication token.")
+                    .Build());
+            }
+        }
+
+        TenantId auditTenant = restrictToTenant ?? TenantId.LegacySingleTenant;
+        var writeAheadEntry = new AuditLogEntry
+        {
+            TenantId = auditTenant,
+            EventType = AuditEventTypes.DataCatalogSync,
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                dryRun,
+                scope = restrictToTenant?.Value ?? "cluster"
+            })
+        };
+
+        if (auditWriter != null)
+        {
+            await auditWriter.RecordRequiredAsync(writeAheadEntry, ct).ConfigureAwait(false);
+        }
+        else if (auditLog != null)
+        {
+            await auditLog.RecordAuditEventAsync(writeAheadEntry, ct).ConfigureAwait(false);
+        }
+
+        var result = await catalogSyncService.SyncCatalogAsync(dryRun, restrictToTenant, ct).ConfigureAwait(false);
+
+        var completionEntry = new AuditLogEntry
+        {
+            TenantId = auditTenant,
+            EventType = AuditEventTypes.DataCatalogSync,
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                dryRun,
+                scope = restrictToTenant?.Value ?? "cluster",
+                syncedTables = result.SyncedTablesCount,
+                syncedColumns = result.SyncedColumnsCount,
+                maskedColumns = result.MaskedColumnsCount,
+                art9Tables = result.Art9ProtectedTablesCount
+            })
+        };
+
+        if (auditWriter != null)
+        {
+            await auditWriter.RecordRequiredAsync(completionEntry, ct).ConfigureAwait(false);
+        }
+        else if (auditLog != null)
+        {
+            await auditLog.RecordAuditEventAsync(completionEntry, ct).ConfigureAwait(false);
+        }
+
         return new DataCatalogSyncPayload
         {
             Success = result.Success,

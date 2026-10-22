@@ -68,7 +68,7 @@ public sealed class HotChocolateGraphQlCostAnalysisEngine : IGraphQlCostAnalysis
             onQueryTooComplex: null,
             maxRootFields: maxRootFields,
             payloadRowMultiplier: 1,
-            maxExecutionDepth: _options.GraphQL.MaxAllowedExecutionDepth > 0 ? _options.GraphQL.MaxAllowedExecutionDepth : 25,
+            maxExecutionDepth: QueryCostAnalyzerRule.ResolveMaxExecutionDepth(_options.GraphQL),
             costOptions: _options.QueryCost);
 
         var (totalCost, rootFieldCosts) = rule.ComputeCostDetails(document, schema, variableValues);

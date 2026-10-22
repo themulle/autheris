@@ -17,11 +17,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// GQL-3 / GQL-4 / WP-ARC-A-13: admission and audit for CDC subscriptions.
+/// GQL-3 / GQL-4 / GQL-10 / WP-ARC-A-13: admission, audit and distributed slot leasing for CDC subscriptions.
 /// <list type="bullet">
 /// <item><c>cdc_all</c> is reserved for global governance administrators.</item>
 /// <item>A table topic requires a catalog table the caller may read (same decision as table queries).</item>
-/// <item>Open subscriptions are limited per subject (tenant + SID), and cluster-wide per tenant when <see cref="IClusterStateTopology.IsClusterWide"/> is active.</item>
+/// <item>Open subscriptions are limited per subject (tenant + SID), and cluster-wide per subject and per tenant when cluster state is active.</item>
 /// <item>Subscribe (allowed and denied) and the aggregated delivery are audited.</item>
 /// </list>
 /// </summary>
@@ -29,7 +29,8 @@ public sealed class CdcSubscriptionGovernor
 {
     public const string AllTopic = "cdc_all";
     private const string DeniedMessage = "Forbidden: subscription to this topic is not permitted.";
-    private static readonly TimeSpan ClusterSubscriptionCounterTtl = TimeSpan.FromHours(24);
+    public static readonly TimeSpan SlotTtl = TimeSpan.FromMinutes(2);
+    public static readonly TimeSpan RenewalInterval = TimeSpan.FromSeconds(40);
 
     private readonly ConcurrentDictionary<string, int> _openPerSubject = new(StringComparer.Ordinal);
     private readonly IOptions<GatewayOptions> _options;
@@ -82,7 +83,8 @@ public sealed class CdcSubscriptionGovernor
         TableIdentifier? table,
         ITableAccessResolver? accessResolver,
         IAuditLogRepository audit,
-        CancellationToken ct)
+        CancellationToken ct,
+        CancellationTokenSource? streamCts = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
         var tenant = principal.GetTenantId();
@@ -126,47 +128,89 @@ public sealed class CdcSubscriptionGovernor
             throw Denied("FORBIDDEN", DeniedMessage);
         }
 
-        var max = Math.Max(1, _options.Value.GraphQL.MaxSubscriptionsPerSubject);
-        var key = $"{tenant.Value}|{sid.Value}";
-        var open = _openPerSubject.AddOrUpdate(key, 1, (_, current) => current + 1);
-        if (open > max)
+        var maxPerSubject = Math.Max(1, _options.Value.GraphQL.MaxSubscriptionsPerSubject);
+        var maxPerTenant = Math.Max(1, _options.Value.GraphQL.MaxSubscriptionsPerTenant);
+        var localKey = $"{tenant.Value}|{sid.Value}";
+        var open = _openPerSubject.AddOrUpdate(localKey, 1, (_, current) => current + 1);
+        if (open > maxPerSubject)
         {
-            Release(key);
+            Release(localKey);
             await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "subscription limit" }, ct).ConfigureAwait(false);
-            throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions (limit {max}).");
+            throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions (limit {maxPerSubject}).");
         }
 
-        string? clusterKey = null;
-        if (_topology?.IsClusterWide == true && _clusterState is not null)
+        bool useClusterState = _clusterState is not null && (_topology is null || _topology.IsClusterWide);
+        string? subjectSlotKey = null;
+        string? tenantSlotKey = null;
+        string? leaseMember = null;
+
+        if (useClusterState)
         {
-            clusterKey = $"cdc:subs:{tenant.Value}";
-            long? clusterOpen;
+            leaseMember = Guid.NewGuid().ToString("N");
+            subjectSlotKey = $"cdc:subs:{tenant.Value}:{sid.Value}";
+            tenantSlotKey = $"cdc:subs:{tenant.Value}";
+
+            // Acquire Slot 1: Subject Slot
+            bool? acquiredSubject;
             try
             {
-                clusterOpen = await _clusterState.IncrementAsync(clusterKey, 1, ClusterSubscriptionCounterTtl, ct).ConfigureAwait(false);
+                acquiredSubject = await _clusterState!.TryAcquireSlotAsync(subjectSlotKey, leaseMember, maxPerSubject, SlotTtl, ct).ConfigureAwait(false);
             }
-            catch (ClusterStateUnavailableException ex)
+            catch (Exception ex)
             {
-                Release(key);
-                _logger.LogError(ex, "Cluster state unavailable while admitting CDC subscription to {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
+                Release(localKey);
+                _logger.LogError(ex, "Cluster state unavailable while acquiring subject slot for {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
                 await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster state unavailable" }, ct).ConfigureAwait(false);
                 throw Denied("SERVICE_UNAVAILABLE", "Cluster state store is unavailable; subscription rejected (fail-closed).");
             }
 
-            if (clusterOpen is null)
+            if (acquiredSubject is null)
             {
-                Release(key);
-                _logger.LogError("Cluster state returned null while admitting CDC subscription to {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
+                Release(localKey);
+                _logger.LogError("Cluster state returned null while acquiring subject slot for {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
                 await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster state unavailable" }, ct).ConfigureAwait(false);
                 throw Denied("SERVICE_UNAVAILABLE", "Cluster state store is unavailable; subscription rejected (fail-closed).");
             }
 
-            if (clusterOpen.Value > max)
+            if (!acquiredSubject.Value)
             {
-                await ReleaseClusterKeyAsync(clusterKey).ConfigureAwait(false);
-                Release(key);
-                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster subscription limit" }, ct).ConfigureAwait(false);
-                throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions across cluster (limit {max}).");
+                Release(localKey);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster subject subscription limit" }, ct).ConfigureAwait(false);
+                throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions across cluster for subject (limit {maxPerSubject}).");
+            }
+
+            // Acquire Slot 2: Tenant Slot
+            bool? acquiredTenant;
+            try
+            {
+                acquiredTenant = await _clusterState.TryAcquireSlotAsync(tenantSlotKey, leaseMember, maxPerTenant, SlotTtl, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Second slot failed with error: release first slot!
+                await _clusterState.ReleaseSlotAsync(subjectSlotKey, leaseMember, CancellationToken.None).ConfigureAwait(false);
+                Release(localKey);
+                _logger.LogError(ex, "Cluster state unavailable while acquiring tenant slot for {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster state unavailable" }, ct).ConfigureAwait(false);
+                throw Denied("SERVICE_UNAVAILABLE", "Cluster state store is unavailable; subscription rejected (fail-closed).");
+            }
+
+            if (acquiredTenant is null)
+            {
+                await _clusterState.ReleaseSlotAsync(subjectSlotKey, leaseMember, CancellationToken.None).ConfigureAwait(false);
+                Release(localKey);
+                _logger.LogError("Cluster state returned null while acquiring tenant slot for {Topic} for tenant {Tenant}; failing closed.", topic, tenant.Value);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster state unavailable" }, ct).ConfigureAwait(false);
+                throw Denied("SERVICE_UNAVAILABLE", "Cluster state store is unavailable; subscription rejected (fail-closed).");
+            }
+
+            if (!acquiredTenant.Value)
+            {
+                // Second slot exceeded limit: release first slot!
+                await _clusterState.ReleaseSlotAsync(subjectSlotKey, leaseMember, CancellationToken.None).ConfigureAwait(false);
+                Release(localKey);
+                await WriteAuditAsync(audit, tenant, sid, topic, "STREAM_SUBSCRIBE", "DENY", new { topic, reason = "cluster tenant subscription limit" }, ct).ConfigureAwait(false);
+                throw Denied("TOO_MANY_REQUESTS", $"Too many open subscriptions across cluster for tenant (limit {maxPerTenant}).");
             }
         }
 
@@ -176,36 +220,20 @@ public sealed class CdcSubscriptionGovernor
         }
         catch
         {
-            if (clusterKey is not null)
+            if (useClusterState && subjectSlotKey != null && tenantSlotKey != null && leaseMember != null)
             {
-                await ReleaseClusterKeyAsync(clusterKey).ConfigureAwait(false);
+                await _clusterState!.ReleaseSlotAsync(subjectSlotKey, leaseMember, CancellationToken.None).ConfigureAwait(false);
+                await _clusterState!.ReleaseSlotAsync(tenantSlotKey, leaseMember, CancellationToken.None).ConfigureAwait(false);
             }
-            Release(key);
+            Release(localKey);
             throw;
         }
 
-        return new Lease(this, key, clusterKey, tenant, sid, topic, audit);
+        return new Lease(this, localKey, useClusterState, subjectSlotKey, tenantSlotKey, leaseMember, tenant, sid, topic, audit, streamCts);
     }
 
     internal int OpenSubscriptions(TenantId tenant, Sid sid) =>
         _openPerSubject.TryGetValue($"{tenant.Value}|{sid.Value}", out var n) ? n : 0;
-
-    private async ValueTask ReleaseClusterKeyAsync(string clusterKey)
-    {
-        if (_clusterState is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _clusterState.IncrementAsync(clusterKey, -1, ClusterSubscriptionCounterTtl, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to decrement cluster subscription counter for {ClusterKey}.", clusterKey);
-        }
-    }
 
     private void Release(string key)
     {
@@ -242,32 +270,152 @@ public sealed class CdcSubscriptionGovernor
     private static GraphQLException Denied(string code, string message) =>
         new(ErrorBuilder.New().SetMessage(message).SetCode(code).Build());
 
-    /// <summary>An admitted subscription. Counts delivered events and writes the aggregated delivery audit on dispose.</summary>
+    /// <summary>An admitted subscription. Renews slots periodically, counts delivered events, and audits on dispose.</summary>
     public sealed class Lease : IAsyncDisposable
     {
         private readonly CdcSubscriptionGovernor _owner;
-        private readonly string _key;
-        private readonly string? _clusterKey;
+        private readonly string _localKey;
+        private readonly bool _useClusterState;
+        private readonly string? _subjectSlotKey;
+        private readonly string? _tenantSlotKey;
+        private readonly string? _leaseMember;
         private readonly TenantId _tenant;
         private readonly Sid _sid;
         private readonly string _topic;
         private readonly IAuditLogRepository _audit;
+        private readonly CancellationTokenSource _cts;
+        private readonly Task? _renewalTask;
         private readonly DateTimeOffset _started = DateTimeOffset.UtcNow;
         private long _delivered;
         private int _disposed;
 
-        internal Lease(CdcSubscriptionGovernor owner, string key, string? clusterKey, TenantId tenant, Sid sid, string topic, IAuditLogRepository audit)
+        public CancellationToken StreamCancellationToken => _cts.Token;
+        public bool IsStreamCompleted => _cts.IsCancellationRequested;
+
+        internal Lease(
+            CdcSubscriptionGovernor owner,
+            string localKey,
+            bool useClusterState,
+            string? subjectSlotKey,
+            string? tenantSlotKey,
+            string? leaseMember,
+            TenantId tenant,
+            Sid sid,
+            string topic,
+            IAuditLogRepository audit,
+            CancellationTokenSource? streamCts = null)
         {
             _owner = owner;
-            _key = key;
-            _clusterKey = clusterKey;
+            _localKey = localKey;
+            _useClusterState = useClusterState;
+            _subjectSlotKey = subjectSlotKey;
+            _tenantSlotKey = tenantSlotKey;
+            _leaseMember = leaseMember;
             _tenant = tenant;
             _sid = sid;
             _topic = topic;
             _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+            _cts = streamCts ?? new CancellationTokenSource();
+
+            if (_useClusterState && _owner._clusterState != null)
+            {
+                _renewalTask = Task.Run(RunRenewalLoopAsync);
+            }
         }
 
         public void CountDelivered() => Interlocked.Increment(ref _delivered);
+
+        private async Task RunRenewalLoopAsync()
+        {
+            using var timer = new PeriodicTimer(RenewalInterval);
+            while (!_cts.IsCancellationRequested)
+            {
+                try
+                {
+                    if (!await timer.WaitForNextTickAsync(_cts.Token).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                var success = await TryRenewWithRetryAsync().ConfigureAwait(false);
+                if (!success)
+                {
+                    _owner._logger.LogWarning("CDC subscription slot renewal failed after retries for tenant {Tenant}, sid {Sid}; terminating stream.", _tenant.Value, _sid.Value);
+                    try
+                    {
+                        _cts.Cancel();
+                    }
+                    catch
+                    {
+                    }
+                    break;
+                }
+            }
+        }
+
+        internal async Task<bool> TriggerRenewalAsync()
+        {
+            var success = await TryRenewWithRetryAsync().ConfigureAwait(false);
+            if (!success)
+            {
+                try
+                {
+                    _cts.Cancel();
+                }
+                catch
+                {
+                }
+            }
+            return success;
+        }
+
+        private async Task<bool> TryRenewWithRetryAsync()
+        {
+            if (!_useClusterState || _owner._clusterState == null || _subjectSlotKey == null || _tenantSlotKey == null || _leaseMember == null)
+            {
+                return true;
+            }
+
+            for (int attempt = 0; attempt <= 2; attempt++)
+            {
+                try
+                {
+                    var r1 = await _owner._clusterState.RenewSlotAsync(_subjectSlotKey, _leaseMember, SlotTtl, _cts.Token).ConfigureAwait(false);
+                    var r2 = await _owner._clusterState.RenewSlotAsync(_tenantSlotKey, _leaseMember, SlotTtl, _cts.Token).ConfigureAwait(false);
+                    if (r1 && r2)
+                    {
+                        return true;
+                    }
+                }
+                catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+                {
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    _owner._logger.LogWarning(ex, "Exception during slot renewal attempt {Attempt}", attempt + 1);
+                }
+
+                if (attempt < 2)
+                {
+                    try
+                    {
+                        await Task.Delay(100, _cts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return false;
+        }
 
         public async ValueTask DisposeAsync()
         {
@@ -276,10 +424,38 @@ public sealed class CdcSubscriptionGovernor
                 return;
             }
 
-            _owner.Release(_key);
-            if (_clusterKey is not null)
+            try
             {
-                await _owner.ReleaseClusterKeyAsync(_clusterKey).ConfigureAwait(false);
+                _cts.Cancel();
+            }
+            catch
+            {
+            }
+
+            if (_renewalTask != null)
+            {
+                try
+                {
+                    await _renewalTask.ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+            }
+
+            _owner.Release(_localKey);
+
+            if (_useClusterState && _owner._clusterState != null && _subjectSlotKey != null && _tenantSlotKey != null && _leaseMember != null)
+            {
+                try
+                {
+                    await _owner._clusterState.ReleaseSlotAsync(_subjectSlotKey, _leaseMember, CancellationToken.None).ConfigureAwait(false);
+                    await _owner._clusterState.ReleaseSlotAsync(_tenantSlotKey, _leaseMember, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _owner._logger.LogWarning(ex, "Failed to release CDC cluster slots for {Member}.", _leaseMember);
+                }
             }
 
             try

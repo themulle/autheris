@@ -20,6 +20,7 @@ public static class AuditEventTypes
     // Catalog & Metadata Reads (Tier B)
     public const string CatalogRead = "CATALOG_READ";
     public const string MetadataExport = "METADATA_EXPORT";
+    public const string DataCatalogSync = "DATA_CATALOG_SYNC";
 
     // Data Access (Tier A / B)
     public const string TableQuery = "TABLE_QUERY";

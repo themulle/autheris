@@ -138,7 +138,7 @@ public sealed class BackgroundServiceLockTests
         IDistributedClusterStateProvider clusterState, FakeTimeProvider time)
     {
         var syncService = Substitute.For<IDataCatalogSyncService>();
-        syncService.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>())
+        syncService.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new CatalogSyncResult(0, 0, 0, 0, Array.Empty<TableIdentifier>(), Array.Empty<string>(), true)));
         var services = new ServiceCollection();
         services.AddSingleton(syncService);
@@ -163,7 +163,7 @@ public sealed class BackgroundServiceLockTests
 
         await RunAsync(service, time, TimeSpan.FromSeconds(30));
 
-        await sync.Received().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await sync.Received().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public sealed class BackgroundServiceLockTests
 
         await RunAsync(service, time, TimeSpan.FromSeconds(30));
 
-        await sync.DidNotReceive().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await sync.DidNotReceive().SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

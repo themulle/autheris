@@ -92,7 +92,7 @@ public sealed class DbtHealthExecutionMiddleware
             {
                 bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
                                     principal?.IsInRole("DataOwner") == true ||
-                                    principal?.IsInRole("ClusterAdmin") == true;
+                                    Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
                 if (!isPrivileged)
                 {
@@ -143,7 +143,7 @@ public sealed class DbtHealthExecutionMiddleware
             {
                 bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
                                     principal?.IsInRole("DataOwner") == true ||
-                                    principal?.IsInRole("ClusterAdmin") == true;
+                                    Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
                 var errBuilder = ErrorBuilder.New()
                     .SetMessage($"The requested table/model '{modelName}' is quarantined due to failed dbt tests.")
