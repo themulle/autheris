@@ -281,9 +281,23 @@ public sealed class RecertificationService : IRecertificationService
         return true;
     }
 
-    public async Task<int> ExecuteAutoRevocationCycleAsync(DateTimeOffset asOf, CancellationToken ct = default)
+    public Task<int> ExecuteAutoRevocationCycleAsync(DateTimeOffset asOf, CancellationToken ct = default) =>
+        RunAutoRevocationCycleAsync(null, asOf, ct);
+
+    /// <summary>GOV-03: tenant-scoped cycle; items of other tenants are never touched.</summary>
+    public Task<int> ExecuteAutoRevocationCycleAsync(TenantId tenantId, DateTimeOffset asOf, CancellationToken ct = default) =>
+        RunAutoRevocationCycleAsync(tenantId, asOf, ct);
+
+    private async Task<int> RunAutoRevocationCycleAsync(TenantId? scope, DateTimeOffset asOf, CancellationToken ct)
     {
         var expiredPending = await _repository.GetPendingItemsPastDeadlineAsync(asOf, ct).ConfigureAwait(false);
+        if (scope is { } only)
+        {
+            expiredPending = expiredPending
+                .Where(i => string.Equals(i.TenantId, only.Value, StringComparison.Ordinal))
+                .ToList();
+        }
+
         int revokedCount = 0;
 
         foreach (var item in expiredPending)

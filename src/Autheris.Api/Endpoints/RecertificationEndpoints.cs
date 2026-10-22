@@ -91,7 +91,7 @@ public static class RecertificationEndpoints
             IRecertificationService service,
             CancellationToken ct) =>
         {
-            var count = await service.ExecuteAutoRevocationCycleAsync(DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            var count = await service.ExecuteAutoRevocationCycleAsync(new TenantId(tenantId), DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
             return Results.Ok(new { revokedItemsCount = count });
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 

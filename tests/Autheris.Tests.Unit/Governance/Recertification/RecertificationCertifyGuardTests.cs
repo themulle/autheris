@@ -160,4 +160,19 @@ public sealed class RecertificationCertifyGuardTests
         await _audit.Received(1).RecordRequiredAsync(
             Arg.Is<AuditLogEntry>(e => e.EventType == "SECURITY_RECERT_DECISION_CONFLICT"), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task AutoRevokeCycle_TenantScoped_OnlyRevokesItemsOfThatTenant_GOV03()
+    {
+        var own = new RecertificationItem("tenant-1", "camp", "item-own", "FunctionalRightMapping", Key,
+            AssignedTo: "user-alice", ReviewerId: "user-bob", Decision: RecertDecision.Pending);
+        var foreign = own with { TenantId = "tenant-2", ItemId = "item-foreign" };
+        _repository.GetPendingItemsPastDeadlineAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([foreign, own]);
+
+        var count = await _sut.ExecuteAutoRevocationCycleAsync(Tenant, _time.GetUtcNow());
+
+        count.ShouldBe(1);
+        await _repository.DidNotReceive().TryUpdateItemDecisionAsync(
+            new TenantId("tenant-2"), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RecertDecision>(), Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
 }
