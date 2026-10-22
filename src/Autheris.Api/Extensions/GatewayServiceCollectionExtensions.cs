@@ -422,6 +422,13 @@ public static class GatewayServiceCollectionExtensions
                 var authHeader = context.Request.Headers.Authorization.ToString();
 
                 // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
+                // API-07: the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
+                // before the unauthenticated-bearer IP budget and do not produce JwtBearer failures.
+                if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && GatewayAuthSchemes.IsScimPath(context.Request.Path))
+                {
+                    return GatewayAuthSchemes.Scim;
+                }
+
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
                     return GatewayAuthSchemes.SelectJwtScheme(authHeader["Bearer ".Length..], gatewayOptions);

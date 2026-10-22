@@ -184,7 +184,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, external_id, user_n
         await using var scope = await open(false, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
         int offset = Math.Max(0, startIndex - 1);
-        cmd.CommandText = "SELECT user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId LIMIT @count OFFSET @offset";
+        cmd.CommandText = "SELECT user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY user_key LIMIT @count OFFSET @offset";
         if (dialect == IdentityStoreDialect.SqlServer)
         {
             cmd.CommandText = "SELECT user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at FROM dbo.IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY user_key OFFSET @offset ROWS FETCH NEXT @count ROWS ONLY";
@@ -342,7 +342,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, group_id, external_id, displa
         await using var scope = await open(false, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
         int offset = Math.Max(0, startIndex - 1);
-        cmd.CommandText = "SELECT group_id, external_id, display_name, created_at, updated_at FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId LIMIT @count OFFSET @offset";
+        cmd.CommandText = "SELECT group_id, external_id, display_name, created_at, updated_at FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY group_id LIMIT @count OFFSET @offset";
         if (dialect == IdentityStoreDialect.SqlServer)
         {
             cmd.CommandText = "SELECT group_id, external_id, display_name, created_at, updated_at FROM dbo.IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY group_id OFFSET @offset ROWS FETCH NEXT @count ROWS ONLY";
