@@ -99,7 +99,8 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         catch (Exception ex)
         {
             dbHealthy = false;
-            dbDesc = $"Governance DB query failed: {ex.Message}";
+            // The exception text (connection strings, host names, SQL) stays in the log; health details are fixed messages.
+            dbDesc = "Governance DB query failed (see gateway logs).";
             _logger.LogError(ex, "Governance DB health check failed.");
         }
         components.Add(new HealthCheckComponentResult("GovernanceDb", dbHealthy, dbDesc));
@@ -109,13 +110,18 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         if (_auditChainMonitor != null)
         {
             bool failReadiness = _options.Value.Audit.FailReadinessOnChainViolation;
-            bool chainHealthy = !_auditChainMonitor.IsViolated;
-            string chainDesc = _auditChainMonitor.IsViolated
+            bool chainViolated = _auditChainMonitor.IsViolated;
+            bool chainRunFailed = _auditChainMonitor.LastRunFailed;
+
+            // A run that could not complete leaves the chain state unknown: unhealthy, like a violation (fail closed). A violation
+            // detected earlier stays reported even when later runs fail.
+            bool chainHealthy = !chainViolated && !chainRunFailed;
+            string chainDesc = chainViolated
                 ? $"Audit hash chain verification FAILED (OnChainViolation policy: {_options.Value.Audit.OnChainViolation?.ToString() ?? "environment default"}; restart after forensic review)."
-                : _auditChainMonitor.LastCheckedAt == null
-                    ? "Audit hash chain not verified yet."
-                    : _auditChainMonitor.LastRunFailed
-                        ? "Last audit hash chain verification could not complete."
+                : chainRunFailed
+                    ? "Last audit hash chain verification could not complete; chain state unknown (see gateway logs)."
+                    : _auditChainMonitor.LastCheckedAt == null
+                        ? "Audit hash chain not verified yet."
                         : "Audit hash chain verified.";
             components.Add(new HealthCheckComponentResult("AuditChain", chainHealthy, chainDesc));
             if (!chainHealthy && failReadiness) overallHealthy = false;
@@ -143,7 +149,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             catch (Exception ex)
             {
                 redisHealthy = false;
-                redisDesc = $"Redis ping failed: {ex.Message}";
+                redisDesc = "Redis ping failed (see gateway logs).";
                 _logger.LogError(ex, "Redis health check failed.");
             }
             components.Add(new HealthCheckComponentResult("Redis", redisHealthy, redisDesc));
@@ -153,22 +159,24 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         // 3. Security Invariants Check (H-5)
         // DANGER entries make the component unhealthy (outside Development additionally the whole report, so that
         // /health/ready returns 503 - defense in depth, startup validation already blocks DANGER there).
-        // WARN entries keep the component healthy but are listed as "degraded: ...".
+        // WARN entries keep the component healthy but are reported as "degraded: ...".
+        // The names of the active switches are never part of the description (it reaches health and metrics responses and would tell
+        // a caller which protections are off); they are logged instead.
         var dangerBypasses = _options.Value.GetActiveDangerBypasses();
         var warnings = _options.Value.GetActiveWarnings();
         bool securityHealthy = dangerBypasses.Count == 0;
         string securityDesc;
         if (!securityHealthy)
         {
-            securityDesc = $"WARNING: Active security bypasses: {string.Join(", ", dangerBypasses)}";
+            securityDesc = "WARNING: Security bypasses are active (see gateway logs).";
             if (warnings.Count > 0)
             {
-                securityDesc += $" degraded: {string.Join(", ", warnings)}";
+                securityDesc += " degraded: security-relevant settings are active (see gateway logs).";
             }
         }
         else if (warnings.Count > 0)
         {
-            securityDesc = $"degraded: {string.Join(", ", warnings)}";
+            securityDesc = "degraded: security-relevant settings are active (see gateway logs).";
         }
         else
         {

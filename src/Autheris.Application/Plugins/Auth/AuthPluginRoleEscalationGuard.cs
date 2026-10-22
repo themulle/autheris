@@ -14,7 +14,30 @@ using Microsoft.Extensions.Logging;
 
 public sealed partial class AuthPluginRoleEscalationGuard
 {
-    private static readonly string[] DefaultProhibitedRoles = ["ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+    /// <summary>
+    /// Every administrative, approver, separation-of-duties, audit and service role the gateway evaluates. An auth plugin may only add
+    /// business roles; none of these can be granted through enrichment. Sources: <c>GatewayRole</c> (and its name aliases),
+    /// <c>GatewayPolicies</c> role sets, and the literal role checks of endpoints and services.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> DefaultProhibitedRoles =
+    [
+        // GatewayRole
+        "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "Auditor", "DataOwner", "DataSteward", "SchemaPublisher",
+        "FilterAdmin", "FilterSync", "CallerAttributeApprover", "CallerAttributeInspector",
+
+        // GatewayPolicies role sets
+        "Approver", "SecurityAdmin", "PrivacyAdmin", "DataProtectionOfficer", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin",
+        "Developer", "Operator", "MetricsScraper", "SCIM_PROVISIONER",
+
+        // Literal role checks outside the policies
+        "DbtAdmin", "DeveloperAdmin", "BillingAdmin", "BreakGlassOperator", "ComplianceOfficer", "ComplianceReviewer",
+        "DATA_GOVERNANCE_REVIEWER", "CatalogSync", "CdcIngestionService", "CLUSTER_ADMIN", "GOVERNANCE_ADMIN", "admin",
+        "governance:admin", "governance:simulate"
+    ];
+
+    // Lookup by normalized name (case and the separators '_', '-', '.' ignored), so "cluster_admin" or "Data-Owner" is caught too.
+    private static readonly HashSet<string> NormalizedDefaultProhibitedRoles =
+        new(DefaultProhibitedRoles.Select(NormalizeRoleName), StringComparer.Ordinal);
 
     private static readonly HashSet<string> ReservedSystemSids = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -48,17 +71,64 @@ public sealed partial class AuthPluginRoleEscalationGuard
         _logger = logger;
         _auditWriter = auditWriter;
 
-        _prohibitedRoles = new HashSet<string>(DefaultProhibitedRoles, StringComparer.OrdinalIgnoreCase);
+        _prohibitedRoles = new HashSet<string>(NormalizedDefaultProhibitedRoles, StringComparer.Ordinal);
         if (_options.ProhibitedRoles != null)
         {
             foreach (var role in _options.ProhibitedRoles)
             {
                 if (!string.IsNullOrWhiteSpace(role))
                 {
-                    _prohibitedRoles.Add(role.Trim());
+                    _prohibitedRoles.Add(NormalizeRoleName(role));
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// True when the role names a prohibited role, case-insensitively, ignoring separators, and also in tenant-prefixed form
+    /// ("tenant:Role", "a:b:Role"): the full value and the part after every ':' are checked.
+    /// </summary>
+    internal bool IsProhibitedRole(string role)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return false;
+        }
+
+        var trimmed = role.Trim();
+        if (_prohibitedRoles.Contains(NormalizeRoleName(trimmed)))
+        {
+            return true;
+        }
+
+        var colon = trimmed.IndexOf(':', StringComparison.Ordinal);
+        while (colon >= 0)
+        {
+            if (_prohibitedRoles.Contains(NormalizeRoleName(trimmed[(colon + 1)..])))
+            {
+                return true;
+            }
+
+            colon = trimmed.IndexOf(':', colon + 1);
+        }
+
+        return false;
+    }
+
+    private static string NormalizeRoleName(string role)
+    {
+        var builder = new System.Text.StringBuilder(role.Length);
+        foreach (var c in role.Trim())
+        {
+            if (c is '_' or '-' or '.' || char.IsWhiteSpace(c))
+            {
+                continue;
+            }
+
+            builder.Append(char.ToLowerInvariant(c));
+        }
+
+        return builder.ToString();
     }
 
     public PluginRoleEnrichmentResult Sanitize(
@@ -79,8 +149,9 @@ public sealed partial class AuthPluginRoleEscalationGuard
 
             var trimmedRole = role.Trim();
 
-            // SEC-BL08-05: Prohibited superadmin check
-            if (_prohibitedRoles.Contains(trimmedRole))
+            // SEC-BL08-05: Prohibited privileged role check (before the syntax check, so a tenant-prefixed admin role is reported as
+            // an escalation attempt and not only as malformed)
+            if (IsProhibitedRole(trimmedRole))
             {
                 _logger?.LogWarning("Auth plugin '{PluginName}' attempted to assign prohibited superadmin role '{Role}'. Stripping role (SEC-BL08-05).",
                     pluginName, trimmedRole);

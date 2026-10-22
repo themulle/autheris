@@ -110,25 +110,7 @@ public sealed partial class TableAccessPolicy
 
     private SecurityEvaluationContext BuildEvaluationContext(TableAccessQuery query)
     {
-        var claims = query.Claims?.ToList() ?? [];
-        var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var claim in claims)
-        {
-            // SR15-08: Action claims from client tokens MUST NOT spoof gateway-internal action resolution!
-            if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            attributes[claim.Type] = claim.Value;
-        }
-
-        var purpose = claims.FirstOrDefault(c => c.Type == "purpose")?.Value ?? claims.FirstOrDefault(c => c.Type == "purpose_id")?.Value;
-
-        foreach (var (key, value) in query.ExtraAttributes ?? new Dictionary<string, object?>())
-        {
-            attributes[key] = value;
-        }
+        var (attributes, purpose) = BuildClaimAttributes(query.Claims, query.ExtraAttributes);
 
         return new SecurityEvaluationContext(
             UserSid: query.UserSid,
@@ -146,4 +128,52 @@ public sealed partial class TableAccessPolicy
             TableColumns = query.Metadata.Columns.Select(c => c.ColumnName).ToList()
         };
     }
+
+    /// <summary>
+    /// Casbin attributes and purpose of a request, built from the token claims and the gateway-provided extra attributes (which win).
+    /// </summary>
+    internal static (Dictionary<string, object?> Attributes, string? Purpose) BuildClaimAttributes(
+        IEnumerable<System.Security.Claims.Claim>? sourceClaims,
+        IReadOnlyDictionary<string, object?>? extraAttributes)
+    {
+        var claims = sourceClaims?.ToList() ?? [];
+        var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var claim in claims)
+        {
+            // SR15-08: Action claims from client tokens MUST NOT spoof gateway-internal action resolution!
+            if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // Fail closed: an empty value is missing, and a claim type with several distinct values is marked ambiguous instead of
+            // keeping the last value, so every rule referencing it fails closed (CasbinEnforcementService.AmbiguousAttributeValue).
+            Autheris.Application.Governance.CasbinEnforcementService.AddClaimAttribute(attributes, claim.Type, claim.Value);
+        }
+
+        // Same rule for the purpose: the first non-empty claim type wins (purpose before purpose_id); several distinct values of it
+        // give no purpose (the attribute is ambiguous, so rules referencing the purpose fail closed).
+        var purposeValues = DistinctClaimValues(claims, "purpose");
+        if (purposeValues.Count == 0)
+        {
+            purposeValues = DistinctClaimValues(claims, "purpose_id");
+        }
+
+        var purpose = purposeValues.Count == 1 ? purposeValues[0] : null;
+
+        foreach (var (key, value) in extraAttributes ?? new Dictionary<string, object?>())
+        {
+            attributes[key] = value;
+        }
+
+        return (attributes, purpose);
+    }
+
+    private static List<string> DistinctClaimValues(IEnumerable<System.Security.Claims.Claim> claims, string type) =>
+        claims
+            .Where(c => c.Type == type && !string.IsNullOrWhiteSpace(c.Value))
+            .Select(c => c.Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 }
