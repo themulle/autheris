@@ -59,7 +59,7 @@ public sealed class SubgraphQuerySignatureVf09Tests
             bodySha256: s.BodyHash);
 
     [Fact]
-    public void SignedQueryString_Validates_AndTamperedQueryIsRejected()
+    public void SignedQueryString_Validates()
     {
         var signed = Sign("https://subgraph.internal/graphql?query=%7Ba%7D");
 

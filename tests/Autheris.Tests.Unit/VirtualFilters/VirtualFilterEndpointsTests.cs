@@ -189,6 +189,26 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         doc.RootElement.GetProperty("filters").GetArrayLength().ShouldBe(1);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task List_ExposesPendingHash_TheValueApprovalCompares()
+    {
+        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
+        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_pending_hash", createContext, approvalService), createContext);
+        var stored = (await _repository.LoadSnapshotAsync()).Filters.Single();
+
+        var context = Context(Tenant, null, "GovernanceAdmin");
+        await StatusAsync(await VirtualFilterEndpoints.ListAsync(context, approvalService), context);
+
+        context.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var view = doc.RootElement.GetProperty("filters")[0];
+        view.GetProperty("pending_hash").GetString().ShouldBe(VirtualFilterAdministrationService.PendingHash(stored));
+        view.GetProperty("pending_hash").GetString().ShouldNotBeNullOrWhiteSpace();
+    }
+
     private static object SyncBody(string commit) => new
     {
         path = "governance/access",
