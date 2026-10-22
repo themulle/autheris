@@ -87,9 +87,14 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             // SR-H-06: tenant/global data-source allowlists apply to every staged table before any read.
+            // SQLA-07: both the identifier domain and the effective source (catalog SourceName, mapped) must pass; the connection below uses the latter.
+            var webSqlOptions = _gatewayOptions.Value.WebSql ?? new WebSqlOptions();
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
-                _gatewayOptions.Value.WebSql ?? new WebSqlOptions(), tenantId,
+                webSqlOptions, tenantId,
                 req.Metadata.Identifier.Domain);
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
+                webSqlOptions, tenantId,
+                Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EffectiveDataSource(webSqlOptions, req.Metadata));
 
             if (req.Metadata.RequiredFilterColumns.Length > 0 || req.Metadata.RequiredFilterColumnGroups.Length > 0)
             {
