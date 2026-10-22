@@ -91,8 +91,8 @@ public sealed class DeclarativeHttpTenantPushdownTests
     public async Task FixedRealmTenant_PushedInsteadOfTokenClaim()
     {
         var (executor, handler, _) = Create();
-        var query = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/c", TenantIdQueryParam = "tenant" };
-        var header = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/c", TenantIdHeaderName = "X-Tenant" };
+        var query = new HttpEndpointDescriptor { BaseUrl = "https://93.184.216.34", PathTemplate = "/v1/c", TenantIdQueryParam = "tenant" };
+        var header = new HttpEndpointDescriptor { BaseUrl = "https://93.184.216.34", PathTemplate = "/v1/c", TenantIdHeaderName = "X-Tenant" };
 
         await executor.ExecuteAsync(Context(query, Token("partner-b"), new TenantId("partner-a")));
         await executor.ExecuteAsync(Context(header, Token("partner-b"), new TenantId("partner-a")));
@@ -107,7 +107,7 @@ public sealed class DeclarativeHttpTenantPushdownTests
     public async Task ClusterAdminSelectedTenant_Pushed()
     {
         var (executor, handler, logger) = Create();
-        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/c", TenantIdHeaderName = "X-Tenant" };
+        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://93.184.216.34", PathTemplate = "/v1/c", TenantIdHeaderName = "X-Tenant" };
 
         await executor.ExecuteAsync(Context(descriptor, Token("home-tenant", "ClusterAdmin"), new TenantId("selected-tenant")));
 
@@ -120,7 +120,7 @@ public sealed class DeclarativeHttpTenantPushdownTests
     public async Task MissingContextTenant_FailsClosed()
     {
         var (executor, handler, _) = Create();
-        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/c", TenantIdHeaderName = "X-Tenant" };
+        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://93.184.216.34", PathTemplate = "/v1/c", TenantIdHeaderName = "X-Tenant" };
 
         await Should.ThrowAsync<SecurityException>(() => executor.ExecuteAsync(Context(descriptor, Token("partner-b"), tenant: null)));
 
@@ -132,7 +132,7 @@ public sealed class DeclarativeHttpTenantPushdownTests
     public async Task ClaimMismatch_EmitsAudit()
     {
         var (executor, _, logger) = Create();
-        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/c", TenantIdQueryParam = "tenant" };
+        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://93.184.216.34", PathTemplate = "/v1/c", TenantIdQueryParam = "tenant" };
 
         await executor.ExecuteAsync(Context(descriptor, Token("partner-b"), new TenantId("partner-a")));
 
