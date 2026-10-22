@@ -165,10 +165,20 @@ public sealed class ScopedAccessPolicyEngine : IScopedAccessPolicyEngine
         }
     }
 
-    public async Task UpdatePolicyAsync(AccessPolicy policy, CancellationToken ct = default)
+    public Task UpdatePolicyAsync(AccessPolicy policy, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(policy);
+        return UpdatePolicyCoreAsync(policy, actorSid: null, ct);
+    }
 
+    /// <summary>
+    /// SEC-SC-14: an update changes the policy content, so a previous approval no longer covers it. Approval fields are reset
+    /// (the policy is unapproved / pending re-approval) and the acting user is never recorded as approver of their own change;
+    /// the actor is only written to the audit entry. Same rule as <c>AccessPolicyEndpoints.BuildServerSidePolicy</c>, which never
+    /// accepts approval fields from input.
+    /// </summary>
+    private async Task UpdatePolicyCoreAsync(AccessPolicy policy, Sid? actorSid, CancellationToken ct)
+    {
         foreach (var g in policy.Grantees)
         {
             if (g.GranteeType != AccessPolicyGranteeType.Group && g.GranteeType != AccessPolicyGranteeType.Role)
@@ -176,6 +186,9 @@ public sealed class ScopedAccessPolicyEngine : IScopedAccessPolicyEngine
                 throw new ArgumentException("Access Policies strictly forbid individual User grantees. Use time-bound grants for users (HTTP 400).");
             }
         }
+
+        policy.ApprovedBy = null;
+        policy.ApprovedAt = null;
 
         await _repository.UpdatePolicyAsync(policy, ct).ConfigureAwait(false);
 
@@ -187,14 +200,15 @@ public sealed class ScopedAccessPolicyEngine : IScopedAccessPolicyEngine
             {
                 TenantId = new TenantId(policy.TenantId),
                 EventType = "SECURITY_POLICY_MUTATED",
-                ActorSid = new Sid(policy.ApprovedBy ?? policy.CreatedBy),
+                ActorSid = actorSid ?? new Sid(policy.CreatedBy),
                 TargetTable = "ACCESS_POLICIES",
                 Decision = "ALLOW",
                 DetailsJson = JsonSerializer.Serialize(new
                 {
                     action = "UPDATE",
                     policy_id = policy.PolicyId,
-                    name = policy.Name
+                    name = policy.Name,
+                    approval_reset = true
                 })
             };
             await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
@@ -234,8 +248,10 @@ public sealed class ScopedAccessPolicyEngine : IScopedAccessPolicyEngine
 
     public Task UpdatePolicyAsync(AccessPolicy policy, Sid actorSid, CancellationToken ct = default)
     {
-        policy.ApprovedBy = actorSid.Value;
-        return UpdatePolicyAsync(policy, ct);
+        ArgumentNullException.ThrowIfNull(policy);
+
+        // SEC-SC-14: the actor is the modifier, not an approver (previously ApprovedBy = actor, i.e. a self-approval).
+        return UpdatePolicyCoreAsync(policy, actorSid, ct);
     }
 
     public Task DeletePolicyAsync(TenantId tenantId, string policyId, Sid actorSid, CancellationToken ct = default) =>

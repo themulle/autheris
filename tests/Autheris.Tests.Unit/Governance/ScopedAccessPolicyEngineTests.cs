@@ -421,10 +421,14 @@ public sealed class ScopedAccessPolicyEngineTests
         var actor = new Sid("admin-user");
 
         // Update
-        // Update via actor overload sets ApprovedBy = actor
+        // SEC-SC-14: the actor overload audits the actor but never records them as approver; a previous approval is reset.
         policy.CreatedBy = "creator-admin";
+        policy.ApprovedBy = "previous-approver";
+        policy.ApprovedAt = DateTimeOffset.UtcNow.AddDays(-1);
         await _sut.UpdatePolicyAsync(policy, actor);
-        await _repository.Received(1).UpdatePolicyAsync(policy, Arg.Any<CancellationToken>());
+        await _repository.Received(1).UpdatePolicyAsync(
+            Arg.Is<AccessPolicy>(p => p == policy && p.ApprovedBy == null && p.ApprovedAt == null),
+            Arg.Any<CancellationToken>());
         await _epochService.Received(1).IncrementEpochAsync(new TenantId(tenantId), Arg.Any<CancellationToken>());
         await _auditWriter.Received(1).RecordRequiredAsync(
             Arg.Is<AuditLogEntry>(e =>
@@ -453,6 +457,63 @@ public sealed class ScopedAccessPolicyEngineTests
                 e.ActorSid == actor &&
                 e.DetailsJson.Contains("DELETE")),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SEC_SC_14_UpdatePolicy_ByActor_IsNeverASelfApproval_AndResetsApproval()
+    {
+        var tenantId = "tenant-corp";
+        var approvedAt = DateTimeOffset.UtcNow.AddDays(-7);
+        var policy = new AccessPolicy
+        {
+            TenantId = tenantId,
+            PolicyId = "policy-approved",
+            Name = "Approved Policy",
+            Decision = AccessPolicyDecision.Permit,
+            CreatedBy = "creator-admin",
+            ApprovedBy = "four-eyes-approver",
+            ApprovedAt = approvedAt,
+            Grantees = [new AccessPolicyGrantee(tenantId, "policy-approved", "realm", AccessPolicyGranteeType.Group, "engineers")],
+            Selectors = []
+        };
+
+        AccessPolicy? persisted = null;
+        _repository.UpdatePolicyAsync(Arg.Do<AccessPolicy>(p => persisted = p), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var modifier = new Sid("modifying-admin");
+        await _sut.UpdatePolicyAsync(policy, modifier);
+
+        persisted.ShouldNotBeNull();
+        persisted!.ApprovedBy.ShouldBeNull();
+        persisted.ApprovedAt.ShouldBeNull();
+        persisted.ApprovedBy.ShouldNotBe(modifier.Value);
+        persisted.CreatedBy.ShouldBe("creator-admin");
+
+        await _auditWriter.Received(1).RecordRequiredAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == "SECURITY_POLICY_MUTATED" &&
+                e.ActorSid == modifier &&
+                e.DetailsJson.Contains("\"approval_reset\":true")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SEC_SC_14_UpdatePolicy_RejectedUserGrantee_KeepsApprovalUntouched()
+    {
+        var policy = new AccessPolicy
+        {
+            TenantId = "tenant-user",
+            PolicyId = "policy-user-grantee",
+            Name = "Bad Policy",
+            ApprovedBy = "four-eyes-approver",
+            Grantees = [new AccessPolicyGrantee("tenant-user", "policy-user-grantee", "realm", AccessPolicyGranteeType.User, "user-direct")],
+            Selectors = []
+        };
+
+        await Should.ThrowAsync<ArgumentException>(() => _sut.UpdatePolicyAsync(policy, new Sid("modifying-admin")));
+
+        policy.ApprovedBy.ShouldBe("four-eyes-approver");
+        await _repository.DidNotReceiveWithAnyArgs().UpdatePolicyAsync(default!, default);
     }
 
     [Fact]

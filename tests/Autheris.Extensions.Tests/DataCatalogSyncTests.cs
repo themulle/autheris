@@ -191,6 +191,31 @@ public class DataCatalogSyncTests
     }
 
     [Fact]
+    public async Task SEC_SYNC_EPOCH_SyncCatalogAsync_FailureMidRun_StillInvalidatesTablesAlreadyWritten()
+    {
+        var first = new TableIdentifier("sales", "dbo", "first");
+        var failing = new TableIdentifier("sales", "dbo", "failing");
+        var never = new TableIdentifier("sales", "dbo", "never");
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset>
+            {
+                new() { Identifier = first },
+                new() { Identifier = failing },
+                new() { Identifier = never }
+            });
+        _tableRepo.UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier.Equals(failing)), Arg.Any<CancellationToken>())
+            .Returns<Task<TableMetadata>>(_ => throw new InvalidOperationException("database down"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() => _sut.SyncCatalogAsync(dryRun: false));
+
+        // The table written before the failure (and the one whose write failed part-way) no longer serve stale decisions.
+        await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(first)), Arg.Any<CancellationToken>());
+        await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(failing)), Arg.Any<CancellationToken>());
+        await _epochService.DidNotReceive().InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(never)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task SyncCatalogAsync_ClientFailure_IsPropagated()
     {
         _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())

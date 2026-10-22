@@ -101,7 +101,8 @@ public static class AccessPolicyEndpoints
 
             var actorSid = httpContext.User.GetUserSid() ?? new Sid("ADMIN");
             // Security review: the route decides tenant and policy id (also for grantees and selectors); creation fields are kept from the
-            // stored policy and approval fields are never taken from the body.
+            // stored policy and approval fields are never taken from the body. SEC-SC-14: the update resets the approval (the engine
+            // records the actor only as modifier in the audit, never as approver of their own change).
             var sanitized = BuildServerSidePolicy(policy, tenantId, policyId, existing.CreatedBy, existing.CreatedAt);
 
             await engine.UpdatePolicyAsync(sanitized, actorSid, ct).ConfigureAwait(false);

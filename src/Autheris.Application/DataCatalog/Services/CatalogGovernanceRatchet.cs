@@ -10,6 +10,8 @@ using Autheris.Domain.Model;
 /// and data source routing fields (DataSourceType, HttpEndpoint, PluginName, SourceType, SourceName) unknown to catalogs
 /// are preserved.
 /// Columns missing from the incoming snapshot keep their persisted protection.
+/// SEC-RATCHET-01: the result is derived from the persisted table, columns and metadata, so properties a catalog does not
+/// own (e.g. required filter columns, enforcement mode, physical database name, localized texts) are never wiped by a sync.
 /// </summary>
 public static class CatalogGovernanceRatchet
 {
@@ -25,7 +27,11 @@ public static class CatalogGovernanceRatchet
         var exTable = existing.Table;
         var tableId = exTable.Id != Guid.Empty ? exTable.Id : inTable.Id;
 
-        var table = new Table
+        // SEC-RATCHET-01: the merge starts from the persisted table so every property a catalog does not own (required filter
+        // columns / groups, enforcement mode, physical database, location, row filter, group size, tags, visibility, expected
+        // rows, routing fields) survives the sync. Only catalog-owned descriptive fields and the ratcheted governance flags are
+        // overridden. Routing fields (DataSourceType, HttpEndpoint, PluginName) are never overridden.
+        var table = exTable with
         {
             Id = tableId,
             SourceType = !string.IsNullOrWhiteSpace(exTable.SourceType) ? exTable.SourceType : inTable.SourceType,
@@ -35,13 +41,11 @@ public static class CatalogGovernanceRatchet
             DisplayName = !string.IsNullOrWhiteSpace(inTable.DisplayName) ? inTable.DisplayName : exTable.DisplayName,
             Description = inTable.Description ?? exTable.Description,
             LongDescription = inTable.LongDescription ?? exTable.LongDescription,
+            Texts = inTable.Texts is { IsEmpty: false } ? inTable.Texts : exTable.Texts,
             DocumentationSource = inTable.DocumentationSource ?? exTable.DocumentationSource,
             Sensitivity = StricterSensitivity(exTable.Sensitivity, inTable.Sensitivity),
             RequiresFourEyes = exTable.RequiresFourEyes || inTable.RequiresFourEyes,
-            IsActive = exTable.IsActive && inTable.IsActive,
-            DataSourceType = exTable.DataSourceType,
-            HttpEndpoint = exTable.HttpEndpoint,
-            PluginName = exTable.PluginName
+            IsActive = exTable.IsActive && inTable.IsActive
         };
 
         var existingColumns = new Dictionary<string, TableColumn>(StringComparer.OrdinalIgnoreCase);
@@ -60,17 +64,22 @@ public static class CatalogGovernanceRatchet
             }
 
             existingColumns.TryGetValue(col.ColumnName, out var exCol);
+
+            // SEC-RATCHET-01: TableColumn is a class (no `with`), so every property is listed; persisted values that the
+            // catalog does not deliver (display name, localized texts, ...) are kept.
             mergedColumns.Add(new TableColumn
             {
                 Id = exCol?.Id ?? col.Id,
                 TableId = tableId,
                 ColumnName = col.ColumnName,
+                DisplayName = !string.IsNullOrWhiteSpace(col.DisplayName) ? col.DisplayName : exCol?.DisplayName,
                 DataType = string.IsNullOrWhiteSpace(col.DataType) && exCol != null ? exCol.DataType : col.DataType,
                 IsSensitive = col.IsSensitive || exCol?.IsSensitive == true,
                 Description = col.Description ?? exCol?.Description,
                 LongDescription = col.LongDescription ?? exCol?.LongDescription,
+                Texts = col.Texts is { IsEmpty: false } ? col.Texts : (exCol?.Texts ?? LocalizedTexts.Empty),
                 DocumentationSource = col.DocumentationSource ?? exCol?.DocumentationSource,
-                Meta = col.Meta.Count > 0 ? col.Meta : (exCol?.Meta ?? col.Meta)
+                Meta = col.Meta is { Count: > 0 } ? col.Meta : (exCol?.Meta ?? col.Meta)
             });
         }
 
@@ -101,7 +110,9 @@ public static class CatalogGovernanceRatchet
         // definition is kept and the result stays unflagged, so a round trip can never wipe it.
         var replace = incoming.ReplaceKeyDefinition;
 
-        return new TableMetadata
+        // SEC-RATCHET-01: metadata-level settings a catalog does not own (owner tenant, profile release, synthetic samples,
+        // row filter evaluation, group size overrides, row count hints) are carried over from the persisted state as well.
+        return existing with
         {
             Table = table,
             Identifier = incoming.Identifier,
