@@ -386,24 +386,22 @@ public static partial class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var callerId = context.User.FindFirst("client_id")?.Value
-                         ?? context.User.FindFirst("azp")?.Value
-                         ?? context.User.FindFirst("sub")?.Value
-                         ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                         ?? context.User.Identity?.Name;
-
-            // SEC SG-29: Prevent self-reset of privacy budget
-            if (!string.IsNullOrWhiteSpace(callerId) && string.Equals(callerId, clientId, StringComparison.OrdinalIgnoreCase))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
             // SEC M-4: Non-canonical cluster admins may only reset clients within their tenant scope
             var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
             if (isForbidden)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
+
+            // SEC SG-29 / EP-02: Prevent self-reset of privacy budget across all identity forms and tenant-qualifications
+            if (IsSelfBudgetReset(context, targetKey))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var callerId = EndpointSecurity.GetCallerIdentity(context)
+                         ?? context.User.FindFirst("client_id")?.Value
+                         ?? "unknown";
 
             await dpEngine.ResetBudgetAsync(targetKey, context.RequestAborted);
 
@@ -558,25 +556,90 @@ public static partial class GovernanceEndpoints
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
 
         // OpenLineage Lineage Push Trigger
-        app.MapPost("/api/lineage/openlineage/sync", async (
+        app.MapPost("/api/lineage/openlineage/sync", (
             IOpenLineageClient openLineageClient,
             HttpContext context,
-            CancellationToken ct) =>
+            CancellationToken ct) => SyncOpenLineageAsync(openLineageClient, context, ct))
+          .RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+    }
+
+    internal static async Task<IResult> SyncOpenLineageAsync(
+        IOpenLineageClient openLineageClient,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // EP-03: Restrict to GovernanceAdmin only
+        if (!GatewayPolicies.HasRole(context.User, GatewayRole.GovernanceAdmin))
         {
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.DataOwner]);
-            if (!isPrivileged)
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        TenantId tenantId;
+        try
+        {
+            tenantId = EndpointSecurity.GetRequestTenant(context);
+        }
+        catch (System.Security.SecurityException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
+        catch (ArgumentException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var success = await openLineageClient.PushLineageGraphAsync(tenantId, ct);
+        if (success)
+        {
+            return Results.Ok(new { message = "OpenLineage sync completed successfully." });
+        }
+        return Results.StatusCode(StatusCodes.Status502BadGateway);
+    }
+
+    internal static bool IsSelfBudgetReset(HttpContext context, string targetKey)
+    {
+        var callerForms = new List<string>();
+
+        void AddIfNotEmpty(string? val)
+        {
+            if (!string.IsNullOrWhiteSpace(val))
             {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
+                callerForms.Add(val.Trim());
+            }
+        }
+
+        AddIfNotEmpty(context.User.FindFirst("client_id")?.Value);
+        AddIfNotEmpty(context.User.FindFirst("azp")?.Value);
+        AddIfNotEmpty(context.User.FindFirst("sub")?.Value);
+        AddIfNotEmpty(context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+        AddIfNotEmpty(context.User.Identity?.Name);
+        AddIfNotEmpty(EndpointSecurity.GetCallerIdentity(context));
+
+        // Fail-closed: caller without any resolvable identity is treated as self-reset / denied
+        if (callerForms.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (var callerId in callerForms)
+        {
+            if (string.Equals(callerId, targetKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
             }
 
-            var tenantId = context.User.FindFirst("tenant_id")?.Value ?? "default";
-            var success = await openLineageClient.PushLineageGraphAsync(new TenantId(tenantId), ct);
-            if (success)
+            var callerKey = ResolveTenantBoundClientId(context, callerId, out _);
+            if (string.Equals(callerKey, targetKey, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.Ok(new { message = "OpenLineage sync completed successfully." });
+                return true;
             }
-            return Results.StatusCode(StatusCodes.Status502BadGateway);
-        }).RequireAuthorization()
-          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }
+
+        return false;
     }
 }

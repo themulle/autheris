@@ -70,9 +70,9 @@ public sealed class AccessPlanStoreTests
         var nodeA = Node(new ClusterAccessPlanStore(state));
         var nodeB = Node(new ClusterAccessPlanStore(state));
 
-        var plan = await nodeA.PlanAccessAsync(Request(), Admin);
+        var plan = await nodeA.PlanAccessAsync(Request(), Admin, "tenant-a");
         var token = await ConfirmAsync(nodeB, plan.PlanId);
-        var result = await nodeB.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin);
+        var result = await nodeB.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin, "tenant-a");
 
         result.Success.ShouldBeTrue();
         (await nodeA.GetPlanAsync(plan.PlanId)).ShouldNotBeNull();
@@ -85,12 +85,12 @@ public sealed class AccessPlanStoreTests
         var nodeA = Node(new ClusterAccessPlanStore(state));
         var nodeB = Node(new ClusterAccessPlanStore(state));
 
-        var plan = await nodeA.PlanAccessAsync(Request(), Admin);
+        var plan = await nodeA.PlanAccessAsync(Request(), Admin, "tenant-a");
         var token = await ConfirmAsync(nodeA, plan.PlanId);
-        await nodeA.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin);
+        await nodeA.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin, "tenant-a");
 
         await Should.ThrowAsync<SecurityException>(() =>
-            nodeB.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin));
+            nodeB.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin, "tenant-a"));
     }
 
     [Fact]
@@ -117,11 +117,11 @@ public sealed class AccessPlanStoreTests
         var nodeA = Node(new ClusterAccessPlanStore(state));
         var nodeB = Node(new ClusterAccessPlanStore(state), otherProvider);
 
-        var plan = await nodeA.PlanAccessAsync(Request(), Admin);
+        var plan = await nodeA.PlanAccessAsync(Request(), Admin, "tenant-a");
         var token = await ConfirmAsync(nodeA, plan.PlanId);
 
         await Should.ThrowAsync<SecurityException>(() =>
-            nodeB.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin));
+            nodeB.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), Admin, "tenant-a"));
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public sealed class AccessPlanStoreTests
     public async Task Apply_WhenStateUnavailable_Throws()
     {
         var state = new InMemoryClusterStateProvider();
-        var plan = await Node(new ClusterAccessPlanStore(state)).PlanAccessAsync(Request(), Admin);
+        var plan = await Node(new ClusterAccessPlanStore(state)).PlanAccessAsync(Request(), Admin, "tenant-a");
 
         var broken = Substitute.For<IDistributedClusterStateProvider>();
         broken.GetAsync<StoredAccessPlan>(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -178,7 +178,7 @@ public sealed class AccessPlanStoreTests
         var node = Node(new ClusterAccessPlanStore(broken));
 
         await Should.ThrowAsync<ClusterStateUnavailableException>(() =>
-            node.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, "token"), Admin));
+            node.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, "token"), Admin, "tenant-a"));
         await _rebac.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
     }
 

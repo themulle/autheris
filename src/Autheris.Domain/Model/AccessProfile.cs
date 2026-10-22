@@ -21,6 +21,12 @@ public sealed class AccessProfile
     public string? CreatedBy { get; init; }
 
     /// <summary>
+    /// EP-01: True if any target table pattern contains a wildcard ('*' or '?').
+    /// </summary>
+    public bool HasWildcardPattern =>
+        TargetTables != null && TargetTables.Exists(p => p.Contains('*') || p.Contains('?'));
+
+    /// <summary>
     /// WP-SC-16: expiry after the read-time clamp. A profile with typed assignments (as loaded for a caller: its effective, matched ones) stays active while ANY
     /// assignment is effective, so it ends at the latest <see cref="AccessProfileAssignmentRules.EffectiveUntil"/> of its assignments (null when one never lapses),
     /// never later than <see cref="ValidTo"/>. The loaded profile is cached, so every assignment expiry (individual cap, 24 h break-glass approval window,

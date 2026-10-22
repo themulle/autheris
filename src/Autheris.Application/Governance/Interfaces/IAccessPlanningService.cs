@@ -34,7 +34,7 @@ public interface IAccessPlanningService
     Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        string? tenantId = null,
+        TenantId tenantId,
         CancellationToken ct = default);
 
     /// <summary>
@@ -54,7 +54,7 @@ public interface IAccessPlanningService
     Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        string? tenantId = null,
+        TenantId tenantId,
         CancellationToken ct = default);
 
     /// <summary>

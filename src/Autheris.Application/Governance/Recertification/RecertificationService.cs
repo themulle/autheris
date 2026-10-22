@@ -18,7 +18,6 @@ public sealed class RecertificationService : IRecertificationService
 {
     private readonly IRecertificationRepository _repository;
     private readonly IFunctionalRightRepository? _functionalRightRepository;
-    private readonly IAccessPolicyRepository? _accessPolicyRepository;
     private readonly IPolicyEpochService? _epochService;
     private readonly IAuditWriter? _auditWriter;
     private readonly ILogger<RecertificationService>? _logger;
@@ -26,14 +25,12 @@ public sealed class RecertificationService : IRecertificationService
     public RecertificationService(
         IRecertificationRepository repository,
         IFunctionalRightRepository? functionalRightRepository = null,
-        IAccessPolicyRepository? accessPolicyRepository = null,
         IPolicyEpochService? epochService = null,
         IAuditWriter? auditWriter = null,
         ILogger<RecertificationService>? logger = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _functionalRightRepository = functionalRightRepository;
-        _accessPolicyRepository = accessPolicyRepository;
         _epochService = epochService;
         _auditWriter = auditWriter;
         _logger = logger;
@@ -44,9 +41,17 @@ public sealed class RecertificationService : IRecertificationService
         string name,
         RecertClass recertClass,
         DateTimeOffset? deadline = null,
+        string? assetType = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        if (!string.IsNullOrWhiteSpace(assetType) &&
+            (string.Equals(assetType, "AccessPolicy", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(assetType, "ACCESS_POLICIES", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ArgumentException("UNSUPPORTED_ASSET_TYPE", nameof(assetType));
+        }
 
         var now = DateTimeOffset.UtcNow;
         var campaignDeadline = deadline ?? now.AddDays(14); // 14-day completion deadline
@@ -101,6 +106,12 @@ public sealed class RecertificationService : IRecertificationService
         string reviewerId,
         CancellationToken ct = default)
     {
+        if (string.Equals(assetType, "AccessPolicy", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(assetType, "ACCESS_POLICIES", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("UNSUPPORTED_ASSET_TYPE", nameof(assetType));
+        }
+
         var item = new RecertificationItem(
             TenantId: tenantId.Value,
             CampaignId: campaignId,
@@ -263,27 +274,6 @@ public sealed class RecertificationService : IRecertificationService
             var groupOrRole = parts[1];
             var right = new FunctionalRight(parts[2]);
             await _functionalRightRepository.DeleteMappingAsync(tenantId, realmId, groupOrRole, right, ct).ConfigureAwait(false);
-        }
-        else if (string.Equals(assetType, "AccessPolicy", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(assetType, "ACCESS_POLICIES", StringComparison.OrdinalIgnoreCase))
-        {
-            if (_accessPolicyRepository == null)
-            {
-                throw new InvalidOperationException(
-                    $"No access policy repository is configured; the recertification asset '{assetKey}' of type '{assetType}' cannot be revoked.");
-            }
-
-            var policy = await _accessPolicyRepository.GetPolicyByIdAsync(tenantId, assetKey, ct).ConfigureAwait(false);
-            if (policy != null)
-            {
-                policy.IsActive = false;
-                await _accessPolicyRepository.UpdatePolicyAsync(policy, ct).ConfigureAwait(false);
-            }
-
-            if (_epochService != null)
-            {
-                await _epochService.IncrementEpochAsync(tenantId, ct).ConfigureAwait(false);
-            }
         }
         else
         {

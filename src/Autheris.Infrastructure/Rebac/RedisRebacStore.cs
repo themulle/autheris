@@ -34,6 +34,12 @@ public sealed class RedisRebacStore : IRebacStore
     public async ValueTask AddTupleAsync(RebacTuple tuple, CancellationToken ct = default)
     {
         ValidateTuple(tuple);
+        var parsedUser = RebacSubject.Parse(tuple.User);
+        if (!parsedUser.IsValid || !string.Equals(parsedUser.Canonical, tuple.User.Trim(), StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"ReBAC tuple 'User' '{tuple.User}' is not in canonical form.", nameof(tuple));
+        }
+
         var db = _multiplexer.GetDatabase();
         var normalized = tuple with { TenantId = NormalizeTenant(tuple.TenantId) };
         await db.HashSetAsync(TenantKey(normalized.TenantId), BuildField(normalized), JsonSerializer.Serialize(normalized, JsonOptions)).ConfigureAwait(false);

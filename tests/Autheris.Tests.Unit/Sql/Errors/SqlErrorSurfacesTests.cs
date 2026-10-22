@@ -238,7 +238,7 @@ public sealed class SqlErrorSurfacesTests
         tcs.SetException(new SqlLimitExceededException(SqlLimitKind.QueryLength, TargetSqlDialect.Oracle, 9, 8));
         sql.ExecuteQueryBufferedAsync(request, user, new TenantId("t"), Arg.Any<CancellationToken>()).Returns(tcs.Task);
 
-        var status = await manager.SubmitOrWaitAsync(request, user, new TenantId("t"), TimeSpan.FromSeconds(2));
+        var status = await manager.SubmitOrWaitAsync(request, user, new Sid("u"), new TenantId("t"), TimeSpan.FromSeconds(2));
 
         status.State.ShouldBe("FAILED");
         status.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage("SQL_LIMIT_EXCEEDED"));

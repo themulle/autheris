@@ -14,6 +14,7 @@ public interface IRecertificationService
         string name,
         RecertClass recertClass,
         DateTimeOffset? deadline = null,
+        string? assetType = null,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<RecertificationCampaign>> GetCampaignsAsync(TenantId tenantId, CancellationToken ct = default);

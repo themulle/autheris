@@ -324,7 +324,6 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
         services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
         services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
-        services.AddSingleton<Autheris.Application.Governance.Policies.IScopedAccessPolicyEngine, Autheris.Application.Governance.Policies.ScopedAccessPolicyEngine>();
         services.AddSingleton<Autheris.Application.Governance.Recertification.IRecertificationService, Autheris.Application.Governance.Recertification.RecertificationService>();
         services.AddHostedService<Autheris.Application.Governance.Recertification.RecertificationGovernorHostedService>();
 
@@ -357,7 +356,6 @@ public static class GatewayGovernanceServiceExtensions
             Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore,
             IIdentityStoreRepository,
             IFunctionalRightRepository,
-            IAccessPolicyRepository,
             IRecertificationRepository
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
@@ -388,7 +386,6 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IAccessPolicyRepository>(sp => (IAccessPolicyRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IRecertificationRepository>(sp => (IRecertificationRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());

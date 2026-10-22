@@ -20,14 +20,29 @@ public sealed class RecertificationCampaignTests
 {
     private readonly IRecertificationRepository _repository = Substitute.For<IRecertificationRepository>();
     private readonly IFunctionalRightRepository _functionalRightRepo = Substitute.For<IFunctionalRightRepository>();
-    private readonly IAccessPolicyRepository _accessPolicyRepo = Substitute.For<IAccessPolicyRepository>();
     private readonly IPolicyEpochService _epochService = Substitute.For<IPolicyEpochService>();
     private readonly IAuditWriter _auditWriter = Substitute.For<IAuditWriter>();
     private readonly RecertificationService _sut;
 
     public RecertificationCampaignTests()
     {
-        _sut = new RecertificationService(_repository, _functionalRightRepo, _accessPolicyRepo, _epochService, _auditWriter);
+        _sut = new RecertificationService(_repository, _functionalRightRepo, _epochService, _auditWriter);
+    }
+
+    [Fact]
+    public async Task CreateCampaign_WithAccessPolicyAssetType_IsRejected()
+    {
+        var tenantId = new TenantId("tenant-1");
+        await Should.ThrowAsync<ArgumentException>(() =>
+            _sut.CreateCampaignAsync(tenantId, "Campaign", RecertClass.Standard, assetType: "AccessPolicy"));
+    }
+
+    [Fact]
+    public async Task AddItem_WithAccessPolicyAssetType_IsRejected()
+    {
+        var tenantId = new TenantId("tenant-1");
+        await Should.ThrowAsync<ArgumentException>(() =>
+            _sut.AddItemAsync(tenantId, "camp-1", "AccessPolicy", "key-1", "user-1", "reviewer-1"));
     }
 
     [Fact]

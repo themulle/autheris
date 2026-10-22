@@ -181,8 +181,16 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             return RebacCheckResult.Denied;
         }
 
+        // EP-08: Canonicalize request.User; invalid subject forms fail-closed to Denied.
+        var parsedUser = RebacSubject.Parse(request.User);
+        if (!parsedUser.IsValid)
+        {
+            return RebacCheckResult.Denied;
+        }
+        var canonicalUser = parsedUser.Canonical;
+
         var tenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
-        var cacheKey = $"{request.User}#{request.Relation}@{request.Object}";
+        var cacheKey = $"{canonicalUser}#{request.Relation}@{request.Object}";
 
         var isDegraded = _degradedTenants.ContainsKey(tenant);
         long? currentGen = null;
@@ -209,7 +217,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
         try
         {
-            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false);
+            var allowed = await TraverseAndEvaluateAsync(tenant, canonicalUser, request.Relation, request.Object, depth: 0, maxDepth, onStack, visitedFailed, tracker, ct).ConfigureAwait(false);
 
             // 3. Store in cache (only if not degraded and generation is known)
             if (!isDegraded && currentGen.HasValue)
@@ -228,7 +236,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", request.User, request.Relation, request.Object, tenant);
+            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", canonicalUser, request.Relation, request.Object, tenant);
             return RebacCheckResult.Denied;
         }
     }

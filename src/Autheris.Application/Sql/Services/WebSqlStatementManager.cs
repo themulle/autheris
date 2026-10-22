@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Security;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
@@ -72,15 +73,20 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     public async Task<StatementExecutionStatus> SubmitOrWaitAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
+        Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(user);
+        if (string.IsNullOrWhiteSpace(owner.Value))
+        {
+            throw new ArgumentException("Owner Sid must not be null or whitespace.", nameof(owner));
+        }
 
         PurgeExpiredSessions();
-        string userSid = ResolveUserSid(user);
+        string userSid = owner.Value;
 
         int activeUserCount = 0;
         List<StatementSession>? userCompletedSessions = null;
@@ -147,7 +153,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         }
 
         long counter = Interlocked.Increment(ref _statementCounter);
-        string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{Guid.NewGuid().ToString("N")[..6]}";
+        string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{RandomNumberGenerator.GetHexString(32, lowercase: true)}";
         var sessionCts = new CancellationTokenSource();
         var sw = Stopwatch.StartNew();
 
@@ -177,37 +183,47 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     public async Task<StatementExecutionStatus> GetStatusOrWaitAsync(
         string statementId,
         ClaimsPrincipal user,
+        Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statementId);
         ArgumentNullException.ThrowIfNull(user);
+        if (string.IsNullOrWhiteSpace(owner.Value))
+        {
+            throw new ArgumentException("Owner Sid must not be null or whitespace.", nameof(owner));
+        }
 
         if (!_sessions.TryGetValue(statementId, out var session))
         {
             throw new KeyNotFoundException($"Statement '{statementId}' was not found or has expired.");
         }
 
-        ValidateSessionOwnership(session, user, tenantId);
+        ValidateSessionOwnership(session, owner, tenantId);
         return await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
     }
 
     public Task<bool> CancelStatementAsync(
         string statementId,
         ClaimsPrincipal user,
+        Sid owner,
         TenantId tenantId,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statementId);
         ArgumentNullException.ThrowIfNull(user);
+        if (string.IsNullOrWhiteSpace(owner.Value))
+        {
+            throw new ArgumentException("Owner Sid must not be null or whitespace.", nameof(owner));
+        }
 
         if (!_sessions.TryGetValue(statementId, out var session))
         {
             return Task.FromResult(false);
         }
 
-        ValidateSessionOwnership(session, user, tenantId);
+        ValidateSessionOwnership(session, owner, tenantId);
         session.IsCancelled = true;
         try { session.Cts.Cancel(); } catch (ObjectDisposedException) { }
         return Task.FromResult(true);
@@ -329,17 +345,13 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         return result;
     }
 
-    private static void ValidateSessionOwnership(StatementSession session, ClaimsPrincipal user, TenantId tenantId)
+    private static void ValidateSessionOwnership(StatementSession session, Sid owner, TenantId tenantId)
     {
-        string currentSid = ResolveUserSid(user);
-        if (!session.TenantId.Equals(tenantId) || !string.Equals(session.UserSid, currentSid, StringComparison.Ordinal))
+        if (!session.TenantId.Equals(tenantId) || !string.Equals(session.UserSid, owner.Value, StringComparison.Ordinal))
         {
             throw new SecurityException("Statement does not belong to the calling user or tenant.");
         }
     }
-
-    private static string ResolveUserSid(ClaimsPrincipal user) =>
-        user.FindFirst(ClaimTypes.PrimarySid)?.Value ?? user.FindFirst("sub")?.Value ?? "anonymous";
 
     private void CleanupExpiredSessions(object? state) => PurgeExpiredSessions();
 

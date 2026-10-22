@@ -465,6 +465,13 @@ public static partial class GovernanceEndpoints
         // Route (b): an individual Unmasked grant needs the data owner (or delegate) of every matched table.
         if (profile.MaskingMode == MaskingPolicyMode.Unmasked && subjectType == AccessProfileSubjectType.User && assignment.Kind == AccessProfileAssignmentKind.Standard)
         {
+            // EP-01: Individual unmasked assignment may only be approved for concrete patterns (no wildcard)
+            if (profile.HasWildcardPattern)
+            {
+                return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = "Individual unmasked assignments cannot be approved for wildcard target tables." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             var owners = context.RequestServices.GetService<IDataOwnershipRepository>();
             var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
             if (owners == null || metaRepo == null)
@@ -475,6 +482,14 @@ public static partial class GovernanceEndpoints
             var matched = (await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false))
                 .Where(t => profile.MatchesTable(t.Identifier))
                 .ToList();
+
+            // EP-01: At least one table must match
+            if (matched.Count == 0)
+            {
+                return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = "No catalogued tables match the profile target tables." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             foreach (var table in matched)
             {
                 if (!await owners.IsAuthorizedApproverForTableAsync(table.Identifier, new Sid(callerSid), ct).ConfigureAwait(false))
