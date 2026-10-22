@@ -132,7 +132,7 @@ public static class SubtreeGraphPartitioner
         var subtrees = new List<SourceSubtree>();
         foreach (var c in finalizedClusters)
         {
-            subtrees.Add(CreateSubtree(c, querySpec, fromSource, $"st{subtrees.Count}", tables));
+            subtrees.Add(CreateSubtree(c, querySpec, ((SelectStatement)statement).OrderBy, fromSource, $"st{subtrees.Count}", tables));
         }
 
         foreach (var st in subtrees)
@@ -248,6 +248,7 @@ public static class SubtreeGraphPartitioner
     private static SourceSubtree CreateSubtree(
         Cluster cluster,
         QuerySpecification querySpec,
+        OrderByClause? orderBy,
         TableSource fromSource,
         string subtreeId,
         IReadOnlyList<ResolvedSourceTable> allTables)
@@ -281,7 +282,7 @@ public static class SubtreeGraphPartitioner
         }
 
         // 2. Identify required projected items
-        var projected = DetermineProjectedItems(cluster.Tables, querySpec, pushable, allTables);
+        var projected = DetermineProjectedItems(cluster.Tables, querySpec, orderBy, pushable, allTables);
 
         return new SourceSubtree(
             SubtreeId: subtreeId,
@@ -296,6 +297,7 @@ public static class SubtreeGraphPartitioner
     private static IReadOnlyList<SelectItem> DetermineProjectedItems(
         IReadOnlyList<ResolvedSourceTable> memberTables,
         QuerySpecification querySpec,
+        OrderByClause? orderBy,
         IReadOnlyList<Expression> pushablePredicates,
         IReadOnlyList<ResolvedSourceTable> allTables)
     {
@@ -399,6 +401,20 @@ public static class SubtreeGraphPartitioner
             foreach (var cr in refs)
             {
                 ConsiderColumn(cr.Name.Parts.Count > 1 ? cr.Name.Parts[^2].Value : null, cr.Name.Parts[^1].Value);
+            }
+        }
+
+        // SQLA-17: the ORDER BY of the statement is evaluated by DuckDB on the staged table, so its subtree columns must be staged too.
+        if (orderBy != null)
+        {
+            foreach (var element in orderBy.Elements)
+            {
+                var refs = new List<ColumnReference>();
+                CollectColumnReferences(element.Expression, refs);
+                foreach (var cr in refs)
+                {
+                    ConsiderColumn(cr.Name.Parts.Count > 1 ? cr.Name.Parts[^2].Value : null, cr.Name.Parts[^1].Value);
+                }
             }
         }
 
