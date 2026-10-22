@@ -43,7 +43,14 @@ public sealed record GovernedSqlQueryRequest(
     string? DataSourceName = null,
     SqlRowLimit? RowLimit = null,
     string? Transport = null,
-    bool PlannedTableRead = false);
+    bool PlannedTableRead = false)
+{
+    /// <summary>
+    /// Issue #280: parameters whose names the gateway generated for a planned read (internal; never from client input). The setter is
+    /// internal to <c>Autheris.Application</c>, so client-facing assemblies cannot set it and JSON binding never reaches it.
+    /// </summary>
+    internal IReadOnlyDictionary<string, object?>? GatewayParameters { get; init; }
+}
 
 public sealed record GovernedSqlResult(
     string OriginalSql,

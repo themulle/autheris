@@ -10,6 +10,7 @@ using Autheris.Application.Analytics;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -186,5 +187,40 @@ public sealed class AggregationPlannerRoutingTests
         result.Metadata.Truncated.ShouldBeFalse();
         result.Groups.Count.ShouldBe(2);
         requests.Single().Sql.ShouldEndWith("LIMIT 3");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_TypedWhere_SendsGatewayParameters_NotClientParameters()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, requests) = Create([SqlRow("A", 5)], executor);
+        var where = TreeFilterClauseBuilder.Build(
+            new TreeComparison("department", TreeFilterOperator.Eq, "north"),
+            _ => new ColumnRef("department", ColumnValueKind.String));
+
+        await service.ExecuteAggregationAsync(Principal(), Query() with { Where = where });
+
+        var request = requests.Single();
+        request.Parameters.ShouldBeNull();
+        request.PlannedTableRead.ShouldBeTrue();
+        request.Sql.ShouldNotContain("north");
+        request.GatewayParameters.ShouldNotBeNull();
+        request.GatewayParameters.Keys.ShouldNotBeEmpty();
+        request.GatewayParameters.Keys.ShouldAllBe(k => k.TrimStart('@').StartsWith("__gql_tf_", StringComparison.Ordinal));
+        request.GatewayParameters.Values.ShouldContain("north");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_WithoutWhere_SendsNoGatewayParameters()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, requests) = Create([SqlRow("A", 5)], executor);
+
+        await service.ExecuteAggregationAsync(Principal(), Query());
+
+        requests.Single().GatewayParameters.ShouldBeNull();
+        requests.Single().Parameters.ShouldBeNull();
     }
 }
