@@ -232,4 +232,23 @@ public class ConsentDecisionGuardTests
         await recorder.RecordAsync(DecisionPrincipals.AppIdOnly("app-2"), "not-person", TenantId.LegacySingleTenant);
         logs.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Error);
     }
+
+    [Theory]
+    [InlineData("preferred_username", "service-account-ci-bot", "azp")]
+    [InlineData("gty", "client-credentials", "client_id")]
+    public void GOV15_ClientCredentialsTokenWithPreferredUsername_IsDeniedAsNotPerson(string markerType, string markerValue, string appIdType)
+    {
+        var identity = new ClaimsIdentity(
+        [
+            new Claim("preferred_username", "service-account-ci-bot"),
+            new Claim(markerType, markerValue),
+            new Claim(appIdType, "ci-bot"),
+            new Claim(ClaimTypes.PrimarySid, Sid)
+        ], "TestAuth");
+
+        var verdict = Guard.Evaluate(new ClaimsPrincipal(identity));
+
+        verdict.Allowed.ShouldBeFalse();
+        verdict.ReasonClass.ShouldBe(ConsentDecisionDenialReasons.NotPerson);
+    }
 }
