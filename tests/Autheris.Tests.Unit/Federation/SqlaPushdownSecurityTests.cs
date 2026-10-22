@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Federation.Optimization;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.Sql.Services;
