@@ -34,16 +34,16 @@ public sealed class RebacCacheGenerationTests
             NullLogger<ZanzibarRebacEvaluator>.Instance,
             eventBus: bus);
 
-        await _store.AddTupleAsync(new RebacTuple("tenant1", "user:alice", "viewer", "doc:1"));
+        await _store.AddTupleAsync(new RebacTuple("tenant1", "alice", "viewer", "doc:1"));
 
-        var request = new RebacCheckRequest("tenant1", "user:alice", "viewer", "doc:1");
+        var request = new RebacCheckRequest("tenant1", "alice", "viewer", "doc:1");
 
         // First check populates cache
         var res1 = await evaluator.CheckAsync(request);
         res1.Allowed.ShouldBeTrue();
 
         // Mutate store directly without invalidation:
-        await _store.DeleteTupleAsync(new RebacTuple("tenant1", "user:alice", "viewer", "doc:1"));
+        await _store.DeleteTupleAsync(new RebacTuple("tenant1", "alice", "viewer", "doc:1"));
 
         // Second check hits cache (still allowed because cached)
         var res2 = await evaluator.CheckAsync(request);

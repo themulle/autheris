@@ -55,11 +55,11 @@ public sealed class CrossChannelIntegrationFixesTests
         // "can_query" is inherited by "viewer", "editor", "owner"
         // "viewer" is inherited by "editor" and "owner"
         // "editor" is inherited by "owner"
-        // Direct tuple: user:alice is "owner" of "table:sales.analytics.orders"
-        await store.AddTupleAsync(new RebacTuple("tenant-1", "user:alice", "owner", "table:sales.analytics.orders"));
+        // Direct tuple: alice is "owner" of "table:sales.analytics.orders"
+        await store.AddTupleAsync(new RebacTuple("tenant-1", "alice", "owner", "table:sales.analytics.orders"));
 
         // Act
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("tenant-1", "user:alice", "can_query", "table:sales.analytics.orders"));
+        var result = await evaluator.CheckAsync(new RebacCheckRequest("tenant-1", "alice", "can_query", "table:sales.analytics.orders"));
 
         // Assert
         result.Allowed.ShouldBeTrue();

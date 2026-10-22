@@ -24,13 +24,13 @@ public sealed class SecurityReviewRecheck3Tests
     public async Task E3_BatchCheck_ItemOfForeignTenant_IsDenied()
     {
         var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        await store.AddTupleAsync(new RebacTuple("tenant-b", "user:alice", "viewer", "doc:1"));
+        await store.AddTupleAsync(new RebacTuple("tenant-b", "alice", "viewer", "doc:1"));
         var evaluator = new ZanzibarRebacEvaluator(
             store,
             Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true, MaxTraversalDepth = 5, CacheTtlSeconds = 10 } }),
             NullLogger<ZanzibarRebacEvaluator>.Instance);
 
-        var foreign = new RebacCheckRequest("tenant-b", "user:alice", "viewer", "doc:1");
+        var foreign = new RebacCheckRequest("tenant-b", "alice", "viewer", "doc:1");
         var result = await evaluator.BatchCheckAsync(new RebacBatchCheckRequest("tenant-a", [foreign]));
 
         result.Decisions[foreign].ShouldBeFalse();

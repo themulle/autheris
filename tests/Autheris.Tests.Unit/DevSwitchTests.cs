@@ -43,7 +43,11 @@ public sealed class DevSwitchTests
         var (config, _) = Resolve("Development");
         var options = Bind(config);
 
+#if AUTHERIS_TEST_AUTH
         options.Authentication.EnableTestAuthHandler.ShouldBeTrue();
+#else
+        options.Authentication.EnableTestAuthHandler.ShouldBeFalse();
+#endif
         options.GraphQL.EnableBananaCakePop.ShouldBeTrue();
         options.GraphQL.EnableIntrospection.ShouldBeTrue();
         options.GovernanceDb.SeedDemoData.ShouldBe(true);

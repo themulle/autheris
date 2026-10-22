@@ -38,11 +38,11 @@ public sealed class RebacZanzibarTests
     public async Task RebacEvaluator_EvaluatesDirectRelationship_Permitted()
     {
         // Arrange
-        var tuple = new RebacTuple("tenant-acme", "user:alice", "viewer", "document:doc-101");
+        var tuple = new RebacTuple("tenant-acme", "alice", "viewer", "document:doc-101");
         await _store.AddTupleAsync(tuple);
 
         // Act
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:alice", "viewer", "document:doc-101"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "alice", "viewer", "document:doc-101"));
 
         // Assert
         result.Allowed.ShouldBeTrue();
@@ -52,10 +52,10 @@ public sealed class RebacZanzibarTests
     public async Task SEC_REBAC_02_RebacStore_EnforcesStrictTenantBoundary_DeniesCrossTenantTupleAccess()
     {
         // Arrange: Alice has viewer on doc-101 in tenant-A
-        await _store.AddTupleAsync(new RebacTuple("tenant-a", "user:alice", "viewer", "document:doc-101"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-a", "alice", "viewer", "document:doc-101"));
 
         // Act: Alice checks viewer on doc-101 in tenant-B
-        var resultTenantB = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-b", "user:alice", "viewer", "document:doc-101"));
+        var resultTenantB = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-b", "alice", "viewer", "document:doc-101"));
 
         // Assert: Access must be denied across tenant boundary
         resultTenantB.Allowed.ShouldBeFalse();
@@ -66,13 +66,13 @@ public sealed class RebacZanzibarTests
     {
         // Arrange: Owner inherits Editor, Editor inherits Viewer
         // Alice is assigned "owner" on doc-200
-        await _store.AddTupleAsync(new RebacTuple("tenant-acme", "user:alice", "owner", "document:doc-200"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-acme", "alice", "owner", "document:doc-200"));
 
         // Act
-        var checkOwner = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:alice", "owner", "document:doc-200"));
-        var checkEditor = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:alice", "editor", "document:doc-200"));
-        var checkViewer = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:alice", "viewer", "document:doc-200"));
-        var checkAdmin = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:alice", "superadmin", "document:doc-200"));
+        var checkOwner = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "alice", "owner", "document:doc-200"));
+        var checkEditor = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "alice", "editor", "document:doc-200"));
+        var checkViewer = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "alice", "viewer", "document:doc-200"));
+        var checkAdmin = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "alice", "superadmin", "document:doc-200"));
 
         // Assert: owner, editor and viewer are transitively permitted; undeclared superadmin is denied
         checkOwner.Allowed.ShouldBeTrue();
@@ -89,7 +89,7 @@ public sealed class RebacZanzibarTests
         await _store.AddTupleAsync(new RebacTuple("tenant-cycle", "document:docA", "parent", "document:docB"));
 
         // Act: Evaluating viewer on docA where user has no valid relation (triggers cycle)
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cycle", "user:mallory", "viewer", "document:docA"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cycle", "mallory", "viewer", "document:docA"));
 
         // Assert: Must not crash with StackOverflowException, must fail-closed (Allowed: false)
         result.Allowed.ShouldBeFalse();
@@ -99,11 +99,11 @@ public sealed class RebacZanzibarTests
     public async Task SEC_REBAC_05_RebacEvaluator_InvalidatesCachedDecisions_WhenTuplesAreDeleted()
     {
         // Arrange
-        var tuple = new RebacTuple("tenant-cache", "user:bob", "editor", "document:doc-300");
+        var tuple = new RebacTuple("tenant-cache", "bob", "editor", "document:doc-300");
         await _store.AddTupleAsync(tuple);
 
         // 1. Initial check (caches Allowed = true)
-        var initialCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cache", "user:bob", "editor", "document:doc-300"));
+        var initialCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cache", "bob", "editor", "document:doc-300"));
         initialCheck.Allowed.ShouldBeTrue();
 
         // 2. Delete tuple and invalidate cache
@@ -111,7 +111,7 @@ public sealed class RebacZanzibarTests
         await _evaluator.InvalidateTenantCacheAsync("tenant-cache");
 
         // 3. Second check must reflect the revocation
-        var revokedCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cache", "user:bob", "editor", "document:doc-300"));
+        var revokedCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cache", "bob", "editor", "document:doc-300"));
         revokedCheck.Allowed.ShouldBeFalse();
     }
 
@@ -119,11 +119,11 @@ public sealed class RebacZanzibarTests
     public async Task RebacEvaluator_ResolvesHierarchicalParentRelationship()
     {
         // Arrange: Alice is viewer of "folder:finance". "document:budget2026" has parent "folder:finance".
-        await _store.AddTupleAsync(new RebacTuple("tenant-acme", "user:alice", "viewer", "folder:finance"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-acme", "alice", "viewer", "folder:finance"));
         await _store.AddTupleAsync(new RebacTuple("tenant-acme", "folder:finance", "parent", "document:budget2026"));
 
         // Act: Check if Alice has viewer access on document:budget2026
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:alice", "viewer", "document:budget2026"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "alice", "viewer", "document:budget2026"));
 
         // Assert: Parent relationship delegation grants access
         result.Allowed.ShouldBeTrue();
@@ -134,10 +134,10 @@ public sealed class RebacZanzibarTests
     {
         // Arrange: "group:engineers" has "viewer" on "repo:gateway". Bob is "member" of "group:engineers".
         await _store.AddTupleAsync(new RebacTuple("tenant-acme", "group:engineers#member", "viewer", "repo:gateway"));
-        await _store.AddTupleAsync(new RebacTuple("tenant-acme", "user:bob", "member", "group:engineers"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-acme", "bob", "member", "group:engineers"));
 
         // Act: Check if user:bob has viewer on repo:gateway
-        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "user:bob", "viewer", "repo:gateway"));
+        var result = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-acme", "bob", "viewer", "repo:gateway"));
 
         // Assert: User-set expansion grants access
         result.Allowed.ShouldBeTrue();
@@ -149,14 +149,14 @@ public sealed class RebacZanzibarTests
         // Arrange
         var dataLoader = new RebacBatchDataLoader(_evaluator, NullLogger<RebacBatchDataLoader>.Instance);
 
-        await _store.AddTupleAsync(new RebacTuple("tenant-batch", "user:alice", "viewer", "doc:1"));
-        await _store.AddTupleAsync(new RebacTuple("tenant-batch", "user:alice", "viewer", "doc:2"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-batch", "alice", "viewer", "doc:1"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-batch", "alice", "viewer", "doc:2"));
         // doc:3 is NOT granted
 
-        var req1 = new RebacCheckRequest("tenant-batch", "user:alice", "viewer", "doc:1");
-        var req2 = new RebacCheckRequest("tenant-batch", "user:alice", "viewer", "doc:2");
-        var req3 = new RebacCheckRequest("tenant-batch", "user:alice", "viewer", "doc:3");
-        var req1Duplicate = new RebacCheckRequest("tenant-batch", "user:alice", "viewer", "doc:1");
+        var req1 = new RebacCheckRequest("tenant-batch", "alice", "viewer", "doc:1");
+        var req2 = new RebacCheckRequest("tenant-batch", "alice", "viewer", "doc:2");
+        var req3 = new RebacCheckRequest("tenant-batch", "alice", "viewer", "doc:3");
+        var req1Duplicate = new RebacCheckRequest("tenant-batch", "alice", "viewer", "doc:1");
 
         // Act: Enqueue checks into DataLoader
         dataLoader.Enqueue(req1);
@@ -176,14 +176,14 @@ public sealed class RebacZanzibarTests
     [Fact]
     public async Task CanQuery_IsInheritedFrom_Viewer_Editor_And_Owner()
     {
-        await _store.AddTupleAsync(new RebacTuple("tenant-test", "user:david", "viewer", "table:lakehouse.dbo.orders"));
-        await _store.AddTupleAsync(new RebacTuple("tenant-test", "user:ed", "editor", "table:sales.public.orders"));
-        await _store.AddTupleAsync(new RebacTuple("tenant-test", "user:owen", "owner", "table:conf.client"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-test", "david", "viewer", "table:lakehouse.dbo.orders"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-test", "ed", "editor", "table:sales.public.orders"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-test", "owen", "owner", "table:conf.client"));
 
-        var davidCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:david", "can_query", "table:lakehouse.dbo.orders"));
-        var edCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:ed", "can_query", "table:sales.public.orders"));
-        var owenCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:owen", "can_query", "table:conf.client"));
-        var strangerCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:stranger", "can_query", "table:lakehouse.dbo.orders"));
+        var davidCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "david", "can_query", "table:lakehouse.dbo.orders"));
+        var edCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "ed", "can_query", "table:sales.public.orders"));
+        var owenCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "owen", "can_query", "table:conf.client"));
+        var strangerCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "stranger", "can_query", "table:lakehouse.dbo.orders"));
 
         davidCheck.Allowed.ShouldBeTrue();
         edCheck.Allowed.ShouldBeTrue();
@@ -205,13 +205,13 @@ public sealed class RebacZanzibarTests
         };
         var evaluator = new ZanzibarRebacEvaluator(store, Options.Create(options), NullLogger<ZanzibarRebacEvaluator>.Instance);
 
-        await store.AddTupleAsync(new RebacTuple("tenant-test", "user:david", "viewer", "table:lakehouse.dbo.orders"));
-        await store.AddTupleAsync(new RebacTuple("tenant-test", "user:ed", "editor", "table:sales.public.orders"));
-        await store.AddTupleAsync(new RebacTuple("tenant-test", "user:owen", "owner", "table:conf.client"));
+        await store.AddTupleAsync(new RebacTuple("tenant-test", "david", "viewer", "table:lakehouse.dbo.orders"));
+        await store.AddTupleAsync(new RebacTuple("tenant-test", "ed", "editor", "table:sales.public.orders"));
+        await store.AddTupleAsync(new RebacTuple("tenant-test", "owen", "owner", "table:conf.client"));
 
-        var davidCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:david", "can_query", "table:lakehouse.dbo.orders"));
-        var edCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:ed", "can_query", "table:sales.public.orders"));
-        var owenCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:owen", "can_query", "table:conf.client"));
+        var davidCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "david", "can_query", "table:lakehouse.dbo.orders"));
+        var edCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "ed", "can_query", "table:sales.public.orders"));
+        var owenCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "owen", "can_query", "table:conf.client"));
 
         davidCheck.Allowed.ShouldBeFalse();
         edCheck.Allowed.ShouldBeTrue();
