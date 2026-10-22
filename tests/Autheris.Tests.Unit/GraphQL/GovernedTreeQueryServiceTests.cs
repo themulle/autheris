@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using BinaryOperator = TrinoSqlEngine.Ast.Nodes.BinaryOperator;
 
 namespace Autheris.Tests.Unit.GraphQL;
 
@@ -313,11 +314,10 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             var articles = MetaOf(Articles, "BLOG", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
             a[Articles] = Allowed(articles) with
             {
-                Decision = TableAccessDecision.Allowed(
+                Decision = TypedTreeRowPolicy.Allowed(
                     Articles,
                     new Dictionary<string, ColumnAccessLevel> { ["title"] = ColumnAccessLevel.Mask },
-                    rowFilterSql: "\"author_id\" = 1",
-                    hasUnconstrainedColumnAllow: true)
+                    TypedTreeRowPolicy.Int("author_id", BinaryOperator.Equal, 1))
             };
         });
 
@@ -370,11 +370,10 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
             a[CrmArticles] = Allowed(child) with
             {
-                Decision = TableAccessDecision.Allowed(
+                Decision = TypedTreeRowPolicy.Allowed(
                     CrmArticles,
                     new Dictionary<string, ColumnAccessLevel> { ["title"] = ColumnAccessLevel.Mask },
-                    rowFilterSql: "\"author_id\" = 1",
-                    hasUnconstrainedColumnAllow: true)
+                    TypedTreeRowPolicy.Int("author_id", BinaryOperator.Equal, 1))
             };
         });
 
@@ -673,8 +672,8 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     private Fixture CreateComposite(
         Dictionary<string, ColumnAccessLevel>? orderAccess = null,
         Dictionary<string, ColumnAccessLevel>? lineAccess = null,
-        string? orderFilter = null,
-        string? lineFilter = null)
+        IRowPolicy? orderFilter = null,
+        IRowPolicy? lineFilter = null)
     {
         SeedComposite();
         return Create(a =>
@@ -682,10 +681,10 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             var orders = Meta(Orders, "blog", OrderColumns);
             var lines = Meta(Lines, "blog", LineColumns);
             a[Orders] = new ResolvedTableAccess(orders,
-                TableAccessDecision.Allowed(Orders, orderAccess ?? new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: orderFilter, hasUnconstrainedColumnAllow: true),
+                TypedTreeRowPolicy.Allowed(Orders, orderAccess ?? new Dictionary<string, ColumnAccessLevel>(), orderFilter),
                 new TenantId("t1"), new Sid("S-1-5-21-DAVID"), new ClaimsPrincipal());
             a[Lines] = new ResolvedTableAccess(lines,
-                TableAccessDecision.Allowed(Lines, lineAccess ?? new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: lineFilter, hasUnconstrainedColumnAllow: true),
+                TypedTreeRowPolicy.Allowed(Lines, lineAccess ?? new Dictionary<string, ColumnAccessLevel>(), lineFilter),
                 new TenantId("t1"), new Sid("S-1-5-21-DAVID"), new ClaimsPrincipal());
         });
     }
@@ -744,7 +743,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     [Fact]
     public async Task CompositeRelation_RowFilterAppliedPerLevel()
     {
-        var fixture = CreateComposite(orderFilter: "\"name\" <> 'o3'", lineFilter: "\"label\" <> 'L10'");
+        var fixture = CreateComposite(
+            orderFilter: TypedTreeRowPolicy.Text("name", BinaryOperator.NotEqual, "o3"),
+            lineFilter: TypedTreeRowPolicy.Text("label", BinaryOperator.NotEqual, "L10"));
 
         using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), OrdersWithLines(3), null);
 
