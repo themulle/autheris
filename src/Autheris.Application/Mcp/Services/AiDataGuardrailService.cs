@@ -469,8 +469,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 var visibleKeys = visibleTables.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 queries = queries.Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()))).ToList();
             }
-            else if (!isMcpAuthBypassed && !isAdmin && string.Equals(sessionContext.UserSid, "ANONYMOUS_MCP_CLIENT", StringComparison.OrdinalIgnoreCase))
+            else if (!isMcpAuthBypassed && !isAdmin)
             {
+                // MCP-15: fail closed - without a consent repository visibility cannot be evaluated (this also covers the anonymous client).
                 queries = Array.Empty<GoldenQuery>();
             }
 
