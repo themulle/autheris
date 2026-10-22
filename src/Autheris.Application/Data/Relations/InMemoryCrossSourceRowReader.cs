@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
@@ -26,57 +25,24 @@ public sealed class InMemoryCrossSourceRowReader : ICrossSourceRowReader
     }
 
     public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadRowsByKeysAsync(
-        TableMetadata targetTable,
-        IReadOnlyList<string> joinKeyColumns,
-        IReadOnlyList<CompositeKey> batchKeys,
+        CrossSourceKeyReadRequest request,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(targetTable);
-        ArgumentNullException.ThrowIfNull(joinKeyColumns);
-        ArgumentNullException.ThrowIfNull(batchKeys);
+        ArgumentNullException.ThrowIfNull(request);
 
-        if (!_tables.TryGetValue(targetTable.Identifier, out var rows) || rows.Count == 0 || batchKeys.Count == 0)
+        if (!_tables.TryGetValue(request.Target.Identifier, out var rows) || rows.Count == 0 || request.Keys.Count == 0)
         {
             return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(Array.Empty<IReadOnlyDictionary<string, object?>>());
         }
 
-        var keySet = new HashSet<CompositeKey>(batchKeys);
+        var keySet = new HashSet<CompositeKey>(request.Keys);
         var matched = new List<IReadOnlyDictionary<string, object?>>();
 
         foreach (var row in rows)
         {
-            if (CrossSourceRelationResolver.TryExtractKey(row, joinKeyColumns, out var key) && keySet.Contains(key))
+            if (CrossSourceRelationResolver.TryExtractKey(row, request.JoinKeyColumns, out var key) && keySet.Contains(key))
             {
                 matched.Add(row);
-            }
-        }
-
-        return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(matched);
-    }
-
-    public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadRowsForFilterAsync(
-        TableMetadata targetTable,
-        string filterSql,
-        int maxRows,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(targetTable);
-
-        if (!_tables.TryGetValue(targetTable.Identifier, out var rows) || rows.Count == 0)
-        {
-            return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(Array.Empty<IReadOnlyDictionary<string, object?>>());
-        }
-
-        var matched = new List<IReadOnlyDictionary<string, object?>>();
-        foreach (var row in rows)
-        {
-            if (string.IsNullOrWhiteSpace(filterSql) || StreamingRowFilterAstEvaluator.Matches(row, filterSql))
-            {
-                matched.Add(row);
-                if (maxRows > 0 && matched.Count >= maxRows)
-                {
-                    break;
-                }
             }
         }
 

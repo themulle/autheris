@@ -467,4 +467,27 @@ public sealed class TableRelation
 
     /// <summary>Issue #75: Explicitly enables resolving this relation across distinct data sources via gateway-level batched key lookup.</summary>
     public bool AllowCrossDataSource { get; set; }
+
+    /// <summary>
+    /// TREE-01: the same relation seen from the other side: parent and child (identifier, id, join keys) are swapped, <c>OneToMany</c> and
+    /// <c>ManyToOne</c> trade places, <c>OneToOne</c> stays. A relation stored in the reverse direction of a navigation is inverted before use.
+    /// </summary>
+    public TableRelation Inverted() => new()
+    {
+        Id = Id,
+        ParentTableId = ChildTableId,
+        ParentTableIdentifier = ChildTableIdentifier,
+        ChildTableId = ParentTableId,
+        ChildTableIdentifier = ParentTableIdentifier,
+        RelationName = RelationName,
+        JoinKeysParent = JoinKeysChild,
+        JoinKeysChild = JoinKeysParent,
+        Cardinality = Cardinality switch
+        {
+            RelationCardinality.OneToMany => RelationCardinality.ManyToOne,
+            RelationCardinality.ManyToOne => RelationCardinality.OneToMany,
+            _ => Cardinality
+        },
+        AllowCrossDataSource = AllowCrossDataSource
+    };
 }

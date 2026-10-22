@@ -524,11 +524,14 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     if (_relationRepository != null)
                     {
                         var parentRels = await _relationRepository.GetRelationsForTableAsync(root.Table, ct).ConfigureAwait(false);
+                        // TREE-01: a forward match is used as stored; a relation stored in the reverse direction is inverted so that the
+                        // resolver always reads the child table of the navigation.
                         relModel = parentRels.FirstOrDefault(r =>
-                            (r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
-                             r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns)) ||
-                            (r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
-                             r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns)));
+                            r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
+                            r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns));
+                        relModel ??= parentRels.FirstOrDefault(r =>
+                            r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
+                            r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns))?.Inverted();
                     }
 
                     relModel ??= new TableRelation
@@ -541,6 +544,11 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                         Cardinality = cr.IsList ? RelationCardinality.OneToMany : RelationCardinality.ManyToOne,
                         AllowCrossDataSource = true
                     };
+
+                    if (!relModel.ParentTableIdentifier.Equals(root.Table) || !relModel.ChildTableIdentifier.Equals(cr.Child.Table))
+                    {
+                        throw new InvalidOperationException("The cross-source relation does not connect the parent table with the requested child table.");
+                    }
 
                     var crossRequest = new CrossSourceRelationRequest(
                         Relation: relModel,

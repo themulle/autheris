@@ -285,7 +285,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
     }
 
     [Fact]
-    public async Task CrossSourceFilterAndSort_EnforcesMaxFilterKeySetAndRejectsCrossSourceSort()
+    public async Task CrossSourceSort_IsRejected()
     {
         // Arrange
         var ordersMeta = CreateOrdersTable();
@@ -324,7 +324,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             rowReader,
             new SimpleMaskingProvider(),
             new FakeAuditLogRepository(),
-            options: Options.Create(new CrossSourceRelationOptions { MaxCrossSourceFilterKeys = 2 }));
+            options: Options.Create(new CrossSourceRelationOptions()));
 
         var relation = new TableRelation
         {
@@ -336,14 +336,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             AllowCrossDataSource = true
         };
 
-        // 1. Filter matching 3 keys when MaxCrossSourceFilterKeys = 2 fails closed with CROSS_SOURCE_FILTER_KEY_SET_EXCEEDED
-        var exceedAct = () => resolver.ResolveCrossSourceFilterKeysAsync(
-            new CrossSourceFilterPushdownRequest(relation, "region = 'EU'", ["region"], CreatePrincipal(), DefaultTenant));
-
-        var exceedEx = await exceedAct.Should().ThrowAsync<CrossSourceRelationException>();
-        exceedEx.Which.ErrorCode.Should().Be(CrossSourceRelationErrorCodes.CrossSourceFilterKeySetExceeded);
-
-        // 2. Sorting parent by cross-source relation fails with CROSS_SOURCE_SORT_NOT_SUPPORTED
+        // Sorting parent by cross-source relation fails with CROSS_SOURCE_SORT_NOT_SUPPORTED
         var sortAct = () => resolver.ResolveRelationAsync(
             new CrossSourceRelationRequest(
                 relation,
@@ -712,6 +705,83 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
 
         var ex = await act.Should().ThrowAsync<CrossSourceRelationException>();
         ex.Which.ErrorCode.Should().Be(CrossSourceRelationErrorCodes.CrossSourceRelationKeyNotClear);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ResolveRelation_ChildWithVirtualFilter_Forbidden()
+    {
+        // VF-02: a Virtual Filter is a subquery; the in-memory evaluation cannot enforce it, so the child read is refused.
+        var (resolver, relation, customers, pdp) = CreateTenantedResolver(
+        [
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice", ["tenant_id"] = "tenant-a" }
+        ]);
+        pdp.SetDecision(customers.Identifier, TableAccessDecision.Allowed(
+            customers.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true) with { MandatoryRowPredicateSql = "EXISTS (SELECT 1)", AppliedVirtualFilters = ["vf1"] });
+        var parentRows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["customer_id"] = 10 } };
+
+        var act = () => resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        await act.Should().ThrowAsync<GatewayForbiddenException>();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ResolveRelation_ChildRowWithNullOrOtherTenant_Dropped()
+    {
+        // VF-03: a row without a tenant value (NULL) or with another tenant never attaches.
+        var (resolver, relation, _, _) = CreateTenantedResolver(
+        [
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "NullTenant", ["tenant_id"] = null },
+            new Dictionary<string, object?> { ["id"] = 20, ["name"] = "CaseTenant", ["tenant_id"] = "TENANT-A" },
+            new Dictionary<string, object?> { ["id"] = 30, ["name"] = "Own", ["tenant_id"] = "tenant-a" }
+        ]);
+        var parentRows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["customer_id"] = 10 },
+            new Dictionary<string, object?> { ["customer_id"] = 20 },
+            new Dictionary<string, object?> { ["customer_id"] = 30 }
+        };
+
+        var result = await resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        result.ManyToOneByParentIndex[0].Should().BeNull();
+        result.ManyToOneByParentIndex[1].Should().BeNull();
+        result.ManyToOneByParentIndex[2]!["name"].Should().Be("Own");
+    }
+
+    private static (CrossSourceRelationResolver Resolver, TableRelation Relation, TableMetadata Customers, FakePolicyDecisionPoint Pdp) CreateTenantedResolver(
+        IEnumerable<IReadOnlyDictionary<string, object?>> customerRows)
+    {
+        var orders = CreateOrdersTable();
+        var customers = CreateCustomersTable();
+        var pdp = new FakePolicyDecisionPoint();
+        pdp.SetDecision(orders.Identifier, TableAccessDecision.Allowed(
+            orders.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["order_id"] = ColumnAccessLevel.Clear, ["customer_id"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true));
+        pdp.SetDecision(customers.Identifier, TableAccessDecision.Allowed(
+            customers.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true));
+        var rowReader = new InMemoryCrossSourceRowReader();
+        rowReader.SeedTable(customers.Identifier, customerRows);
+        var resolver = new CrossSourceRelationResolver(
+            new FakeMetadataRepository(orders, customers), pdp, rowReader, new SimpleMaskingProvider(), new FakeAuditLogRepository(),
+            options: Options.Create(new CrossSourceRelationOptions()));
+        var relation = new TableRelation
+        {
+            ParentTableIdentifier = orders.Identifier,
+            ChildTableIdentifier = customers.Identifier,
+            RelationName = "customer",
+            JoinKeysParent = ["customer_id"],
+            JoinKeysChild = ["id"],
+            Cardinality = RelationCardinality.ManyToOne,
+            AllowCrossDataSource = true
+        };
+        return (resolver, relation, customers, pdp);
     }
 
     // =========================================================================
