@@ -20,17 +20,22 @@ using Microsoft.Extensions.Options;
 public sealed class AttributeValidatingConsentRepository : IConsentRepository, IConsentDescriptionRepository
 {
     private readonly IConsentRepository _inner;
-    private readonly ICallerAttributeRegistry _registry;
-    private readonly ITableMetadataRepository _tables;
-    private readonly CallerAttributeOptions _options;
+    private readonly IConsentMaterializationGuard _guard;
 
     public AttributeValidatingConsentRepository(
         IConsentRepository inner, ICallerAttributeRegistry registry, ITableMetadataRepository tables, IOptions<GatewayOptions> options)
+        : this(inner, new CallerAttributeConsentGuard(
+            () => registry ?? throw new ArgumentNullException(nameof(registry)),
+            () => tables ?? throw new ArgumentNullException(nameof(tables)),
+            options))
+    {
+    }
+
+    /// <summary>GOV-12: the decorator delegates to the shared materialisation guard (single implementation of the checks).</summary>
+    public AttributeValidatingConsentRepository(IConsentRepository inner, IConsentMaterializationGuard guard)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _tables = tables ?? throw new ArgumentNullException(nameof(tables));
-        _options = options?.Value?.CallerAttributes ?? new CallerAttributeOptions();
+        _guard = guard ?? throw new ArgumentNullException(nameof(guard));
     }
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
@@ -80,19 +85,7 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
     private async Task ValidateAsync(Consent consent, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(consent);
-        ConsentRowFilterAttributeValidator.ValidateShape(consent.RowFilters);
-        bool hasAttribute = consent.RowFilters.Any(f => string.Equals(f.ValueSource, ConsentRowFilterAttributeValidator.UserAttributeSource, StringComparison.OrdinalIgnoreCase));
-        var snapshot = _options.Enabled || hasAttribute ? await _registry.GetAsync(ct).ConfigureAwait(false) : CallerAttributeSnapshot.Empty;
-        if (_options.Enabled && ConsentRowFilterAttributeValidator.IsAttributeSource(consent, snapshot, _options))
-        {
-            throw new InvalidOperationException("A consent on a caller attribute source table is refused: the table is read with the gateway service identity.");
-        }
-
-        if (hasAttribute)
-        {
-            var metadata = await _tables.GetTableMetadataAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
-            ConsentRowFilterAttributeValidator.ValidateAgainstRegistry(consent, snapshot, _options, metadata);
-        }
+        await _guard.EnsureMayMaterializeAsync(consent.TenantId, consent.TableIdentifier, consent.RowFilters, ct).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>

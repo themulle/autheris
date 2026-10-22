@@ -25,16 +25,24 @@ public static class ConsentRowFilterAttributeValidator
         Consent consent, CallerAttributeSnapshot snapshot, CallerAttributeOptions options, TableMetadata? metadata)
     {
         ArgumentNullException.ThrowIfNull(consent);
+        ValidateAgainstRegistry(consent.TenantId, consent.RowFilters, snapshot, options, metadata);
+    }
+
+    /// <summary>The registry rules for the filters of a consent of <paramref name="tenant"/> (also used before a consent object exists).</summary>
+    public static void ValidateAgainstRegistry(
+        TenantId tenant, IEnumerable<ConsentRowFilter> filters, CallerAttributeSnapshot snapshot, CallerAttributeOptions options, TableMetadata? metadata)
+    {
+        ArgumentNullException.ThrowIfNull(filters);
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(options);
-        foreach (var filter in consent.RowFilters.Where(f => string.Equals(f.ValueSource, UserAttributeSource, StringComparison.OrdinalIgnoreCase)))
+        foreach (var filter in filters.Where(f => string.Equals(f.ValueSource, UserAttributeSource, StringComparison.OrdinalIgnoreCase)))
         {
             if (!options.Enabled)
             {
                 throw Refuse(filter, "caller attributes are disabled");
             }
 
-            if (!snapshot.TryGetDefinition(consent.TenantId, filter.UserAttribute!, out var definition))
+            if (!snapshot.TryGetDefinition(tenant, filter.UserAttribute!, out var definition))
             {
                 throw Refuse(filter, "the attribute is not registered and active");
             }
@@ -61,11 +69,17 @@ public static class ConsentRowFilterAttributeValidator
     /// A-10: a consent on the table an attribute-table provider reads would make the privileged read reachable through the data channels
     /// (BC-129-11). Refused unless the table is listed in <c>AllowAttributeSourceInCatalog</c>.
     /// </summary>
-    public static bool IsAttributeSource(Consent consent, CallerAttributeSnapshot snapshot, CallerAttributeOptions options)
+    public static bool IsAttributeSource(Consent consent, CallerAttributeSnapshot snapshot, CallerAttributeOptions options) =>
+        IsAttributeSource(consent.TableIdentifier, snapshot, options);
+
+    /// <summary>
+    /// GOV-12: the definitions of ALL tenants are evaluated. The attribute table is read with the gateway service identity, so a
+    /// consent of another tenant on the same physical table would expose it just the same.
+    /// </summary>
+    public static bool IsAttributeSource(TableIdentifier table, CallerAttributeSnapshot snapshot, CallerAttributeOptions options)
     {
-        var table = consent.TableIdentifier;
         string qualified = $"{table.Schema}.{table.TableName}";
-        foreach (var definition in snapshot.Definitions.Where(d => d.Provider.Kind == CallerAttributeProviderBinding.AttributeTable && d.Tenant == consent.TenantId))
+        foreach (var definition in snapshot.Definitions.Where(d => d.Provider.Kind == CallerAttributeProviderBinding.AttributeTable))
         {
             if (!AttributeTableSpec.TryParse(definition.Provider.Config, out var spec, out _) ||
                 !string.Equals(spec!.DataSource, table.Domain, StringComparison.OrdinalIgnoreCase))

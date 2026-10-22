@@ -50,6 +50,8 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     private readonly ICallerContextProvider? _callerContextProvider;
     private readonly IEventBus? _eventBus;
 
+    private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
+
     public SqlServerGovernanceRepository(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
@@ -58,8 +60,10 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
         ILogger<SqlServerGovernanceRepository>? logger = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);

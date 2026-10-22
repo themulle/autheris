@@ -366,11 +366,16 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<TRepository>());
         // REQ-GOV-129 (A-9): the one write seam for consents checks caller attribute filters against the registry; reads pass through.
+        // GOV-12: one materialisation guard (A-10 + registry rules) shared by this write seam, the approval materialisation in the
+        // governance repositories and the request creation services. The registry and the table repository are resolved lazily because
+        // the repositories (which take the guard) are the backing store of both.
+        services.AddSingleton<Autheris.Application.Identity.Attributes.IConsentMaterializationGuard>(sp => new Autheris.Application.Identity.Attributes.CallerAttributeConsentGuard(
+            () => sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
+            () => sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()));
         services.AddSingleton(sp => new Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository(
             sp.GetRequiredService<TRepository>(),
-            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
-            sp.GetRequiredService<TRepository>(),
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()));
+            sp.GetRequiredService<Autheris.Application.Identity.Attributes.IConsentMaterializationGuard>()));
         services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>());
         services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditPurgeKeyProvider>(sp => sp.GetRequiredService<TRepository>());

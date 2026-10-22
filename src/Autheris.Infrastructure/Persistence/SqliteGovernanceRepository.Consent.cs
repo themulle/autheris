@@ -842,8 +842,19 @@ public partial class SqliteGovernanceRepository
     public Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default) =>
         ActivateConsentCoreAsync(requestId, null, allowPendingAutoApprove: true, ct);
 
+    // GOV-12: every path that materialises a consent outside IConsentRepository (the A-10 decorator seam) passes the shared guard first.
+    // It runs before any connection or write scope is taken: the guard reads the caller attribute registry, which is backed by this repository.
+    private ValueTask EnsureMayMaterializeAsync(TenantId tenant, TableIdentifier table, IReadOnlyList<ConsentRowFilter> filters, CancellationToken ct) =>
+        _materializationGuard is null
+            ? ValueTask.CompletedTask
+            : _materializationGuard.EnsureMayMaterializeAsync(tenant, table, filters, ct);
+
     private async Task ActivateConsentCoreAsync(Guid requestId, Sid? approvedBy, bool allowPendingAutoApprove, CancellationToken ct)
     {
+        var pending = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
+        if (pending == null) return;
+        await EnsureMayMaterializeAsync(pending.TenantId, pending.TableIdentifier, Array.Empty<ConsentRowFilter>(), ct).ConfigureAwait(false);
+
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
         {
@@ -1395,6 +1406,7 @@ public partial class SqliteGovernanceRepository
         consent.RowFilters = rowFilters ?? Array.Empty<ConsentRowFilter>();
         consent.ColumnRules = columnRules ?? Array.Empty<ConsentColumnRule>();
         consent.Validate();
+        await EnsureMayMaterializeAsync(consent.TenantId, consent.TableIdentifier, consent.RowFilters, ct).ConfigureAwait(false);
 
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");

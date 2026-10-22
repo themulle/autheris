@@ -72,6 +72,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
     private readonly ICallerContextProvider? _callerContextProvider;
     private readonly IEventBus? _eventBus;
 
+    private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
+
     public PostgreSqlGovernanceRepository(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
@@ -80,8 +82,10 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
         ILogger<PostgreSqlGovernanceRepository>? logger = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
