@@ -101,7 +101,11 @@ public interface IConsentRepository
     Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default);
     Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default);
     Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default);
-    Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default);
+    /// <summary>
+    /// Active (not revoked, not yet expired) consents that expire at or before <paramref name="threshold"/>, soonest first, capped at
+    /// <paramref name="maxResults"/> (PERS-04: already expired consents are never returned, on every provider).
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default);
     Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default);
 
     /// <summary>

@@ -105,8 +105,8 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
     public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default) =>
         _inner.RevokeConsentAsync(consentId, revokedBySid, reason, ct);
 
-    public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default) =>
-        _inner.GetExpiringConsentsAsync(threshold, ct);
+    public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
+        _inner.GetExpiringConsentsAsync(threshold, maxResults, ct);
 
     public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) =>
         _inner.ExtendConsentExpiryAsync(consentId, newValidTo, ct);

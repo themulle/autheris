@@ -869,19 +869,22 @@ public partial class SqlServerGovernanceRepository
         return true;
     }
 
-    public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default)
     {
         var consents = new List<Consent>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
+        cmd.CommandText = @"SELECT TOP (@maxResults) c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                    c.tenant_id, c.renewal_count
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
-                            WHERE c.is_revoked = 0 AND c.valid_to <= @threshold";
+                            WHERE c.is_revoked = 0 AND c.valid_to > @now AND c.valid_to <= @threshold
+                            ORDER BY c.valid_to";
+        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
         cmd.Parameters.AddWithValue("@threshold", threshold.ToString("O"));
+        cmd.Parameters.AddWithValue("@maxResults", Math.Max(1, maxResults));
 
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {

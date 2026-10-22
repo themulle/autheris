@@ -115,7 +115,7 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, CancellationToken ct = default) =>
+    public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>(_consents.Where(c => !c.IsRevoked && c.ValidTo <= threshold).ToList());
 
     public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) => Task.CompletedTask;
