@@ -21,14 +21,18 @@ public sealed class RecertificationService : IRecertificationService
     private readonly IPolicyEpochService? _epochService;
     private readonly IAuditWriter? _auditWriter;
     private readonly ILogger<RecertificationService>? _logger;
+    private readonly TimeProvider _timeProvider;
+    private const string ItemAlreadyDecidedCode = "RECERT_ITEM_ALREADY_DECIDED";
 
     public RecertificationService(
         IRecertificationRepository repository,
         IFunctionalRightRepository? functionalRightRepository = null,
         IPolicyEpochService? epochService = null,
         IAuditWriter? auditWriter = null,
-        ILogger<RecertificationService>? logger = null)
+        ILogger<RecertificationService>? logger = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _functionalRightRepository = functionalRightRepository;
         _epochService = epochService;
@@ -140,20 +144,15 @@ public sealed class RecertificationService : IRecertificationService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewerId);
 
-        var item = await _repository.GetItemByIdAsync(tenantId, campaignId, itemId, ct).ConfigureAwait(false);
-        if (item == null)
-        {
-            throw new KeyNotFoundException($"Recertification item '{itemId}' not found.");
-        }
+        var item = await LoadDecidableItemAsync(tenantId, campaignId, itemId, reviewerId, ct).ConfigureAwait(false);
 
-        // SEC-SC-15: Anti-Self-Review Rule
-        if (string.Equals(reviewerId.Trim(), item.AssignedTo.Trim(), StringComparison.OrdinalIgnoreCase))
+        // GOV-02: compare-and-set from Pending; a concurrent decision leaves the record unchanged.
+        var updated = await _repository.TryUpdateItemDecisionAsync(
+            tenantId, campaignId, itemId, RecertDecision.Pending, RecertDecision.Certified, reviewerId, comments, ct).ConfigureAwait(false);
+        if (!updated)
         {
-            throw new SecurityException($"Self-certification prohibited: Reviewer '{reviewerId}' cannot certify their own assignment (SEC-SC-15: self_certification_prohibited).");
+            throw new RecertificationConflictException(ItemAlreadyDecidedCode, $"Recertification item '{itemId}' has already been decided.");
         }
-
-        await _repository.UpdateItemDecisionAsync(
-            tenantId, campaignId, itemId, RecertDecision.Certified, reviewerId, comments, ct).ConfigureAwait(false);
     }
 
     public async Task RevokeItemAsync(
@@ -166,18 +165,120 @@ public sealed class RecertificationService : IRecertificationService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewerId);
 
+        var item = await LoadDecidableItemAsync(tenantId, campaignId, itemId, reviewerId, ct).ConfigureAwait(false);
+
+        // Security review: the access is removed first and the decision recorded afterwards. When the deactivation fails (or the asset
+        // type is unknown) the item stays Pending and can be retried; it is never shown as Revoked while the access still exists.
+        await DeactivateUnderlyingAssetAsync(new TenantId(item.TenantId), item.AssetType, item.AssetKey, ct).ConfigureAwait(false);
+
+        var recorded = await RecordRevocationAsync(tenantId, item, reviewerId, comments, ct).ConfigureAwait(false);
+        if (!recorded)
+        {
+            throw new RecertificationConflictException(ItemAlreadyDecidedCode, $"Recertification item '{itemId}' has already been decided.");
+        }
+    }
+
+    /// <summary>
+    /// GOV-02: loads the item and enforces the reviewer designation, the pending state and the campaign state
+    /// (active, not past its deadline). Every violation fails closed without touching the record.
+    /// </summary>
+    private async Task<RecertificationItem> LoadDecidableItemAsync(
+        TenantId tenantId, string campaignId, string itemId, string reviewerId, CancellationToken ct)
+    {
         var item = await _repository.GetItemByIdAsync(tenantId, campaignId, itemId, ct).ConfigureAwait(false);
         if (item == null)
         {
             throw new KeyNotFoundException($"Recertification item '{itemId}' not found.");
         }
 
-        // Security review: the access is removed first and the decision recorded afterwards. When the deactivation fails (or the asset
-        // type is unknown) the item stays Pending and can be retried; it is never shown as Revoked while the access still exists.
-        await DeactivateUnderlyingAssetAsync(new TenantId(item.TenantId), item.AssetType, item.AssetKey, ct).ConfigureAwait(false);
+        var reviewer = reviewerId.Trim();
 
-        await _repository.UpdateItemDecisionAsync(
-            tenantId, campaignId, itemId, RecertDecision.Revoked, reviewerId, comments, ct).ConfigureAwait(false);
+        // SEC-SC-15: Anti-Self-Review Rule
+        if (string.Equals(reviewer, item.AssignedTo.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityException($"Self-certification prohibited: Reviewer '{reviewerId}' cannot certify their own assignment (SEC-SC-15: self_certification_prohibited).");
+        }
+
+        // Only the designated reviewer may decide.
+        if (string.IsNullOrWhiteSpace(item.ReviewerId) ||
+            !string.Equals(reviewer, item.ReviewerId.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityException($"Reviewer '{reviewerId}' is not the designated reviewer of item '{itemId}'.");
+        }
+
+        var campaign = await _repository.GetCampaignByIdAsync(tenantId, campaignId, ct).ConfigureAwait(false);
+        if (campaign == null)
+        {
+            throw new KeyNotFoundException($"Recertification campaign '{campaignId}' not found.");
+        }
+
+        if (campaign.Status != RecertCampaignStatus.Active)
+        {
+            throw new RecertificationConflictException("RECERT_CAMPAIGN_NOT_ACTIVE", $"Recertification campaign '{campaignId}' is not active.");
+        }
+
+        if (_timeProvider.GetUtcNow() > campaign.Deadline)
+        {
+            throw new RecertificationConflictException("RECERT_CAMPAIGN_DEADLINE_PASSED", $"Recertification campaign '{campaignId}' is past its deadline.");
+        }
+
+        if (item.Decision != RecertDecision.Pending)
+        {
+            throw new RecertificationConflictException(ItemAlreadyDecidedCode, $"Recertification item '{itemId}' has already been decided.");
+        }
+
+        return item;
+    }
+
+    /// <summary>
+    /// Records the Revoked decision after the access is gone. Pending to Revoked is a compare-and-set; when a concurrent
+    /// reviewer certified the item in the meantime the evidence is corrected to Revoked (the access is gone) and a conflict
+    /// audit event is written. Returns false when the item was already revoked by someone else.
+    /// </summary>
+    private async Task<bool> RecordRevocationAsync(
+        TenantId tenantId, RecertificationItem item, string decisionBy, string? comments, CancellationToken ct)
+    {
+        if (await _repository.TryUpdateItemDecisionAsync(
+                tenantId, item.CampaignId, item.ItemId, RecertDecision.Pending, RecertDecision.Revoked, decisionBy, comments, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        var current = await _repository.GetItemByIdAsync(tenantId, item.CampaignId, item.ItemId, ct).ConfigureAwait(false);
+        if (current is not { Decision: RecertDecision.Certified })
+        {
+            return false;
+        }
+
+        // The asset was removed but the item reads Certified: the stored evidence must match reality.
+        if (!await _repository.TryUpdateItemDecisionAsync(
+                tenantId, item.CampaignId, item.ItemId, RecertDecision.Certified, RecertDecision.Revoked, decisionBy, comments, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        if (_auditWriter != null)
+        {
+            var entry = new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "SECURITY_RECERT_DECISION_CONFLICT",
+                ActorSid = new Sid(decisionBy),
+                TargetTable = item.AssetType,
+                Decision = "DENY",
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    campaign_id = item.CampaignId,
+                    item_id = item.ItemId,
+                    asset_key = item.AssetKey,
+                    previous_decision_by = current.DecisionBy,
+                    reason = "certified_concurrently_with_revocation"
+                })
+            };
+            await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+        }
+
+        return true;
     }
 
     public async Task<int> ExecuteAutoRevocationCycleAsync(DateTimeOffset asOf, CancellationToken ct = default)
@@ -217,9 +318,15 @@ public sealed class RecertificationService : IRecertificationService
         await DeactivateUnderlyingAssetAsync(tenantId, item.AssetType, item.AssetKey, ct).ConfigureAwait(false);
 
         // 2. Mark as Revoked by SYSTEM_AUTO_REVOKE
-        await _repository.UpdateItemDecisionAsync(
-            tenantId, item.CampaignId, item.ItemId, RecertDecision.Revoked, "SYSTEM_AUTO_REVOKE",
+        // GOV-02: compare-and-set; when the item was decided concurrently the evidence is reconciled (never left Certified).
+        var recorded = await RecordRevocationAsync(
+            tenantId, item, "SYSTEM_AUTO_REVOKE",
             "Automated revocation fail-closed upon 14-day deadline expiry", ct).ConfigureAwait(false);
+        if (!recorded)
+        {
+            // Already revoked by another actor; the access is gone and the evidence exists.
+            return;
+        }
 
         // 3. Emit Tier-A audit event
         if (_auditWriter != null)
@@ -281,4 +388,10 @@ public sealed class RecertificationService : IRecertificationService
                 $"Recertification asset type '{assetType}' is not supported for revocation; the access behind '{assetKey}' was not revoked.");
         }
     }
+}
+
+/// <summary>GOV-02: state or deadline conflict on a recertification decision (maps to HTTP 409).</summary>
+public sealed class RecertificationConflictException(string code, string message) : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
 }

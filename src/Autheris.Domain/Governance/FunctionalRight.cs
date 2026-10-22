@@ -1,6 +1,7 @@
 namespace Autheris.Domain.Governance;
 
 using System;
+using System.Collections.Generic;
 using Autheris.Domain.Common;
 
 public readonly record struct FunctionalRight(string Value)
@@ -28,6 +29,18 @@ public readonly record struct FunctionalRight(string Value)
     public static readonly FunctionalRight McpUse = new("Mcp.Use");
     public static readonly FunctionalRight McpAdmin = new("Mcp.Admin");
     public static readonly FunctionalRight CatalogCurate = new("Catalog.Curate");
+
+    /// <summary>The values of every privileged right (PERS-09: the store filters self-approved mappings of these in SQL as defense in depth).</summary>
+    public static IReadOnlyList<string> PrivilegedValues { get; } =
+    [
+        GovernanceApprove.Value,
+        GovernanceAdminRight.Value,
+        DataUnmaskSensitive.Value,
+        SecurityBreakGlass.Value,
+        SecurityAdmin.Value,
+        DataExportClearText.Value,
+        ClusterAdmin.Value
+    ];
 
     public bool IsPrivileged =>
         this == GovernanceApprove ||

@@ -62,7 +62,7 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
 
         _logger.LogInformation("Scanning for consents expiring before {Threshold}...", threshold);
 
-        var expiringConsents = await _consentRepo.GetExpiringConsentsAsync(threshold, ct).ConfigureAwait(false);
+        var expiringConsents = await _consentRepo.GetExpiringConsentsAsync(threshold, ct: ct).ConfigureAwait(false);
         int dispatchedCount = 0;
 
         // Cleanup stale entries older than 24h

@@ -61,7 +61,7 @@ public sealed class DeclarativeConsentApplyService(
         var now = DateTimeOffset.UtcNow;
 
         // SR-M-10: the self-grant check compares against every identifier form of the actor and the groups and roles it holds.
-        var actorIdentifiers = CollectActorIdentifiers(caller, actorSid, callerContext);
+        var actorIdentifiers = ActorIdentifiers.Collect(caller, actorSid, callerContext);
         var hasGroupOverage = HasGroupOverage(caller);
 
         int totalEvaluated = 0;
@@ -149,7 +149,7 @@ public sealed class DeclarativeConsentApplyService(
 
             // SR-M-10 (SoD): no self-grant, neither directly (any identifier form) nor through a group or role the actor holds.
             // A deny towards an own group or role only restricts access and stays allowed; an individual policy for the actor is refused for any effect.
-            if ((individual || effect == ConsentEffect.Allow) && IsActorSubject(actorIdentifiers, policy.GranteeRef))
+            if ((individual || effect == ConsentEffect.Allow) && ActorIdentifiers.IsActorSubject(actorIdentifiers, policy.GranteeRef))
             {
                 throw new GrantPolicyViolationException(GrantDecision.Deny(
                     GrantErrorCodes.FourEyesRequired,
@@ -440,11 +440,6 @@ public sealed class DeclarativeConsentApplyService(
         return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details, updated);
     }
 
-    private static readonly string[] ActorEmailClaimTypes = [ClaimTypes.Email, "email"];
-
-    // Application identifiers of the actor: an app-only GitOps token must not grant to its own client id.
-    private static readonly string[] ActorApplicationIdClaimTypes = ["appid", "azp", "client_id"];
-
     /// <summary>
     /// Entra group overage: with too many groups the token carries "hasgroups" (implicit flow) or a "_claim_names" entry for "groups"
     /// instead of the group list, so the group claims are incomplete.
@@ -455,84 +450,6 @@ public sealed class DeclarativeConsentApplyService(
         caller.HasClaim(c => string.Equals(c.Type, "_claim_names", StringComparison.OrdinalIgnoreCase)
                              && c.Value != null
                              && c.Value.Contains("groups", StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>
-    /// SR-M-10: every identifier of the actor (SIDs, oid, sub, UPN, e-mail, name, application ids), its group SIDs and its roles, taken from
-    /// the claims and, when given, from the resolved request context (plugin-enriched groups and roles). Same identifier forms as the bulk grant path.
-    /// </summary>
-    private static HashSet<string> CollectActorIdentifiers(ClaimsPrincipal caller, Sid actorSid, SecurityPrincipalContext? callerContext)
-    {
-        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddIdentifierForms(ids, actorSid.Value);
-        foreach (var id in caller.GetUserIdentifiers())
-        {
-            AddIdentifierForms(ids, id);
-        }
-
-        foreach (var claimType in ActorEmailClaimTypes.Concat(ActorApplicationIdClaimTypes))
-        {
-            foreach (var claim in caller.FindAll(claimType))
-            {
-                AddIdentifierForms(ids, claim.Value);
-            }
-        }
-
-        foreach (var group in caller.GetGroupSids())
-        {
-            AddIdentifierForms(ids, group.Value);
-        }
-
-        foreach (var role in caller.GetUserRoles())
-        {
-            AddIdentifierForms(ids, role);
-        }
-
-        if (callerContext is not null)
-        {
-            AddIdentifierForms(ids, callerContext.UserSid.Value);
-            foreach (var group in callerContext.GroupSids)
-            {
-                AddIdentifierForms(ids, group.Value);
-            }
-
-            foreach (var role in callerContext.TenantRoles.Concat(callerContext.ClusterRoles))
-            {
-                AddIdentifierForms(ids, role);
-            }
-        }
-
-        return ids;
-    }
-
-    private static bool IsActorSubject(HashSet<string> actorIdentifiers, string? granteeRef)
-    {
-        var forms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddIdentifierForms(forms, granteeRef);
-        return forms.Any(f => actorIdentifiers.Contains(f));
-    }
-
-    // Adds the value and its account-name forms: 'DOMAIN\user' -> 'user', 'user@domain' -> 'user'.
-    private static void AddIdentifierForms(HashSet<string> set, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return;
-        }
-
-        var v = value.Trim();
-        set.Add(v);
-        var slash = v.LastIndexOf('\\');
-        if (slash >= 0 && slash < v.Length - 1)
-        {
-            set.Add(v[(slash + 1)..]);
-        }
-
-        var at = v.IndexOf('@', StringComparison.Ordinal);
-        if (at > 0)
-        {
-            set.Add(v[..at]);
-        }
-    }
 
     // A Clear column rule exposes the column in clear text: the grant is classified like an Unmasked one.
     private static bool HasClearColumnRule(DeclarativeConsentPolicy policy) =>

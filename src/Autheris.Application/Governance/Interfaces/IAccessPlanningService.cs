@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Interfaces;
 
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
@@ -17,7 +18,8 @@ public interface IAccessPlanningService
         AdminPlanAccessRequest request,
         string adminSid,
         string? tenantId = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        ClaimsPrincipal? caller = null);
 
     /// <summary>
     /// Verifies TOTP 2FA for an access plan and issues an HMAC-signed confirmation token with TTL.
@@ -35,7 +37,8 @@ public interface IAccessPlanningService
         AdminApplyAccessRequest request,
         string adminSid,
         TenantId tenantId,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        ClaimsPrincipal? caller = null);
 
     /// <summary>
     /// Issue #107: plans a change of the row filter key-set cache settings of one rule or one object. Validated against the current caps; no state

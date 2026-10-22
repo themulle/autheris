@@ -235,6 +235,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
     private readonly ICallerContextProvider? _callerContextProvider;
     private readonly IEventBus? _eventBus;
 
+    private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
+
     public SqliteGovernanceRepository(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
@@ -244,8 +246,10 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
         ICallerContextProvider callerContextProvider,
         IGatewayStatePaths statePaths,
         ILogger<SqliteGovernanceRepository>? logger = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);

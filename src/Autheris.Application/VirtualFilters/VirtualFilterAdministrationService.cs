@@ -166,9 +166,10 @@ public sealed partial class VirtualFilterAdministrationService
     }
 
     /// <summary>Writes and makes the change visible to enforcement on this instance at once.</summary>
-    private async Task ApplyAsync(VirtualFilterChangeSet changes, CancellationToken ct)
+    private async Task ApplyAsync(VirtualFilterChangeSet changes, long expectedGeneration, CancellationToken ct)
     {
-        await _repository.ApplyAsync(changes, ct).ConfigureAwait(false);
+        // PERS-13: the change is bound to the generation of the snapshot it was computed from.
+        await _repository.ApplyAsync(changes with { ExpectedGeneration = expectedGeneration }, ct).ConfigureAwait(false);
         _snapshots?.Invalidate();
     }
 
@@ -211,7 +212,7 @@ public sealed partial class VirtualFilterAdministrationService
                     UpdatedAt = DateTimeOffset.UtcNow
                 };
 
-                await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, ct).ConfigureAwait(false);
+                await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, snapshot.Generation, ct).ConfigureAwait(false);
                 await AuditAsync(filter.TenantId, actor, "VIRTUAL_FILTER_PENDING_APPROVAL",
                     $"virtual_filter:{filter.Name}", new { name = filter.Name, status = "DraftPendingApproval", before = existing.ComputeDefinitionHash(), draft = draft.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
                 return toStore;
@@ -232,7 +233,7 @@ public sealed partial class VirtualFilterAdministrationService
                 DeletionRequestedBy = null
             };
 
-            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pending] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pending] }, snapshot.Generation, ct).ConfigureAwait(false);
             var action = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
             await AuditAsync(filter.TenantId, actor, "VIRTUAL_FILTER_PENDING_APPROVAL",
                 $"virtual_filter:{filter.Name}", new { name = filter.Name, status = pending.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
@@ -253,7 +254,7 @@ public sealed partial class VirtualFilterAdministrationService
             DeletionRequestedBy = null
         };
 
-        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
         var evt = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
         await AuditAsync(filter.TenantId, actor, evt,
             $"virtual_filter:{filter.Name}", new { name = filter.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
@@ -301,7 +302,7 @@ public sealed partial class VirtualFilterAdministrationService
 
         if (existing.PendingDeletion)
         {
-            await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
             await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash(), approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
             return existing with { Status = FilterApprovalStatus.Rejected, PendingDeletion = false };
         }
@@ -318,7 +319,7 @@ public sealed partial class VirtualFilterAdministrationService
                 PendingDeletion = false,
                 DeletionRequestedBy = null
             };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [promoted] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [promoted] }, snapshot.Generation, ct).ConfigureAwait(false);
             await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_APPROVED", $"virtual_filter:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
             return promoted;
         }
@@ -330,7 +331,7 @@ public sealed partial class VirtualFilterAdministrationService
             ApprovedAt = DateTimeOffset.UtcNow
         };
 
-        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [approved] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [approved] }, snapshot.Generation, ct).ConfigureAwait(false);
         await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_APPROVED",
             $"virtual_filter:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
         return approved;
@@ -363,12 +364,12 @@ public sealed partial class VirtualFilterAdministrationService
                 UpdatedBy = actor.Sid.Value,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pendingDeletion] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pendingDeletion] }, snapshot.Generation, ct).ConfigureAwait(false);
             await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_PENDING_DELETION", $"virtual_filter:{name}", new { name }, ct).ConfigureAwait(false);
             return;
         }
 
-        await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
         await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 }

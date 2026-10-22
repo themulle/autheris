@@ -196,6 +196,15 @@ public sealed partial class TableAccessPolicy
         }
     }
 
+    private static bool IsRoleResolutionDegraded(TableAccessQuery query)
+    {
+        static bool Marks(Claim c) =>
+            string.Equals(c.Type, Autheris.Domain.Identity.RoleResolutionClaims.ClaimType, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(c.Value, Autheris.Domain.Identity.RoleResolutionClaims.Degraded, StringComparison.OrdinalIgnoreCase);
+
+        return query.Claims?.Any(Marks) == true || query.Principal?.Claims.Any(Marks) == true;
+    }
+
     private async Task<TableAccessDecision> DecideCoreAsync(TableAccessQuery query, CancellationToken ct)
     {
         var table = query.Metadata.Identifier;
@@ -204,6 +213,13 @@ public sealed partial class TableAccessPolicy
         if (!query.Metadata.Table.IsActive)
         {
             return TableAccessDecision.Denied(table, $"Table '{table.ToQualifiedName()}' is not active.");
+        }
+
+        // GOV-08: group and role resolution was unavailable for this request, so group-scoped deny rules and consents cannot be
+        // evaluated reliably. Deny the data request instead of treating the caller as a member of no group (fail closed).
+        if (IsRoleResolutionDegraded(query))
+        {
+            return TableAccessDecision.Denied(table, "Group resolution unavailable (fail-closed).");
         }
 
         // SR15-51 / SG-16: Enforce schema contracts at query execution time

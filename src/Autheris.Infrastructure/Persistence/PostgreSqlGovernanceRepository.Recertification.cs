@@ -42,6 +42,6 @@ public partial class PostgreSqlGovernanceRepository : IRecertificationRepository
     public Task<IReadOnlyList<RecertificationItem>> GetPendingItemsPastDeadlineAsync(DateTimeOffset deadlineUtc, CancellationToken ct = default) =>
         RecertificationStoreInstance.GetPendingItemsPastDeadlineAsync(deadlineUtc, ct);
 
-    public Task UpdateItemDecisionAsync(TenantId tenantId, string campaignId, string itemId, RecertDecision decision, string decisionBy, string? comments = null, CancellationToken ct = default) =>
-        RecertificationStoreInstance.UpdateItemDecisionAsync(tenantId, campaignId, itemId, decision, decisionBy, comments, ct);
+    public Task<bool> TryUpdateItemDecisionAsync(TenantId tenantId, string campaignId, string itemId, RecertDecision expected, RecertDecision decision, string decisionBy, string? comments = null, CancellationToken ct = default) =>
+        RecertificationStoreInstance.TryUpdateItemDecisionAsync(tenantId, campaignId, itemId, expected, decision, decisionBy, comments, ct);
 }

@@ -66,7 +66,7 @@ public sealed class GraphRoleProvider : IRoleProvider
             if (DateTimeOffset.UtcNow < _circuitBreakerOpenUntil)
             {
                 // Circuit is open - fail closed
-                return ProviderRoleResult.Empty;
+                return ProviderRoleResult.FailedResult;
             }
         }
 
@@ -100,7 +100,7 @@ public sealed class GraphRoleProvider : IRoleProvider
                     _circuitBreakerOpenUntil = DateTimeOffset.UtcNow.Add(backoff);
                 }
             }
-            return ProviderRoleResult.Empty;
+            return ProviderRoleResult.FailedResult;
         }
         catch (Exception)
         {
@@ -113,7 +113,7 @@ public sealed class GraphRoleProvider : IRoleProvider
                     _circuitBreakerOpenUntil = DateTimeOffset.UtcNow.Add(_circuitBreakDuration);
                 }
             }
-            return ProviderRoleResult.Empty;
+            return ProviderRoleResult.FailedResult;
         }
     }
 
