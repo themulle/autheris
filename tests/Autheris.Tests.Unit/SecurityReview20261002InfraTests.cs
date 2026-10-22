@@ -667,7 +667,9 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             AccessDecision: TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true),
             Arguments: arguments ?? new Dictionary<string, object?>(),
             RequestedFields: ["id"],
-            RequestHeaders: headers);
+            RequestHeaders: headers,
+            // MISC-13: the executor pushes down the gateway-resolved context tenant; these tests resolve it from the principal's tenant claim.
+            Tenant: principal.FindFirst("tenant_id")?.Value is { } tenantValue ? new TenantId(tenantValue) : null);
     }
 
     private static ClaimsPrincipal User(string? tenant = "tenant-a")
@@ -759,7 +761,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             ["name"] = "Smith"
         };
 
-        var url = executor.BuildUrl(descriptor, args, User("tenant-a"));
+        var url = executor.BuildUrl(descriptor, args, new TenantId("tenant-a"));
 
         url.ShouldContain("customerTenant=tenant-a");
         url.ShouldContain("name=Smith");
@@ -777,7 +779,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             TenantIdQueryParam = "tenantId"
         };
 
-        Should.Throw<SecurityException>(() => executor.BuildUrl(descriptor, new Dictionary<string, object?>(), User(tenant: null)));
+        Should.Throw<SecurityException>(() => executor.BuildUrl(descriptor, new Dictionary<string, object?>(), null));
     }
 
     [Fact]
@@ -807,7 +809,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         };
 
         Should.Throw<SecurityException>(() =>
-            executor.BuildUrl(descriptor, new Dictionary<string, object?> { ["tenantId"] = "victim-tenant" }, User("tenant-a")));
+            executor.BuildUrl(descriptor, new Dictionary<string, object?> { ["tenantId"] = "victim-tenant" }, new TenantId("tenant-a")));
     }
 
     // =========================================================================

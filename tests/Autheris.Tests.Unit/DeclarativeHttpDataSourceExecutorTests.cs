@@ -108,7 +108,9 @@ public sealed class DeclarativeHttpDataSourceExecutorTests
             AccessDecision: decision,
             Arguments: arguments,
             RequestedFields: ["id", "name"],
-            RequestHeaders: requestHeaders
+            RequestHeaders: requestHeaders,
+            // MISC-13: the gateway-resolved context tenant is what gets pushed down; these tests derive it from the principal's tenant claim.
+            Tenant: principal.FindFirst("tenant_id")?.Value is { } tenantValue ? new TenantId(tenantValue) : null
         );
     }
 

@@ -257,21 +257,12 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         return Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
-    private static TenantId ResolveTenant(DataSourceExecutionContext context)
-    {
-        if (context.Tenant is { } tenant)
-        {
-            return tenant;
-        }
-
-        var claim = context.Principal?.FindFirst("tenant_id")?.Value ?? context.Principal?.FindFirst("tenant")?.Value;
-        if (claim == null)
-        {
-            return TenantId.LegacySingleTenant;
-        }
-
-        return TenantId.TryParse(claim, out var parsed) ? parsed : throw new GatewayForbiddenException("Invalid tenant identity.");
-    }
+    /// <summary>
+    /// MISC-13: the gateway-resolved context tenant; callers populate it. The only fallback is the central realm-bound resolver
+    /// (<c>GetTenantId</c>), never a raw claim read in the executor.
+    /// </summary>
+    private static TenantId ResolveTenant(DataSourceExecutionContext context) =>
+        context.Tenant ?? context.Principal.GetTenantId();
 
     /// <summary>The requested columns without the denied ones (an empty request selects every accessible column in the planner).</summary>
     private static IReadOnlyList<string>? ResolveSelectedColumns(DataSourceExecutionContext context)

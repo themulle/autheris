@@ -35,10 +35,8 @@ public sealed class DeclarativeHttpSecurityTests
             ["userId"] = maliciousParam
         };
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity());
-
         Should.Throw<SecurityException>(() =>
-            _executor.BuildUrl(descriptor, arguments, principal));
+            _executor.BuildUrl(descriptor, arguments, tenant: null));
     }
 
     [Fact]
@@ -58,9 +56,7 @@ public sealed class DeclarativeHttpSecurityTests
             ["role"] = "ClusterAdmin"
         };
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity());
-
-        var url = _executor.BuildUrl(descriptor, arguments, principal);
+        var url = _executor.BuildUrl(descriptor, arguments, tenant: null);
 
         url.ShouldContain("search=books");
         url.ShouldNotContain("tenant_id=spoofed_tenant");
