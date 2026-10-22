@@ -251,6 +251,7 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public async Task Issue280_PlannedRead_GatewayParameters_PassRewriterTextGuard()
     {
         // Reproduces the integration failure: the normalized text went through the real rewriter's reserved-identifier guard.
@@ -269,6 +270,7 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public void Issue280_ClientTextAlias_NotBoundToGatewayValue()
     {
         var request = Planned(
