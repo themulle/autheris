@@ -34,7 +34,7 @@ public abstract class MetadataCacheReplicaContractBase : IAsyncLifetime
 
     public Task DisposeAsync() => DisposeReplicasAsync();
 
-    private static TableMetadata Table(string name, bool active, string? maskedColumn)
+    private static TableMetadata NewTable(string name, bool active, string? maskedColumn)
     {
         var id = Guid.NewGuid();
         return new TableMetadata
@@ -56,10 +56,10 @@ public abstract class MetadataCacheReplicaContractBase : IAsyncLifetime
         if (!Available) return;
         var name = Name("mc");
         var id = new TableIdentifier("ReplicaDomain", "dbo", name);
-        await ReplicaA.UpsertTableMetadataAsync(Table(name, active: true, maskedColumn: null));
+        await ReplicaA.UpsertTableMetadataAsync(NewTable(name, active: true, maskedColumn: null));
         (await ReplicaB.GetTableMetadataAsync(id))!.ColumnMaskingRules.ShouldBeEmpty(); // fills B's cache
 
-        await ReplicaA.UpsertTableMetadataAsync(Table(name, active: true, maskedColumn: "email"));
+        await ReplicaA.UpsertTableMetadataAsync(NewTable(name, active: true, maskedColumn: "email"));
 
         (await ReplicaB.GetTableMetadataAsync(id))!.ColumnMaskingRules.ShouldContainKey("email");
     }
@@ -70,10 +70,10 @@ public abstract class MetadataCacheReplicaContractBase : IAsyncLifetime
         if (!Available) return;
         var name = Name("mc");
         var id = new TableIdentifier("ReplicaDomain", "dbo", name);
-        await ReplicaA.UpsertTableMetadataAsync(Table(name, active: true, maskedColumn: null));
+        await ReplicaA.UpsertTableMetadataAsync(NewTable(name, active: true, maskedColumn: null));
         (await ReplicaB.GetTableMetadataAsync(id))!.Table.IsActive.ShouldBeTrue();
 
-        await ReplicaA.UpsertTableMetadataAsync(Table(name, active: false, maskedColumn: null));
+        await ReplicaA.UpsertTableMetadataAsync(NewTable(name, active: false, maskedColumn: null));
 
         (await ReplicaB.GetTableMetadataAsync(id))!.Table.IsActive.ShouldBeFalse();
     }
@@ -86,7 +86,7 @@ public abstract class MetadataCacheReplicaContractBase : IAsyncLifetime
         var id = new TableIdentifier("ReplicaDomain", "dbo", name);
         (await ReplicaB.GetTableMetadataAsync(id)).ShouldBeNull(); // a negative result is never cached
 
-        await ReplicaA.UpsertTableMetadataAsync(Table(name, active: true, maskedColumn: null));
+        await ReplicaA.UpsertTableMetadataAsync(NewTable(name, active: true, maskedColumn: null));
 
         (await ReplicaB.GetTableMetadataAsync(id)).ShouldNotBeNull();
     }
