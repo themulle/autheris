@@ -513,7 +513,12 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
 
             var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-                ? WithTypedMasks(TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true), tableMeta, tenantId)
+                ? WithTypedMasks(
+                    await WithVirtualFiltersAsync(
+                        TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
+                        new MandatoryFilterQuery(userSid, groupSids, roles, tenantId, tableMeta),
+                        ct).ConfigureAwait(false),
+                    tableMeta, tenantId)
                 : await AccessPolicy().DecideAsync(
                     new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
@@ -795,6 +800,38 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 "GovernedSqlExecutionService: Row-filter key set site {Table} outcome={Outcome} reason={Reason} keys={Keys} padded={Padded} ageSeconds={Age}",
                 o.Table, o.Outcome, o.Reason, o.KeyCount, o.PaddedCount, o.AgeSeconds);
         }
+    }
+
+    /// <summary>
+    /// SQLA-19: a decision built locally (consent bypass, no consent services) keeps the tenant Virtual Filters of the caller, as the cross-source
+    /// path and the procedure channel do: a deny stays a deny, a predicate narrows the rows. Caller attribute filters are not resolved on this
+    /// path (no attribute store), so a table that needs them is denied (fail closed).
+    /// </summary>
+    private async Task<TableAccessDecision> WithVirtualFiltersAsync(TableAccessDecision decision, MandatoryFilterQuery query, CancellationToken ct)
+    {
+        var mandatory = await (_mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance).ResolveAsync(query, ct).ConfigureAwait(false);
+        if (mandatory.IsDenied)
+        {
+            return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        if (mandatory.PredicateSql == null)
+        {
+            return decision;
+        }
+
+        if (_typedPolicies is not null && mandatory.TypedPredicate is not null && mandatory.CallerAttributes.Count == 0)
+        {
+            return decision.WithMandatoryPredicate(
+                _typedPolicies.RowPolicies.FromPredicate(mandatory.TypedPredicate, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
+        }
+
+        if (mandatory.CallerAttributesTextConstant || mandatory.CallerAttributes.Count > 0)
+        {
+            return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
+        }
+
+        return decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
     }
 
     /// <summary>
