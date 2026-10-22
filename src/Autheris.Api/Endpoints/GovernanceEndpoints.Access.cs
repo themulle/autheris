@@ -243,13 +243,6 @@ public static partial class GovernanceEndpoints
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
-        if (grantDecision.RequiresFourEyes)
-        {
-            return Results.Json(
-                new { error = GrantErrorCodes.FourEyesRequired, message = "Bulk grant of sensitive or unmasked access requires independent four-eyes approver(s) and cannot be self-approved." },
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
         var profile = new AccessProfile
         {
             ProfileId = profileId,
