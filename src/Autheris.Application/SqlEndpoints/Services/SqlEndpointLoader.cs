@@ -206,7 +206,7 @@ public sealed class SqlEndpointLoader : IDisposable
         string summary = string.Empty;
         string? dataSource = null;
         string httpMethod = "GET";
-        int timeoutSeconds = 30;
+        int? timeoutSeconds = null;
         var headerParams = new Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc, bool IsList)>(StringComparer.OrdinalIgnoreCase);
 
         var matches = HeaderRegex.Matches(content);
@@ -230,7 +230,9 @@ public sealed class SqlEndpointLoader : IDisposable
                     httpMethod = val.ToUpperInvariant();
                     break;
                 case "timeout" when int.TryParse(val, out int t):
-                    timeoutSeconds = t;
+                    timeoutSeconds = t > 0
+                        ? t
+                        : throw new ArgumentException($"Endpoint '{SanitizeHeaderValue(name)}': '-- @timeout' must be a positive number of seconds.", nameof(content));
                     break;
                 case "param":
                     ParseParamHeader(val, headerParams, defaultName);
