@@ -41,6 +41,9 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
     /// <summary>Mandatory per-group row count alias emitted by <see cref="PlanAggregate"/> for minimum group size guarding (#37).</summary>
     public const string GroupCountColumnAlias = "__n";
 
+    /// <summary>MISC-08: prefix of the hidden <c>COUNT(col)</c> emitted next to every AVG so merged averages can be weighted by non-null counts.</summary>
+    public const string AvgCountAliasPrefix = "__cnt_";
+
     public string BuildFullTableSelect(TableIdentifier table) => $"SELECT * FROM {table.ToQualifiedName()}";
 
     public PlannedTableRead Plan(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
@@ -251,6 +254,10 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                     _ => throw new ArgumentOutOfRangeException(nameof(intent), $"Unsupported aggregate function '{agg.Function}'.")
                 };
                 selectItems.Add(sqlExpr);
+                if (agg.Function == AggregateFunction.Avg)
+                {
+                    selectItems.Add($"COUNT({quotedCol}) AS {DataApiFilterTranslator.QuoteIdentifier(AvgCountAliasPrefix + normalized.EffectiveAlias)}");
+                }
             }
         }
 

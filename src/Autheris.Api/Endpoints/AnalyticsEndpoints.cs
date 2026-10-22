@@ -138,6 +138,11 @@ public static class AnalyticsEndpoints
                 AggregationColumnUnavailableException.FixedMessage,
                 httpContext);
         }
+        catch (AggregationFilterRejectedException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, AggregationFilterRejectedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationFilterRejectedException.ErrorCodeConst, AggregationFilterRejectedException.FixedMessage, httpContext);
+        }
         catch (AggregationRowCapExceededException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, AggregationRowCapExceededException.ErrorCodeConst);
@@ -220,6 +225,11 @@ public static class AnalyticsEndpoints
                 AggregationColumnUnavailableException.ErrorCodeConst,
                 AggregationColumnUnavailableException.FixedMessage,
                 httpContext);
+        }
+        catch (AggregationFilterRejectedException ex)
+        {
+            SafeErrorResults.LogFailure(httpContext, ex, AggregationFilterRejectedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationFilterRejectedException.ErrorCodeConst, AggregationFilterRejectedException.FixedMessage, httpContext);
         }
         catch (AggregationRowCapExceededException ex)
         {
