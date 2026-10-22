@@ -39,6 +39,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     internal const string InternalParameterPrefix = "__gql_";
     internal const string ClientParameterPlaceholderPrefix = "__param_";
 
+    /// <summary>
+    /// Issue #280: prefix of the executor-side alias of a gateway parameter. It matches no reserved prefix of the text guard
+    /// (<c>__gql_</c>, <c>__rls_ks</c>) or of the client name guard, so the rewriter accepts the normalized text.
+    /// </summary>
+    internal const string GatewayParameterAliasPrefix = "gw_tf_";
+
+    private const int MaxGatewayParameterDigits = 6;
+
     private readonly GovernedSqlRewriter _rewriter;
     private readonly GovernedSqlExecutor _executor;
     private readonly Lazy<IFederatedQueryExecutionService>? _federatedExecution;
@@ -432,13 +440,46 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
                 throw new InvalidOperationException("A gateway parameter is not a scalar planned-read parameter.");
             }
 
-            if (!merged.TryAdd(trimmed, value))
+            // The merged map is keyed by the alias (never by the reserved gateway name). A client entry under the original name or the
+            // alias, or two gateway names with the same alias, fails closed (OrdinalIgnoreCase everywhere).
+            var alias = GatewayParameterAlias(trimmed);
+            if (merged.ContainsKey(trimmed) || !merged.TryAdd(alias, value))
             {
                 throw new System.Security.SecurityException("A statement parameter name is bound twice (fail-closed).");
             }
         }
 
         return merged;
+    }
+
+    /// <summary>
+    /// The alias of a validated gateway parameter name (<c>@__gql_tf_N</c> to <c>gw_tf_N</c>). Throws for any other name, so no
+    /// gateway name reaches the rewriter unaliased. The message carries no name.
+    /// </summary>
+    internal static string GatewayParameterAlias(string name)
+    {
+        var tfPrefix = Autheris.Application.Sql.Tree.TreeFilterClauseBuilder.ParameterPrefix.TrimStart('@');
+        var trimmed = name.TrimStart('@');
+        if (!trimmed.StartsWith(tfPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("A gateway parameter is not a scalar planned-read parameter.");
+        }
+
+        var suffix = trimmed[tfPrefix.Length..];
+        if (suffix.Length is 0 or > MaxGatewayParameterDigits)
+        {
+            throw new InvalidOperationException("A gateway parameter is not a scalar planned-read parameter.");
+        }
+
+        foreach (var c in suffix)
+        {
+            if (!char.IsAsciiDigit(c))
+            {
+                throw new InvalidOperationException("A gateway parameter is not a scalar planned-read parameter.");
+            }
+        }
+
+        return GatewayParameterAliasPrefix + suffix;
     }
 
     private static bool IsGatewayScalar(object? value) =>
@@ -448,11 +489,24 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     internal static string NormalizeClientParameters(
         string sql,
         IReadOnlyDictionary<string, object?>? parameters,
+        out IReadOnlyCollection<string> replacedNames) =>
+        NormalizeClientParameters(sql, parameters, null, out replacedNames);
+
+    /// <summary>
+    /// Issue #280: with <paramref name="gatewayParameters"/> (planned read, validated by <see cref="MergeGatewayParameters"/>), a text
+    /// placeholder of a gateway name is replaced by the placeholder of its alias; <paramref name="parameters"/> then holds the merged
+    /// map, whose alias keys are never matched against the text (a text <c>@gw_tf_0</c> stays unbound).
+    /// </summary>
+    internal static string NormalizeClientParameters(
+        string sql,
+        IReadOnlyDictionary<string, object?>? parameters,
+        IReadOnlyDictionary<string, object?>? gatewayParameters,
         out IReadOnlyCollection<string> replacedNames)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         replacedNames = names;
-        if (parameters == null || parameters.Count == 0 || sql.IndexOf('@') < 0)
+        bool hasGateway = gatewayParameters is { Count: > 0 };
+        if ((!hasGateway && (parameters == null || parameters.Count == 0)) || sql.IndexOf('@') < 0)
         {
             return sql;
         }
@@ -462,7 +516,31 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
         }
 
-        var supplied = new HashSet<string>(parameters.Keys.Select(k => k.TrimStart('@')), StringComparer.OrdinalIgnoreCase);
+        var gatewayNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (hasGateway)
+        {
+            foreach (var gatewayName in gatewayParameters!.Keys)
+            {
+                var trimmedGateway = gatewayName.TrimStart('@');
+                gatewayNames.Add(trimmedGateway);
+                aliases.Add(GatewayParameterAlias(trimmedGateway));
+            }
+        }
+
+        var supplied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (parameters != null)
+        {
+            foreach (var key in parameters.Keys)
+            {
+                var trimmedKey = key.TrimStart('@');
+                if (!aliases.Contains(trimmedKey))
+                {
+                    supplied.Add(trimmedKey);
+                }
+            }
+        }
+
         var sb = new StringBuilder(sql.Length + 16);
         char quote = '\0';
         for (int i = 0; i < sql.Length; i++)
@@ -504,6 +582,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
                 }
 
                 string name = sql[(i + 1)..end];
+                if (gatewayNames.Contains(name))
+                {
+                    var alias = GatewayParameterAlias(name);
+                    sb.Append(ClientParameterPlaceholderPrefix).Append(alias);
+                    names.Add(alias);
+                    i = end - 1;
+                    continue;
+                }
+
                 if (supplied.Contains(name))
                 {
                     sb.Append(ClientParameterPlaceholderPrefix).Append(name);

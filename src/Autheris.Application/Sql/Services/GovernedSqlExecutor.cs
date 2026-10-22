@@ -249,7 +249,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
 
         var bindNames = GovernedSqlExecutionService.MergeGatewayParameters(request);
-        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, bindNames, out var referencedNames);
+        string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, bindNames, request.GatewayParameters, out var referencedNames);
 
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
@@ -687,7 +687,7 @@ public sealed partial class GovernedSqlExecutor
         {
             foreach (var (name, value) in gatewayParameters)
             {
-                values.Add(name.TrimStart('@'), value);
+                values.Add(GovernedSqlExecutionService.GatewayParameterAlias(name), value);
             }
         }
 

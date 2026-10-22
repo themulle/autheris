@@ -25,6 +25,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
+using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
 public sealed class GovernedSqlExecutionParameterSecurityTests
@@ -238,14 +239,174 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
             new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel });
 
         var merged = GovernedSqlExecutionService.MergeGatewayParameters(request);
-        var text = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, merged, out var names);
+        var text = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, merged, request.GatewayParameters, out var names);
 
         merged.ShouldNotBeNull();
-        merged["__gql_tf_0"].ShouldBe(Sentinel);
+        merged["gw_tf_0"].ShouldBe(Sentinel);
         text.ShouldNotContain(Sentinel);
-        text.ShouldContain("__param___gql_tf_0");
+        text.ShouldContain("__param_gw_tf_0");
         text.ShouldNotContain("@__gql_tf_0");
-        names.ShouldContain("__gql_tf_0");
+        text.ShouldNotContain("__gql_");
+        names.ShouldContain("gw_tf_0");
+    }
+
+    [Fact]
+    public async Task Issue280_PlannedRead_GatewayParameters_PassRewriterTextGuard()
+    {
+        // Reproduces the integration failure: the normalized text went through the real rewriter's reserved-identifier guard.
+        var request = Planned(
+            "SELECT id FROM orders WHERE region = @__gql_tf_0",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel });
+        var merged = GovernedSqlExecutionService.MergeGatewayParameters(request);
+        var text = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, merged, request.GatewayParameters, out _);
+        var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
+
+        var compiled = await service.CompileAsync(text, CreateUser(), new TenantId(Tenant));
+
+        compiled.Parameters.ShouldContain(p => p.SourceName == "gw_tf_0" && p.Origin == ParameterOrigin.ClientNamed);
+        compiled.Sql.ShouldNotContain(Sentinel);
+        compiled.Parameters.ShouldAllBe(p => !Equals(p.Value, Sentinel));
+    }
+
+    [Fact]
+    public void Issue280_ClientTextAlias_NotBoundToGatewayValue()
+    {
+        var request = Planned(
+            "SELECT id FROM orders WHERE region = @__gql_tf_0 AND id = @gw_tf_0",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel });
+        var merged = GovernedSqlExecutionService.MergeGatewayParameters(request);
+
+        var text = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, merged, request.GatewayParameters, out _);
+
+        text.ShouldContain("id = @gw_tf_0");
+        text.ShouldContain("region = __param_gw_tf_0");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("@__gql_tf_x")]
+    [InlineData("@__gql_tf_")]
+    [InlineData("@__gql_tf_0a")]
+    [InlineData("@__gql_tf_1234567")]
+    public void Issue280_GatewayParameterSuffixNotDigits_FailsClosed(string name)
+    {
+        var request = Planned("SELECT 1", new Dictionary<string, object?> { [name] = Sentinel });
+
+        var ex = Should.Throw<InvalidOperationException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
+
+        ex.Message.ShouldNotContain(Sentinel);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Issue280_GatewayCaseVariantAliasCollision_FailsClosed()
+    {
+        var request = Planned(
+            "SELECT 1",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = 1, ["@__GQL_TF_0"] = 2 });
+
+        Should.Throw<SecurityException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_280_9_GatewayAliasCaseVariantClientParam_FailsClosed()
+    {
+        var request = Planned(
+            "SELECT id FROM orders WHERE region = @__gql_tf_0",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel },
+            new Dictionary<string, object?> { ["GW_TF_0"] = "client" });
+
+        var ex = Should.Throw<SecurityException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
+
+        ex.Message.ShouldNotContain(Sentinel);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_280_10_ClientParamNamedAlias_WithGatewayMap_FailsClosed()
+    {
+        var request = Planned(
+            "SELECT id FROM orders WHERE region = @__gql_tf_0",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel },
+            new Dictionary<string, object?> { ["@gw_tf_0"] = "client" });
+
+        var ex = Should.Throw<SecurityException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
+
+        ex.Message.ShouldNotContain(Sentinel);
+        ex.Message.ShouldNotContain("client");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_280_10_ClientParamNamedGwTf0_WithoutGatewayMap_BindsAsClientValue()
+    {
+        var client = new Dictionary<string, object?> { ["gw_tf_0"] = "client" };
+        var request = Planned("SELECT id FROM orders WHERE region = @gw_tf_0", null, client);
+
+        var merged = GovernedSqlExecutionService.MergeGatewayParameters(request);
+        var text = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, merged, request.GatewayParameters, out var names);
+
+        merged.ShouldBeSameAs(client);
+        text.ShouldContain("region = __param_gw_tf_0");
+        names.ShouldContain("gw_tf_0");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SEC_280_11_ClientTextPreNormalizedGatewayPlaceholder_IsRejected(bool withGatewayMap)
+    {
+        const string Sql = "SELECT id FROM orders WHERE region = @__param_gw_tf_0";
+        var request = Planned(
+            Sql,
+            withGatewayMap ? new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel } : null);
+
+        if (withGatewayMap)
+        {
+            var merged = GovernedSqlExecutionService.MergeGatewayParameters(request);
+            Should.Throw<WebSqlPolicyException>(() =>
+                GovernedSqlExecutionService.NormalizeClientParameters(Sql, merged, request.GatewayParameters, out _));
+        }
+
+        var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
+        var rejected = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+            await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        rejected.Message.ShouldNotContain(Sentinel);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("__gql_tf_x")]
+    [InlineData("__gql_tf_")]
+    [InlineData("__gql_tf_1234567")]
+    [InlineData("__gql_rls_0")]
+    [InlineData("region")]
+    [InlineData("")]
+    [InlineData("@")]
+    public void SEC_280_12_GatewayParameterAlias_RejectsInvalidNames(string name)
+    {
+        Should.Throw<InvalidOperationException>(() => GovernedSqlExecutionService.GatewayParameterAlias(name));
+        GovernedSqlExecutionService.GatewayParameterAlias("@__GQL_TF_12").ShouldBe("gw_tf_12");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_280_13_GatewayPlaceholderInQuotedLiteral_NotReplaced_NotBound()
+    {
+        var request = Planned(
+            "SELECT id FROM orders WHERE region = '@__gql_tf_0' AND id = '@gw_tf_0' AND tenant_id = @__gql_tf_0",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = Sentinel });
+        var merged = GovernedSqlExecutionService.MergeGatewayParameters(request);
+
+        var text = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, merged, request.GatewayParameters, out _);
+
+        text.ShouldContain("region = '@__gql_tf_0'");
+        text.ShouldContain("id = '@gw_tf_0'");
+        text.ShouldContain("tenant_id = __param_gw_tf_0");
+        text.ShouldNotContain(Sentinel);
     }
 
     [Fact]
@@ -267,8 +428,8 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
 
         merged.ShouldNotBeNull();
         merged.Count.ShouldBe(4);
-        merged["__gql_tf_2"].ShouldBeOfType<DateTime>().ShouldBe(from);
-        merged["__gql_tf_3"].ShouldBeOfType<DateTime>().ShouldBe(to);
+        merged["gw_tf_2"].ShouldBeOfType<DateTime>().ShouldBe(from);
+        merged["gw_tf_3"].ShouldBeOfType<DateTime>().ShouldBe(to);
     }
 
     [Fact]
@@ -345,6 +506,20 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         var ex = Should.Throw<SecurityException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
 
         ex.Message.ShouldNotContain("__gql_tf_0");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("__gql_tf_0")]
+    [InlineData("gw_tf_0")]
+    public void Issue280_GatewayAndClientOriginalOrAliasName_FailsClosed(string clientName)
+    {
+        var request = Planned(
+            "SELECT id FROM orders",
+            new Dictionary<string, object?> { ["@__gql_tf_0"] = 1 },
+            new Dictionary<string, object?> { [clientName] = 2 });
+
+        Should.Throw<SecurityException>(() => GovernedSqlExecutionService.MergeGatewayParameters(request));
     }
 
     [Fact]
