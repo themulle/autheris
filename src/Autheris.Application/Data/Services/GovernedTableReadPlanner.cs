@@ -41,6 +41,9 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
     /// <summary>Mandatory per-group row count alias emitted by <see cref="PlanAggregate"/> for minimum group size guarding (#37).</summary>
     public const string GroupCountColumnAlias = "__n";
 
+    /// <summary>MISC-08: prefix of the hidden <c>COUNT(col)</c> emitted next to every AVG so merged averages can be weighted by non-null counts.</summary>
+    public const string AvgCountAliasPrefix = "__cnt_";
+
     public string BuildFullTableSelect(TableIdentifier table) => $"SELECT * FROM {table.ToQualifiedName()}";
 
     public PlannedTableRead Plan(TableReadIntent intent, TableMetadata metadata, TableAccessDecision decision)
@@ -251,6 +254,10 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                     _ => throw new ArgumentOutOfRangeException(nameof(intent), $"Unsupported aggregate function '{agg.Function}'.")
                 };
                 selectItems.Add(sqlExpr);
+                if (agg.Function == AggregateFunction.Avg)
+                {
+                    selectItems.Add($"COUNT({quotedCol}) AS {DataApiFilterTranslator.QuoteIdentifier(AvgCountAliasPrefix + normalized.EffectiveAlias)}");
+                }
             }
         }
 
@@ -514,35 +521,9 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             return;
         }
 
-        bool IsSatisfied(string reqCol)
-        {
-            if (!isAggregate &&
-                metadata.TenantColumnName != null &&
-                string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
-                rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
-            {
-                return true;
-            }
-
-            if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) &&
-                decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (filter != null &&
-                filter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            return false;
-        }
+        // MISC-04: whole-identifier rule shared with every other read path (no substring matching on the row filter text).
+        bool IsSatisfied(string reqCol) =>
+            RequiredFilterColumnRule.IsColumnSatisfied(reqCol, metadata, decision, filter?.ReferencedColumns, tenantColumnCounts: !isAggregate);
 
         if (metadata.RequiredFilterColumnGroups.Length > 0)
         {

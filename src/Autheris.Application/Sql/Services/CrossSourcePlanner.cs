@@ -142,20 +142,9 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             {
                 foreach (var reqCol in t.Metadata.RequiredFilterColumns)
                 {
-                    if (t.Metadata.TenantColumnName != null &&
-                        string.Equals(t.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (dec.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
-                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
-                    {
-                        continue;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(dec.CombinedRowFilterSql) &&
-                        dec.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
+                    // MISC-04: shared whole-identifier rule (no substring matching on the row filter text).
+                    if (Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+                            reqCol, t.Metadata, dec, clientFilterColumns: null, tenantColumnCounts: true))
                     {
                         continue;
                     }

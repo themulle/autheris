@@ -175,7 +175,15 @@ public sealed record ConsumerAppDailySummary(
     IReadOnlyList<string> QueryNames,
     int DistinctActors = 0,
     IReadOnlyList<string>? ActorSids = null
-);
+)
+{
+    /// <summary>
+    /// MISC-17: HMAC-pseudonymised actor identifiers of this (day, application) cell, for internal k-anonymity decisions only
+    /// (the union of folded cells must count true distinct actors). Never serialized.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlySet<string>? ActorKeys { get; init; }
+}
 
 public sealed record TableConsumersReport(
     string Table,
@@ -209,6 +217,9 @@ public sealed record GdprDisclosureReport(
     int TotalAccessEvents,
     IReadOnlyList<GdprRecipientAccessRecord> DisclosedRecipients,
     IReadOnlyList<string> SensitivityCategories,
-    string LegalBasisNotice
+    string LegalBasisNotice,
+    bool IsComplete = true,
+    string EvidenceLevel = "TableLevel",
+    IReadOnlyList<string>? IncompletenessReasons = null
 );
 

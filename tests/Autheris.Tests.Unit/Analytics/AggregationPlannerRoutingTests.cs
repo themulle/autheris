@@ -134,7 +134,7 @@ public sealed class AggregationPlannerRoutingTests
         TableId,
         GroupBy: ["department"],
         Aggregates: [new AggregateSelection(AggregateFunction.Count, null, "cnt")],
-        PreEvaluatedDecision: Decision());
+        PreEvaluatedDecision: Decision().AsPdpEvaluated());
 
     [Fact]
     public async Task Aggregation_SqlTable_Over100kRows_UsesPlanner_CountIs100001()

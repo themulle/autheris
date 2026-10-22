@@ -46,7 +46,8 @@ public sealed record TableAccessQuery(
     FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
     IReadOnlySet<Sid>? AllUserSids = null,
     SchemaContractDefinition? Contract = null,
-    ClaimsPrincipal? Principal = null)
+    ClaimsPrincipal? Principal = null,
+    IReadOnlyList<Consent>? SupplementalConsents = null)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,

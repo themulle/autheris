@@ -157,7 +157,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
                     var cursorParam = config.PageParamName ?? "cursor";
                     pageArgs[cursorParam] = currentCursor;
                 }
-                url = BuildUrl(descriptor, pageArgs, context.Principal);
+                url = BuildUrl(descriptor, pageArgs, ResolveContextTenant(context, descriptor));
             }
 
             await ValidateDestinationUrl(url, ct);
@@ -313,7 +313,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         }
         var effectiveCt = timeoutCts?.Token ?? ct;
 
-        var url = BuildUrl(descriptor, arguments, context.Principal);
+        var url = BuildUrl(descriptor, arguments, ResolveContextTenant(context, descriptor));
         await ValidateDestinationUrl(url, effectiveCt);
         var method = new HttpMethod(descriptor.Method ?? "GET");
 
@@ -347,7 +347,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         }
         var effectiveCt = timeoutCts?.Token ?? ct;
 
-        var url = BuildUrl(descriptor, context.Arguments, context.Principal);
+        var url = BuildUrl(descriptor, context.Arguments, ResolveContextTenant(context, descriptor));
         await ValidateDestinationUrl(url, effectiveCt);
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         ApplyHeadersAndAuth(request, descriptor, context);
@@ -471,10 +471,33 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         return allRows.ToList();
     }
 
+    /// <summary>
+    /// MISC-13: the tenant to push down is <see cref="DataSourceExecutionContext.Tenant"/>, never a raw token claim. Returns null when the
+    /// descriptor pushes no tenant; throws (fail closed) when it does and the context has none. A conflicting raw claim is audited.
+    /// </summary>
+    private TenantId? ResolveContextTenant(DataSourceExecutionContext context, HttpEndpointDescriptor descriptor)
+    {
+        if (string.IsNullOrWhiteSpace(descriptor.TenantIdQueryParam) && string.IsNullOrWhiteSpace(descriptor.TenantIdHeaderName))
+        {
+            return context.Tenant;
+        }
+
+        var tenant = TenantPushdown.Require(context.Tenant, descriptor.TenantIdQueryParam ?? descriptor.TenantIdHeaderName ?? "tenant");
+        if (TenantPushdown.HasConflictingRawClaim(context.Principal, tenant))
+        {
+            _logger.LogWarning(
+                "Security audit (MISC-13): the token carries a tenant claim that differs from the resolved tenant; the resolved tenant '{Tenant}' is pushed to data source '{Source}'.",
+                tenant,
+                context.SourceName);
+        }
+
+        return context.Tenant;
+    }
+
     internal string BuildUrl(
         HttpEndpointDescriptor descriptor,
         IReadOnlyDictionary<string, object?> arguments,
-        ClaimsPrincipal principal)
+        TenantId? tenant)
     {
         var baseUrl = descriptor.BaseUrl.TrimEnd('/');
         var pathTemplate = descriptor.PathTemplate.StartsWith('/')
@@ -528,9 +551,8 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         // 3. Tenant ID Pushdown as query parameter (fail-closed without tenant claim, SEC M-26)
         if (!string.IsNullOrWhiteSpace(descriptor.TenantIdQueryParam))
         {
-            var tenantClaim = ResolveTenantClaim(principal)
-                ?? throw new SecurityException($"The HTTP data source requires a tenant ('{descriptor.TenantIdQueryParam}'), but the caller has no tenant claim.");
-            queryParams.Add($"{Uri.EscapeDataString(descriptor.TenantIdQueryParam)}={Uri.EscapeDataString(tenantClaim)}");
+            var resolvedTenant = TenantPushdown.Require(tenant, descriptor.TenantIdQueryParam);
+            queryParams.Add($"{Uri.EscapeDataString(descriptor.TenantIdQueryParam)}={Uri.EscapeDataString(resolvedTenant)}");
         }
 
         var fullUrl = baseUrl + expandedPath;
@@ -596,14 +618,6 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         return true;
     }
 
-    private static string? ResolveTenantClaim(ClaimsPrincipal principal)
-    {
-        var tenantClaim = principal.FindFirst("tenant_id")?.Value
-                          ?? principal.FindFirst("tid")?.Value
-                          ?? principal.FindFirst("tenant")?.Value;
-        return string.IsNullOrWhiteSpace(tenantClaim) ? null : tenantClaim;
-    }
-
     internal Task ValidateDestinationUrl(string fullUrl, CancellationToken ct = default)
     {
         if (!Uri.TryCreate(fullUrl, UriKind.Absolute, out var uri))
@@ -658,9 +672,8 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         {
             request.Headers.Remove(descriptor.TenantIdHeaderName);
             // SEC M-26: fail-closed - never call a tenant-scoped API without the caller's tenant.
-            var tenantClaim = ResolveTenantClaim(context.Principal)
-                ?? throw new SecurityException($"The HTTP data source requires a tenant header ('{descriptor.TenantIdHeaderName}'), but the caller has no tenant claim.");
-            request.Headers.TryAddWithoutValidation(descriptor.TenantIdHeaderName, tenantClaim);
+            var resolvedTenant = TenantPushdown.Require(ResolveContextTenant(context, descriptor), descriptor.TenantIdHeaderName);
+            request.Headers.TryAddWithoutValidation(descriptor.TenantIdHeaderName, resolvedTenant);
         }
 
         // 3. User Identity Header Pushdown (X-User-Sid) - strip any forwarded value first

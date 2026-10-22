@@ -547,10 +547,27 @@ public static partial class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var report = await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
+            GdprDisclosureReport report;
+            try
+            {
+                report = await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
+            }
+            catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException ex)
+            {
+                // MISC-11: no table scope means no honest report; never a report that implies completeness.
+                return Results.Json(
+                    new { error = Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode, message = ex.Message },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+
             var exportResult = pdfExporter.ExportReportToPdf(report);
 
-            context.Response.Headers["X-Audit-Seal-SHA256"] = exportResult.Sha256AuditSeal;
+            // MISC-12: only a keyed seal is published; without a signer the header is omitted.
+            if (exportResult.AuditSeal != null)
+            {
+                context.Response.Headers["X-Audit-Seal"] = exportResult.AuditSeal;
+            }
+
             return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
         }).RequireAuthorization()
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
