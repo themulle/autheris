@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Federation.Conjuncts;
-using Autheris.Application.Sql.Federation.Optimization;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.Sql.Services;
@@ -243,8 +242,8 @@ public sealed class SqlaPushdownSecurityTests
         var contract = FederatedParameterContract.Create(new Dictionary<string, object?> { ["x"] = null, ["y"] = "open" });
         var candidates = new[]
         {
-            new PushedConjunctCandidate("id", "=", "x"),
-            new PushedConjunctCandidate("status", "=", "y")
+            new Autheris.Application.Sql.Federation.Optimization.PushedConjunctCandidate("id", "=", "x"),
+            new Autheris.Application.Sql.Federation.Optimization.PushedConjunctCandidate("status", "=", "y")
         };
 
         var clause = OptimizationBuilder.BuildClause(meta, Clear(meta), candidates, contract, null, out _);
