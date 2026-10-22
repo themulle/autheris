@@ -247,6 +247,7 @@ public sealed class ItsmWebhookHandler(
         }
 
         var registeredKeys = new List<string>(replayKeys.Count);
+        var clusterKeys = new List<string>(replayKeys.Count);
         foreach (var key in replayKeys)
         {
             if (!_replayCache.TryRegister(key, now))
@@ -281,6 +282,8 @@ public sealed class ItsmWebhookHandler(
                             SanitizeForLog(payload.TicketId));
                         return true;
                     }
+
+                    clusterKeys.Add(key);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -306,6 +309,29 @@ public sealed class ItsmWebhookHandler(
                 {
                     _replayCache.Remove(registered);
                 }
+
+                // EXT-13: release the cluster dedup counters as well, otherwise every retry is acknowledged as a replay.
+                await ReleaseClusterKeysAsync(clusterKeys).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task ReleaseClusterKeysAsync(List<string> clusterKeys)
+    {
+        if (clusterState == null)
+        {
+            return;
+        }
+
+        foreach (var key in clusterKeys)
+        {
+            try
+            {
+                await clusterState.RemoveAsync($"itsm:dedup:{key}", CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "ITSM webhook cluster state: failed to release a replay registration.");
             }
         }
     }
@@ -356,6 +382,16 @@ public sealed class ItsmWebhookHandler(
         {
             logger.LogWarning("Webhook discarded: Unknown TicketId '{TicketId}' for instance '{InstanceId}'.", payload.TicketId, logInstanceId);
             return false;
+        }
+
+        // EXT-14: APPROVED without an activated consent is a recoverable state (the activation after the approval step failed
+        // earlier): a retried approval completes the activation instead of being acknowledged as already processed.
+        if (string.Equals(request.Status, "APPROVED", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(payload.Action, "APPROVE", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogInformation("Consent Request {RequestId} is APPROVED but not yet activated; completing the activation.", request.Id);
+            await ActivateApprovedRequestAsync(request, BuildActorSid(payload, instanceId), ct).ConfigureAwait(false);
+            return true;
         }
 
         // 6. Idempotente Bearbeitung (nur PENDING_EXTERNAL_APPROVAL darf bearbeitet werden)
@@ -412,12 +448,7 @@ public sealed class ItsmWebhookHandler(
 
             if (string.Equals(stepResult.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
             {
-                await governanceRepo.ActivateConsentAsync(request.Id, actor, ct).ConfigureAwait(false);
-
-                if (eventBus != null)
-                {
-                    await eventBus.PublishAsync($"governance:policy-epoch-increment:{request.TenantId.Value}", request.TenantId.Value, ct).ConfigureAwait(false);
-                }
+                await ActivateApprovedRequestAsync(request, actor, ct).ConfigureAwait(false);
             }
 
             return true;
@@ -431,6 +462,16 @@ public sealed class ItsmWebhookHandler(
 
         logger.LogWarning("Webhook ignoriert: Unbekannte Action '{Action}'", payload.Action);
         return false;
+    }
+
+    private async Task ActivateApprovedRequestAsync(ConsentRequest request, Sid actor, CancellationToken ct)
+    {
+        await governanceRepo.ActivateConsentAsync(request.Id, actor, ct).ConfigureAwait(false);
+
+        if (eventBus != null)
+        {
+            await eventBus.PublishAsync($"governance:policy-epoch-increment:{request.TenantId.Value}", request.TenantId.Value, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
