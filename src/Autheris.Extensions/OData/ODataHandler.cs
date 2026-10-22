@@ -53,8 +53,9 @@ public sealed partial class ODataHandler(
             var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var tenantId = principal.GetTenantId().Value;
             var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
-            var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(tables.Select(t => t.Identifier));
-            var cacheKey = $"odata:csdl:{tenantId}:s{structureVersion}:{visibilityHash}";
+            // EXT-01: Key by column visibility and keys shape hash rather than table identifiers alone
+            var shapeHash = ComputeShapeHash(tables);
+            var cacheKey = $"odata:csdl:{tenantId}:s{structureVersion}:{shapeHash}";
 
             if (_memoryCache.TryGetValue(cacheKey, out string? cachedXml) && cachedXml != null)
             {
@@ -127,6 +128,48 @@ public sealed partial class ODataHandler(
         return size;
     }
 
+    private static string ComputeShapeHash(IReadOnlyList<Autheris.Domain.Model.TableMetadata> tables)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var ms = new MemoryStream();
+        using var writer = new StreamWriter(ms, new System.Text.UTF8Encoding(false));
+
+        var sortedTables = tables.OrderBy(t => t.Identifier.ToString(), StringComparer.Ordinal).ToList();
+        foreach (var t in sortedTables)
+        {
+            writer.Write(t.Identifier.ToString());
+            writer.Write('\0');
+
+            foreach (var col in t.Columns)
+            {
+                writer.Write(col.ColumnName);
+                writer.Write('\0');
+            }
+
+            foreach (var pk in t.PrimaryKeyColumns)
+            {
+                writer.Write(pk);
+                writer.Write('\0');
+            }
+
+            foreach (var idx in t.Indexes)
+            {
+                foreach (var idxCol in idx.Columns)
+                {
+                    writer.Write(idxCol);
+                    writer.Write('\0');
+                }
+            }
+
+            writer.Write('\n');
+        }
+
+        writer.Flush();
+        ms.Position = 0;
+        var hashBytes = sha.ComputeHash(ms);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
     private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
         if (principal?.Identity?.IsAuthenticated != true)
@@ -136,7 +179,8 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null)
         {
-            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
+            var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "ANONYMOUS";
+            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{sid}";
             if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
             {
                 return (cachedTables, true);
@@ -198,7 +242,8 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null && complete)
         {
-            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{principal.GetUserSid()?.Value}";
+            var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "ANONYMOUS";
+            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{sid}";
             SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
         }
 

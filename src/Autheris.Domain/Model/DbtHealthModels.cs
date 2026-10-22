@@ -32,7 +32,8 @@ public sealed record DbtRunResultsReport(
     string DbtVersion,
     DateTimeOffset GeneratedAt,
     TimeSpan ElapsedTime,
-    IReadOnlyList<DbtModelExecutionResult> Results
+    IReadOnlyList<DbtModelExecutionResult> Results,
+    IReadOnlyList<string>? UnattributedFailures = null
 );
 
 public sealed record DbtHealthState(

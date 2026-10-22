@@ -152,6 +152,7 @@ public static class GatewayGovernanceServiceExtensions
 
         services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
+        services.AddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
 
         services.AddSingleton<VirtualFilterAdministrationService>();

@@ -32,14 +32,16 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly IRebacStore? _rebacStore;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
     private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
+    private readonly IDbtTestTargetMap? _testTargetMap;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
         IDbtProposalRepository proposalRepository,
         ITableMetadataRepository metadataRepository,
         ILineageGraphStore lineageGraphStore,
-        ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, logger)
+        ILogger<DbtMetadataIngestionService> logger,
+        IDbtTestTargetMap? testTargetMap = null)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, testTargetMap, logger)
     {
     }
 
@@ -157,9 +159,28 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        IRebacStore? rebacStore,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
+        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        IDbtTestTargetMap? testTargetMap,
+        ILogger<DbtMetadataIngestionService> logger)
     {
         _tagImport = tagImport;
         _syntheticRowGenerator = syntheticRowGenerator;
+        _testTargetMap = testTargetMap;
         _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
@@ -217,9 +238,26 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         return Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "dbt");
     }
 
-    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
+    private static bool IsTenantAllowed(TableIdentifier id, DbtGovernanceImportCaller caller)
+    {
+        if (caller.IsClusterAdmin)
+        {
+            return true;
+        }
+
+        if (string.Equals(id.Domain, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            return caller.Tenant == TenantId.LegacySingleTenant ||
+                   string.Equals(caller.Tenant.Value, "default", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(id.Domain, caller.Tenant.Value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, DbtGovernanceImportCaller caller, bool dryRun = false, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ArgumentNullException.ThrowIfNull(caller);
         ValidateSafeFilePath(filePath);
         var fullPath = Path.GetFullPath(filePath);
         ValidateSafeFilePath(fullPath);
@@ -230,7 +268,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
 
         await using var stream = File.OpenRead(fullPath);
-        return await IngestManifestStreamAsync(stream, dryRun, tenant, ct).ConfigureAwait(false);
+        return await IngestManifestStreamAsync(stream, caller, dryRun, ct).ConfigureAwait(false);
     }
 
     private static void ValidateSafeFilePath(string fullPath)
@@ -265,19 +303,27 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
     }
 
-    public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
+    public Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
+        => IngestManifestStreamAsync(manifestStream, new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("system:dbt-sync"), IsSync: true, null), tenant ?? TenantId.LegacySingleTenant, tenant == null), dryRun, ct);
+
+    public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, DbtGovernanceImportCaller caller, bool dryRun = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(manifestStream);
+        ArgumentNullException.ThrowIfNull(caller);
 
         var warnings = new List<string>();
-        IReadOnlyList<DbtModelDefinition> models;
+        var rejectedModels = new List<string>();
+        var suppressedRelaxations = new List<DbtSuppressedRelaxation>();
+        IReadOnlyList<DbtModelDefinition> allModels;
         IReadOnlyList<DbtRelationshipDefinition> relationships;
+        IReadOnlyDictionary<string, IReadOnlyList<string>> testToModels = ImmutableDictionary<string, IReadOnlyList<string>>.Empty;
 
         try
         {
             var parsed = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(manifestStream, ct).ConfigureAwait(false);
-            models = parsed.Models;
+            allModels = parsed.Models;
             relationships = parsed.Relationships;
+            testToModels = parsed.TestToModels;
             warnings.AddRange(parsed.Warnings);
         }
         catch (Exception ex)
@@ -286,7 +332,43 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             return new DbtSyncResult(false, 0, 0, 0, [], $"Manifest parse failure: {ex.Message}");
         }
 
-        _logger.LogInformation("Parsed {Count} dbt models and {RelCount} relationships from manifest.", models.Count, relationships.Count);
+        // EXT-07: Filter models by caller tenant
+        var models = new List<DbtModelDefinition>();
+        var rejectedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var m in allModels)
+        {
+            var tid = m.ToTableIdentifier();
+            if (IsTenantAllowed(tid, caller))
+            {
+                models.Add(m);
+            }
+            else
+            {
+                var idStr = tid.ToString();
+                rejectedModels.Add(idStr);
+                rejectedSet.Add(m.Name);
+                rejectedSet.Add(m.UniqueId);
+                rejectedSet.Add(idStr);
+                warnings.Add($"Table '{idStr}': tenant '{tid.Domain}' is not the caller's tenant; only a ClusterAdmin may import into another tenant.");
+            }
+        }
+
+        // EXT-08: Feed IDbtTestTargetMap with parsed test-to-models mappings
+        if (_testTargetMap != null)
+        {
+            var modelToTable = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in models)
+            {
+                var tid = m.ToTableIdentifier();
+                modelToTable[m.UniqueId] = tid;
+                modelToTable[m.Name] = tid;
+            }
+            _testTargetMap.Replace(caller.Tenant, modelToTable, testToModels);
+        }
+
+        _logger.LogInformation("Parsed {Count} dbt models ({Allowed} allowed, {Rejected} rejected) and {RelCount} relationships from manifest.",
+            allModels.Count, models.Count, rejectedModels.Count, relationships.Count);
 
         var generatedProposals = 0;
         var lineageNodesToUpdate = new List<LineageNode>();
@@ -478,7 +560,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 DownstreamNodeIds: downstream,
                 OwnerTeam: ownerTeam,
                 OwnerEmail: model.Meta.GetValueOrDefault("owner_email"),
-                TenantId: (tenant ?? TenantId.LegacySingleTenant).Value
+                TenantId: caller.Tenant.Value
             ));
 
             // 3. Omnichannel Documentation Sync (F-DOC-01): Synchronize dbt model and column descriptions
@@ -498,8 +580,21 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
                 if (existingMeta != null)
                 {
-                    var reqCols = ParseMetaRequiredFilterColumns(model.Meta) ?? existingMeta.Table.RequiredFilterColumns;
-                    var reqGroups = ParseMetaRequiredFilterColumnGroups(model.Meta) ?? existingMeta.Table.RequiredFilterColumnGroups;
+                    // EXT-05: Ratchet governance properties rather than overwrite
+                    var reqCols = DbtManifestRatchet.MergeRequiredFilterColumns(
+                        existingMeta.Identifier,
+                        existingMeta.Table.RequiredFilterColumns,
+                        ParseMetaRequiredFilterColumns(model.Meta),
+                        model.Meta.ContainsKey("required_filter_columns"),
+                        suppressedRelaxations,
+                        _logger);
+                    var reqGroups = DbtManifestRatchet.MergeRequiredFilterColumnGroups(
+                        existingMeta.Identifier,
+                        existingMeta.Table.RequiredFilterColumnGroups,
+                        ParseMetaRequiredFilterColumnGroups(model.Meta),
+                        model.Meta.ContainsKey("required_filter_column_groups"),
+                        suppressedRelaxations,
+                        _logger);
 
                     var updatedTableObj = new Table
                     {
@@ -535,7 +630,13 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         var matchingCol = model.Columns.TryGetValue(c.ColumnName, out var dCol) ? dCol : null;
                         var colDesc = matchingCol?.Description ?? c.Description;
                         var colLongDesc = matchingCol?.Meta.GetValueOrDefault("long_description") ?? c.LongDescription;
-                        var colMeta = matchingCol?.Meta ?? c.Meta;
+                        var colMeta = DbtManifestRatchet.MergeColumnMeta(
+                            existingMeta.Identifier,
+                            c.ColumnName,
+                            c.Meta,
+                            matchingCol?.Meta,
+                            suppressedRelaxations,
+                            _logger);
 
                         updatedColumns.Add(new TableColumn
                         {
@@ -550,6 +651,13 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         });
                     }
 
+                    var mergedSamples = DbtManifestRatchet.MergeSyntheticSamples(
+                        existingMeta.Identifier,
+                        existingMeta.PredefinedSyntheticSamples,
+                        model.SyntheticSamples,
+                        suppressedRelaxations,
+                        _logger);
+
                     var updatedMetadata = new TableMetadata
                     {
                         Table = updatedTableObj,
@@ -558,7 +666,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         Indexes = existingMeta.Indexes,
-                        PredefinedSyntheticSamples = model.SyntheticSamples ?? existingMeta.PredefinedSyntheticSamples
+                        PredefinedSyntheticSamples = mergedSamples
                     };
 
                     // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
@@ -567,9 +675,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         updatedMetadata = ApplyDeclaredKeys(updatedMetadata, declared);
                     }
 
-                    if (model.SyntheticSamples != null)
+                    if (mergedSamples != null)
                     {
-                        _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, model.SyntheticSamples);
+                        _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, mergedSamples);
                     }
 
                     await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
@@ -604,10 +712,22 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
 
         // R-31 / issue #151: persist relationships (all ordered key pairs, reason-coded warnings, dry-run parity)
-        var importedRelations = 0;
-        if (_relationRepository != null && relationships.Count > 0)
+        // EXT-07: Filter out relationships involving rejected models
+        var allowedRelationships = new List<DbtRelationshipDefinition>();
+        foreach (var rel in relationships)
         {
-            importedRelations = await ImportRelationsAsync(models, relationships, dryRun, warnings, ct).ConfigureAwait(false);
+            if (rejectedSet.Contains(rel.ParentModelOrTable) || rejectedSet.Contains(rel.ChildModelOrTable))
+            {
+                warnings.Add($"Relationship '{rel.Name}': dropped because it targets model outside caller's tenant.");
+                continue;
+            }
+            allowedRelationships.Add(rel);
+        }
+
+        var importedRelations = 0;
+        if (_relationRepository != null && allowedRelationships.Count > 0)
+        {
+            importedRelations = await ImportRelationsAsync(models, allowedRelationships, dryRun, warnings, ct).ConfigureAwait(false);
         }
 
         // Apply lineage updates
@@ -616,8 +736,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             _lineageGraphStore.UpdateGraph(lineageNodesToUpdate);
         }
 
-        _logger.LogInformation("Completed dbt ingestion: {Models} models, {Proposals} proposals, {Lineage} lineage nodes, {Relations} relations.",
-            models.Count, generatedProposals, lineageNodesToUpdate.Count, importedRelations);
+        _logger.LogInformation("Completed dbt ingestion: {Models} models, {Proposals} proposals, {Lineage} lineage nodes, {Relations} relations, {Rejected} rejected.",
+            models.Count, generatedProposals, lineageNodesToUpdate.Count, importedRelations, rejectedModels.Count);
 
         return new DbtSyncResult(
             Success: true,
@@ -626,7 +746,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             UpdatedLineageNodesCount: lineageNodesToUpdate.Count,
             Warnings: warnings,
             ErrorMessage: null,
-            ImportedRelationsCount: importedRelations
+            ImportedRelationsCount: importedRelations,
+            RejectedModels: rejectedModels,
+            SuppressedRelaxations: suppressedRelaxations
         );
     }
 
@@ -895,7 +1017,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         void ApplyMaskingRule(Dictionary<string, MaskingRule> rules, TableIdentifier table, string column, MaskingRule newRule)
         {
             if (rules.TryGetValue(column, out var stored) &&
-                CatalogGovernanceRatchet.MaskingRuleStrength(stored) > CatalogGovernanceRatchet.MaskingRuleStrength(newRule))
+                CatalogGovernanceRatchet.IsMaskingRelaxation(stored, newRule))
             {
                 relaxedMaskingRulesCount++;
                 rejections.Add($"Column '{table}.{column}': masking rule '{newRule.RuleType}' would weaken the stored rule '{stored.RuleType}'; use the dbt proposal workflow.");
@@ -970,6 +1092,12 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 var itemDatabase = item.TryGetProperty("database", out var dbProp2) ? dbProp2.GetString() : null;
 
                 var tableId = ParseTableIdentifier(tableNameStr, itemSchema, itemDatabase);
+                if (!IsTenantAllowed(tableId, caller))
+                {
+                    rejections.Add($"Table '{tableId}': tenant '{tableId.Domain}' is not the caller's tenant; only a ClusterAdmin may import into another tenant.");
+                    continue;
+                }
+
                 TableMetadata? existingMeta;
                 try
                 {
@@ -985,11 +1113,19 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 if (existingMeta == null)
                 {
                     var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-                    existingMeta = allTables.FirstOrDefault(m =>
+                    var candidates = allTables.Where(m =>
+                        IsTenantAllowed(m.Identifier, caller) &&
                         string.Equals(m.Identifier.Schema, tableId.Schema, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(m.Identifier.TableName, tableId.TableName, StringComparison.OrdinalIgnoreCase));
-                    if (existingMeta != null)
+                        string.Equals(m.Identifier.TableName, tableId.TableName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (candidates.Count > 1)
                     {
+                        rejections.Add($"Table '{tableId}': ambiguous table reference matches multiple tenants; use fully qualified identifier.");
+                        continue;
+                    }
+                    if (candidates.Count == 1)
+                    {
+                        existingMeta = candidates[0];
                         tableId = existingMeta.Identifier;
                     }
                 }
@@ -1226,6 +1362,11 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                                 if (mrProp.TryGetProperty("token_domain", out var tdProp) || mrProp.TryGetProperty("tokenDomain", out tdProp) || mrProp.TryGetProperty("TokenDomain", out tdProp))
                                 {
                                     newRule = newRule with { TokenDomain = tdProp.GetString() };
+                                }
+
+                                if (newRule.KeepPrefix < 0 || newRule.KeepSuffix < 0 || (newRule.KeepPrefix + newRule.KeepSuffix > MaskingRule.MaxRevealedChars))
+                                {
+                                    throw new ArgumentException($"Masking rule on column '{col.ColumnName}' specifies invalid revealed characters ({newRule.KeepPrefix}+{newRule.KeepSuffix} > {MaskingRule.MaxRevealedChars}).");
                                 }
 
                                 ApplyMaskingRule(updatedMaskingRules, tableId, col.ColumnName, newRule);
@@ -1647,7 +1788,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
         // EXT-1: Ratchet enforcement – approve must never weaken existing stronger masking rules
         if (tableMeta.ColumnMaskingRules.TryGetValue(proposal.ColumnName, out var existingRule) &&
-            CatalogGovernanceRatchet.MaskingRuleStrength(existingRule) > CatalogGovernanceRatchet.MaskingRuleStrength(newRule))
+            CatalogGovernanceRatchet.IsMaskingRelaxation(existingRule, newRule))
         {
             _logger.LogWarning(
                 "Dbt proposal {Id} suggests rule {SuggestedRule} for {Table}.{Column}, but existing masking rule {ExistingRule} is stronger.",

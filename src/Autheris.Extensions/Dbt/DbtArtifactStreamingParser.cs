@@ -41,6 +41,7 @@ public static class DbtArtifactStreamingParser
 
         using var document = await JsonDocument.ParseAsync(stream, jsonDocOptions, ct).ConfigureAwait(false);
         var root = document.RootElement;
+        var testToModels = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
 
         if (root.TryGetProperty("nodes", out var nodesElement) && nodesElement.ValueKind == JsonValueKind.Object)
         {
@@ -104,6 +105,38 @@ public static class DbtArtifactStreamingParser
                     }
 
                     CollectUniqueTest(node, keyBuilders);
+
+                    // EXT-08: collect test target model mappings for circuit breaker attribution
+                    var testUniqueId = nodeProperty.Name;
+                    var targetModels = new List<string>();
+                    if (node.TryGetProperty("attached_node", out var anProp2) && anProp2.GetString() is string anStr && !string.IsNullOrWhiteSpace(anStr))
+                    {
+                        targetModels.Add(anStr);
+                    }
+                    if (node.TryGetProperty("depends_on", out var depProp2) &&
+                        depProp2.TryGetProperty("nodes", out var depNodes2) &&
+                        depNodes2.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var dn in depNodes2.EnumerateArray())
+                        {
+                            var dnStr = dn.GetString();
+                            if (!string.IsNullOrWhiteSpace(dnStr) &&
+                                (dnStr.StartsWith("model.", StringComparison.OrdinalIgnoreCase) ||
+                                 dnStr.StartsWith("source.", StringComparison.OrdinalIgnoreCase) ||
+                                 dnStr.StartsWith("seed.", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                if (!targetModels.Contains(dnStr, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    targetModels.Add(dnStr);
+                                }
+                            }
+                        }
+                    }
+                    if (targetModels.Count > 0)
+                    {
+                        testToModels[testUniqueId] = targetModels;
+                    }
+
                     continue;
                 }
 
@@ -383,7 +416,7 @@ public static class DbtArtifactStreamingParser
             }
         }
 
-        return new DbtManifestParseResult(models, relations.Relationships, relations.Finish());
+        return new DbtManifestParseResult(models, relations.Relationships, relations.Finish(), testToModels);
     }
 
     private static string ReadModelRef(JsonElement constraint) =>

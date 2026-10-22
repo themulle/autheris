@@ -80,7 +80,18 @@ public sealed record DbtRelationshipDefinition(
 public sealed record DbtManifestParseResult(
     IReadOnlyList<DbtModelDefinition> Models,
     IReadOnlyList<DbtRelationshipDefinition> Relationships,
-    IReadOnlyList<string> Warnings
+    IReadOnlyList<string> Warnings,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? TestToModels = null
+)
+{
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> TestToModels { get; init; } =
+        TestToModels ?? new Dictionary<string, IReadOnlyList<string>>();
+}
+
+public sealed record DbtSuppressedRelaxation(
+    TableIdentifier Table,
+    string Field,
+    string Reason
 );
 
 public sealed record DbtSyncResult(
@@ -90,8 +101,14 @@ public sealed record DbtSyncResult(
     int UpdatedLineageNodesCount,
     IReadOnlyList<string> Warnings,
     string? ErrorMessage = null,
-    int ImportedRelationsCount = 0
-);
+    int ImportedRelationsCount = 0,
+    IReadOnlyList<string>? RejectedModels = null,
+    IReadOnlyList<DbtSuppressedRelaxation>? SuppressedRelaxations = null
+)
+{
+    public IReadOnlyList<string> RejectedModels { get; init; } = RejectedModels ?? Array.Empty<string>();
+    public IReadOnlyList<DbtSuppressedRelaxation> SuppressedRelaxations { get; init; } = SuppressedRelaxations ?? Array.Empty<DbtSuppressedRelaxation>();
+}
 
 public sealed record DbtContractBreakingChange(
     TableIdentifier Table,

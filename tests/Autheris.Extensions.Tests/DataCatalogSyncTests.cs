@@ -329,4 +329,47 @@ public class DataCatalogSyncTests
                 tuples.Any(t => t.TenantId == "corp" && t.User == "domain:corp" && t.Relation == "parent" && t.Object == "schema:corp.hr")),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task DataCatalogSync_KeepsRequiredFilterColumns()
+    {
+        var tableId = new TableIdentifier("corp", "hr", "employees");
+        var existingTable = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table
+            {
+                SourceName = "corp",
+                SchemaName = "hr",
+                TableName = "employees",
+                DisplayName = "Employees",
+                RequiredFilterColumns = System.Collections.Immutable.ImmutableArray.Create("tenant_id")
+            },
+            Columns = [new() { ColumnName = "id", DataType = "int" }, new() { ColumnName = "tenant_id", DataType = "varchar" }]
+        };
+
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            DisplayName = "Employees Updated",
+            Description = "Updated description from catalog",
+            Tags = [],
+            Columns = [new() { ColumnName = "id", DataType = "int" }, new() { ColumnName = "tenant_id", DataType = "varchar" }]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns(existingTable);
+
+        TableMetadata? savedMeta = null;
+        await _tableRepo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(m => savedMeta = m), Arg.Any<CancellationToken>());
+
+        var result = await _sut.SyncCatalogAsync(dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        savedMeta.ShouldNotBeNull();
+        savedMeta.RequiredFilterColumns.ShouldContain("tenant_id");
+        savedMeta.Table.Description.ShouldBe("Updated description from catalog");
+    }
 }
