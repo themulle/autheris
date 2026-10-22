@@ -151,6 +151,10 @@ public static class GatewayServiceCollectionExtensions
             new CrossSourceOptionsValidator(
                 configuration,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<CrossSourceOptionsValidator>>()));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new DuckDbOlapOptionsValidator(
+                environment,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<DuckDbOlapOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(_ => new ReadPathSwitchOptionsValidator(configuration));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new BulkStreamSigningKeyOptionsValidator(
