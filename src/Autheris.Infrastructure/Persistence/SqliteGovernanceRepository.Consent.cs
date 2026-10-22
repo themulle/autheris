@@ -1164,17 +1164,7 @@ public partial class SqliteGovernanceRepository
             ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
 
             // Four-eyes principle / Separation of duties check at repository layer
-            if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
-            {
-                throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
-            }
-
-            // Review R4-4 (rest): compare by the stable data owner id as well, not only by spelling.
-            var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(conn, ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct);
-            if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(conn, req, ct)))
-            {
-                throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
-            }
+            var approverOwnerIds = await EnsureApproverIsNotRequesterAsync(conn, req, approverSid, itsmApproverAccount, ct);
 
             if (!isExternalItsmApproval)
             {
@@ -1205,48 +1195,9 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            // Check if table requires four-eyes
-            bool requiresFourEyes = false;
-            string? tableSensitivity = null;
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT requires_four_eyes, sensitivity FROM TABLES WHERE id = @tid";
-                cmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
-                using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (await reader.ReadAsync(ct))
-                {
-                    if (!reader.IsDBNull(0))
-                    {
-                        requiresFourEyes = Convert.ToInt32(reader.GetValue(0)) == 1;
-                    }
-                    if (!reader.IsDBNull(1))
-                    {
-                        tableSensitivity = reader.GetString(1);
-                    }
-                }
-            }
+            var state = await ReadApprovalStateAsync(conn, req, approverSid, itsmApproverAccount, approverOwnerIds, ct);
 
-            // Check existing approval steps
-            var existingApprovers = new List<string>();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT approver_sid FROM APPROVAL_STEPS WHERE consent_request_id = @reqId AND decision = 'APPROVED' ORDER BY step_number";
-                cmd.Parameters.AddWithValue("@reqId", requestId.ToString());
-                using var reader = await cmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                {
-                    existingApprovers.Add(reader.GetString(0));
-                }
-            }
-
-            bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
-            for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
-            {
-                var storedOwnerIds = await ResolveDataOwnerIdsInternalAsync(conn, ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct);
-                sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
-            }
-
-            if (sameApprover)
+            if (state.SameApprover)
             {
                 if (isExternalItsmApproval)
                 {
@@ -1254,13 +1205,13 @@ public partial class SqliteGovernanceRepository
                     return req;
                 }
 
-                throw new InvalidOperationException("Vier-Augen-Prinzip verletzt: Genehmiger hat diesen Antrag bereits genehmigt.");
+                throw new InvalidOperationException(ConsentApprovalPolicy.SameApproverViolationMessage);
             }
 
-            int nextStep = existingApprovers.Count + 1;
+            int nextStep = state.NextStepNumber;
             // Review E-9: an ITSM-governed request stays with the change board for its second step as well, so the
             // four-eyes decision cannot be assembled from one ITSM and one GraphQL approval.
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, nextStep, isExternalItsmApproval, tableSensitivity);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, nextStep, isExternalItsmApproval, state.Sensitivity);
 
             using var tx = conn.BeginTransaction();
             // Insert approval step
@@ -1445,24 +1396,44 @@ public partial class SqliteGovernanceRepository
         consent.ColumnRules = columnRules ?? Array.Empty<ConsentColumnRule>();
         consent.Validate();
 
+        var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
+        if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
+
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+
+        // The decision state is read under the write gate before the transaction starts (as in the approve step): no other writer
+        // can record a step or change the status in between.
+        string currentStatus;
+        using (var checkCmd = conn.CreateCommand())
+        {
+            checkCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
+            checkCmd.Parameters.AddWithValue("@id", requestId.ToString());
+            var statusObj = await checkCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (statusObj == null) throw new InvalidOperationException($"Request {requestId} not found.");
+            currentStatus = statusObj.ToString()!;
+        }
+
+        ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval: false);
+
+        // Security review (four-eyes on the atomic path): the same separation-of-duties and same-approver checks as the approve step;
+        // this call only completes a request whose four-eyes requirement (flag or ADR-008 sensitivity) is met by this step.
+        var approverOwnerIds = await EnsureApproverIsNotRequesterAsync(conn, req, step.ApproverSid, null, ct).ConfigureAwait(false);
+        var state = await ReadApprovalStateAsync(conn, req, step.ApproverSid, null, approverOwnerIds, ct).ConfigureAwait(false);
+        if (state.SameApprover)
+        {
+            throw new InvalidOperationException(ConsentApprovalPolicy.SameApproverViolationMessage);
+        }
+
+        string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, state.NextStepNumber, isExternalItsmApproval: false, state.Sensitivity);
+        if (!string.Equals(newStatus, ConsentApprovalPolicy.Approved, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(ConsentApprovalPolicy.FourEyesNotSatisfiedMessage(requestId));
+        }
+
         using var tx = conn.BeginTransaction();
         try
         {
-            string currentStatus;
-            using (var checkCmd = conn.CreateCommand())
-            {
-                checkCmd.Transaction = tx;
-                checkCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
-                checkCmd.Parameters.AddWithValue("@id", requestId.ToString());
-                var statusObj = await checkCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                if (statusObj == null) throw new InvalidOperationException($"Request {requestId} not found.");
-                currentStatus = statusObj.ToString()!;
-            }
-
-            ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval: false);
-
             // 1. Insert approval step
             using (var cmd = conn.CreateCommand())
             {
@@ -1471,14 +1442,18 @@ public partial class SqliteGovernanceRepository
                                     VALUES (@id, @reqId, @step, @appr, 'APPROVED', @now)";
                 cmd.Parameters.AddWithValue("@id", step.Id.ToString());
                 cmd.Parameters.AddWithValue("@reqId", requestId.ToString());
-                cmd.Parameters.AddWithValue("@step", step.StepNumber);
+                cmd.Parameters.AddWithValue("@step", state.NextStepNumber);
                 cmd.Parameters.AddWithValue("@appr", step.ApproverSid.Value);
                 cmd.Parameters.AddWithValue("@now", (step.DecidedAt ?? DateTimeOffset.UtcNow).ToString("O"));
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             // 2. Guarded status update to APPROVED
-            await ApplyGuardedStatusAsync(conn, tx, requestId, "APPROVED", currentStatus, ct).ConfigureAwait(false);
+            await ApplyGuardedStatusAsync(conn, tx, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
+
+            req.Status = newStatus;
+            await RecordAuditEventInternalAsync(conn,
+                ConsentApprovalPolicy.BuildStepAudit(req, step.ApproverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, null, null), ct, tx).ConfigureAwait(false);
 
             // 3. Insert consent, column rules, row filters and audit entry
             await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
@@ -1501,6 +1476,83 @@ public partial class SqliteGovernanceRepository
             OnTransactionRolledBack(tx);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Separation of duties shared by the approve step and the atomic final approval: the approver is not the requester, neither by
+    /// identifier nor (Review R4-4) by the stable data owner id. Returns the approver's data owner ids for the same-approver check.
+    /// Runs under the write gate on <paramref name="conn"/> without an open transaction.
+    /// </summary>
+    private async Task<IReadOnlyCollection<string>> EnsureApproverIsNotRequesterAsync(SqliteConnection conn, ConsentRequest req, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
+    {
+        if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
+        {
+            throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
+        }
+
+        var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(conn, ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct);
+        if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(conn, req, ct)))
+        {
+            throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
+        }
+
+        return approverOwnerIds;
+    }
+
+    /// <summary>
+    /// Decision state read under the write gate, shared by the approve step and the atomic final approval: the table's four-eyes flag and
+    /// sensitivity, whether the approver already recorded an approved step (Review R4-4: by account part or data owner id) and the next step number.
+    /// </summary>
+    private async Task<(bool RequiresFourEyes, string? Sensitivity, bool SameApprover, int NextStepNumber)> ReadApprovalStateAsync(
+        SqliteConnection conn,
+        ConsentRequest req,
+        Sid approverSid,
+        string? itsmApproverAccount,
+        IReadOnlyCollection<string> approverOwnerIds,
+        CancellationToken ct)
+    {
+        // Check if table requires four-eyes
+        bool requiresFourEyes = false;
+        string? tableSensitivity = null;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT requires_four_eyes, sensitivity FROM TABLES WHERE id = @tid";
+            cmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    requiresFourEyes = Convert.ToInt32(reader.GetValue(0)) == 1;
+                }
+                if (!reader.IsDBNull(1))
+                {
+                    tableSensitivity = reader.GetString(1);
+                }
+            }
+        }
+
+        // Check existing approval steps
+        var existingApprovers = new List<string>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT approver_sid FROM APPROVAL_STEPS WHERE consent_request_id = @reqId AND decision = 'APPROVED' ORDER BY step_number";
+            cmd.Parameters.AddWithValue("@reqId", req.Id.ToString());
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                existingApprovers.Add(reader.GetString(0));
+            }
+        }
+
+        bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
+        for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
+        {
+            var storedOwnerIds = await ResolveDataOwnerIdsInternalAsync(conn, ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct);
+            sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
+        }
+
+        return (requiresFourEyes, tableSensitivity, sameApprover, existingApprovers.Count + 1);
     }
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)

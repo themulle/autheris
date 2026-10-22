@@ -257,6 +257,7 @@ public sealed class PathLookupConnectorTests
 
         var ex = await Should.ThrowAsync<HttpRequestException>(() => read).WaitAsync(TimeSpan.FromSeconds(5));
         ex.Message.ShouldBe("boom");
+        SpinWait.SpinUntil(() => Volatile.Read(ref cancelled) == 2, TimeSpan.FromSeconds(2));
         cancelled.ShouldBe(2);
     }
 }

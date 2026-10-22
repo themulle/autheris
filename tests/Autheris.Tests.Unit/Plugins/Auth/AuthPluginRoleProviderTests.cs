@@ -81,7 +81,7 @@ public sealed class AuthPluginRoleProviderTests
     {
         var (host, _, _) = CreateHost();
         var provider = new StubRoleProvider("ad-provider", new PluginRoleEnrichmentResult(
-            addedRoles: ["FinanceViewer", "Auditor"],
+            addedRoles: ["FinanceViewer", "RiskViewer"],
             addedGroupSids: [new Sid("S-1-5-21-100-200-300-1001")]));
 
         host.RegisterRoleProvider(provider);
@@ -90,7 +90,7 @@ public sealed class AuthPluginRoleProviderTests
 
         result.IsSuccess.ShouldBeTrue();
         result.Result.AddedRoles.ShouldContain("FinanceViewer");
-        result.Result.AddedRoles.ShouldContain("Auditor");
+        result.Result.AddedRoles.ShouldContain("RiskViewer");
         result.Result.AddedGroupSids.ShouldContain(new Sid("S-1-5-21-100-200-300-1001"));
     }
 

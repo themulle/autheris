@@ -201,6 +201,11 @@ internal sealed class AccessProfileStore(
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.ProfileId);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile.Name);
+        if (!Enum.IsDefined(profile.MaskingMode))
+        {
+            // An undefined mode would be stored as its number ("7") and could never be applied as intended.
+            throw new ArgumentOutOfRangeException(nameof(profile), "The access profile masking mode is not a defined value.");
+        }
 
         var now = _time.GetUtcNow();
         await using var scope = await open(true, ct).ConfigureAwait(false);
@@ -431,7 +436,8 @@ internal sealed class AccessProfileStore(
 
     private AccessProfile ReadProfile(DbDataReader reader, TenantId fallbackTenant, int o)
     {
-        var mode = Enum.TryParse<MaskingPolicyMode>(reader.GetString(o + 3), true, out var m) ? m : MaskingPolicyMode.Strict; // unknown mode: most restrictive
+        // Unknown or undefined (e.g. a numeric "7", which Enum.TryParse accepts) mode: most restrictive.
+        var mode = Enum.TryParse<MaskingPolicyMode>(reader.GetString(o + 3), true, out var m) && Enum.IsDefined(m) ? m : MaskingPolicyMode.Strict;
         var targets = reader.IsDBNull(o + 4) || string.IsNullOrWhiteSpace(reader.GetString(o + 4))
             ? []
             : JsonSerializer.Deserialize<List<string>>(reader.GetString(o + 4)) ?? [];

@@ -344,6 +344,33 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     public const string ApplicationIdentityKind = "application";
 
     /// <summary>
+    /// Raw role and group claim types of a token (short JWT names and the long WS-Federation names that <c>GetUserRoles</c> /
+    /// <c>GetGroupSids</c> also read). The session carries the vetted roles and group SIDs separately; letting the raw claims through
+    /// as additional claims would re-add groups to an app-only principal (SR-M-08) and untrusted roles.
+    /// </summary>
+    private static readonly HashSet<string> RoleAndGroupClaimTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "roles",
+        "role",
+        "groups",
+        "groupsid",
+        "wids",
+        System.Security.Claims.ClaimTypes.Role,
+        System.Security.Claims.ClaimTypes.GroupSid,
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+    };
+
+    /// <summary>
+    /// Whether a token claim may be carried into the MCP session principal as an additional claim. Role and group claims never are
+    /// (they come only from the vetted session roles and group SIDs), nor are the identity markers that only the gateway sets.
+    /// </summary>
+    public static bool IsAllowedAdditionalClaimType(string? claimType) =>
+        !string.IsNullOrWhiteSpace(claimType) &&
+        !RoleAndGroupClaimTypes.Contains(claimType) &&
+        !string.Equals(claimType, IdentityKindClaimType, StringComparison.Ordinal) &&
+        !string.Equals(claimType, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal);
+
+    /// <summary>
     /// The principal of an MCP caller as the catalog, resource and tool services expect it (SID, tenant, roles, groups, claims, read-only
     /// marker). SR-M-08: the subject is the authenticated user of the session. A session without a user SID (app-only token) keeps the
     /// application identity, is marked with <see cref="IdentityKindClaimType"/> and carries no group SIDs, so no user-level consent applies.
@@ -385,9 +412,9 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         {
             foreach (var (k, v) in session.AdditionalClaims)
             {
-                // The identity markers are set by the gateway only; a token claim must not spoof or clear them.
-                if (string.Equals(k, IdentityKindClaimType, StringComparison.Ordinal) ||
-                    string.Equals(k, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal))
+                // The identity markers are set by the gateway only; a token claim must not spoof or clear them. Raw role and group
+                // claims must not re-add what the session deliberately left out (app-only sessions carry no groups).
+                if (!IsAllowedAdditionalClaimType(k))
                 {
                     continue;
                 }
@@ -455,11 +482,32 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         }
 
         var uri = uriProp.GetString();
-        var principal = BuildPrincipalFromSession(session);
-        var allResources = await _semanticCompiler.GetSemanticResourcesAsync(null, principal, ct).ConfigureAwait(false);
-        var target = allResources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(uri) || session == null)
+        {
+            return CreateErrorResponse(id, -32004, $"Resource '{uri}' not found.");
+        }
 
-        if (target == null)
+        // Same guardrail as the HTTP server (GatewayMcpServer.ReadGuardedSemanticResourceAsync): Casbin ABAC on the semantic catalog,
+        // PII scrubbing, token budget and the MCP_TOOL_EXECUTION audit. The resource list is consent-filtered for the caller; a URI
+        // outside it, a denied read and a failed guardrail all answer alike (no existence oracle).
+        ISemanticMcpCompiler compiler = _semanticCompiler;
+        McpResourceItem? target = null;
+        var result = await _guardrailService.ReadResourceWithGuardrailAsync(
+            uri,
+            [McpSemanticTools.SemanticCatalogTable],
+            async token =>
+            {
+                var principal = BuildPrincipalFromSession(session);
+                var allResources = await compiler.GetSemanticResourcesAsync(null, principal, token).ConfigureAwait(false);
+                target = allResources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new McpResourceNotFoundException(uri);
+                return target.Text;
+            },
+            session,
+            applyTokenBudget: true,
+            ct).ConfigureAwait(false);
+
+        if (result is not { IsSuccess: true } || target == null)
         {
             return CreateErrorResponse(id, -32004, $"Resource '{uri}' not found.");
         }
@@ -473,7 +521,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
               {
                 "uri": "{{EscapeJson(target.Uri)}}",
                 "mimeType": "{{EscapeJson(target.MimeType)}}",
-                "text": "{{EscapeJson(target.Text)}}"
+                "text": "{{EscapeJson(result.ContentJson)}}"
               }
             ]
           }

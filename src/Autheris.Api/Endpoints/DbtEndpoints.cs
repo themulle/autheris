@@ -8,6 +8,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Dbt.Services;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -45,9 +46,24 @@ public static class DbtEndpoints
             var dryRun = context.Request.Query.ContainsKey("dryRun") &&
                          bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
 
+            Autheris.Domain.Security.SecurityPrincipalContext security;
+            try
+            {
+                security = EndpointSecurity.GetSecurityContext(context);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var caller = new DbtGovernanceImportCaller(
+                new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
+                EndpointSecurity.GetRequestTenant(context),
+                EndpointSecurity.IsCanonicalClusterAdmin(context.User));
+
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, dryRun, EndpointSecurity.GetRequestTenant(context), context.RequestAborted);
+                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, caller, dryRun, context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, manifestTooLarge);
         }).RequireAuthorization()
@@ -59,12 +75,30 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtMetadataIngestionService dbtService) =>
         {
-            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("DbtAdmin");
-            if (!isPrivileged)
+            // The direct governance import writes masking rules, sensitivities, virtual filters and access profiles; the DbtAdmin
+            // role alone (manifest / run-results automation) does not authorize it. Only global governance administrators.
+            if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
+
+            // Virtual filters and access profiles are saved as the calling user (never as the sync, so the approval workflow
+            // applies) in the server-resolved request tenant; only a canonical ClusterAdmin may import into another tenant.
+            Autheris.Domain.Security.SecurityPrincipalContext security;
+            try
+            {
+                security = EndpointSecurity.GetSecurityContext(context);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Authenticated without a resolvable SID: refused (403) instead of surfacing as a 500.
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var caller = new DbtGovernanceImportCaller(
+                new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
+                EndpointSecurity.GetRequestTenant(context),
+                EndpointSecurity.IsCanonicalClusterAdmin(context.User));
 
             const string governanceTooLarge = "Governance file size exceeds maximum allowed size (100 MB).";
             var limitError = EndpointSecurity.TryApplyBodyLimit(context.Request, 100 * 1024 * 1024, governanceTooLarge);
@@ -81,7 +115,7 @@ public static class DbtEndpoints
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, replace, context.RequestAborted);
+                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, caller, dryRun, replace, context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, governanceTooLarge);
         }).RequireAuthorization()
@@ -238,7 +272,8 @@ public static class DbtEndpoints
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var report = await circuitBreaker.RecordRunResultsAsync(context.Request.Body, context.RequestAborted);
+                var tenant = EndpointSecurity.GetRequestTenant(context);
+                var report = await circuitBreaker.RecordRunResultsAsync(context.Request.Body, tenant, context.RequestAborted);
                 return Results.Ok(report);
             }, runResultsTooLarge);
         }).RequireAuthorization()
@@ -247,7 +282,8 @@ public static class DbtEndpoints
 
         app.MapGet("/api/extensions/dbt/health", async (
             HttpContext context,
-            IDbtHealthCircuitBreaker circuitBreaker) =>
+            IDbtHealthCircuitBreaker circuitBreaker,
+            IDbtTestTargetMap? testTargetMap) =>
         {
             // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
@@ -259,9 +295,18 @@ public static class DbtEndpoints
 
             if (context.Request.Query.TryGetValue("table", out var tableName) && !string.IsNullOrWhiteSpace(tableName))
             {
-                var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : "default";
-                var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
-                var tableId = new TableIdentifier(db, schema, tableName!);
+                var reqTenant = EndpointSecurity.GetRequestTenant(context);
+                TableIdentifier tableId;
+                if (testTargetMap != null && testTargetMap.TryResolveModel(reqTenant, tableName!, out var resolvedId))
+                {
+                    tableId = resolvedId;
+                }
+                else
+                {
+                    var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : reqTenant.Value;
+                    var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
+                    tableId = new TableIdentifier(db, schema, tableName!);
+                }
                 var health = await circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted);
                 return Results.Ok(health);
             }
@@ -272,7 +317,8 @@ public static class DbtEndpoints
 
         app.MapPost("/api/extensions/dbt/health/reset", async (
             HttpContext context,
-            IDbtHealthCircuitBreaker circuitBreaker) =>
+            IDbtHealthCircuitBreaker circuitBreaker,
+            IDbtTestTargetMap? testTargetMap) =>
         {
             // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
             // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
@@ -285,9 +331,18 @@ public static class DbtEndpoints
 
             if (context.Request.Query.TryGetValue("table", out var tableName) && !string.IsNullOrWhiteSpace(tableName))
             {
-                var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : "default";
-                var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
-                var tableId = new TableIdentifier(db, schema, tableName!);
+                var reqTenant = EndpointSecurity.GetRequestTenant(context);
+                TableIdentifier tableId;
+                if (testTargetMap != null && testTargetMap.TryResolveModel(reqTenant, tableName!, out var resolvedId))
+                {
+                    tableId = resolvedId;
+                }
+                else
+                {
+                    var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : reqTenant.Value;
+                    var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
+                    tableId = new TableIdentifier(db, schema, tableName!);
+                }
                 await circuitBreaker.ResetTableHealthAsync(tableId, context.RequestAborted);
                 return Results.Ok(new { message = $"Table '{tableId}' health reset to healthy." });
             }

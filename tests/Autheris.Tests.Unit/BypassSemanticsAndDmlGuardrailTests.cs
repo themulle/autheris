@@ -328,6 +328,20 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     }
 
     [Fact]
+    public async Task SEM_Health_DangerDescription_DoesNotListTheActiveBypasses()
+    {
+        var options = WithNewDangerSwitch("warn_disable_rate_limiting");
+
+        var report = await CheckHealthAsync(options, Environments.Production);
+
+        var description = SecurityComponent(report).Description;
+        description.ShouldNotBeNull();
+        description!.ShouldStartWith("WARNING: ");
+        description.ShouldNotContain("warn_disable_rate_limiting");
+        description.ShouldNotContain("DANGER:");
+    }
+
+    [Fact]
     public async Task SEM_Health_WarnKeepsSecurityComponentHealthy_WithDegradedDescription()
     {
         var options = WithWarnSwitch("catalog_legacy_payload_only_signature");
@@ -339,7 +353,8 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         component.IsHealthy.ShouldBeTrue();
         component.Description.ShouldNotBeNull();
         component.Description!.ShouldStartWith("degraded: ");
-        component.Description!.ShouldContain("WARN:catalog_legacy_payload_only_signature");
+        // The names of active switches are logged, never returned in the health details.
+        component.Description!.ShouldNotContain("catalog_legacy_payload_only_signature");
     }
 
     [Fact]

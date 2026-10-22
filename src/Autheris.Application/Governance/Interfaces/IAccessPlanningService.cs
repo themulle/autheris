@@ -34,7 +34,7 @@ public interface IAccessPlanningService
     Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,
         string adminSid,
-        string? tenantId = null,
+        TenantId tenantId,
         CancellationToken ct = default);
 
     /// <summary>
@@ -53,6 +53,32 @@ public interface IAccessPlanningService
     /// </summary>
     Task<AdminApplyRowFilterEvaluationResult> ApplyRowFilterEvaluationAsync(
         AdminApplyAccessRequest request,
+        string adminSid,
+        TenantId tenantId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Plans a mutating MCP administrator operation (two-phase confirmation, ADR-03) without executing it. The plan binds the operation
+    /// (tool name) and the SHA-256 digest of its canonical arguments; <paramref name="target"/> is the human-readable object the
+    /// confirming administrator sees in the plan. Confirmation uses <see cref="ConfirmPlanAsync"/> (TOTP) like an access plan.
+    /// </summary>
+    Task<AdminPlanAccessResult> PlanAdminOperationAsync(
+        string operation,
+        string target,
+        string argumentsDigest,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Verifies and consumes (once, cluster-wide) the confirmation token of a <see cref="PlanAdminOperationAsync"/> plan with the checks of
+    /// every apply (plan kind, expiry, administrator, tenant, token). Throws <see cref="System.Security.SecurityException"/> when any check
+    /// fails or when the plan was made for another operation or other arguments; the caller runs the operation only after this returns.
+    /// </summary>
+    Task ConsumeAdminOperationAsync(
+        AdminApplyAccessRequest request,
+        string operation,
+        string argumentsDigest,
         string adminSid,
         string? tenantId = null,
         CancellationToken ct = default);

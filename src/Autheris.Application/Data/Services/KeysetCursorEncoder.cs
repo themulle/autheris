@@ -43,9 +43,10 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         _signingKeyBytes = signingKeyBytes ?? EphemeralProcessFallbackKey;
     }
 
-    public string EncodeCursor(IReadOnlyDictionary<string, object?> pkValues, KeysetCursorContext? context = null)
+    public string EncodeCursor(IReadOnlyDictionary<string, object?> pkValues, KeysetCursorContext context)
     {
         ArgumentNullException.ThrowIfNull(pkValues);
+        ArgumentNullException.ThrowIfNull(context);
         if (pkValues.Count == 0)
         {
             throw new ArgumentException("Primary key values cannot be empty.", nameof(pkValues));
@@ -69,9 +70,10 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         return $"{payload}.{sig}";
     }
 
-    public IReadOnlyDictionary<string, object?> DecodeCursor(string cursorBase64, TableMetadata metadata, KeysetCursorContext? context = null)
+    public IReadOnlyDictionary<string, object?> DecodeCursor(string cursorBase64, TableMetadata metadata, KeysetCursorContext context)
     {
         ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(context);
         if (string.IsNullOrWhiteSpace(cursorBase64))
         {
             throw new InvalidCursorException("INVALID_CURSOR: Cursor cannot be empty.");
@@ -86,24 +88,12 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         var payloadBase64 = cursorBase64[..dotIndex];
         var providedSig = cursorBase64[(dotIndex + 1)..];
 
-        var effectiveContext = context ?? new KeysetCursorContext(
-            TenantId: metadata.TenantColumnName,
-            DataSource: metadata.Identifier.Domain,
-            TableName: metadata.Identifier.TableName,
-            Direction: "asc",
-            Columns: metadata.PrimaryKeyColumns);
-
-        var expectedSig = ComputeSignature(payloadBase64, effectiveContext);
-
-        bool isValid = CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expectedSig), Encoding.UTF8.GetBytes(providedSig));
-        if (!isValid)
+        // Fail closed: the signature is verified against the exact supplied context only. There is no unbound
+        // (bare payload) fallback, so a cursor cannot be replayed across tenants, callers, tables or request shapes.
+        var expectedSig = ComputeSignature(payloadBase64, context);
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expectedSig), Encoding.UTF8.GetBytes(providedSig)))
         {
-            // Also test fallback to bare payload signature if context was not originally bound
-            var bareSig = ComputeSignature(payloadBase64, null);
-            if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(bareSig), Encoding.UTF8.GetBytes(providedSig)))
-            {
-                throw new InvalidCursorException("INVALID_CURSOR: Cursor signature verification failed; cursor may have been tampered with or used across different tables/tenants.");
-            }
+            throw new InvalidCursorException("INVALID_CURSOR: Cursor signature verification failed; cursor may have been tampered with or used across different tables/tenants.");
         }
 
         byte[] bytes;
@@ -367,17 +357,51 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         return Convert.FromBase64String(padded);
     }
 
-    private static string FormatContext(KeysetCursorContext? context)
+    /// <summary>
+    /// Canonical, injective rendering of the context: every field is length-prefixed so a delimiter inside a value
+    /// (for example a tenant id containing <c>|</c>) cannot shift content into a neighbouring field. Identifiers are
+    /// case-insensitive in the catalog and are lower-cased; tenant, caller and request hash are compared exactly.
+    /// </summary>
+    private static string FormatContext(KeysetCursorContext context)
     {
-        if (context == null) return string.Empty;
-        var cols = context.Columns != null ? string.Join(",", context.Columns) : string.Empty;
-        return $"{context.TenantId?.ToLowerInvariant()}|{context.DataSource?.ToLowerInvariant()}|{context.TableName?.ToLowerInvariant()}|{context.Direction?.ToLowerInvariant()}|{cols.ToLowerInvariant()}|{context.Caller?.ToLowerInvariant()}";
+        var sb = new StringBuilder("kc2");
+        AppendField(sb, context.TenantId);
+        AppendField(sb, context.DataSource?.ToLowerInvariant());
+        AppendField(sb, context.Schema?.ToLowerInvariant());
+        AppendField(sb, context.TableName?.ToLowerInvariant());
+        AppendField(sb, context.Direction?.ToLowerInvariant());
+        if (context.Columns is null)
+        {
+            sb.Append("|-");
+        }
+        else
+        {
+            sb.Append('|').Append(context.Columns.Count.ToString(CultureInfo.InvariantCulture));
+            foreach (var column in context.Columns)
+            {
+                AppendField(sb, column?.ToLowerInvariant());
+            }
+        }
+
+        AppendField(sb, context.Caller);
+        AppendField(sb, context.RequestHash);
+        return sb.ToString();
     }
 
-    private string ComputeSignature(string payload, KeysetCursorContext? context = null)
+    private static void AppendField(StringBuilder sb, string? value)
     {
-        var contextStr = FormatContext(context);
-        var dataToSign = string.IsNullOrEmpty(contextStr) ? payload : $"{payload}:{contextStr}";
+        if (value is null)
+        {
+            sb.Append("|-");
+            return;
+        }
+
+        sb.Append('|').Append(value.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(value);
+    }
+
+    private string ComputeSignature(string payload, KeysetCursorContext context)
+    {
+        var dataToSign = $"{payload}:{FormatContext(context)}";
         var hash = HMACSHA256.HashData(_signingKeyBytes, Encoding.UTF8.GetBytes(dataToSign));
         return Base64UrlEncode(hash);
     }

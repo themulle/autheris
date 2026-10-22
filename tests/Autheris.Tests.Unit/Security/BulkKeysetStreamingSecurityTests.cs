@@ -210,7 +210,8 @@ public sealed class BulkKeysetStreamingSecurityTests
         var encoder = new KeysetCursorEncoder();
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
 
-        var ex = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(tamperedCursor, metadata));
+        var context = KeysetCursorContextFactory.ForBulkStream("tenant-1", metadata, metadata.PrimaryKeyColumns, "user-readonly", new BulkTableStreamRequest());
+        var ex = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(tamperedCursor, metadata, context));
         ex.Message.ShouldContain("INVALID_CURSOR");
     }
 
@@ -231,10 +232,12 @@ public sealed class BulkKeysetStreamingSecurityTests
             hasUnconstrainedColumnAllow: true);
 
         var encoder = new KeysetCursorEncoder();
-        var cursor = encoder.EncodeCursor(new Dictionary<string, object?> { ["id"] = 999 });
+        var firstPage = new BulkTableStreamRequest();
+        var cursorContext = KeysetCursorContextFactory.ForBulkStream("tenant_A", metadata, metadata.PrimaryKeyColumns, "user-readonly", firstPage);
+        var cursor = encoder.EncodeCursor(new Dictionary<string, object?> { ["id"] = 999 }, cursorContext);
 
-        var request = new BulkTableStreamRequest(Cursor: cursor);
-        var planned = planner.PlanKeysetStream(request, metadata, decision);
+        var request = firstPage with { Cursor = cursor };
+        var planned = planner.PlanKeysetStream(request, metadata, decision, "tenant_A", "user-readonly");
 
         // SQL must contain BOTH cursor seek AND mandatory RLS policy conjoined with AND
         planned.Sql.ShouldContain("(\"id\" > @cursor_0)");

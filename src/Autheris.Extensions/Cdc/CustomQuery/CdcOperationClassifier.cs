@@ -73,16 +73,41 @@ public static class CdcOperationClassifier
 
     public static bool IsPayloadIdentical(
         IReadOnlyDictionary<string, object?> current,
-        IReadOnlyDictionary<string, object?> prior)
+        IReadOnlyDictionary<string, object?> prior,
+        IReadOnlyList<WatermarkDimensionDefinition>? watermarkDimensions = null)
     {
         if (ReferenceEquals(current, prior)) return true;
         if (current is null || prior is null) return false;
-        if (current.Count != prior.Count) return false;
+
+        HashSet<string>? watermarkCols = null;
+        if (watermarkDimensions is { Count: > 0 })
+        {
+            watermarkCols = new HashSet<string>(watermarkDimensions.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var d in watermarkDimensions)
+            {
+                watermarkCols.Add(string.IsNullOrWhiteSpace(d.Column) ? d.Name : d.Column);
+            }
+        }
 
         foreach (var (k, v1) in current)
         {
+            if (watermarkCols != null && watermarkCols.Contains(k))
+            {
+                continue;
+            }
+
             if (!prior.TryGetValue(k, out var v2)) return false;
             if (!ValuesEqual(v1, v2)) return false;
+        }
+
+        foreach (var (k, _) in prior)
+        {
+            if (watermarkCols != null && watermarkCols.Contains(k))
+            {
+                continue;
+            }
+
+            if (!current.ContainsKey(k)) return false;
         }
 
         return true;

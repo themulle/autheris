@@ -12,6 +12,8 @@ using HotChocolate.Language;
 using HotChocolate.Types;
 using HotChocolate.Validation;
 
+public readonly record struct FragmentCostKey(string Fragment, string? TypeName, int Depth);
+
 public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
 {
     private readonly int _maxAllowedCost;
@@ -65,6 +67,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
     public bool IsCacheable => true;
     public ushort Priority => 10;
 
+    public static int ResolveMaxExecutionDepth(GraphQLOptions? options)
+    {
+        return options?.MaxAllowedExecutionDepth > 0 ? options.MaxAllowedExecutionDepth : 25;
+    }
+
+    public static int ResolveMaxExecutionDepth(GatewayOptions? options)
+        => ResolveMaxExecutionDepth(options?.GraphQL);
+
     public static int CalculateCost(
         DocumentNode document,
         ISchemaDefinition schema,
@@ -73,12 +83,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         IReadOnlyDictionary<string, object?>? variableValues = null,
         QueryCostOptions? costOptions = null,
         Func<string, string, RelationCardinality?>? relationLookup = null,
-        AggregationOptions? aggregation = null)
+        AggregationOptions? aggregation = null,
+        int maxExecutionDepth = 25)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
             defaultListMultiplier,
             maxResponseRows,
+            maxExecutionDepth: maxExecutionDepth,
             costOptions: costOptions,
             relationLookup: relationLookup,
             aggregateFieldCostWeight: aggregation?.AggregateFieldCostWeight ?? AggregationOptions.DefaultAggregateFieldCostWeight,
@@ -102,12 +114,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         int maxResponseRows = 1000,
         IReadOnlyDictionary<string, object?>? variableValues = null,
         QueryCostOptions? costOptions = null,
-        Func<string, string, RelationCardinality?>? relationLookup = null)
+        Func<string, string, RelationCardinality?>? relationLookup = null,
+        int maxExecutionDepth = 25)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
             defaultListMultiplier,
             maxResponseRows,
+            maxExecutionDepth: maxExecutionDepth,
             costOptions: costOptions,
             relationLookup: relationLookup);
         return rule.ComputeCostDetails(document, schema, variableValues);
@@ -246,8 +260,8 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             .ToDictionary(f => f.Name.Value, f => f, StringComparer.Ordinal);
 
         var activeFragments = new HashSet<string>(StringComparer.Ordinal);
-        var fragmentCostCache = new Dictionary<string, int>(StringComparer.Ordinal);
-        var maskingCostCache = new Dictionary<string, int>(StringComparer.Ordinal);
+        var fragmentCostCache = new Dictionary<FragmentCostKey, int>();
+        var maskingCostCache = new Dictionary<FragmentCostKey, int>();
         int spreadCounter = 0;
         const int maxSpreadExpansions = 250;
         int totalCost = 0;
@@ -324,8 +338,8 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         IObjectTypeDefinition? currentType,
         IReadOnlyDictionary<string, FragmentDefinitionNode> fragments,
         HashSet<string> activeFragments,
-        Dictionary<string, int> fragmentCostCache,
-        Dictionary<string, int> maskingCostCache,
+        Dictionary<FragmentCostKey, int> fragmentCostCache,
+        Dictionary<FragmentCostKey, int> maskingCostCache,
         ISchemaDefinition schema,
         ref int spreadCounter,
         int maxSpreadExpansions,
@@ -333,9 +347,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         IReadOnlyDictionary<string, object?>? variableValues = null,
         int currentDepth = 1)
     {
-        if (selectionSet == null || selectionSet.Selections.Count == 0 || currentDepth > _maxExecutionDepth)
+        if (selectionSet == null || selectionSet.Selections.Count == 0)
         {
             return 0;
+        }
+
+        if (currentDepth > _maxExecutionDepth)
+        {
+            return SafeAdd(_maxAllowedCost, 1000);
         }
 
         int cost = 0;
@@ -520,7 +539,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     inlineType = foundType;
                 }
 
-                cost = SafeAdd(cost, CalculateSelectionSetCost(inlineFrag.SelectionSet, inlineType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues, currentDepth + 1));
+                cost = SafeAdd(cost, CalculateSelectionSetCost(inlineFrag.SelectionSet, inlineType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues, currentDepth));
             }
             else if (selection is FragmentSpreadNode fragmentSpread)
             {
@@ -530,21 +549,23 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     return SafeAdd(_maxAllowedCost, 1000);
                 }
 
-                if (fragmentCostCache.TryGetValue(fragmentSpread.Name.Value, out var cachedFragCost))
+                IObjectTypeDefinition? fragType = currentType;
+                if (fragments.TryGetValue(fragmentSpread.Name.Value, out var fragDef) && fragDef.TypeCondition != null && schema.Types.TryGetType<IObjectTypeDefinition>(fragDef.TypeCondition.Name.Value, out var foundType))
+                {
+                    fragType = foundType;
+                }
+
+                var cacheKey = new FragmentCostKey(fragmentSpread.Name.Value, fragType?.Name, currentDepth);
+
+                if (fragmentCostCache.TryGetValue(cacheKey, out var cachedFragCost))
                 {
                     cost = SafeAdd(cost, cachedFragCost);
                 }
-                else if (fragments.TryGetValue(fragmentSpread.Name.Value, out var fragDef) && activeFragments.Add(fragDef.Name.Value))
+                else if (fragments.TryGetValue(fragmentSpread.Name.Value, out fragDef) && activeFragments.Add(fragDef.Name.Value))
                 {
-                    IObjectTypeDefinition? fragType = currentType;
-                    if (fragDef.TypeCondition != null && schema.Types.TryGetType<IObjectTypeDefinition>(fragDef.TypeCondition.Name.Value, out var foundType))
-                    {
-                        fragType = foundType;
-                    }
-
-                    int fragCost = CalculateSelectionSetCost(fragDef.SelectionSet, fragType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues, currentDepth + 1);
+                    int fragCost = CalculateSelectionSetCost(fragDef.SelectionSet, fragType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues, currentDepth);
                     activeFragments.Remove(fragDef.Name.Value);
-                    fragmentCostCache[fragDef.Name.Value] = fragCost;
+                    fragmentCostCache[cacheKey] = fragCost;
                     cost = SafeAdd(cost, fragCost);
                 }
             }
@@ -808,12 +829,17 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         SelectionSetNode selectionSet,
         IReadOnlyDictionary<string, FragmentDefinitionNode> fragments,
         HashSet<string> activeFragments,
-        Dictionary<string, int> maskingCostCache,
+        Dictionary<FragmentCostKey, int> maskingCostCache,
         int currentDepth = 1)
     {
-        if (currentDepth > _maxExecutionDepth)
+        if (selectionSet == null || selectionSet.Selections.Count == 0)
         {
             return 0;
+        }
+
+        if (currentDepth > _maxExecutionDepth)
+        {
+            return SafeAdd(_maxAllowedCost, 1000);
         }
 
         int maskingCost = 0;
@@ -828,19 +854,27 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             }
             else if (childSel is InlineFragmentNode inlineFrag)
             {
-                maskingCost = SafeAdd(maskingCost, CalculateMaskingCost(inlineFrag.SelectionSet, fragments, activeFragments, maskingCostCache, currentDepth + 1));
+                maskingCost = SafeAdd(maskingCost, CalculateMaskingCost(inlineFrag.SelectionSet, fragments, activeFragments, maskingCostCache, currentDepth));
             }
             else if (childSel is FragmentSpreadNode spread)
             {
-                if (maskingCostCache.TryGetValue(spread.Name.Value, out var cachedMaskCost))
+                string? typeName = null;
+                if (fragments.TryGetValue(spread.Name.Value, out var fragDef) && fragDef.TypeCondition != null)
+                {
+                    typeName = fragDef.TypeCondition.Name.Value;
+                }
+
+                var cacheKey = new FragmentCostKey(spread.Name.Value, typeName, currentDepth);
+
+                if (maskingCostCache.TryGetValue(cacheKey, out var cachedMaskCost))
                 {
                     maskingCost = SafeAdd(maskingCost, cachedMaskCost);
                 }
-                else if (fragments.TryGetValue(spread.Name.Value, out var fragDef) && activeFragments.Add(fragDef.Name.Value))
+                else if (fragments.TryGetValue(spread.Name.Value, out fragDef) && activeFragments.Add(fragDef.Name.Value))
                 {
-                    int fragMaskCost = CalculateMaskingCost(fragDef.SelectionSet, fragments, activeFragments, maskingCostCache, currentDepth + 1);
+                    int fragMaskCost = CalculateMaskingCost(fragDef.SelectionSet, fragments, activeFragments, maskingCostCache, currentDepth);
                     activeFragments.Remove(fragDef.Name.Value);
-                    maskingCostCache[fragDef.Name.Value] = fragMaskCost;
+                    maskingCostCache[cacheKey] = fragMaskCost;
                     maskingCost = SafeAdd(maskingCost, fragMaskCost);
                 }
             }

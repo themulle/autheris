@@ -28,6 +28,12 @@ public sealed class InMemoryRebacStore : IRebacStore
     public ValueTask AddTupleAsync(RebacTuple tuple, CancellationToken ct = default)
     {
         ValidateTuple(tuple);
+        var parsedUser = RebacSubject.Parse(tuple.User);
+        if (!parsedUser.IsValid || !string.Equals(parsedUser.Canonical, tuple.User.Trim(), StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"ReBAC tuple 'User' '{tuple.User}' is not in canonical form.", nameof(tuple));
+        }
+
         var tenant = NormalizeTenant(tuple.TenantId);
         var store = _tenantStores.GetOrAdd(tenant, _ => new ConcurrentDictionary<string, RebacTuple>(StringComparer.OrdinalIgnoreCase));
 

@@ -681,18 +681,35 @@ public sealed class Mutation
             }
         }
 
-        bool requiresFourEyes = tableMeta?.Table.RequiresFourEyes ?? false;
-        bool isFinalStep = !(requiresFourEyes && req.ApprovalSteps.Count == 0);
+        // ADR-008 / D-4: the canonical four-eyes rule (explicit flag OR CONFIDENTIAL/HIGH/RESTRICTED/SECRET sensitivity), identical to
+        // ConsentApprovalPolicy.RequiresFourEyesApproval in the repositories, which stay authoritative under the row lock.
+        bool requiresFourEyes = tableMeta?.Table.IsHighlySensitive ?? false;
+        // Not every read model populates ApprovalSteps (SQLite does not): the status after the first step counts as well.
+        bool firstStepRecorded =
+            string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) ||
+            req.ApprovalSteps.Any(s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase));
+        bool isFinalStep = !requiresFourEyes || firstStepRecorded;
+        bool hasRestrictions = builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0);
+
+        // Security review: restrictions are only applied with the final approval that creates the consent. On the first step of a
+        // four-eyes request they would be dropped and the second approver could approve unrestricted, so they are refused (fail closed).
+        if (hasRestrictions && !isFinalStep)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("BAD_REQUEST")
+                .SetMessage($"Consent request '{requestId}' requires four-eyes approval: rowFilter and columnMasking can only be supplied with the second (final) approval, not with the first step.")
+                .Build());
+        }
 
         ConsentRequest approved;
-        if (isFinalStep && (builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0)))
+        if (hasRestrictions)
         {
             var isRole = req.RequestedGranteeType == GranteeType.Role;
             var step = new ApprovalStep
             {
                 Id = Guid.NewGuid(),
                 ConsentRequestId = requestId,
-                StepNumber = req.ApprovalSteps.Count + 1,
+                StepNumber = req.ApprovalSteps.Count + 1, // informational: the repository assigns the step number under the row lock
                 ApproverSid = approverSid,
                 Decision = "APPROVED",
                 DecidedAt = DateTimeOffset.UtcNow
@@ -712,11 +729,14 @@ public sealed class Mutation
                 ValidTo = req.RequestedValidTo,
                 CreatedBySid = approverSid,
                 ColumnRules = columnRules,
-                RowFilters = builtRowFilters
+                RowFilters = builtRowFilters,
+                Description = validatedDescription
             };
 
             try
             {
+                // The repository re-checks separation of duties and the four-eyes requirement under the row lock and refuses a
+                // step that would not complete the request (nothing is written).
                 await approvalRepository.ExecuteAtomicApprovalWithConsentAsync(
                     requestId, step, consent, builtRowFilters, columnRules, ct).ConfigureAwait(false);
                 approved = req;
@@ -1113,6 +1133,8 @@ public sealed class Mutation
         bool dryRun = false,
         [Service] IDataCatalogSyncService catalogSyncService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        [Service] Autheris.Application.Interfaces.IAuditLogRepository? auditLog = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -1125,15 +1147,136 @@ public sealed class Mutation
         }
 
         var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin") && !roles.Contains("DeveloperAdmin"))
+        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (!isClusterAdmin && !roles.Contains("GovernanceAdmin"))
         {
+            TenantId denyTenant;
+            try
+            {
+                denyTenant = principal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+                denyTenant = TenantId.LegacySingleTenant;
+            }
+
+            var denyEntry = new AuditLogEntry
+            {
+                TenantId = denyTenant,
+                EventType = AuditEventTypes.DataCatalogSync,
+                ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-ANONYMOUS"),
+                TargetTable = string.Empty,
+                Decision = "DENY",
+                TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { dryRun, reason = "ForbiddenRole" })
+            };
+
+            if (auditWriter != null)
+            {
+                await auditWriter.RecordRequiredAsync(denyEntry, ct).ConfigureAwait(false);
+            }
+            else if (auditLog != null)
+            {
+                await auditLog.RecordAuditEventAsync(denyEntry, ct).ConfigureAwait(false);
+            }
+
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
                 .SetMessage("Only governance or cluster administrators may synchronize the data catalog.")
                 .Build());
         }
 
-        var result = await catalogSyncService.SyncCatalogAsync(dryRun, ct);
+        TenantId? restrictToTenant = null;
+        if (!isClusterAdmin)
+        {
+            try
+            {
+                restrictToTenant = principal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+                var denyEntry = new AuditLogEntry
+                {
+                    TenantId = TenantId.LegacySingleTenant,
+                    EventType = AuditEventTypes.DataCatalogSync,
+                    ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                    TargetTable = string.Empty,
+                    Decision = "DENY",
+                    TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { dryRun, reason = "InvalidTenant" })
+                };
+
+                if (auditWriter != null)
+                {
+                    await auditWriter.RecordRequiredAsync(denyEntry, ct).ConfigureAwait(false);
+                }
+                else if (auditLog != null)
+                {
+                    await auditLog.RecordAuditEventAsync(denyEntry, ct).ConfigureAwait(false);
+                }
+
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("FORBIDDEN")
+                    .SetMessage("No valid tenant in the authentication token.")
+                    .Build());
+            }
+        }
+
+        TenantId auditTenant = restrictToTenant ?? TenantId.LegacySingleTenant;
+        var writeAheadEntry = new AuditLogEntry
+        {
+            TenantId = auditTenant,
+            EventType = AuditEventTypes.DataCatalogSync,
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                dryRun,
+                scope = restrictToTenant?.Value ?? "cluster"
+            })
+        };
+
+        if (auditWriter != null)
+        {
+            await auditWriter.RecordRequiredAsync(writeAheadEntry, ct).ConfigureAwait(false);
+        }
+        else if (auditLog != null)
+        {
+            await auditLog.RecordAuditEventAsync(writeAheadEntry, ct).ConfigureAwait(false);
+        }
+
+        var result = await catalogSyncService.SyncCatalogAsync(dryRun, restrictToTenant, ct).ConfigureAwait(false);
+
+        var completionEntry = new AuditLogEntry
+        {
+            TenantId = auditTenant,
+            EventType = AuditEventTypes.DataCatalogSync,
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                dryRun,
+                scope = restrictToTenant?.Value ?? "cluster",
+                syncedTables = result.SyncedTablesCount,
+                syncedColumns = result.SyncedColumnsCount,
+                maskedColumns = result.MaskedColumnsCount,
+                art9Tables = result.Art9ProtectedTablesCount
+            })
+        };
+
+        if (auditWriter != null)
+        {
+            await auditWriter.RecordRequiredAsync(completionEntry, ct).ConfigureAwait(false);
+        }
+        else if (auditLog != null)
+        {
+            await auditLog.RecordAuditEventAsync(completionEntry, ct).ConfigureAwait(false);
+        }
+
         return new DataCatalogSyncPayload
         {
             Success = result.Success,

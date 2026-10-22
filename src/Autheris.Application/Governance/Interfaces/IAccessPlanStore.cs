@@ -12,8 +12,20 @@ public enum AccessPlanKind
     Access = 0,
 
     /// <summary>Row filter key-set cache settings of one rule or one object.</summary>
-    RowFilterEvaluation = 1
+    RowFilterEvaluation = 1,
+
+    /// <summary>
+    /// A mutating MCP administrator operation (dataset state, dataset catalog settings, datasource registration), bound to the tool
+    /// and a digest of its arguments (<see cref="AdminOperationPlan"/>).
+    /// </summary>
+    AdminOperation = 2
 }
+
+/// <summary>
+/// The operation of an <see cref="AccessPlanKind.AdminOperation"/> plan: the MCP tool and the SHA-256 digest of its canonical arguments.
+/// The confirmation token of the plan applies exactly this operation with exactly these arguments.
+/// </summary>
+public sealed record AdminOperationPlan(string Operation, string ArgumentsDigest);
 
 /// <summary>
 /// The change of a <see cref="AccessPlanKind.RowFilterEvaluation"/> plan. <paramref name="Before"/> is the stored setting at planning time;
@@ -30,6 +42,7 @@ public sealed record RowFilterEvaluationPlan(
 /// A pending access plan as persisted by an <see cref="IAccessPlanStore"/>. Only a SHA-256 hash of the confirmation
 /// token is stored, never the token itself. <see cref="PlanKind"/> separates access plans from row filter evaluation plans
 /// (<see cref="RowFilterEvaluation"/> is set only for the latter; their <see cref="Request"/> carries no grants).
+/// <see cref="AdminOperation"/> is set only for <see cref="AccessPlanKind.AdminOperation"/> plans.
 /// </summary>
 public sealed record StoredAccessPlan(
     AdminPlanAccessResult Result,
@@ -38,7 +51,8 @@ public sealed record StoredAccessPlan(
     string? ConfirmedTokenHash = null,
     string? TenantId = null,
     AccessPlanKind PlanKind = AccessPlanKind.Access,
-    RowFilterEvaluationPlan? RowFilterEvaluation = null);
+    RowFilterEvaluationPlan? RowFilterEvaluation = null,
+    AdminOperationPlan? AdminOperation = null);
 
 /// <summary>
 /// State port of the two-phase access planning service (SR-L-06, ARC-C-05). Plans and consumed confirmation tokens are

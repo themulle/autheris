@@ -426,9 +426,12 @@ public sealed partial class GovernedAggregationService
 
             var sqlRequest = new GovernedSqlQueryRequest(
                 planned.Sql,
-                planned.Parameters.Count > 0 ? planned.Parameters : null,
+                Parameters: null,
                 Transport: query.Transport ?? SqlTransports.Rest,
-                PlannedTableRead: true);
+                PlannedTableRead: true)
+            {
+                GatewayParameters = planned.Parameters.Count > 0 ? planned.Parameters : null,
+            };
 
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(sqlRequest, principal, tenantId, ct).ConfigureAwait(false);
             if (sqlResult.Rows.Count > 0 && sqlResult.Rows[0].ContainsKey(planned.CountColumnAlias))

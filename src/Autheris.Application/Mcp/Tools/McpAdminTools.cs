@@ -28,6 +28,10 @@ public static class McpAdminTools
 
     private static readonly TableIdentifier AdminControlPlaneTable = new("governance", "admin", "control_plane");
 
+    private const string ConfirmationHint =
+        "Two-phase (ADR-03): the first call only returns a planId; confirm it with TOTP (POST /api/governance/plans/{planId}/confirm), " +
+        "then repeat the call with the same arguments plus planId and confirmationToken.";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -115,7 +119,7 @@ public static class McpAdminTools
 
         yield return new McpToolDefinition(
             Name: RegisterDatasource,
-            Description: "Registers a new datasource in inactive state (SEC M-30). Credentials stored safely in vault.",
+            Description: "Registers a new datasource in inactive state (SEC M-30). Credentials stored safely in vault. " + ConfirmationHint,
             InputJsonSchema: """
             {
               "type": "object",
@@ -127,7 +131,9 @@ public static class McpAdminTools
                 "specUrl": { "type": "string" },
                 "baseUrl": { "type": "string" },
                 "auth": { "type": "object" },
-                "dryRun": { "type": "boolean" }
+                "dryRun": { "type": "boolean" },
+                "planId": { "type": "string", "description": "Plan identifier returned by the first (planning) call." },
+                "confirmationToken": { "type": "string", "description": "HMAC-signed confirmation token of the TOTP-confirmed plan." }
               }
             }
             """,
@@ -136,7 +142,7 @@ public static class McpAdminTools
 
         yield return new McpToolDefinition(
             Name: SetDatasetState,
-            Description: "Changes dataset lifecycle state (active, quarantined, deprecated, inactive) with WORM audit (R-58).",
+            Description: "Changes dataset lifecycle state (active, quarantined, deprecated, inactive) with WORM audit (R-58). " + ConfirmationHint,
             InputJsonSchema: """
             {
               "type": "object",
@@ -144,7 +150,9 @@ public static class McpAdminTools
               "properties": {
                 "datasetId": { "type": "string" },
                 "state": { "type": "string", "enum": ["active", "quarantined", "deprecated", "inactive"] },
-                "reason": { "type": "string" }
+                "reason": { "type": "string" },
+                "planId": { "type": "string", "description": "Plan identifier returned by the first (planning) call." },
+                "confirmationToken": { "type": "string", "description": "HMAC-signed confirmation token of the TOTP-confirmed plan." }
               }
             }
             """,
@@ -191,7 +199,7 @@ public static class McpAdminTools
 
         yield return new McpToolDefinition(
             Name: SetDatasetCatalog,
-            Description: "Sets the tags and/or the catalog visibility tier (Hidden, Summary, Full) of a dataset (issue #111). Single call; Full is an administrator act and every change is audited.",
+            Description: "Sets the tags and/or the catalog visibility tier (Hidden, Summary, Full) of a dataset (issue #111). Full is an administrator act and every change is audited. " + ConfirmationHint,
             InputJsonSchema: """
             {
               "type": "object",
@@ -200,7 +208,9 @@ public static class McpAdminTools
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table or table id)." },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces the admin tags (empty list removes them). Omit to leave unchanged." },
-                "visibility": { "type": "string", "enum": ["Hidden", "Summary", "Full"], "description": "Catalog tier. Omit to leave unchanged." }
+                "visibility": { "type": "string", "enum": ["Hidden", "Summary", "Full"], "description": "Catalog tier. Omit to leave unchanged." },
+                "planId": { "type": "string", "description": "Plan identifier returned by the first (planning) call." },
+                "confirmationToken": { "type": "string", "description": "HMAC-signed confirmation token of the TOTP-confirmed plan." }
               }
             }
             """,
@@ -275,6 +285,19 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminRegisterDatasourceRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_register_datasource.");
+                if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Domain))
+                {
+                    throw new ArgumentException("admin_register_datasource requires 'name' and 'domain'.");
+                }
+
+                // Two-phase confirmation (ADR-03): even a dry run stores an inline secret, so every registration is confirmed.
+                var pending = await RequireConfirmationAsync(
+                    RegisterDatasource, $"{req.Domain}.{req.Name}", JsonSerializer.Serialize(req, CanonicalJsonOptions), argumentsJson, adminSid, sessionContext, planningService, ct).ConfigureAwait(false);
+                if (pending != null)
+                {
+                    return pending;
+                }
+
                 var result = await planningService.RegisterDatasourceAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
@@ -283,13 +306,25 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminSetDatasetStateRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_set_dataset_state.");
+                if (string.IsNullOrWhiteSpace(req.DatasetId) || string.IsNullOrWhiteSpace(req.State))
+                {
+                    throw new ArgumentException("admin_set_dataset_state requires 'datasetId' and 'state'.");
+                }
+
+                var pending = await RequireConfirmationAsync(
+                    SetDatasetState, req.DatasetId, JsonSerializer.Serialize(req, CanonicalJsonOptions), argumentsJson, adminSid, sessionContext, planningService, ct).ConfigureAwait(false);
+                if (pending != null)
+                {
+                    return pending;
+                }
+
                 var result = await planningService.SetDatasetStateAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
             if (string.Equals(toolName, SetDatasetCatalog, StringComparison.OrdinalIgnoreCase))
             {
-                return await SetDatasetCatalogAsync(argumentsJson, sessionContext, datasetCatalog, ct).ConfigureAwait(false);
+                return await SetDatasetCatalogAsync(argumentsJson, sessionContext, planningService, datasetCatalog, ct).ConfigureAwait(false);
             }
 
             if (string.Equals(toolName, ResolvePrincipal, StringComparison.OrdinalIgnoreCase))
@@ -304,15 +339,96 @@ public static class McpAdminTools
         }
         catch (SecurityException sex)
         {
+            // The control plane raises SecurityException only with its own fixed texts (plan, confirmation and tenant checks).
             return new McpToolCallResult(false, "{}", sex.Message);
         }
-        catch (Exception ex)
+        catch (RowFilterEvaluationValidationException rex)
         {
-            return new McpToolCallResult(false, "{}", ex.Message);
+            // Curated, fixed-text reason (names caps and rule types, never stored data).
+            return new McpToolCallResult(false, "{}", rex.Reason);
+        }
+        catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException gex)
+        {
+            return new McpToolCallResult(false, "{}", $"Grant policy violation ({gex.ErrorCode}).");
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException or FormatException)
+        {
+            // Fixed text: a parser or validation message can echo the arguments, inline secrets included.
+            return new McpToolCallResult(false, "{}", $"Invalid arguments for admin tool '{toolName}'.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Fixed text: store, vault and repository errors can carry connection strings, secret references or internal names.
+            return new McpToolCallResult(false, "{}", $"Admin tool '{toolName}' failed.");
         }
     }
 
-    private sealed record SetDatasetCatalogArguments(string? Dataset, IReadOnlyList<string>? Tags, string? Visibility);
+    /// <summary>Property names of the second, confirming call of a mutating admin tool; they are not part of the confirmed arguments.</summary>
+    private sealed record ConfirmationArguments(string? PlanId, string? ConfirmationToken);
+
+    // Canonical form of the typed arguments for the confirmation digest (declaration order, no indentation, case-sensitive names).
+    private static readonly JsonSerializerOptions CanonicalJsonOptions = new()
+    {
+        WriteIndented = false
+    };
+
+    /// <summary>
+    /// Two-phase confirmation of a mutating admin tool (ADR-03, the mechanism of <c>admin_apply_access</c>). Without <c>planId</c> and
+    /// <c>confirmationToken</c> the call only plans the operation: the plan binds the tool and the SHA-256 digest of the canonical
+    /// arguments and is answered with its planId (nothing is changed). The administrator confirms the plan with TOTP
+    /// (<c>POST /api/governance/plans/{planId}/confirm</c>) and repeats the call with the same arguments plus <c>planId</c> and
+    /// <c>confirmationToken</c>; the token is verified and consumed once before the operation runs (null is returned then). Any
+    /// mismatch throws <see cref="SecurityException"/>.
+    /// </summary>
+    private static async Task<McpToolCallResult?> RequireConfirmationAsync(
+        string operation,
+        string target,
+        string canonicalArguments,
+        string argumentsJson,
+        string adminSid,
+        McpSessionContext sessionContext,
+        IAccessPlanningService planningService,
+        CancellationToken ct)
+    {
+        var confirmation = JsonSerializer.Deserialize<ConfirmationArguments>(argumentsJson, JsonOptions);
+        var digest = ArgumentsDigest(operation, canonicalArguments);
+        var hasPlan = !string.IsNullOrWhiteSpace(confirmation?.PlanId);
+        var hasToken = !string.IsNullOrWhiteSpace(confirmation?.ConfirmationToken);
+
+        if (!hasPlan && !hasToken)
+        {
+            var plan = await planningService.PlanAdminOperationAsync(operation, target, digest, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+            if (plan is null)
+            {
+                // Fail closed: without a stored plan there is nothing the administrator could confirm.
+                return new McpToolCallResult(false, "{}", $"Admin tool '{operation}' could not create a confirmation plan.");
+            }
+
+            return new McpToolCallResult(true, JsonSerializer.Serialize(new
+            {
+                status = "CONFIRMATION_REQUIRED",
+                operation,
+                target,
+                planId = plan.PlanId,
+                expiresAt = plan.ExpiresAt,
+                nextStep = $"Confirm the plan with TOTP (POST /api/governance/plans/{plan.PlanId}/confirm), then call '{operation}' again with the same arguments plus 'planId' and 'confirmationToken'."
+            }, JsonOptions));
+        }
+
+        if (!hasPlan || !hasToken)
+        {
+            throw new SecurityException("Both 'planId' and 'confirmationToken' are required to apply a confirmed administrator operation.");
+        }
+
+        await planningService.ConsumeAdminOperationAsync(
+            new AdminApplyAccessRequest(confirmation!.PlanId!, confirmation.ConfirmationToken!), operation, digest, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+        return null;
+    }
+
+    private static string ArgumentsDigest(string operation, string canonicalArguments) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(operation + "\n" + canonicalArguments)));
+
+    private sealed record SetDatasetCatalogArguments(string? Dataset, IReadOnlyList<string>? Tags, string? Visibility, string? PlanId = null, string? ConfirmationToken = null);
 
     /// <summary>
     /// Issue #111 (A-8): the same service as REST and the manifest, called with the principal rebuilt from the session, so the tool cannot widen
@@ -321,6 +437,7 @@ public static class McpAdminTools
     private static async Task<McpToolCallResult> SetDatasetCatalogAsync(
         string argumentsJson,
         McpSessionContext sessionContext,
+        IAccessPlanningService planningService,
         Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalog,
         CancellationToken ct)
     {
@@ -334,6 +451,21 @@ public static class McpAdminTools
         if (string.IsNullOrWhiteSpace(req.Dataset) || (req.Tags is null && req.Visibility is null))
         {
             throw new ArgumentException("admin_set_dataset_catalog requires 'dataset' and at least one of 'tags' or 'visibility'.");
+        }
+
+        // Two-phase confirmation (ADR-03): the confirmed arguments are the edit itself, without the confirmation properties.
+        var pending = await RequireConfirmationAsync(
+            SetDatasetCatalog,
+            req.Dataset,
+            JsonSerializer.Serialize(req with { PlanId = null, ConfirmationToken = null }, CanonicalJsonOptions),
+            argumentsJson,
+            sessionContext.UserSid ?? sessionContext.ServicePrincipalId,
+            sessionContext,
+            planningService,
+            ct).ConfigureAwait(false);
+        if (pending != null)
+        {
+            return pending;
         }
 
         var principal = Autheris.Application.Mcp.Services.McpProtocolHandler.BuildPrincipalFromSession(sessionContext);

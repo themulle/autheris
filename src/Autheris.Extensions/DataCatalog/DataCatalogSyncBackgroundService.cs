@@ -45,7 +45,7 @@ public sealed class DataCatalogSyncJob(IDataCatalogSyncService syncService, ILog
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var result = await syncService.SyncCatalogAsync(dryRun: false, ct: ct).ConfigureAwait(false);
+        var result = await syncService.SyncCatalogAsync(dryRun: false, restrictToTenant: null, ct: ct).ConfigureAwait(false);
         if (result.Success)
         {
             logger.LogInformation(

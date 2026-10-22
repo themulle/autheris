@@ -246,7 +246,6 @@ public static class GatewayApplicationBuilderExtensions
         app.MapScimDiscoveryEndpoints();
         app.MapSubjectLifecycleEndpoints();
         app.MapFunctionalRightEndpoints();
-        app.MapAccessPolicyEndpoints();
         app.MapRecertificationEndpoints();
         if (gatewayOptions.Arrow.Enabled)
         {

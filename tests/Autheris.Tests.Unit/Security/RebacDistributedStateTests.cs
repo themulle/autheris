@@ -83,10 +83,10 @@ public sealed class RebacDistributedStateTests
         var replicaA = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance, bus);
         var replicaB = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance, bus);
 
-        var tuple = new RebacTuple("tenant-alpha", "user:alice", "viewer", "doc:100");
+        var tuple = new RebacTuple("tenant-alpha", "alice", "viewer", "doc:100");
         await store.AddTupleAsync(tuple);
 
-        var check = new RebacCheckRequest("tenant-alpha", "user:alice", "viewer", "doc:100");
+        var check = new RebacCheckRequest("tenant-alpha", "alice", "viewer", "doc:100");
 
         // 1. Replica B evaluates and caches ALLOW
         var result1 = await replicaB.CheckAsync(check);
@@ -116,7 +116,7 @@ public sealed class RebacDistributedStateTests
 
         var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance, bus);
 
-        var tuple = new RebacTuple("tenant-degraded", "user:bob", "editor", "folder:200");
+        var tuple = new RebacTuple("tenant-degraded", "bob", "editor", "folder:200");
         await store.AddTupleAsync(tuple);
 
         // Invalidation must fail-closed: propagate exception, clear cache, mark tenant degraded
@@ -128,7 +128,7 @@ public sealed class RebacDistributedStateTests
         // Mutate store directly to confirm evaluator bypasses decision cache
         await store.DeleteTupleAsync(tuple);
 
-        var check = new RebacCheckRequest("tenant-degraded", "user:bob", "editor", "folder:200");
+        var check = new RebacCheckRequest("tenant-degraded", "bob", "editor", "folder:200");
         var res = await evaluator.CheckAsync(check);
         res.Allowed.ShouldBeFalse(); // Must re-evaluate directly against store without serving stale cache
     }

@@ -16,32 +16,31 @@ using Microsoft.Extensions.Logging;
 public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
 {
     private readonly ConcurrentDictionary<TableIdentifier, DbtHealthState> _states = new();
+    private readonly IDbtTestTargetMap? _testTargetMap;
     private readonly ILogger<DbtHealthCircuitBreaker>? _logger;
 
-    public DbtHealthCircuitBreaker(ILogger<DbtHealthCircuitBreaker>? logger = null)
+    public DbtHealthCircuitBreaker(
+        IDbtTestTargetMap? testTargetMap = null,
+        ILogger<DbtHealthCircuitBreaker>? logger = null)
     {
+        _testTargetMap = testTargetMap;
         _logger = logger;
+    }
+
+    public DbtHealthCircuitBreaker(ILogger<DbtHealthCircuitBreaker>? logger)
+        : this(null, logger)
+    {
     }
 
     public ValueTask<DbtHealthState> GetTableHealthAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        // 1. Direct exact match
+        // EXT-08: Exact match only; eliminate cross-tenant and prefix collisions
         if (_states.TryGetValue(table, out var exactState))
         {
             return ValueTask.FromResult(exactState);
         }
 
-        // 2. Fallback match by Table name (case-insensitive) if schema/database were not part of run_results
-        foreach (var (storedTable, state) in _states)
-        {
-            if (string.Equals(storedTable.TableName, table.TableName, StringComparison.OrdinalIgnoreCase) ||
-                storedTable.TableName.StartsWith(table.TableName + "_", StringComparison.OrdinalIgnoreCase))
-            {
-                return ValueTask.FromResult(state);
-            }
-        }
-
-        // 3. Default to Healthy if no adverse test run recorded
+        // Default to Healthy if no adverse test run recorded
         var defaultHealthy = new DbtHealthState(
             table,
             DbtModelHealthStatus.Healthy,
@@ -74,7 +73,10 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
         return Task.FromResult(snapshot);
     }
 
-    public async Task<DbtRunResultsReport> RecordRunResultsAsync(Stream runResultsStream, CancellationToken ct = default)
+    public Task<DbtRunResultsReport> RecordRunResultsAsync(Stream runResultsStream, CancellationToken ct = default)
+        => RecordRunResultsAsync(runResultsStream, TenantId.LegacySingleTenant, ct);
+
+    public async Task<DbtRunResultsReport> RecordRunResultsAsync(Stream runResultsStream, TenantId tenant, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(runResultsStream);
 
@@ -111,8 +113,11 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
         }
 
         var resultsList = new List<DbtModelExecutionResult>();
-        var modelFailures = new Dictionary<string, List<DbtTestFailure>>(StringComparer.OrdinalIgnoreCase);
-        var modelStatuses = new Dictionary<string, DbtModelHealthStatus>(StringComparer.OrdinalIgnoreCase);
+        var tableFailures = new Dictionary<TableIdentifier, List<DbtTestFailure>>();
+        var tableStatuses = new Dictionary<TableIdentifier, DbtModelHealthStatus>();
+        var unattributedFailures = new List<string>();
+
+        var knownModels = _testTargetMap?.GetKnownModels(tenant) ?? new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
 
         if (root.TryGetProperty("results", out var resultsElem) && resultsElem.ValueKind == JsonValueKind.Array)
         {
@@ -141,13 +146,20 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
                     uniqueId.StartsWith("seed.", StringComparison.OrdinalIgnoreCase))
                 {
                     var modelName = ExtractModelNameFromUniqueId(uniqueId);
+                    if ((_testTargetMap == null || !_testTargetMap.TryResolveModel(tenant, uniqueId, out var tableId)) &&
+                        (_testTargetMap == null || !_testTargetMap.TryResolveModel(tenant, modelName, out tableId)) &&
+                        !knownModels.TryGetValue(modelName, out tableId))
+                    {
+                        tableId = new TableIdentifier(tenant.Value, "default", modelName);
+                    }
+
                     if (string.Equals(status, "error", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(status, "fail", StringComparison.OrdinalIgnoreCase))
                     {
-                        modelStatuses[modelName] = DbtModelHealthStatus.Quarantined;
-                        EnsureFailureList(modelFailures, modelName).Add(new DbtTestFailure(
+                        tableStatuses[tableId] = DbtModelHealthStatus.Quarantined;
+                        EnsureFailureList(tableFailures, tableId).Add(new DbtTestFailure(
                             TestName: "model_execution",
-                            ModelName: modelName,
+                            ModelName: tableId.TableName,
                             ColumnName: null,
                             Severity: "error",
                             Message: message,
@@ -155,82 +167,101 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
                     }
                     else if (string.Equals(status, "warn", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!modelStatuses.TryGetValue(modelName, out var existing) || existing != DbtModelHealthStatus.Quarantined)
+                        if (!tableStatuses.TryGetValue(tableId, out var existing) || existing != DbtModelHealthStatus.Quarantined)
                         {
-                            modelStatuses[modelName] = DbtModelHealthStatus.Degraded;
+                            tableStatuses[tableId] = DbtModelHealthStatus.Degraded;
                         }
                     }
                     else if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(status, "pass", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!modelStatuses.ContainsKey(modelName))
+                        if (!tableStatuses.ContainsKey(tableId))
                         {
-                            modelStatuses[modelName] = DbtModelHealthStatus.Healthy;
+                            tableStatuses[tableId] = DbtModelHealthStatus.Healthy;
                         }
                     }
                 }
                 else if (uniqueId.StartsWith("test.", StringComparison.OrdinalIgnoreCase))
                 {
-                    var (testName, targetModel, columnName) = ParseTestUniqueId(uniqueId);
                     var isFail = string.Equals(status, "fail", StringComparison.OrdinalIgnoreCase) ||
                                  string.Equals(status, "error", StringComparison.OrdinalIgnoreCase);
                     var isWarn = string.Equals(status, "warn", StringComparison.OrdinalIgnoreCase);
 
-                    if (isFail)
+                    if (isFail || isWarn)
                     {
-                        modelStatuses[targetModel] = DbtModelHealthStatus.Quarantined;
-                        EnsureFailureList(modelFailures, targetModel).Add(new DbtTestFailure(
-                            TestName: testName,
-                            ModelName: targetModel,
-                            ColumnName: columnName,
-                            Severity: "error",
-                            Message: message,
-                            FailedRowsCount: failuresCount));
-                    }
-                    else if (isWarn)
-                    {
-                        if (!modelStatuses.TryGetValue(targetModel, out var current) || current != DbtModelHealthStatus.Quarantined)
+                        var parts = uniqueId.Split('.');
+                        var testPart = parts.Length >= 3 ? parts[2] : uniqueId;
+
+                        IReadOnlyList<TableIdentifier> targetTables;
+                        if (_testTargetMap != null && _testTargetMap.TryResolveTest(tenant, uniqueId, out var resolved) && resolved.Count > 0)
                         {
-                            modelStatuses[targetModel] = DbtModelHealthStatus.Degraded;
+                            targetTables = resolved;
                         }
-                        EnsureFailureList(modelFailures, targetModel).Add(new DbtTestFailure(
-                            TestName: testName,
-                            ModelName: targetModel,
-                            ColumnName: columnName,
-                            Severity: "warn",
-                            Message: message,
-                            FailedRowsCount: failuresCount));
+                        else
+                        {
+                            // Unresolvable test: candidate matching against tenant known model names
+                            var candidates = FindCandidateModels(uniqueId, knownModels);
+                            if (candidates.Count > 0)
+                            {
+                                targetTables = candidates;
+                            }
+                            else
+                            {
+                                unattributedFailures.Add(uniqueId);
+                                _logger?.LogWarning("Unattributed test failure for {UniqueId}: no matching model found for tenant {Tenant}.", uniqueId, tenant);
+                                targetTables = Array.Empty<TableIdentifier>();
+                            }
+                        }
+
+                        foreach (var targetTable in targetTables)
+                        {
+                            var (testType, columnName) = ParseTestTypeAndColumn(testPart, targetTable.TableName);
+
+                            if (isFail)
+                            {
+                                tableStatuses[targetTable] = DbtModelHealthStatus.Quarantined;
+                                EnsureFailureList(tableFailures, targetTable).Add(new DbtTestFailure(
+                                    TestName: testType,
+                                    ModelName: targetTable.TableName,
+                                    ColumnName: columnName,
+                                    Severity: "error",
+                                    Message: message,
+                                    FailedRowsCount: failuresCount));
+                            }
+                            else if (isWarn)
+                            {
+                                if (!tableStatuses.TryGetValue(targetTable, out var current) || current != DbtModelHealthStatus.Quarantined)
+                                {
+                                    tableStatuses[targetTable] = DbtModelHealthStatus.Degraded;
+                                }
+                                EnsureFailureList(tableFailures, targetTable).Add(new DbtTestFailure(
+                                    TestName: testType,
+                                    ModelName: targetTable.TableName,
+                                    ColumnName: columnName,
+                                    Severity: "warn",
+                                    Message: message,
+                                    FailedRowsCount: failuresCount));
+                            }
+                        }
                     }
                 }
             }
         }
 
         // Apply health state updates
-        foreach (var (modelName, status) in modelStatuses)
+        foreach (var (tableId, status) in tableStatuses)
         {
-            var failures = modelFailures.TryGetValue(modelName, out var list) ? list : (IReadOnlyList<DbtTestFailure>)Array.Empty<DbtTestFailure>();
-            var tableId = new TableIdentifier("default", "default", modelName);
+            var failures = tableFailures.TryGetValue(tableId, out var list) ? list : (IReadOnlyList<DbtTestFailure>)Array.Empty<DbtTestFailure>();
             await SetTableHealthAsync(tableId, status, failures, ct).ConfigureAwait(false);
         }
 
-        return new DbtRunResultsReport(dbtVersion, generatedAt, totalElapsedTime, resultsList);
+        return new DbtRunResultsReport(dbtVersion, generatedAt, totalElapsedTime, resultsList, unattributedFailures);
     }
 
     public Task ResetTableHealthAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        // EXT-08: Exact match only
         _states.TryRemove(table, out _);
-
-        // Also clean up partial entries matching table name
-        var matchingKeys = _states.Keys
-            .Where(k => string.Equals(k.TableName, table.TableName, StringComparison.OrdinalIgnoreCase) ||
-                        k.TableName.StartsWith(table.TableName + "_", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        foreach (var key in matchingKeys)
-        {
-            _states.TryRemove(key, out _);
-        }
-
         _logger?.LogInformation("dbt Circuit Breaker reset table health for {Table}.", table);
         return Task.CompletedTask;
     }
@@ -242,59 +273,89 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
         return Task.CompletedTask;
     }
 
-    private static List<DbtTestFailure> EnsureFailureList(Dictionary<string, List<DbtTestFailure>> dict, string modelName)
+    private static List<DbtTestFailure> EnsureFailureList(Dictionary<TableIdentifier, List<DbtTestFailure>> dict, TableIdentifier table)
     {
-        if (!dict.TryGetValue(modelName, out var list))
+        if (!dict.TryGetValue(table, out var list))
         {
             list = new List<DbtTestFailure>();
-            dict[modelName] = list;
+            dict[table] = list;
         }
         return list;
     }
 
     private static string ExtractModelNameFromUniqueId(string uniqueId)
     {
-        // e.g. "model.analytics.monthly_revenue" -> "monthly_revenue"
         var parts = uniqueId.Split('.');
         return parts.Length > 0 ? parts[^1] : uniqueId;
     }
 
-    private static (string TestName, string TargetModel, string? ColumnName) ParseTestUniqueId(string uniqueId)
+    private static List<TableIdentifier> FindCandidateModels(string testUniqueId, IReadOnlyDictionary<string, TableIdentifier> knownModels)
     {
-        // dbt test unique_id format: "test.<project>.<test_name_with_model_and_column>.<hash>"
-        var parts = uniqueId.Split('.');
-        if (parts.Length < 3)
-        {
-            return (uniqueId, "unknown", null);
-        }
+        var parts = testUniqueId.Split('.');
+        var testPart = parts.Length >= 3 ? parts[2] : testUniqueId;
 
-        var fullTestIdentifier = parts[2];
-
-        // Check common test prefixes
+        var candidates = new List<TableIdentifier>();
         string[] standardPrefixes = ["not_null_", "unique_", "accepted_values_", "relationships_"];
-        foreach (var prefix in standardPrefixes)
+
+        foreach (var (modelName, tableId) in knownModels)
         {
-            if (fullTestIdentifier.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            if (candidates.Contains(tableId)) continue;
+
+            if (testPart.Equals(modelName, StringComparison.OrdinalIgnoreCase))
             {
-                var testType = prefix.TrimEnd('_');
-                var remainder = fullTestIdentifier[prefix.Length..];
+                candidates.Add(tableId);
+                continue;
+            }
 
-                // Split at the last underscore: everything before is model name, after is column name
-                var lastUnderscore = remainder.LastIndexOf('_');
-                if (lastUnderscore > 0)
+            var matched = false;
+            foreach (var prefix in standardPrefixes)
+            {
+                if (testPart.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    var model = remainder[..lastUnderscore];
-                    var col = remainder[(lastUnderscore + 1)..];
-                    return (testType, model, col);
+                    var rem = testPart[prefix.Length..];
+                    if (rem.Equals(modelName, StringComparison.OrdinalIgnoreCase) ||
+                        rem.StartsWith(modelName + "_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        candidates.Add(tableId);
+                        matched = true;
+                        break;
+                    }
                 }
+            }
 
-                return (testType, remainder, null);
+            if (!matched)
+            {
+                if (testPart.Contains("_" + modelName + "_", StringComparison.OrdinalIgnoreCase) ||
+                    testPart.EndsWith("_" + modelName, StringComparison.OrdinalIgnoreCase) ||
+                    testPart.StartsWith(modelName + "_", StringComparison.OrdinalIgnoreCase))
+                {
+                    candidates.Add(tableId);
+                }
             }
         }
 
-        // Generic fallback
-        var testParts = fullTestIdentifier.Split('_');
-        var fallbackModel = testParts.Length > 1 ? testParts[^1] : parts[1];
-        return (fullTestIdentifier, fallbackModel, null);
+        return candidates;
+    }
+
+    private static (string TestType, string? ColumnName) ParseTestTypeAndColumn(string testPart, string targetModelName)
+    {
+        string[] standardPrefixes = ["not_null_", "unique_", "accepted_values_", "relationships_"];
+        foreach (var prefix in standardPrefixes)
+        {
+            if (testPart.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var testType = prefix.TrimEnd('_');
+                var rem = testPart[prefix.Length..];
+                if (rem.StartsWith(targetModelName + "_", StringComparison.OrdinalIgnoreCase))
+                {
+                    var col = rem[(targetModelName.Length + 1)..];
+                    return (testType, col);
+                }
+                return (testType, null);
+            }
+        }
+
+        var split = testPart.Split('_');
+        return (split[0], null);
     }
 }

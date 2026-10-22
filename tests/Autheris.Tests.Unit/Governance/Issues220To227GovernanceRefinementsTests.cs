@@ -106,7 +106,8 @@ public sealed class Issues220To227GovernanceRefinementsTests
         var encoder = new KeysetCursorEncoder(secret);
 
         var pkValues = new Dictionary<string, object?> { ["id"] = 100 };
-        var token = encoder.EncodeCursor(pkValues);
+        var cursorContext = new Autheris.Application.Data.Interfaces.KeysetCursorContext("tenant-1", "sales", "orders", "asc", ["id"], "caller", "dbo");
+        var token = encoder.EncodeCursor(pkValues, cursorContext);
         token.ShouldContain(".");
 
         var metadata = new TableMetadata
@@ -116,7 +117,7 @@ public sealed class Issues220To227GovernanceRefinementsTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        var decoded = encoder.DecodeCursor(token, metadata);
+        var decoded = encoder.DecodeCursor(token, metadata, cursorContext);
         decoded.ShouldNotBeNull();
         decoded["id"].ShouldBe(100);
     }
@@ -128,7 +129,8 @@ public sealed class Issues220To227GovernanceRefinementsTests
         var encoder = new KeysetCursorEncoder(secret);
 
         var pkValues = new Dictionary<string, object?> { ["id"] = 100 };
-        var token = encoder.EncodeCursor(pkValues);
+        var cursorContext = new Autheris.Application.Data.Interfaces.KeysetCursorContext("tenant-1", "sales", "orders", "asc", ["id"], "caller", "dbo");
+        var token = encoder.EncodeCursor(pkValues, cursorContext);
         var parts = token.Split('.');
         var tampered = parts[0] + "tampered." + parts[1];
 
@@ -139,7 +141,7 @@ public sealed class Issues220To227GovernanceRefinementsTests
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
 
-        Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(tampered, metadata));
+        Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(tampered, metadata, cursorContext));
     }
 
     // =========================================================================

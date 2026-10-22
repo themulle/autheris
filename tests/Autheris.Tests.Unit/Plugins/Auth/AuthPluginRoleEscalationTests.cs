@@ -48,6 +48,65 @@ public sealed class AuthPluginRoleEscalationTests
         sanitized.AddedRoles.Count.ShouldBe(1);
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("TenantAdmin")]
+    [InlineData("FilterAdmin")]
+    [InlineData("FilterSync")]
+    [InlineData("CallerAttributeApprover")]
+    [InlineData("CallerAttributeInspector")]
+    [InlineData("DataOwner")]
+    [InlineData("DataSteward")]
+    [InlineData("DbtAdmin")]
+    [InlineData("SCIM_PROVISIONER")]
+    [InlineData("scim_provisioner")]
+    [InlineData("SchemaPublisher")]
+    [InlineData("SchemaAdmin")]
+    [InlineData("PrivacyAdmin")]
+    [InlineData("DataProtectionOfficer")]
+    [InlineData("GatewayAdmin")]
+    [InlineData("PlatformAdmin")]
+    [InlineData("SecurityAuditor")]
+    [InlineData("Auditor")]
+    [InlineData("MetricsScraper")]
+    [InlineData("BreakGlassOperator")]
+    [InlineData("CLUSTER_ADMIN")]
+    [InlineData("cluster_admin")]
+    [InlineData("Cluster-Admin")]
+    [InlineData("tenantadmin")]
+    [InlineData("admin")]
+    [InlineData("governance:simulate")]
+    [InlineData("governance:admin")]
+    [InlineData("tenant-1:DataOwner")]
+    [InlineData("tenant-1:GovernanceAdmin")]
+    [InlineData("a:b:ClusterAdmin")]
+    public void Sanitize_PrivilegedApproverAndSodRoles_AreStripped(string privilegedRole)
+    {
+        var guard = new AuthPluginRoleEscalationGuard(new AuthPluginOptions(), NullLogger<AuthPluginRoleEscalationGuard>.Instance);
+
+        var sanitized = guard.Sanitize(
+            "test-plugin",
+            new PluginRoleEnrichmentResult(addedRoles: [privilegedRole, "LegitimateRole"]),
+            CreateTestContext());
+
+        sanitized.AddedRoles.ShouldNotContain(privilegedRole);
+        sanitized.AddedRoles.ShouldContain("LegitimateRole");
+        sanitized.AddedRoles.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void IsProhibitedRole_ChecksTenantPrefixedFormsAndKeepsBusinessRoles()
+    {
+        var guard = new AuthPluginRoleEscalationGuard(new AuthPluginOptions(), NullLogger<AuthPluginRoleEscalationGuard>.Instance);
+
+        guard.IsProhibitedRole("tenant-1:FilterAdmin").ShouldBeTrue();
+        guard.IsProhibitedRole(" dataowner ").ShouldBeTrue();
+        guard.IsProhibitedRole("Analyst").ShouldBeFalse();
+        guard.IsProhibitedRole("BillingViewer").ShouldBeFalse();
+        guard.IsProhibitedRole("support.tier-1").ShouldBeFalse();
+    }
+
     [Fact]
     public void Sanitize_WhenConfiguredProhibitedRoles_StripsCustomProhibitedRole()
     {

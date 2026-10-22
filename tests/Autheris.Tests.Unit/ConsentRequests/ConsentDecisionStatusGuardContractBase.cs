@@ -286,6 +286,88 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(2);
     }
 
+    // ---------------- Security review: four-eyes on the atomic final approval (row filter / column masking path) ----------------
+
+    private static (ApprovalStep Step, Consent Consent) AtomicApproval(ConsentRequest req, string approver)
+    {
+        var step = new ApprovalStep
+        {
+            Id = Guid.NewGuid(),
+            ConsentRequestId = req.Id,
+            StepNumber = 1, // stale on purpose: the repository assigns the step number under the lock
+            ApproverSid = new Sid(approver),
+            Decision = "APPROVED",
+            DecidedAt = DateTimeOffset.UtcNow
+        };
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = req.TableId,
+            TableIdentifier = req.TableIdentifier,
+            ConsentRequestId = req.Id,
+            TenantId = req.TenantId,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid(req.RequestedGranteeRef),
+            ValidFrom = DateTimeOffset.UtcNow,
+            ValidTo = req.RequestedValidTo,
+            CreatedBySid = new Sid(approver),
+            Description = "atomic approval"
+        };
+        return (step, consent);
+    }
+
+    [RuntimeSkippableFact]
+    public async Task FourEyes_AtomicApproval_BySameApproverAfterFirstStep_IsRefused_AndWritesNothing()
+    {
+        RequireAvailable();
+        var approver = await NewApproverAsync();
+        var req = await NewRequestAsync(fourEyes: true);
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+
+        var (step, consent) = AtomicApproval(req, approver);
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, step, consent, [], []));
+        ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
+
+        (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await CountApprovalStepsAsync(req.Id)).ShouldBe(1);
+    }
+
+    [RuntimeSkippableFact]
+    public async Task FourEyes_AtomicApproval_OnTheFirstStep_IsRefused_AndASecondApproverCompletesIt()
+    {
+        RequireAvailable();
+        var first = await NewApproverAsync();
+        var second = await NewApproverAsync();
+        var req = await NewRequestAsync(fourEyes: true);
+
+        var (firstStep, firstConsent) = AtomicApproval(req, first);
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, firstStep, firstConsent, [], []));
+        ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
+        (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
+        (await CountApprovalStepsAsync(req.Id)).ShouldBe(0);
+
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        var (secondStep, secondConsent) = AtomicApproval(req, second);
+        await Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, secondStep, secondConsent, [], []);
+
+        (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
+        (await CountApprovalStepsAsync(req.Id)).ShouldBe(2);
+    }
+
+    [RuntimeSkippableFact]
+    public async Task AtomicApproval_ByTheRequester_IsRefused()
+    {
+        RequireAvailable();
+        var req = await NewRequestAsync(fourEyes: false);
+        await GrantGovernanceAdminAsync(req.RequesterSid.Value);
+
+        var (step, consent) = AtomicApproval(req, req.RequesterSid.Value);
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, step, consent, [], []));
+        ex.Message.ShouldContain("Separation of duties");
+        (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
+    }
+
     /// <summary>True when the call succeeded, false when it lost with exactly <typeparamref name="TLoser"/>; any other exception propagates and fails the test.</summary>
     private static async Task<bool> Attempt<TLoser>(Func<Task<ConsentRequest>> action, bool exact = false)
         where TLoser : InvalidOperationException

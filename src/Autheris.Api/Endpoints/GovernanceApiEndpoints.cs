@@ -31,6 +31,13 @@ public static class GovernanceApiEndpoints
                 return Results.Unauthorized();
             }
 
+            // Security review (TOTP TOFU): a first enrollment requires a fresh interactive sign-in (not in Development).
+            var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "begin", context.RequestAborted).ConfigureAwait(false);
+            if (firstEnrollment.Rejection != null)
+            {
+                return firstEnrollment.Rejection;
+            }
+
             var email = ResolveUserEmail(context, userSid);
             var enrollment = await enrollmentService.BeginEnrollmentAsync(userSid, email, "Autheris", context.RequestAborted).ConfigureAwait(false);
             if (enrollment == null)
@@ -65,8 +72,21 @@ public static class GovernanceApiEndpoints
                 return Results.BadRequest(new TotpVerifyResult(false, "TotpCode is required."));
             }
 
+            // Security review (TOTP TOFU): checked again on activation; the verify window covers the pending-seed lifetime.
+            var firstEnrollment = await TotpFirstEnrollmentGuard.CheckAsync(context, enrollmentService, userSid, "verify", context.RequestAborted).ConfigureAwait(false);
+            if (firstEnrollment.Rejection != null)
+            {
+                return firstEnrollment.Rejection;
+            }
+
             var outcome = await enrollmentService.CompleteEnrollmentAsync(
                 userSid, request.TotpCode, request.CurrentTotpCode, context.RequestAborted).ConfigureAwait(false);
+
+            if (outcome == TotpEnrollmentOutcome.Completed && firstEnrollment.IsFirstEnrollment)
+            {
+                // Required audit (fail closed): an unavailable audit store aborts with 503 via the gateway exception handler.
+                await TotpFirstEnrollmentGuard.RecordFirstEnrollmentCompletedAsync(context, userSid, context.RequestAborted).ConfigureAwait(false);
+            }
 
             return outcome switch
             {

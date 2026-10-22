@@ -1359,10 +1359,11 @@ public class SecurityFindingsRemediationTests
     public async Task SEC_12H_06_HandleTrinoQueuedStatementRequest_SecurityException_ReturnsUniform404()
     {
         var statementManager = Substitute.For<Application.Sql.Interfaces.IWebSqlStatementManager>();
-        statementManager.GetStatusOrWaitAsync(Arg.Any<string>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<TimeSpan>(), Arg.Any<System.Threading.CancellationToken>())
+        statementManager.GetStatusOrWaitAsync(Arg.Any<string>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<Sid>(), Arg.Any<TenantId>(), Arg.Any<TimeSpan>(), Arg.Any<System.Threading.CancellationToken>())
             .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
 
         var context = new DefaultHttpContext();
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Response.Body = new MemoryStream();
 
         await WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-foreign-tenant", context, statementManager, NullLoggerFactory.Instance);
@@ -1377,10 +1378,12 @@ public class SecurityFindingsRemediationTests
     public async Task SEC_12H_06_HandleTrinoCancelStatementRequest_SecurityException_ReturnsUniform404()
     {
         var statementManager = Substitute.For<Application.Sql.Interfaces.IWebSqlStatementManager>();
-        statementManager.CancelStatementAsync(Arg.Any<string>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<System.Threading.CancellationToken>())
+        statementManager.CancelStatementAsync(Arg.Any<string>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<Sid>(), Arg.Any<TenantId>(), Arg.Any<System.Threading.CancellationToken>())
             .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
 
         var context = new DefaultHttpContext();
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
+        context.Request.Headers["X-Trino-User"] = "user-1";
 
         await WebSqlEndpoints.HandleTrinoCancelStatementRequest("stmt-foreign-tenant", context, statementManager);
 

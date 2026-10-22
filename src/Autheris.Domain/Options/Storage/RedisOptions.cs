@@ -154,4 +154,10 @@ public sealed class EpochValidationOptions
     /// </summary>
     [Range(0, 250)] public int LocalStalenessBudgetMilliseconds { get; init; } = 150;
     public int MaxLocalEpochEntries { get; init; } = 50_000;
+
+    /// <summary>
+    /// INF-01 R1: Grace period after Redis connection restoration during which Redis epoch reads are treated
+    /// as non-authoritative to protect against missed pub/sub invalidations before the revoking peer flushes.
+    /// </summary>
+    public TimeSpan ReconnectEpochGrace { get; init; } = TimeSpan.FromSeconds(5);
 }

@@ -208,10 +208,17 @@ public sealed class Issues236And237GovernanceHotfixTests
         var exDir = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(cursor, metadata, wrongDir));
         exDir.Message.ShouldContain("INVALID_CURSOR");
 
-        // Legacy cursor without context decoded without context succeeds (backward compatibility)
-        var legacyCursor = encoder.EncodeCursor(pkValues, context: null);
-        var legacyDecoded = encoder.DecodeCursor(legacyCursor, metadata, context: null);
-        Convert.ToInt64(legacyDecoded["id"]).ShouldBe(42L);
+        // Tampering Caller fails closed
+        var wrongCaller = context with { Caller = "other-app" };
+        Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(cursor, metadata, wrongCaller));
+
+        // Tampering Schema or request shape fails closed
+        Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(cursor, metadata, context with { Schema = "archive" }));
+        Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(cursor, metadata, context with { RequestHash = "different" }));
+
+        // Unbound (context-less) cursors are no longer issued or accepted (no bare-signature fallback)
+        Should.Throw<ArgumentNullException>(() => encoder.EncodeCursor(pkValues, null!));
+        Should.Throw<ArgumentNullException>(() => encoder.DecodeCursor(cursor, metadata, null!));
     }
 
     // =========================================================================

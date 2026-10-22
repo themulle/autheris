@@ -238,11 +238,18 @@ public static class AccessProfileAssignmentRules
             .ThenBy(p => p.ProfileId, StringComparer.Ordinal)
             .ToList();
 
-    private static int Rank(MaskingPolicyMode mode) => mode switch
+    /// <summary>
+    /// The mode a profile is enforced with: an undefined value (e.g. a numeric "7" that slipped through a write path) is enforced as
+    /// <see cref="MaskingPolicyMode.Strict"/>, never as an unknown mode that the enforcement would pass through unchanged.
+    /// </summary>
+    public static MaskingPolicyMode EnforcedMode(MaskingPolicyMode mode) => Enum.IsDefined(mode) ? mode : MaskingPolicyMode.Strict;
+
+    /// <summary>Lower is more restrictive. Explicit for the defined values only; an undefined value ranks exactly as Strict (the mode it is enforced with).</summary>
+    public static int Rank(MaskingPolicyMode mode) => EnforcedMode(mode) switch
     {
         MaskingPolicyMode.Strict => 0,
         MaskingPolicyMode.Default => 1,
         MaskingPolicyMode.Unmasked => 2,
-        _ => 0 // an unknown mode is treated as the most restrictive
+        _ => 0
     };
 }

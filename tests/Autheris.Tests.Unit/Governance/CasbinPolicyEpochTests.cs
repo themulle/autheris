@@ -504,4 +504,22 @@ internal sealed class SwitchableStateProvider(InMemoryClusterStateProvider inner
         Guard();
         return Inner.TryAcquireLeaseAsync(resourceKey, ttl, ct);
     }
+
+    public ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default)
+    {
+        Guard();
+        return Inner.TryAcquireSlotAsync(setKey, member, limit, ttl, ct);
+    }
+
+    public ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default)
+    {
+        Guard();
+        return Inner.RenewSlotAsync(setKey, member, ttl, ct);
+    }
+
+    public ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default)
+    {
+        Guard();
+        return Inner.ReleaseSlotAsync(setKey, member, ct);
+    }
 }

@@ -2,11 +2,13 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.IO;
+using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Docs.Services;
 using Autheris.Application.Events;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Events;
@@ -30,6 +32,13 @@ public static class DocIngestionEndpoints
             IUniversalDocStore docStore,
             CancellationToken ct) =>
         {
+            // Cluster administrators publish official documentation; every other caller's bundle belongs to the caller's tenant
+            // (served to that tenant only, marked as untrusted user content) and can never replace an existing document.
+            if (!DocEndpointAccess.TryResolveDepositor(request.HttpContext, appId, out var depositTenantId, out var depositAuthorSid, out var denied))
+            {
+                return denied!;
+            }
+
             if (!request.HasFormContentType)
             {
                 // Raw stream upload
@@ -59,8 +68,8 @@ public static class DocIngestionEndpoints
                 }
 
                 ms.Position = 0;
-                var result = await docStore.ExtractBundleAsync(appId, ms, ct).ConfigureAwait(false);
-                return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+                var result = DocEndpointAccess.Scrub(await docStore.ExtractBundleAsync(appId, ms, depositTenantId, depositAuthorSid, ct).ConfigureAwait(false));
+                return BundleResult(result);
             }
 
             var form = await request.ReadFormAsync(ct).ConfigureAwait(false);
@@ -77,8 +86,8 @@ public static class DocIngestionEndpoints
             }
 
             await using var stream = file.OpenReadStream();
-            var extractResult = await docStore.ExtractBundleAsync(appId, stream, ct).ConfigureAwait(false);
-            return extractResult.Success ? Results.Ok(extractResult) : Results.BadRequest(extractResult);
+            var extractResult = DocEndpointAccess.Scrub(await docStore.ExtractBundleAsync(appId, stream, depositTenantId, depositAuthorSid, ct).ConfigureAwait(false));
+            return BundleResult(extractResult);
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionBundleApplied);
 
         // 2. Deposit or update individual document
@@ -102,6 +111,13 @@ public static class DocIngestionEndpoints
                 return Results.BadRequest(new { error = "Document content cannot be empty." });
             }
 
+            // Cluster administrators deposit official documentation; every other caller's document belongs to the caller's tenant
+            // (served to that tenant only, marked as untrusted user content), exactly like the MCP deposit tool.
+            if (!DocEndpointAccess.TryResolveDepositor(httpContext, appId, out var depositTenantId, out var depositAuthorSid, out var denied))
+            {
+                return denied!;
+            }
+
             var title = !string.IsNullOrWhiteSpace(body.Title) ? body.Title : docId;
             var depositRequest = new DepositDocRequest(
                 appId,
@@ -110,9 +126,17 @@ public static class DocIngestionEndpoints
                 body.Content,
                 docId,
                 body.ErrorCode,
-                body.Tags);
+                body.Tags,
+                depositTenantId,
+                depositAuthorSid);
 
-            var result = await docStore.DepositDocumentAsync(depositRequest, ct).ConfigureAwait(false);
+            // A tenant administrator may add documents but never replace an existing one (official or of another tenant).
+            if (depositTenantId is not null && await docStore.DocumentExistsAsync(depositRequest, ct).ConfigureAwait(false))
+            {
+                return DocEndpointAccess.Forbidden("Overwriting an existing document requires ClusterAdmin role.");
+            }
+
+            var result = DocEndpointAccess.Scrub(await docStore.DepositDocumentAsync(depositRequest, ct).ConfigureAwait(false));
 
             if (result.Success && eventBus != null)
             {
@@ -158,6 +182,7 @@ public static class DocIngestionEndpoints
             string query,
             string? category,
             int? limit,
+            HttpContext httpContext,
             IDocSearchService searchService,
             CancellationToken ct) =>
         {
@@ -172,27 +197,29 @@ public static class DocIngestionEndpoints
                 parsedCategory = c;
             }
 
-            var results = await searchService.SearchAsync(query, parsedCategory, limit ?? 10, ct).ConfigureAwait(false);
+            var results = await searchService.SearchAsync(query, DocEndpointAccess.ResolveReadScope(httpContext), parsedCategory, limit ?? 10, ct).ConfigureAwait(false);
             return Results.Ok(new { total = results.Count, results });
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
 
         // 6. List documentation topics REST API
         app.MapGet("/api/v1/docs/topics", async (
             string? appId,
+            HttpContext httpContext,
             IDocSearchService searchService,
             CancellationToken ct) =>
         {
-            var topics = await searchService.ListTopicsAsync(appId, ct).ConfigureAwait(false);
+            var topics = await searchService.ListTopicsAsync(DocEndpointAccess.ResolveReadScope(httpContext), appId, ct).ConfigureAwait(false);
             return Results.Ok(new { total = topics.Count, topics });
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
 
         // 7. Lookup error code REST API
         app.MapGet("/api/v1/docs/errors/{errorCode}", async (
             string errorCode,
+            HttpContext httpContext,
             IDocSearchService searchService,
             CancellationToken ct) =>
         {
-            var def = await searchService.LookupErrorCodeAsync(errorCode, ct).ConfigureAwait(false);
+            var def = await searchService.LookupErrorCodeAsync(errorCode, DocEndpointAccess.ResolveReadScope(httpContext), ct).ConfigureAwait(false);
             return def != null
                 ? Results.Ok(def)
                 : Results.NotFound(new { error = $"Error code '{errorCode}' was not found in documentation." });
@@ -201,6 +228,7 @@ public static class DocIngestionEndpoints
         // 8. Retrieve procedure instructions REST API
         app.MapGet("/api/v1/docs/procedures/{*identifier}", async (
             string identifier,
+            HttpContext httpContext,
             IDocSearchService searchService,
             CancellationToken ct) =>
         {
@@ -209,7 +237,7 @@ public static class DocIngestionEndpoints
                 return Results.BadRequest(new { error = $"Invalid document identifier format '{identifier}'." });
             }
 
-            var chunk = await searchService.GetChunkAsync(id, ct).ConfigureAwait(false);
+            var chunk = await searchService.GetChunkAsync(id, DocEndpointAccess.ResolveReadScope(httpContext), ct).ConfigureAwait(false);
             return chunk != null
                 ? Results.Ok(chunk)
                 : Results.NotFound(new { error = $"Document section '{identifier}' was not found." });
@@ -226,6 +254,97 @@ public static class DocIngestionEndpoints
 
         return app;
     }
+
+    private static IResult BundleResult(DepositDocResult result)
+    {
+        if (result.Success)
+        {
+            return Results.Ok(result);
+        }
+
+        // A tenant bundle that would replace an existing document is a permission problem, not a malformed request.
+        return string.Equals(result.ErrorCode, "DOC_OVERWRITE_FORBIDDEN", StringComparison.Ordinal)
+            ? Results.Json(result, statusCode: StatusCodes.Status403Forbidden)
+            : Results.BadRequest(result);
+    }
+}
+
+/// <summary>
+/// Tenant scoping of the REST documentation endpoints, mirroring the MCP documentation tools: cluster administrators deposit
+/// official documentation, every other depositor deposits tenant documents, and readers see official documentation plus their
+/// own tenant's documents.
+/// </summary>
+internal static class DocEndpointAccess
+{
+    /// <summary>
+    /// Resolves who a deposit belongs to. A canonical ClusterAdmin deposits official (tenant-less) documentation
+    /// (<paramref name="tenantId"/> is null). Every other caller deposits for the request tenant; without a resolvable tenant
+    /// the request is refused (<paramref name="denied"/>), because the document could not be scoped and would read as official.
+    /// Non-ClusterAdmin callers may not deposit for the global applications.
+    /// </summary>
+    public static bool TryResolveDepositor(HttpContext httpContext, string appId, out string? tenantId, out string? authorSid, out IResult? denied)
+    {
+        tenantId = null;
+        authorSid = null;
+        denied = null;
+
+        try
+        {
+            authorSid = EndpointSecurity.GetCallerIdentity(httpContext);
+            if (EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User))
+            {
+                return true;
+            }
+
+            var tenant = EndpointSecurity.GetRequestTenant(httpContext).Value;
+            if (string.IsNullOrWhiteSpace(tenant))
+            {
+                denied = Forbidden("Depositing documentation requires a tenant-bound session.");
+                return false;
+            }
+
+            if (IsGlobalApplication(appId))
+            {
+                denied = Forbidden("Depositing documentation for global application requires ClusterAdmin role.");
+                return false;
+            }
+
+            tenantId = tenant.Trim();
+            return true;
+        }
+        catch (SecurityException)
+        {
+            // A malformed tenant claim or a rejected cross-tenant request fails closed.
+            authorSid = null;
+            denied = Forbidden("Depositing documentation requires a tenant-bound session.");
+            return false;
+        }
+    }
+
+    /// <summary>Official documentation plus the caller's tenant documents; official documentation only without a resolvable tenant.</summary>
+    public static DocAccessScope ResolveReadScope(HttpContext httpContext)
+    {
+        try
+        {
+            return DocAccessScope.ForTenant(EndpointSecurity.GetRequestTenant(httpContext).Value);
+        }
+        catch (SecurityException)
+        {
+            return DocAccessScope.OfficialOnly;
+        }
+    }
+
+    public static bool IsGlobalApplication(string? appId) =>
+        string.Equals(appId, "autheris", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(appId, "global", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(appId, "system", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Never discloses the server's absolute file system path: the result carries a store-relative path only.</summary>
+    public static DepositDocResult Scrub(DepositDocResult result) =>
+        result.FilePath is null ? result : result with { FilePath = DocProvenance.ToSafeSourcePath(result.FilePath) };
+
+    public static IResult Forbidden(string message) =>
+        Results.Json(new { error = "Forbidden", message }, statusCode: StatusCodes.Status403Forbidden);
 }
 
 public sealed record DepositDocumentBody(

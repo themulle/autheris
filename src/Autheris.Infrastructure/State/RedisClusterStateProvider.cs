@@ -80,6 +80,37 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) 
 return 0
 ";
 
+    // Slot scripts: KEYS[1] = setKey, ARGV[1] = member, ARGV[2] = limit, ARGV[3] = nowMs, ARGV[4] = expiryMs, ARGV[5] = ttlMs
+    private const string AcquireSlotScript = @"
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if score then
+    redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1])
+    redis.call('PEXPIRE', KEYS[1], ARGV[5])
+    return 1
+end
+local count = redis.call('ZCARD', KEYS[1])
+if count < tonumber(ARGV[2]) then
+    redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1])
+    redis.call('PEXPIRE', KEYS[1], ARGV[5])
+    return 1
+else
+    return 0
+end
+";
+
+    private const string RenewSlotScript = @"
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[2])
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if score then
+    redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+    redis.call('PEXPIRE', KEYS[1], ARGV[4])
+    return 1
+else
+    return 0
+end
+";
+
     private string BuildKey(string key) => _prefix + key;
 
     /// <summary>
@@ -388,6 +419,80 @@ end
         protected override void OnLeaseLost(string reason) => RecordLeaseEvent(reason);
 
         protected override void OnRenewFailure() => RecordLeaseEvent("renew_failure");
+    }
+
+    public async ValueTask<bool?> TryAcquireSlotAsync(string setKey, string member, int limit, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(setKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(member);
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var redisKey = BuildKey(setKey);
+            var nowMs = _time.GetUtcNow().ToUnixTimeMilliseconds();
+            var ttlMs = (long)Math.Max(1000, ttl.TotalMilliseconds);
+            var expiryMs = nowMs + ttlMs;
+
+            var result = (int)await db.ScriptEvaluateAsync(
+                AcquireSlotScript,
+                new RedisKey[] { redisKey },
+                new RedisValue[] { member, limit, nowMs, expiryMs, ttlMs }).ConfigureAwait(false);
+
+            return result == 1;
+        }
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
+        {
+            RecordRedisFailure("TryAcquireSlot");
+            _logger.LogWarning(ex, "Redis cluster state operation TryAcquireSlot failed for key {Key}.", setKey);
+            return null;
+        }
+    }
+
+    public async ValueTask<bool> RenewSlotAsync(string setKey, string member, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(setKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(member);
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var redisKey = BuildKey(setKey);
+            var nowMs = _time.GetUtcNow().ToUnixTimeMilliseconds();
+            var ttlMs = (long)Math.Max(1000, ttl.TotalMilliseconds);
+            var expiryMs = nowMs + ttlMs;
+
+            var result = (int)await db.ScriptEvaluateAsync(
+                RenewSlotScript,
+                new RedisKey[] { redisKey },
+                new RedisValue[] { member, nowMs, expiryMs, ttlMs }).ConfigureAwait(false);
+
+            return result == 1;
+        }
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
+        {
+            RecordRedisFailure("RenewSlot");
+            _logger.LogWarning(ex, "Redis cluster state operation RenewSlot failed for key {Key}.", setKey);
+            return false;
+        }
+    }
+
+    public async ValueTask ReleaseSlotAsync(string setKey, string member, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(setKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(member);
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var redisKey = BuildKey(setKey);
+            await db.SortedSetRemoveAsync(redisKey, member).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsInfrastructureFailure(ex))
+        {
+            RecordRedisFailure("ReleaseSlot");
+            _logger.LogWarning(ex, "Redis cluster state operation ReleaseSlot failed for key {Key}.", setKey);
+        }
     }
 
     private sealed class RedisSubscriptionLease : IAsyncDisposable

@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Connectors;
+using Autheris.Application.Data.Relations;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -27,6 +28,18 @@ public sealed class BatchRelationLoader
     private readonly Func<ClaimsPrincipal?, TableIdentifier, CancellationToken, Task<TableAccessDecision>> _checkTableAccess;
 
     public int LastDispatchedChildQueryCount { get; private set; }
+    private readonly List<string> _reasons = new();
+    public IReadOnlyList<string> Reasons => _reasons;
+    public string? LastRefusalReason { get; private set; }
+
+    private void RecordReason(string reason)
+    {
+        LastRefusalReason = reason;
+        if (!_reasons.Contains(reason))
+        {
+            _reasons.Add(reason);
+        }
+    }
 
     public BatchRelationLoader(
         ITableMetadataRepository metadataRepository,
@@ -85,6 +98,27 @@ public sealed class BatchRelationLoader
             ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
             ?? "parent_id";
 
+        var isSensitive = TableAccessDecision.IsCatalogSensitive(joinColumn, metadata);
+        var explicitAccess = decision.ColumnAccess.TryGetValue(joinColumn, out var direct) ? direct : (ColumnAccessLevel?)null;
+        var effectiveJoinAccess = explicitAccess ?? (isSensitive ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear);
+
+        if (effectiveJoinAccess != ColumnAccessLevel.Clear)
+        {
+            RecordReason(CrossSourceRelationErrorCodes.RelationKeyMasked);
+            LastDispatchedChildQueryCount = 0;
+            return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+        }
+
+        var effectiveDecision = decision;
+        if (explicitAccess == null && !isSensitive)
+        {
+            var augmented = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase)
+            {
+                [joinColumn] = ColumnAccessLevel.Clear
+            };
+            effectiveDecision = decision with { ColumnAccess = augmented };
+        }
+
         var (result, dispatchedQueries) = await _chunkedQueryExecutor.ExecuteGroupedWithMetricsAsync<string, InvoiceItemRecord>(
             invoiceIds,
             async (chunkKeys, chunkCt) =>
@@ -125,7 +159,7 @@ public sealed class BatchRelationLoader
                 };
 
                 var requestedColumns = metadata.Columns
-                    .Where(c => decision.GetColumnAccess(c.ColumnName) != ColumnAccessLevel.Deny)
+                    .Where(c => effectiveDecision.GetColumnAccess(c.ColumnName) != ColumnAccessLevel.Deny)
                     .Select(c => c.ColumnName)
                     .ToList();
 
@@ -133,7 +167,7 @@ public sealed class BatchRelationLoader
                     SourceName: metadata.Table.SourceName,
                     Metadata: metadata,
                     Principal: principal ?? new ClaimsPrincipal(new ClaimsIdentity()),
-                    AccessDecision: decision,
+                    AccessDecision: effectiveDecision,
                     Arguments: new Dictionary<string, object?> { ["limit"] = Math.Max(100, chunkKeys.Count * 10), ["offset"] = 0 },
                     RequestedFields: requestedColumns,
                     RequestHeaders: null,
@@ -160,7 +194,7 @@ public sealed class BatchRelationLoader
                 var processedRows = GovernedConnectorReader.Apply(
                     rawRows,
                     metadata,
-                    decision,
+                    effectiveDecision,
                     tenantId.Value,
                     rlsPushdownAlreadyOccurred,
                     inDbMaskingAlreadyOccurred,
@@ -170,32 +204,37 @@ public sealed class BatchRelationLoader
                         MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
                         MaxBytes: maxBytes));
 
+                bool batchRecordedKeyMasked = false;
                 for (int i = 0; i < processedRows.Count; i++)
                 {
                     var row = processedRows[i];
-                    var raw = i < rawRows.Count ? rawRows[i] : null;
 
-                    var parentKey = row.TryGetValue(joinColumn, out var pkVal) ? pkVal?.ToString() ?? "" : "";
-                    if (string.IsNullOrEmpty(parentKey) && raw != null)
+                    string? parentKey = null;
+                    if (row.TryGetValue(joinColumn, out var pkVal) && pkVal != null)
                     {
-                        parentKey = raw.TryGetValue(joinColumn, out var rPk) ? rPk?.ToString() ?? "" : "";
-                    }
-                    if (string.IsNullOrEmpty(parentKey) && string.Equals(joinColumn, "parent_id", StringComparison.OrdinalIgnoreCase) && raw != null)
-                    {
-                        parentKey = raw.TryGetValue("invoice_id", out var altVal) ? altVal?.ToString() ?? "" : "";
+                        var str = pkVal.ToString();
+                        if (!string.IsNullOrWhiteSpace(str))
+                        {
+                            parentKey = str;
+                        }
                     }
 
-                    if (string.IsNullOrEmpty(parentKey) || !chunkResult.TryGetValue(parentKey, out var list))
+                    if (string.IsNullOrEmpty(parentKey))
+                    {
+                        if (!batchRecordedKeyMasked)
+                        {
+                            RecordReason(CrossSourceRelationErrorCodes.RelationKeyMasked);
+                            batchRecordedKeyMasked = true;
+                        }
+                        continue;
+                    }
+
+                    if (!chunkResult.TryGetValue(parentKey, out var list))
                     {
                         continue;
                     }
 
-                    var id = row.TryGetValue("id", out var idVal) ? idVal?.ToString() ?? "" : "";
-                    if (string.IsNullOrEmpty(id) && raw != null)
-                    {
-                        id = raw.TryGetValue("id", out var rawId) ? rawId?.ToString() ?? "" : "";
-                    }
-
+                    var id = row.TryGetValue("id", out var idVal) && idVal != null ? idVal.ToString() : null;
                     var prodName = row.TryGetValue("product_name", out var prodVal) ? prodVal?.ToString() : null;
                     var price = 0m;
                     if (row.TryGetValue("price", out var priceVal) && priceVal != null)

@@ -2,7 +2,7 @@
 
 **Document ID:** `REQ-SEC-271`  
 **Date:** 2026-10-21  
-**Status:** APPROVED  
+**Status:** MERGED (PR #273, `b2b1bf2f`); follow-up hardening on `fix/security-review-open-findings` (implemented, not built). Open: `REQ-SEC-271-15` partial (fallback to `Gateway:Cluster:Secret`, per-process random key outside Development), `REQ-SEC-271-03` startup rule not implemented (purge threshold uses the max of all retention periods instead).  
 **Author:** Product Manager (`product-manager`)  
 **Security Lead:** Lead Application Security Expert (`csharp-security-expert`)  
 **Parent Plan:** [00-master-plan-overview.md](00-master-plan-overview.md)  

@@ -250,6 +250,19 @@ public sealed class TotpOptions
     public int PendingEnrollmentMinutes { get; init; } = 10;
 
     /// <summary>
+    /// Maximum age of the interactive authentication for a user's first TOTP enrollment. Without an active secret there
+    /// is no second factor to prove, so a stolen long-lived credential must not be able to bind an authenticator (trust
+    /// on first use). JWT bearer identities (Entra ID / ADFS) must carry <c>auth_time</c>; <c>iat</c> is not accepted
+    /// for JWTs because a silent token refresh resets it. Basic session cookies are judged by their <c>iat</c> (the login
+    /// time, kept across sliding refreshes). ForwardAuth (proxy) identities carry no authentication time and their first
+    /// enrollment is always denied. Per-request authentication (Negotiate/Kerberos/NTLM, raw Basic header) is allowed and
+    /// audited; unknown authentication types are rejected. The verify step accepts an authentication age of up to this
+    /// value plus <see cref="PendingEnrollmentMinutes"/> (the pending seed was created by a begin that passed this check).
+    /// Not enforced in the Development environment.
+    /// </summary>
+    public int FirstEnrollmentMaxAuthAgeMinutes { get; init; } = 5;
+
+    /// <summary>
     /// Encrypts TOTP seeds at rest with ASP.NET Data Protection. Requires a persisted key ring shared by all nodes
     /// (otherwise seeds become unreadable after a restart or on other nodes), hence off by default.
     /// </summary>

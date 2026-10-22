@@ -54,7 +54,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, CancellationToken ct = default)
+    public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
         var client = _clientFactory.GetActiveClient();
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
@@ -84,9 +84,23 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             }
             catch (TableMetadataUnavailableException)
             {
+                if (restrictToTenant != null)
+                {
+                    // No name disclosure when restricted
+                    continue;
+                }
+
                 // SEC-94-01: an unavailable table is never ingested as a new one (its stored masking rules would be lost).
                 warnings.Add($"Table '{tableAsset.Identifier}': skipped, its stored metadata is unavailable (invalid key or index definition).");
                 continue;
+            }
+
+            if (restrictToTenant != null)
+            {
+                if (existing == null || !string.Equals(existing.OwnerTenantId, restrictToTenant.Value.Value, StringComparison.Ordinal))
+                {
+                    continue;
+                }
             }
 
             syncedTables++;
@@ -219,7 +233,18 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
             if (!dryRun)
             {
-                await _metadataRepo.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+                try
+                {
+                    await _metadataRepo.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // SEC-SYNC-EPOCH: the epoch of a table is invalidated right after its own upsert (also when the upsert
+                    // fails part-way), not after the whole loop: an exception or cancellation later in the run must not leave
+                    // an already written table (e.g. with tightened masking) behind cached decisions of the old metadata.
+                    // CancellationToken.None: a cancelled run still invalidates the table it may already have written.
+                    await _epochService.InvalidateEpochAsync(tableAsset.Identifier, CancellationToken.None).ConfigureAwait(false);
+                }
 
                 if (_rebacStore != null)
                 {
@@ -238,10 +263,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
         if (!dryRun && affectedTables.Count > 0)
         {
-            foreach (var affectedTable in affectedTables)
-            {
-                await _epochService.InvalidateEpochAsync(affectedTable, ct).ConfigureAwait(false);
-            }
             _logger.LogInformation("Invalidated governance epochs after syncing {Count} tables from catalog.", affectedTables.Count);
         }
 

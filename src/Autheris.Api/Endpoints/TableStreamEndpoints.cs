@@ -257,7 +257,7 @@ public static class TableStreamEndpoints
         PlannedTableRead planned;
         try
         {
-            planned = planner.PlanKeysetStream(request, metadata, decision);
+            planned = planner.PlanKeysetStream(request, metadata, decision, tenant.Value, callerSid);
         }
         catch (InvalidCursorException ex)
         {
@@ -469,7 +469,8 @@ public static class TableStreamEndpoints
 
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
-                    var cursorContext = new KeysetCursorContext(tenant.Value, domain, table, "asc", pkCols, callerSid);
+                    // Same factory and encoder the planner verifies continuation cursors with.
+                    var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenant.Value, metadata, pkCols, callerSid, request);
                     nextCursor = cursorEncoder.EncodeCursor(lastRowPk, cursorContext);
                 }
             }
@@ -591,7 +592,8 @@ public static class TableStreamEndpoints
 
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
-                    var cursorContext = new KeysetCursorContext(tenant.Value, domain, table, "asc", pkCols, callerSid);
+                    // Same factory and encoder the planner verifies continuation cursors with.
+                    var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenant.Value, metadata, pkCols, callerSid, request);
                     nextCursor = cursorEncoder.EncodeCursor(lastRowPk, cursorContext);
                 }
 
@@ -646,7 +648,9 @@ public static class TableStreamEndpoints
                 if (rateLimiter != null)
                 {
                     int actualCost = baseCost + (rowsEmitted * costPerRow);
-                    var settlement = await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, actualCost, policy, ct).ConfigureAwait(false);
+                    // CancellationToken.None: on a client abort the request token is already cancelled; settling with it
+                    // would throw from this finally block, mask the original exception and never refund the reservation.
+                    var settlement = await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, actualCost, policy, CancellationToken.None).ConfigureAwait(false);
                     SetResponseMetadata(httpContext.Response, "X-RateLimit-Remaining", settlement.RemainingTokens.ToString(CultureInfo.InvariantCulture));
                 }
             }

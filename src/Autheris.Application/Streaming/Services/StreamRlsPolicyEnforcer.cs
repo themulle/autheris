@@ -84,23 +84,36 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         ArgumentNullException.ThrowIfNull(cdcEvent);
         ArgumentNullException.ThrowIfNull(subscriber);
 
-        // 1. Tenant Isolation Check
-        var subscriberTenant = subscriber.FindFirst("tenant_id")?.Value
-            ?? subscriber.FindFirst("tenant")?.Value
-            ?? subscriber.FindFirst("tid")?.Value
-            ?? TenantId.LegacySingleTenant.Value;
-
-        if (string.IsNullOrWhiteSpace(cdcEvent.TenantId) ||
-            !string.Equals(cdcEvent.TenantId, subscriberTenant, StringComparison.OrdinalIgnoreCase))
+        // 1. Tenant Isolation Check (INF-08: tenant taken strictly from realm-bound GetTenantId())
+        TenantId tenantId;
+        try
         {
-            _logger.LogDebug(
-                "Streaming event '{EventId}' dropped due to tenant mismatch (Event: {EventTenant}, Subscriber: {SubTenant})",
-                cdcEvent.EventId, cdcEvent.TenantId, subscriberTenant);
+            tenantId = subscriber.GetTenantId();
+        }
+        catch
+        {
             return StreamSecurityDecision.Denied("Tenant mismatch");
         }
 
-        if (!TenantId.TryParse(subscriberTenant, out var tenantId))
+        var rawTenantClaim = subscriber.Claims.FirstOrDefault(c =>
+            string.Equals(c.Type, "tenant_id", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Type, "tenant", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Type, "tid", StringComparison.OrdinalIgnoreCase))?.Value;
+
+        if (rawTenantClaim != null && !string.Equals(rawTenantClaim, tenantId.Value, StringComparison.OrdinalIgnoreCase))
         {
+            _logger.LogDebug(
+                "Streaming event '{EventId}' dropped due to conflicting raw tenant claim (Raw: {RawTenant}, Bound: {BoundTenant})",
+                cdcEvent.EventId, rawTenantClaim, tenantId.Value);
+            return StreamSecurityDecision.Denied("Tenant mismatch");
+        }
+
+        if (string.IsNullOrWhiteSpace(cdcEvent.TenantId) ||
+            !string.Equals(cdcEvent.TenantId, tenantId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug(
+                "Streaming event '{EventId}' dropped due to tenant mismatch (Event: {EventTenant}, Subscriber: {SubTenant})",
+                cdcEvent.EventId, cdcEvent.TenantId, tenantId.Value);
             return StreamSecurityDecision.Denied("Tenant mismatch");
         }
 
@@ -184,19 +197,11 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         // 6. Casbin ABAC Policy Enforcement as additional gate + row filter (with full ABAC context)
         if (_policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
         {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in subscriber.Claims)
-            {
-                if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                attributes[claim.Type] = claim.Value;
-            }
-            attributes["action"] = "read";
-
-            var purpose = subscriber.FindFirst("purpose")?.Value ?? subscriber.FindFirst("purpose_id")?.Value;
+            // Same attribute map as the query path (TableAccessPolicy): action claims are ignored, empty values are missing, and a claim
+            // type with several distinct values is ambiguous (fail closed) instead of keeping the last value; the gateway action wins.
+            var (attributes, purpose) = Autheris.Application.Policy.TableAccessPolicy.BuildClaimAttributes(
+                subscriber.Claims,
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["action"] = "read" });
 
             var evalContext = new SecurityEvaluationContext(
                 UserSid: userSid,
@@ -264,7 +269,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             // REQ-GOV-129 (A-8, BC-129-14): a consent filter with caller attributes is evaluated typed, per event, from the recipe; the text of such a
             // decision is only a constant. Null: no attribute leaves (or the feature is off), the text evaluator decides as before.
             bool? attributeVerdict = await EvaluateAttributeFilterAsync(decision, subscriber, tenantId, metadata, rawPayload, ct).ConfigureAwait(false);
-            if (!(attributeVerdict ?? MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql)))
+            if (!(attributeVerdict ?? MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql, metadata.Dialect)))
             {
                 _logger.LogDebug(
                     "Streaming event '{EventId}' filtered out by in-stream row filter for subscriber '{UserSid}'",
@@ -466,8 +471,8 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         return IPAddress.None;
     }
 
-    private static bool MatchesStreamingRowFilter(IReadOnlyDictionary<string, object?> payload, string filterSql)
+    private static bool MatchesStreamingRowFilter(IReadOnlyDictionary<string, object?> payload, string filterSql, DatabaseDialect? dialect = null)
     {
-        return StreamingRowFilterAstEvaluator.Matches(payload, filterSql);
+        return StreamingRowFilterAstEvaluator.Matches(payload, filterSql, dialect);
     }
 }

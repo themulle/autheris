@@ -138,22 +138,32 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             throw new UnauthorizedAccessException("Authenticated principal is required to analyze queries.");
         }
 
+        if (targetPrincipal != null && !HasSimulatePrivilege(callerPrincipal))
+        {
+            var targetSid = ResolvePrincipalSid(targetPrincipal);
+            if (targetSid == null || !string.Equals(callerSid.Value.Value, targetSid.Value.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException(
+                    "Evaluating queries on behalf of another principal requires the 'governance:simulate' or 'GovernanceAdmin' role.");
+            }
+
+            // A target with the caller's own SID is still a separately built identity (its roles and claims come from the request):
+            // without the simulation privilege the caller is always evaluated as itself, never with asserted roles.
+            targetPrincipal = null;
+        }
+
         var effectivePrincipal = targetPrincipal ?? callerPrincipal;
         var effectiveSid = ResolvePrincipalSid(effectivePrincipal) ?? callerSid.Value;
-
-        if (targetPrincipal != null &&
-            !string.Equals(callerSid.Value.Value, effectiveSid.Value, StringComparison.OrdinalIgnoreCase) &&
-            !HasSimulatePrivilege(callerPrincipal))
-        {
-            throw new UnauthorizedAccessException(
-                "Evaluating queries on behalf of another principal requires the 'governance:simulate' or 'GovernanceAdmin' role.");
-        }
 
         var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tableLookup = BuildTableLookup(allTables);
         var activeConsents = await LoadActiveConsentsAsync(effectivePrincipal, effectiveSid.Value, ct).ConfigureAwait(false);
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
-        var isAdmin = IsAdminPrincipal(effectivePrincipal);
+
+        // A simulated target never gets administrator semantics (hidden datasets, Clear columns, no mandatory filters), whatever roles
+        // it carries: its roles are asserted by the simulating caller, not by an identity provider. The prediction for a real
+        // administrator is therefore conservative. Only the authenticated caller evaluated as itself can be an administrator.
+        var isAdmin = targetPrincipal == null && IsAdminPrincipal(callerPrincipal);
 
         // Issue #127: the caller's own token scopes (claims overload, as the data path) are only known for the caller itself;
         // an impersonated target carries no token, so its levels are predicted for the worst case (see ResolveTableColumnLevels).
@@ -654,8 +664,13 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
     }
 
-    internal static bool HasSimulatePrivilege(ClaimsPrincipal principal)
+    /// <summary>
+    /// True when the principal may evaluate queries for a target principal (<c>governance:simulate</c>, <c>governance:admin</c> or an
+    /// administrator). Checked by the analyze endpoint before it builds a simulated target, and again by the service.
+    /// </summary>
+    public static bool HasSimulatePrivilege(ClaimsPrincipal principal)
     {
+        ArgumentNullException.ThrowIfNull(principal);
         if (IsAdminPrincipal(principal))
         {
             return true;
@@ -675,6 +690,67 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     c.Value.Contains("governance:admin", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(c.Value, "GovernanceAdmin", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(c.Value, "admin", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>Authentication type of the identity built for a simulated target (never an identity-provider scheme).</summary>
+    public const string SimulatedTargetAuthenticationType = "SimulatedTarget";
+
+    /// <summary>
+    /// Builds the identity of a simulated target from a subject id and client-supplied roles. The caller must hold the simulation
+    /// privilege (<see cref="HasSimulatePrivilege"/>). Roles that grant administrator or simulation semantics (GovernanceAdmin,
+    /// ClusterAdmin, governance:admin, governance:simulate, admin, also tenant-prefixed) are dropped, so the identity never passes
+    /// <see cref="IsAdminPrincipal"/>, <see cref="Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin"/> or
+    /// <see cref="HasSimulatePrivilege"/>; the service additionally never applies administrator semantics to a target.
+    /// </summary>
+    public static ClaimsPrincipal CreateSimulatedTargetPrincipal(string subjectId, IEnumerable<string>? roles)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
+
+        var trimmedSubject = subjectId.Trim();
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, trimmedSubject),
+            new(ClaimTypes.Name, trimmedSubject)
+        };
+
+        foreach (var role in roles ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(role) || IsAdminOrSimulationRole(role))
+            {
+                continue;
+            }
+
+            claims.Add(new Claim(ClaimTypes.Role, role.Trim()));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, SimulatedTargetAuthenticationType));
+    }
+
+    /// <summary>
+    /// True for a role value that <see cref="IsAdminPrincipal"/> or <see cref="HasSimulatePrivilege"/> would honour, checked on the
+    /// whole value and on every part after a ':' (tenant prefixes), case-insensitively.
+    /// </summary>
+    internal static bool IsAdminOrSimulationRole(string role)
+    {
+        var trimmed = role.Trim();
+        if (trimmed.Contains("governance:simulate", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("governance:admin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var part in trimmed.Split(':'))
+        {
+            var name = part.Trim();
+            if (string.Equals(name, "GovernanceAdmin", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "admin", StringComparison.OrdinalIgnoreCase) ||
+                Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(name))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<IReadOnlyList<Consent>> LoadActiveConsentsAsync(

@@ -17,7 +17,7 @@ using Autheris.Domain.Audit;
 
 public static class RecertificationEndpoints
 {
-    public sealed record CreateCampaignRequest(string Name, RecertClass RecertClass, DateTimeOffset? Deadline = null);
+    public sealed record CreateCampaignRequest(string Name, RecertClass RecertClass, DateTimeOffset? Deadline = null, string? AssetType = null);
     public sealed record ItemDecisionRequest(string? Comments);
 
     public static IEndpointRouteBuilder MapRecertificationEndpoints(this IEndpointRouteBuilder app)
@@ -41,8 +41,18 @@ public static class RecertificationEndpoints
             IRecertificationService service,
             CancellationToken ct) =>
         {
-            var campaign = await service.CreateCampaignAsync(new TenantId(tenantId), request.Name, request.RecertClass, request.Deadline, ct).ConfigureAwait(false);
-            return Results.Created($"/api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaign.CampaignId}", campaign);
+            try
+            {
+                var campaign = await service.CreateCampaignAsync(new TenantId(tenantId), request.Name, request.RecertClass, request.Deadline, request.AssetType, ct).ConfigureAwait(false);
+                return Results.Created($"/api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaign.CampaignId}", campaign);
+            }
+            catch (ArgumentException ex) when (ex.Message.Contains("UNSUPPORTED_ASSET_TYPE"))
+            {
+                return Results.Problem(
+                    detail: "Recertification campaigns requesting the AccessPolicy asset type are not supported.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "UNSUPPORTED_ASSET_TYPE");
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapGet("/campaigns/{campaignId}/items", async (

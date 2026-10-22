@@ -8,29 +8,29 @@ using Microsoft.AspNetCore.Http;
 /// </summary>
 internal static class HttpResponseGuard
 {
-    public static bool CanModify(HttpContext httpContext) => !httpContext.Response.HasStarted;
+    public static bool CanModify(HttpContext? httpContext) => httpContext != null && !httpContext.Response.HasStarted;
 
-    public static void SetHeader(HttpContext httpContext, string name, string value)
+    public static void SetHeader(HttpContext? httpContext, string name, string value)
     {
         if (CanModify(httpContext))
         {
-            httpContext.Response.Headers[name] = value;
+            httpContext!.Response.Headers[name] = value;
         }
     }
 
-    public static void RemoveHeader(HttpContext httpContext, string name)
+    public static void RemoveHeader(HttpContext? httpContext, string name)
     {
         if (CanModify(httpContext))
         {
-            httpContext.Response.Headers.Remove(name);
+            httpContext!.Response.Headers.Remove(name);
         }
     }
 
-    public static void SetStatus(HttpContext httpContext, int statusCode)
+    public static void SetStatus(HttpContext? httpContext, int statusCode)
     {
         if (CanModify(httpContext))
         {
-            httpContext.Response.StatusCode = statusCode;
+            httpContext!.Response.StatusCode = statusCode;
         }
     }
 }

@@ -41,6 +41,66 @@ public sealed class McpResourceProvider : IMcpResourceProvider
 
     public bool IsResourceEnabled(string uri) => _switches?.IsResourceEnabled(uri) ?? true;
 
+    private static readonly TableIdentifier DatasourcesTable = new("governance", "catalog", "datasources");
+    private static readonly TableIdentifier ApiDescribeTable = new("governance", "api", "describe");
+    private static readonly TableIdentifier MyAccessTable = new("mcp", "tool", McpDatasetTools.DescribeMyAccess);
+
+    /// <summary>
+    /// The ABAC objects a native resource discloses, the same as the equivalent tool call: the dataset of a schema resource
+    /// (<c>get_table_schema</c>), the catalog for the summary (<c>list_datasets</c>), the data sources object (<c>list_datasources</c>),
+    /// the self-access object (<c>describe_my_access</c>) and the API description object (<c>describe_api</c>). Null for a URI that names
+    /// no native resource (including a schema URI without a valid dataset id): such a read is answered as not found without reading.
+    /// </summary>
+    public static IReadOnlyList<TableIdentifier>? GuardTargets(string uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            return null;
+        }
+
+        if (Is(uri, CatalogSummaryUri))
+        {
+            return [McpDatasetTools.CatalogTable];
+        }
+
+        if (uri.StartsWith(SchemaPrefix, StringComparison.OrdinalIgnoreCase) && uri.EndsWith(SchemaSuffix, StringComparison.OrdinalIgnoreCase) &&
+            uri.Length > SchemaPrefix.Length + SchemaSuffix.Length)
+        {
+            try
+            {
+                return McpDatasetCatalog.TryParseDatasetId(uri[SchemaPrefix.Length..^SchemaSuffix.Length], out var tableId) ? [tableId] : null;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+
+        if (Is(uri, CatalogDatasourcesUri))
+        {
+            return [DatasourcesTable];
+        }
+
+        if (Is(uri, MyAccessUri))
+        {
+            return [MyAccessTable];
+        }
+
+        if (IsStaticDocumentation(uri))
+        {
+            return [ApiDescribeTable];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The static API documentation resources (OpenAPI document, endpoint and tool references). They carry no catalog data, so the token
+    /// budget, which would cut a JSON document in half, does not apply to them; ABAC, PII scrubbing and audit do.
+    /// </summary>
+    public static bool IsStaticDocumentation(string uri) =>
+        Is(uri, OpenApiUri) || Is(uri, EndpointsDocUri) || Is(uri, McpToolsDocUri);
+
     public bool IsNativeResource(string uri) =>
         uri.StartsWith("autheris://catalog/", StringComparison.OrdinalIgnoreCase) ||
         uri.StartsWith("autheris://governance/", StringComparison.OrdinalIgnoreCase) ||
@@ -135,7 +195,8 @@ public sealed class McpResourceProvider : IMcpResourceProvider
             sb.AppendLine($"- **Principal:** `{session.UserSid ?? session.ServicePrincipalId}`");
             sb.AppendLine($"- **Tenant:** `{session.TenantId}`");
             sb.AppendLine($"- **Roles:** {(session.Roles != null && session.Roles.Count > 0 ? string.Join(", ", session.Roles) : "None")}");
-            sb.AppendLine($"- **Groups:** {(session.GroupSids != null && session.GroupSids.Count > 0 ? string.Join(", ", session.GroupSids) : "None")}");
+            var groups = EffectiveGroupSids(session);
+            sb.AppendLine($"- **Groups:** {(groups.Count > 0 ? string.Join(", ", groups) : "None")}");
             sb.AppendLine($"- **Read-Only:** {session.IsReadOnly}");
             return new McpResourceContent(uri, Markdown, sb.ToString());
         }
@@ -160,13 +221,17 @@ public sealed class McpResourceProvider : IMcpResourceProvider
 
     private static bool Is(string uri, string expected) => string.Equals(uri, expected, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>SR-M-08: an app-only session (no user SID) has no group SIDs, exactly like its principal.</summary>
+    private static IReadOnlyList<string> EffectiveGroupSids(McpSessionContext session) =>
+        string.IsNullOrWhiteSpace(session.UserSid) ? [] : session.GroupSids ?? [];
+
     private static RequestContext BuildRequestContext(McpSessionContext session)
     {
         var roles = session.Roles ?? [];
         var context = RequestContext.FromCaller(
             new CallerSecurityContext(
-                UserSid: new Sid(session.UserSid ?? session.ServicePrincipalId),
-                GroupSids: (session.GroupSids ?? []).Select(g => new Sid(g)).ToArray(),
+                UserSid: new Sid(!string.IsNullOrWhiteSpace(session.UserSid) ? session.UserSid : session.ServicePrincipalId),
+                GroupSids: EffectiveGroupSids(session).Select(g => new Sid(g)).ToArray(),
                 Roles: roles,
                 Tenant: new TenantId(session.TenantId),
                 IsGovernanceAdmin: false,

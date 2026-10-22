@@ -30,9 +30,24 @@ public interface IUniversalDocStore
     Task<DepositDocResult> DepositDocumentAsync(DepositDocRequest request, CancellationToken ct = default);
 
     /// <summary>
+    /// Whether <see cref="DepositDocumentAsync"/> would overwrite an existing document for <paramref name="request"/>
+    /// (same application, category and document id, resolved exactly as the deposit resolves them).
+    /// </summary>
+    Task<bool> DocumentExistsAsync(DepositDocRequest request, CancellationToken ct = default);
+
+    /// <summary>
     /// Safely unpacks and applies an application documentation ZIP archive with Zip-Slip defense.
     /// </summary>
     Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default);
+
+    /// <summary>
+    /// Tenant-scoped bundle extraction. With a non-null <paramref name="tenantId"/> only markdown documents are extracted, every
+    /// document is stamped with the tenant/author provenance block (so it is served to that tenant only and marked as untrusted
+    /// user content), and the bundle is rejected as a whole if any document would replace an existing file (official
+    /// documentation or another tenant's document). A null <paramref name="tenantId"/> behaves like the unscoped overload
+    /// (official documentation; cluster administrators only).
+    /// </summary>
+    Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, string? tenantId, string? authorSid, CancellationToken ct = default);
 
     /// <summary>
     /// Scans the physical document store directory, discovers all existing application documents,

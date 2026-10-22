@@ -26,12 +26,22 @@ public sealed class GatewayUnauthorizedException : GatewaySecurityException
         : base(message, "UNAUTHORIZED")
     {
     }
+
+    public GatewayUnauthorizedException(string message, string errorCode)
+        : base(message, errorCode)
+    {
+    }
 }
 
 public sealed class GatewayForbiddenException : GatewaySecurityException
 {
     public GatewayForbiddenException(string message = "Access denied.")
         : base(message, "FORBIDDEN")
+    {
+    }
+
+    public GatewayForbiddenException(string message, string errorCode)
+        : base(message, errorCode)
     {
     }
 }

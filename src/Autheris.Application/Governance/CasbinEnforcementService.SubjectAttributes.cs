@@ -48,6 +48,12 @@ public sealed partial class CasbinEnforcementService
             return false;
         }
 
+        // A rule that references a multi-valued (ambiguous) attribute is unknown: an allow rule does not match, a deny rule matches.
+        if (ReferencesAmbiguousAttribute(subRule, context))
+        {
+            return null;
+        }
+
         // WP-PF-03: compiled once per distinct sub_rule; null (unknown) is handled fail-closed by the callers.
         return CompiledSubRuleCache.Evaluate(subRule, context, subject, tableStr, act);
     }
@@ -65,8 +71,147 @@ public sealed partial class CasbinEnforcementService
         return value.Replace("'", "''", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Attribute value for a claim type that carried several distinct values. The evaluator never picks one of them: a sub_rule that
+    /// references such an attribute is unknown (fail closed: an allow rule does not match, a deny rule matches) and a row filter
+    /// template that references it is rejected, exactly like a missing attribute. The text is constant, so neither the values nor
+    /// their order reach a filter, a decision cache key or a log.
+    /// </summary>
+    public sealed class AmbiguousAttributeValue
+    {
+        public static readonly AmbiguousAttributeValue Instance = new();
+
+        private AmbiguousAttributeValue()
+        {
+        }
+
+        public override string ToString() => "<ambiguous>";
+    }
+
+    /// <summary>
+    /// Adds one claim to a Casbin attribute map (fail closed): an empty or whitespace value is treated as missing, and a claim type
+    /// that appears again with a different value becomes <see cref="AmbiguousAttributeValue"/> instead of keeping the last value.
+    /// The map should use a case-insensitive comparer, so claim types differing only in case are merged as well.
+    /// </summary>
+    public static void AddClaimAttribute(IDictionary<string, object?> attributes, string claimType, string? claimValue)
+    {
+        ArgumentNullException.ThrowIfNull(attributes);
+        if (string.IsNullOrWhiteSpace(claimType) || string.IsNullOrWhiteSpace(claimValue))
+        {
+            return;
+        }
+
+        if (attributes.TryGetValue(claimType, out var existing))
+        {
+            if (existing is string text && string.Equals(text, claimValue, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            attributes[claimType] = AmbiguousAttributeValue.Instance;
+            return;
+        }
+
+        attributes[claimType] = claimValue;
+    }
+
+    // Typed context properties read an attribute through a fallback chain (SecurityEvaluationContext.Department reads 'department',
+    // then 'dept'); the property is ambiguous when the attribute it resolves to is ambiguous. Each entry lists the names under which a
+    // rule or template can reference the property.
+    private static readonly (string Primary, string Fallback, string[] References)[] AliasedContextAttributes =
+    {
+        ("department", "dept", new[] { "Department", "department" }),
+        ("region", "country", new[] { "Region", "region" }),
+        ("clearance", "clearance_level", new[] { "ClearanceLevel", "clearance" }),
+        ("purpose", "purpose_id", new[] { "PurposeId", "purpose" })
+    };
+
+    /// <summary>True when <paramref name="text"/> (a sub_rule or row filter template) references an ambiguous attribute.</summary>
+    private static bool ReferencesAmbiguousAttribute(string text, SecurityEvaluationContext context)
+    {
+        var attributes = context.Attributes;
+        if (attributes is not { Count: > 0 } || string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        var any = false;
+        foreach (var (key, value) in attributes)
+        {
+            if (value is AmbiguousAttributeValue)
+            {
+                any = true;
+                if (ContainsIdentifier(text, key))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (!any)
+        {
+            return false;
+        }
+
+        foreach (var (primary, fallback, references) in AliasedContextAttributes)
+        {
+            var resolved = attributes.TryGetValue(primary, out var primaryValue) && primaryValue != null
+                ? primaryValue
+                : attributes.TryGetValue(fallback, out var fallbackValue) ? fallbackValue : null;
+            if (resolved is not AmbiguousAttributeValue)
+            {
+                continue;
+            }
+
+            foreach (var reference in references)
+            {
+                if (ContainsIdentifier(text, reference))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Case-insensitive occurrence of <paramref name="name"/> that is not part of a longer identifier.</summary>
+    private static bool ContainsIdentifier(string text, string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return false;
+        }
+
+        var index = text.IndexOf(name, StringComparison.OrdinalIgnoreCase);
+        while (index >= 0)
+        {
+            var end = index + name.Length;
+            var startsWord = index == 0 || !IsIdentifierChar(text[index - 1]);
+            var endsWord = end >= text.Length || !IsIdentifierChar(text[end]);
+            if (startsWord && endsWord)
+            {
+                return true;
+            }
+
+            index = text.IndexOf(name, index + 1, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
     private static string InterpolateRlsFilter(string filterTemplate, SecurityEvaluationContext context)
     {
+        // Fail-Closed: an attribute with several distinct claim values is never resolved to one of them.
+        if (ReferencesAmbiguousAttribute(filterTemplate, context))
+        {
+            throw new SecurityException($"Security error: Row filter template '{filterTemplate}' references an attribute with several distinct values.");
+        }
+
         // Fail-Closed: Required attributes MUST be present in security context if referenced in template
         if ((filterTemplate.Contains("${department}", StringComparison.OrdinalIgnoreCase) || filterTemplate.Contains("${r.ctx.Department}", StringComparison.OrdinalIgnoreCase)) &&
             string.IsNullOrWhiteSpace(context.Department))
@@ -167,32 +312,44 @@ public sealed partial class CasbinEnforcementService
             case "r.tenant":
             case "tenant":
                 return context.Tenant.Value;
+            // An empty or whitespace value is missing: the placeholder stays unresolved and the template is rejected (fail closed).
             case "r.ctx.department":
             case "department":
-                return context.Department ?? string.Empty;
+                return NullIfBlank(context.Department);
             case "r.ctx.region":
             case "region":
-                return context.Region ?? string.Empty;
+                return NullIfBlank(context.Region);
             case "r.ctx.clearancelevel":
             case "clearance":
-                return context.ClearanceLevel ?? string.Empty;
+                return NullIfBlank(context.ClearanceLevel);
             case "r.ctx.purposeid":
             case "purpose":
-                return context.PurposeId ?? string.Empty;
+                return NullIfBlank(context.PurposeId);
         }
 
         if (context.Attributes == null) return null;
 
         var key = name.StartsWith("attr.", StringComparison.OrdinalIgnoreCase) ? name[5..] : name;
+        string? resolved = null;
         foreach (var (k, v) in context.Attributes)
         {
-            if (v != null && string.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+            if (v == null || !string.Equals(k, key, StringComparison.OrdinalIgnoreCase))
             {
-                return v.ToString();
+                continue;
             }
+
+            // Several distinct values (an ambiguous claim, or keys differing only in case in a case-sensitive map) or an empty value
+            // never resolve (defense in depth; InterpolateRlsFilter rejects ambiguous references up front).
+            var text = v is AmbiguousAttributeValue ? null : NullIfBlank(v.ToString());
+            if (text == null || (resolved != null && !string.Equals(resolved, text, StringComparison.Ordinal)))
+            {
+                return null;
+            }
+
+            resolved = text;
         }
 
-        return null;
+        return resolved;
     }
 
     /// <summary>

@@ -34,6 +34,8 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
     private readonly InMemoryTableCacheStore _store;
     private readonly TableCacheCatalog _catalog;
     private readonly IAuditLogRepository _auditRepo;
+    private readonly IConsentResolutionService _consentService;
+    private readonly IColumnMaskingProvider _maskingProvider;
     private readonly byte[] _masterKey = Encoding.UTF8.GetBytes("01234567890123456789012345678901");
 
     public TableCacheGovernanceSecurityTests()
@@ -58,6 +60,37 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         _store = new InMemoryTableCacheStore(Options.Create(_options));
         _catalog = new TableCacheCatalog();
         _auditRepo = Substitute.For<IAuditLogRepository>();
+        _consentService = Substitute.For<IConsentResolutionService>();
+        _maskingProvider = Substitute.For<IColumnMaskingProvider>();
+
+        _consentService.ResolveAccess(
+                Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(),
+                Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(),
+                Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
+            .Returns(ci => TableAccessDecision.Allowed(ci.Arg<TableIdentifier>(), new Dictionary<string, ColumnAccessLevel>()));
+
+        _maskingProvider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>())
+            .Returns(ci => ci.Arg<MaskingRule>().RuleType == "REDACT" ? "***-**-****" : ci.Arg<object?>());
+    }
+
+    private static ClaimsPrincipal CreatePrincipal(string name = "test_user", string sid = "S-1-5-21-1") =>
+        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, name), new Claim(ClaimTypes.PrimarySid, sid)], "Auth"));
+
+    private GovernedTableCacheExecutionService CreateService(
+        TableCacheOptions? options = null,
+        IAuditLogRepository? auditRepo = null,
+        IConsentResolutionService? consentService = null,
+        IColumnMaskingProvider? maskingProvider = null,
+        TimeProvider? timeProvider = null)
+    {
+        return new GovernedTableCacheExecutionService(
+            _catalog,
+            _store,
+            Options.Create(options ?? _options),
+            auditRepo ?? _auditRepo,
+            consentService ?? _consentService,
+            maskingProvider ?? _maskingProvider,
+            timeProvider);
     }
 
     public void Dispose()
@@ -98,10 +131,10 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
+        var service = CreateService();
 
         var unauthorizedCaller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "malicious_user")])),
+            Principal: CreatePrincipal("malicious_user"),
             TenantId: new TenantId("tenant_alpha"),
             Roles: new HashSet<string> { "DENY_ALL" });
 
@@ -121,10 +154,10 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
+        var service = CreateService();
 
         var callerAlpha = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "user_alpha")])),
+            Principal: CreatePrincipal("user_alpha"),
             TenantId: new TenantId("tenant_alpha"));
 
         // Act: Caller Alpha queries table containing tenant_alpha and tenant_beta records
@@ -140,7 +173,7 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
 
         // Empty tenant context must fail closed with 403 (TENANT_CONTEXT_MISSING)
         var emptyTenantCaller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity()),
+            Principal: CreatePrincipal(),
             TenantId: default);
 
         var emptyEx = await Should.ThrowAsync<SecurityException>(async () =>
@@ -157,15 +190,15 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
+        var service = CreateService();
 
         var caller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity()),
+            Principal: CreatePrincipal(),
             TenantId: new TenantId("tenant_alpha"));
 
-        var columnMasks = new Dictionary<string, string>
+        var columnMasks = new Dictionary<string, MaskingRule>
         {
-            ["ssn"] = "REDACT"
+            ["ssn"] = new MaskingRule { RuleType = "REDACT" }
         };
 
         // Act: Query ssn column with REDACT mask rule
@@ -191,11 +224,11 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("crm", "public", "customers");
         await SeedTableDataAsync(table);
 
-        var service = new GovernedTableCacheExecutionService(_catalog, _store, Options.Create(_options), _auditRepo);
+        var service = CreateService();
 
         // Caller has RLS attribute dept_code = 'FIN'
         var caller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity()),
+            Principal: CreatePrincipal(),
             TenantId: new TenantId("tenant_alpha"),
             Attributes: new Dictionary<string, string> { ["dept_code"] = "FIN" });
 
@@ -331,15 +364,10 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
             Arg.Any<IReadOnlySet<string>?>())
             .Returns(TableAccessDecision.Denied(table, "CONSENT_REVOKED: Caller consent was withdrawn."));
 
-        var service = new GovernedTableCacheExecutionService(
-            _catalog,
-            _store,
-            Options.Create(_options),
-            _auditRepo,
-            consentService: consentService);
+        var service = CreateService(consentService: consentService);
 
         var caller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity()),
+            Principal: CreatePrincipal(),
             TenantId: new TenantId("tenant_alpha"));
 
         // Act & Assert: Revoked consent denies with 403 (CONSENT_REQUIRED) even in offline mode
@@ -384,15 +412,12 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
 
         _catalog.Upsert(expiredMeta);
 
-        var service = new GovernedTableCacheExecutionService(
-            _catalog,
-            _store,
-            Options.Create(shortStaleOptions),
-            _auditRepo,
+        var service = CreateService(
+            options: shortStaleOptions,
             timeProvider: timeProvider);
 
         var caller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity()),
+            Principal: CreatePrincipal(),
             TenantId: new TenantId("tenant_alpha"));
 
         // Act & Assert: Stale duration (100s) exceeds MaxStaleSurvivalSeconds (60s) -> 503 fail closed
@@ -464,17 +489,13 @@ public sealed class TableCacheGovernanceSecurityTests : IDisposable
         await SeedTableDataAsync(table);
 
         var auditRepo = Substitute.For<IAuditLogRepository>();
-        var service = new GovernedTableCacheExecutionService(
-            _catalog,
-            _store,
-            Options.Create(_options),
-            auditRepo: auditRepo);
+        var service = CreateService(auditRepo: auditRepo);
 
         var caller = new TableCacheCallerContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "audited_user")])),
+            Principal: CreatePrincipal("audited_user"),
             TenantId: new TenantId("tenant_alpha"));
 
-        var columnMasks = new Dictionary<string, string> { ["ssn"] = "REDACT" };
+        var columnMasks = new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT" } };
 
         // Act
         await service.ExecuteGovernedQueryAsync(

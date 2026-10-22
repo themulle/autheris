@@ -135,7 +135,7 @@ public sealed class AdminMcpTwoPhaseTests
         // Act & Assert
         await Should.ThrowAsync<SecurityException>(async () =>
         {
-            await service.ApplyAccessAsync(applyWithoutToken, AdminSid);
+            await service.ApplyAccessAsync(applyWithoutToken, AdminSid, "tenant-a");
         });
 
         await _rebacStore.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
@@ -178,7 +178,7 @@ public sealed class AdminMcpTwoPhaseTests
             Grants: [new("analyst_bob", new Dictionary<string, string> { ["id"] = "clear", ["total_amount"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
             Reason: "Authorized financial report");
 
-        var planResult = await service.PlanAccessAsync(planRequest, AdminSid);
+        var planResult = await service.PlanAccessAsync(planRequest, AdminSid, "tenant-a");
         var enrollment = _totpService.GenerateEnrollment(AdminSid, "admin@autheris.local");
         await _totpSecretStore.SetSecretAsync(AdminSid, enrollment.SecretBase32);
         var validTotp = _totpService.GenerateTotpCode(enrollment.SecretBase32);
@@ -188,7 +188,8 @@ public sealed class AdminMcpTwoPhaseTests
         // Act
         var applyResult = await service.ApplyAccessAsync(
             new AdminApplyAccessRequest(planResult.PlanId, confirmResult.ConfirmationToken),
-            AdminSid);
+            AdminSid,
+            "tenant-a");
 
         // Assert
         applyResult.Success.ShouldBeTrue();
@@ -213,7 +214,8 @@ public sealed class AdminMcpTwoPhaseTests
         {
             await service.ApplyAccessAsync(
                 new AdminApplyAccessRequest(planResult.PlanId, confirmResult.ConfirmationToken),
-                AdminSid);
+                AdminSid,
+                "tenant-a");
         });
     }
 
@@ -446,7 +448,7 @@ public sealed class AdminMcpTwoPhaseTests
             Grants: [new("user_eve", new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
             Reason: "ReBAC colon SID test");
 
-        var planResult = await _service.PlanAccessAsync(planRequest, colonAdminSid);
+        var planResult = await _service.PlanAccessAsync(planRequest, colonAdminSid, "tenant-a");
         var enrollment = _totpService.GenerateEnrollment(colonAdminSid, "admin@autheris.local");
         await _totpSecretStore.SetSecretAsync(colonAdminSid, enrollment.SecretBase32);
 
@@ -460,7 +462,8 @@ public sealed class AdminMcpTwoPhaseTests
         // Act 2: Apply with the confirmation token
         var applyResult = await _service.ApplyAccessAsync(
             new AdminApplyAccessRequest(planResult.PlanId, confirmResult.ConfirmationToken),
-            colonAdminSid);
+            colonAdminSid,
+            "tenant-a");
 
         // Assert
         applyResult.Success.ShouldBeTrue();

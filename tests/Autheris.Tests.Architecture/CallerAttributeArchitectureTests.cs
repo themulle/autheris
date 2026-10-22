@@ -145,6 +145,7 @@ public sealed partial class CallerAttributeArchitectureTests
             ["src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs"] = "copies the decision, which carries the typed policy; aggregation compiles through the typed path",
             ["src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
             ["src/Autheris.Application/Data/Services/GovernedTableReadPlanner.Keyset.cs"] = "keyset pagination query planner: appends mandatory row predicate to WHERE clause",
+            ["src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs"] = "an applying Virtual Filter denies (ext_authz cannot enforce row filters)",
             ["src/Autheris.Application/Policy/TableAccessPolicy.cs"] = "the decision point: a caller attribute outcome without a typed predicate denies the table (BC-129-05)",
             ["src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs"] = "delegated source coarse gate: clears row-level predicates for native source pushdown (SEC-SC-13)",
             ["src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs"] = "consent bypass without consent services: text only, so a caller attribute filter denies the table (F-4)",

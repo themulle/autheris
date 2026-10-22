@@ -264,6 +264,7 @@ public sealed class WebSqlTrinoProtocolTests
         var status = await statementManager.SubmitOrWaitAsync(
             new GovernedSqlQueryRequest("SELECT 1"),
             TestUser,
+            new Sid("user-trino"),
             TestTenant,
             TimeSpan.FromMilliseconds(10));
 
@@ -272,6 +273,7 @@ public sealed class WebSqlTrinoProtocolTests
             User = TestUser
         };
         cancelContext.Request.Headers["X-Tenant-Id"] = TestTenant.Value;
+        cancelContext.Request.Headers["X-Trino-User"] = "TrinoUser";
 
         // Act
         await WebSqlEndpoints.HandleTrinoCancelStatementRequest(
@@ -306,6 +308,7 @@ public sealed class WebSqlTrinoProtocolTests
         var status = await statementManager.SubmitOrWaitAsync(
             new GovernedSqlQueryRequest("SELECT 1"),
             TestUser,
+            new Sid("user-trino"),
             TestTenant,
             TimeSpan.FromMilliseconds(10));
 

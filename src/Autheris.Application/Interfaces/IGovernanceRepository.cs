@@ -308,6 +308,12 @@ public interface IConsentApprovalRepository
     /// <summary>
     /// SEC-GOV113-05: Atomically records the approval step, updates the request status to APPROVED, creates the active consent
     /// and its column rules and row filters, and bumps the table policy epoch in a single database transaction.
+    /// Security review (four-eyes on the atomic path): implementations must apply the same checks as
+    /// <see cref="ApproveConsentRequestStepAsync(Guid, Sid, CancellationToken)"/> under the row lock (approver is not the requester, has not
+    /// already approved this request) and only complete the request when this step satisfies the four-eyes requirement (table flag or
+    /// HIGH/RESTRICTED/SECRET sensitivity, ADR-008). Otherwise nothing is written and <see cref="InvalidOperationException"/> is thrown
+    /// (<c>ConsentRequestStatusConflictException</c> when the request is no longer pending). The step number is assigned by the
+    /// repository; <see cref="ApprovalStep.StepNumber"/> is ignored.
     /// </summary>
     Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
         Guid requestId,

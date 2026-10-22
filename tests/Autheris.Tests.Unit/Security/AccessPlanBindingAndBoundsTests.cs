@@ -61,16 +61,16 @@ public sealed class AccessPlanBindingAndBoundsTests
     public async Task ApplyAccess_TokenFromDifferentAdmin_Throws()
     {
         var service = CreateService();
-        var plan = await service.PlanAccessAsync(Request(), AdminA);
+        var plan = await service.PlanAccessAsync(Request(), AdminA, "tenant-a");
         var token = await ConfirmAsync(service, plan.PlanId, AdminA);
 
         await Should.ThrowAsync<SecurityException>(() =>
-            service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminB));
+            service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminB, "tenant-a"));
 
         await _rebac.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
 
         // The legitimate admin can still apply: the failed attempt did not consume the token.
-        var ok = await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA);
+        var ok = await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA, "tenant-a");
         ok.Success.ShouldBeTrue();
     }
 
@@ -92,10 +92,10 @@ public sealed class AccessPlanBindingAndBoundsTests
     {
         const string colonSid = "corp:S-1-5-21:500";
         var service = CreateService();
-        var plan = await service.PlanAccessAsync(Request(), colonSid);
+        var plan = await service.PlanAccessAsync(Request(), colonSid, "tenant-a");
         var token = await ConfirmAsync(service, plan.PlanId, colonSid);
 
-        var ok = await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), colonSid);
+        var ok = await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), colonSid, "tenant-a");
         ok.Success.ShouldBeTrue();
     }
 
@@ -117,9 +117,9 @@ public sealed class AccessPlanBindingAndBoundsTests
     public async Task ExpiredPlans_AreSweptFromStore()
     {
         var service = CreateService(new AccessPlanOptions { PlanTtlMinutes = 5, SweepIntervalSeconds = 1 });
-        var plan = await service.PlanAccessAsync(Request(), AdminA);
+        var plan = await service.PlanAccessAsync(Request(), AdminA, "tenant-a");
         var token = await ConfirmAsync(service, plan.PlanId, AdminA);
-        await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA);
+        await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA, "tenant-a");
 
         service.PlanCount.ShouldBe(1);
         service.ConsumedTokenCount.ShouldBe(1);

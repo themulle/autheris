@@ -117,27 +117,40 @@ public static class RebacEndpoints
             }
         }
 
+        // EP-08: Validate and canonicalize subjects before evaluating policy or storing.
+        var canonicalTuples = new List<RebacTuple>(tuples.Count);
+        foreach (var t in tuples)
+        {
+            var parsed = RebacSubject.Parse(t.User);
+            if (!parsed.IsValid)
+            {
+                return Results.BadRequest(new { error = $"Invalid ReBAC subject: '{t.User}'.", errorCode = "INVALID_REBAC_SUBJECT" });
+            }
+            canonicalTuples.Add(t with { User = parsed.Canonical });
+        }
+
         // WP-SC-16: a tuple for an individual user is a time-bound individual grant (explicit ExpiresAt within the class maximum).
         // Usersets (group#member) and structural tuples (parent) are standing and not limited.
         var policy = grantPolicy ?? new GrantPolicy();
         var now = DateTimeOffset.UtcNow;
         var requester = request.HttpContext.User.GetUserSid()?.Value;
-        foreach (var t in tuples)
+        foreach (var t in canonicalTuples)
         {
-            if (!IsIndividualUserTuple(t))
+            var parsed = RebacSubject.Parse(t.User);
+            if (parsed.Kind != RebacSubjectKind.Individual)
             {
                 continue;
             }
 
             var decision = policy.Evaluate(new GrantRequest(
-                GranteeType.User, t.User.Trim(), GrantKind.RebacTuple, t.ExpiresAt, now, Requester: requester));
+                GranteeType.User, t.User, GrantKind.RebacTuple, t.ExpiresAt, now, Requester: requester));
             if (!decision.Allowed)
             {
                 return Results.BadRequest(new { error = decision.Reason, errorCode = decision.ErrorCode, maxValidTo = decision.MaxValidTo });
             }
         }
 
-        foreach (var t in tuples)
+        foreach (var t in canonicalTuples)
         {
             await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
             try
@@ -152,11 +165,8 @@ public static class RebacEndpoints
             await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleAdded, "ALLOW", t).ConfigureAwait(false);
         }
 
-        return Results.Ok(new { status = "Tuples added", count = tuples.Count });
+        return Results.Ok(new { status = "Tuples added", count = canonicalTuples.Count });
     }
-
-    private static bool IsIndividualUserTuple(RebacTuple t) =>
-        t.User.Trim().StartsWith("user:", StringComparison.OrdinalIgnoreCase) && !t.User.Contains('#', StringComparison.Ordinal);
 
     internal static async Task<IResult> RemoveTupleAsync(
         RebacTuple tuple, HttpRequest request, IRebacStore store, IRebacEvaluator evaluator, IAuditWriter auditWriter)
@@ -178,26 +188,33 @@ public static class RebacEndpoints
             return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
         }
 
+        var parsed = RebacSubject.Parse(tuple.User);
+        if (!parsed.IsValid)
+        {
+            return Results.BadRequest(new { error = $"Invalid ReBAC subject: '{tuple.User}'.", errorCode = "INVALID_REBAC_SUBJECT" });
+        }
+        var canonicalTuple = tuple with { User = parsed.Canonical };
+
         if (!secContext.IsClusterAdmin)
         {
             if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
-                !string.Equals(secContext.TenantId.Value, tuple.TenantId, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(secContext.TenantId.Value, canonicalTuple.TenantId, StringComparison.OrdinalIgnoreCase))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
         }
 
-        var removed = await store.DeleteTupleAsync(tuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
+        var removed = await store.DeleteTupleAsync(canonicalTuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
         try
         {
-            await evaluator.InvalidateTenantCacheAsync(tuple.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+            await evaluator.InvalidateTenantCacheAsync(canonicalTuple.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, secContext.TenantId, tuple.TenantId, ex).ConfigureAwait(false);
+            await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, secContext.TenantId, canonicalTuple.TenantId, ex).ConfigureAwait(false);
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
-        await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleRemoved, removed ? "REVOKED" : "NOOP", tuple).ConfigureAwait(false);
+        await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleRemoved, removed ? "REVOKED" : "NOOP", canonicalTuple).ConfigureAwait(false);
 
         return Results.Ok(new { removed });
     }

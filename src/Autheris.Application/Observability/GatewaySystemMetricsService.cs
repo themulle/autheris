@@ -75,6 +75,8 @@ public sealed class GatewaySystemMetricsService : IGatewaySystemMetricsService
                 var healthReport = await _healthCheckService.CheckHealthAsync(cancellationToken).ConfigureAwait(false);
                 foreach (var c in healthReport.Components)
                 {
+                    // The component descriptions of GatewayHealthCheckService are fixed messages (no exception text, no names of
+                    // active security switches), so they can be passed through.
                     components.Add(new ComponentHealth(
                         ComponentName: c.Name,
                         Status: c.IsHealthy ? "Healthy" : "Degraded",
@@ -85,8 +87,9 @@ public sealed class GatewaySystemMetricsService : IGatewaySystemMetricsService
             }
             catch (Exception ex)
             {
+                // The exception text stays in the log; the metrics response carries a fixed message only.
                 _logger.LogWarning(ex, "Failed to query health check service for system metrics");
-                components.Add(new ComponentHealth("HealthCheckService", "Unhealthy", ex.Message, timestamp));
+                components.Add(new ComponentHealth("HealthCheckService", "Unhealthy", "Health check could not be completed (see gateway logs).", timestamp));
             }
         }
         else

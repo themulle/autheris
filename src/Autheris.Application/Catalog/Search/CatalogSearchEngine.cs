@@ -1,13 +1,13 @@
 namespace Autheris.Application.Catalog.Search;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Caching;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -26,13 +26,23 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     private readonly ILocalEmbeddingGenerator _embeddingGenerator;
     private readonly IOptions<CatalogSearchOptions> _options;
     private readonly ILogger<CatalogSearchEngine> _logger;
-    private readonly ConcurrentDictionary<string, ReadOnlyMemory<float>> _embeddingCache = new();
+    /// <summary>Fallback when <see cref="CatalogSearchOptions.MaxQueryLength"/> is not a positive value.</summary>
+    public const int DefaultMaxQueryLength = 256;
+
+    /// <summary>Maximum number of cached query embeddings (LRU; a miss only recomputes the vector).</summary>
+    public const int QueryEmbeddingCacheCapacity = 1024;
+
+    // Bounded LRU: arbitrary distinct queries must not grow the process memory without limit.
+    private readonly BoundedCache<string, ReadOnlyMemory<float>> _embeddingCache = new(QueryEmbeddingCacheCapacity, comparer: StringComparer.Ordinal);
 
     private CatalogSearchSnapshot? _currentSnapshot;
 
     public bool IsIndexReady => _currentSnapshot != null;
     public int IndexedTableCount => _currentSnapshot?.MetadataMap.Count ?? 0;
     public DateTimeOffset? LastIndexedAt => _currentSnapshot?.CreatedAt;
+
+    /// <summary>Number of query embeddings currently cached (never above <see cref="QueryEmbeddingCacheCapacity"/>).</summary>
+    public int CachedQueryEmbeddingCount => _embeddingCache.Count;
 
     public CatalogSearchEngine(
         ILocalEmbeddingGenerator embeddingGenerator,
@@ -184,11 +194,60 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     }
 
     public IReadOnlyList<CatalogSearchHit> Search(
-        CatalogSearchQuery query, 
-        Func<TableIdentifier, bool> isVisiblePredicate)
+        CatalogSearchQuery query,
+        Func<TableIdentifier, bool> isVisiblePredicate) =>
+        SearchCore(query, isVisiblePredicate, precomputedQueryVector: null);
+
+    /// <summary>
+    /// Asynchronous variant of <see cref="Search"/>: the query embedding is computed without blocking a thread and honours
+    /// <paramref name="ct"/>. Results are identical to <see cref="Search"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(
+        CatalogSearchQuery query,
+        Func<TableIdentifier, bool> isVisiblePredicate,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(isVisiblePredicate);
+        EnsureQueryLength(query.QueryText);
+        ct.ThrowIfCancellationRequested();
+
+        var queryVector = ReadOnlyMemory<float>.Empty;
+        if (query.Mode != CatalogSearchMode.KeywordBm25 && IsVectorSearchAvailable() && Volatile.Read(ref _currentSnapshot) != null)
+        {
+            queryVector = await GetOrComputeQueryEmbeddingAsync(query.QueryText, ct).ConfigureAwait(false);
+        }
+
+        return SearchCore(query, isVisiblePredicate, queryVector);
+    }
+
+    /// <summary>
+    /// Rejects over-long query text at the engine boundary, before it reaches BM25 tokenization or the embedding provider
+    /// (a 400 for REST callers via <see cref="GatewayInvalidQueryException"/>; the message never echoes the query).
+    /// </summary>
+    private void EnsureQueryLength(string? queryText)
+    {
+        var maxLength = _options.Value.MaxQueryLength > 0 ? _options.Value.MaxQueryLength : DefaultMaxQueryLength;
+        if (queryText != null && queryText.Length > maxLength)
+        {
+            throw new GatewayInvalidQueryException(
+                $"The catalog search query exceeds the maximum length of {maxLength} characters.",
+                "CATALOG_SEARCH_QUERY_TOO_LONG");
+        }
+    }
+
+    private bool IsVectorSearchAvailable() =>
+        _options.Value.EmbeddingProvider != CatalogEmbeddingProvider.None &&
+        (_embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable);
+
+    private IReadOnlyList<CatalogSearchHit> SearchCore(
+        CatalogSearchQuery query,
+        Func<TableIdentifier, bool> isVisiblePredicate,
+        ReadOnlyMemory<float>? precomputedQueryVector)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(isVisiblePredicate);
+        EnsureQueryLength(query.QueryText);
 
         // Sperrenfreier Lesezugriff via Volatile.Read
         var snapshot = Volatile.Read(ref _currentSnapshot);
@@ -231,7 +290,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
         ReadOnlyMemory<float> queryVec = ReadOnlyMemory<float>.Empty;
         if (effectiveMode == "semantic" || effectiveMode == "hybrid")
         {
-            queryVec = GetOrComputeQueryEmbedding(query.QueryText);
+            queryVec = precomputedQueryVector ?? GetOrComputeQueryEmbedding(query.QueryText);
         }
 
         var vectorHits = !queryVec.IsEmpty
@@ -343,7 +402,45 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             return ReadOnlyMemory<float>.Empty;
         }
 
-        var hashKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-        return _embeddingCache.GetOrAdd(hashKey, _ => _embeddingGenerator.GenerateNormalizedEmbedding(text));
+        var hashKey = QueryEmbeddingCacheKey(text);
+        if (_embeddingCache.TryGet(hashKey, out var cached))
+        {
+            return cached;
+        }
+
+        var vector = _embeddingGenerator.GenerateNormalizedEmbedding(text);
+        CacheQueryEmbedding(hashKey, vector);
+        return vector;
     }
+
+    private async Task<ReadOnlyMemory<float>> GetOrComputeQueryEmbeddingAsync(string text, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return ReadOnlyMemory<float>.Empty;
+        }
+
+        var hashKey = QueryEmbeddingCacheKey(text);
+        if (_embeddingCache.TryGet(hashKey, out var cached))
+        {
+            return cached;
+        }
+
+        var vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync([text], ct).ConfigureAwait(false);
+        var vector = vectors.Count > 0 ? vectors[0] : ReadOnlyMemory<float>.Empty;
+        CacheQueryEmbedding(hashKey, vector);
+        return vector;
+    }
+
+    private void CacheQueryEmbedding(string hashKey, ReadOnlyMemory<float> vector)
+    {
+        // An empty vector means the provider failed or was unavailable: do not pin that degradation in the cache.
+        if (!vector.IsEmpty)
+        {
+            _embeddingCache.Set(hashKey, vector);
+        }
+    }
+
+    private static string QueryEmbeddingCacheKey(string text) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 }

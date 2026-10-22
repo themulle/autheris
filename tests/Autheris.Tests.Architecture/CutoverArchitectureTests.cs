@@ -392,6 +392,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
         ("Autheris.Application.Sql.TimeZones.DuckDbIcuProbe", "REQ-SQL-130 (BC-130-7): probe of the time zone state on throw-away in-memory DuckDB databases; constants only (sandbox setup, one conversion, two metadata reads), no client text"),
         ("Autheris.Application.Olap.OlapSqlInspector", "DuckDB parse-only (json_serialize_sql): the client text is passed as a quoted literal to the parser of a throw-away in-memory database; nothing is executed or staged"),
+        ("Autheris.Infrastructure.Caching.TableCache.Storage.DuckDbConnectionPool", "DuckDB table cache connection pool: executes validated ATTACH statements on reader initialization; no client text"),
         ("Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider", "virtual-filter key set: the query is rendered from the typed key-source definition"),
         ("Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader", "row-filter key set (issue #107): fixed transaction-mode statements (SET TRANSACTION, PRAGMA query_only) only; the key query text is set by the binder through CompiledSqlBinders.BindKeyQuery"),
         // -- statements of the gateway itself (no client text) --

@@ -168,11 +168,72 @@ public sealed partial class TableAccessPolicy
         existing is null or { Count: 0 } ? added : [.. existing, .. added.Where(a => !existing.Contains(a))];
 
     /// <summary>
-    /// SR-M-07: applies an access profile to an already allowed consent decision. <see cref="MaskingPolicyMode.Unmasked"/> relaxes
-    /// masked columns to Clear (a Deny stays a Deny); Default and Strict can only lower the level of sensitive columns. The profile
-    /// row filter is AND-ed with the consent row filter.
+    /// SR-M-07: applies the matched access profiles (<paramref name="profiles"/>, most restrictive first) to an already allowed consent decision.
+    /// The masking mode is the most restrictive one among them; the row filters of ALL of them are AND-ed with the consent row filter, so one
+    /// profile never drops the row restriction of another. An admin predicate that cannot be parsed into a typed policy, or conflicting row
+    /// filter parameters, deny the table (fail closed); the denial reason never echoes the predicate text.
     /// </summary>
-    private static TableAccessDecision ApplyProfileToDecision(TableAccessDecision consent, AccessProfile profile, TableMetadata metadata, IRowPolicy? rowPolicy)
+    private TableAccessDecision ApplyAccessProfiles(TableAccessDecision decision, IReadOnlyList<AccessProfile> profiles, TableMetadata metadata)
+    {
+        var table = metadata.Identifier;
+        var predicates = profiles
+            .Select(p => p.RowFilterPredicate)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var rowPolicies = new List<IRowPolicy>();
+        if (_rowPolicyFactory is { CanParseAdminPredicates: true })
+        {
+            // WP-X0e: each admin-authored predicate is parsed on its own into a typed policy (never concatenated as text first).
+            try
+            {
+                foreach (var predicate in predicates)
+                {
+                    rowPolicies.Add(_rowPolicyFactory.FromAccessProfile(predicate, metadata));
+                }
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
+            {
+                return TableAccessDecision.Denied(table, "Access profile row filter is invalid (fail-closed).");
+            }
+        }
+
+        try
+        {
+            var restricted = ApplyProfileMasking(decision, AccessProfileAssignmentRules.EnforcedMode(profiles[0].MaskingMode), metadata);
+            if (rowPolicies.Count > 0)
+            {
+                foreach (var policy in rowPolicies)
+                {
+                    restricted = restricted.WithAdditionalRowPolicy(policy);
+                }
+
+                return restricted;
+            }
+
+            foreach (var predicate in predicates)
+            {
+                restricted = restricted.WithAdditionalRowFilter(predicate);
+            }
+
+            return restricted;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return TableAccessDecision.Denied(table, "Conflicting row-level security parameters.");
+        }
+    }
+
+    /// <summary>
+    /// SR-M-07: the column levels of an access profile on top of an allowed consent decision. <see cref="MaskingPolicyMode.Unmasked"/> lifts
+    /// only the catalog default mask (an implicit or explicit Clear that the catalog masks because the column is sensitive); a Mask set by the
+    /// consents themselves (Deny-consent masks, explicit Mask levels, scope rules that tighten to Mask) stays a Mask and a Deny stays a Deny.
+    /// Default and Strict can only lower the level of sensitive columns. <paramref name="mode"/> must be a defined value
+    /// (<see cref="AccessProfileAssignmentRules.EnforcedMode"/>); anything else is handled like Strict.
+    /// </summary>
+    private static TableAccessDecision ApplyProfileMasking(TableAccessDecision consent, MaskingPolicyMode mode, TableMetadata metadata)
     {
         var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in metadata.Columns)
@@ -187,40 +248,37 @@ public sealed partial class TableAccessPolicy
             }
             else
             {
-                level = profile.MaskingMode switch
+                level = mode switch
                 {
-                    MaskingPolicyMode.Unmasked => effective == ColumnAccessLevel.Mask ? ColumnAccessLevel.Clear : raw,
+                    MaskingPolicyMode.Unmasked => raw == ColumnAccessLevel.Clear && effective == ColumnAccessLevel.Mask ? ColumnAccessLevel.Clear : raw,
                     MaskingPolicyMode.Default => sensitive && raw == ColumnAccessLevel.Clear && !consent.HasExplicitClear(col.ColumnName) ? ColumnAccessLevel.Mask : raw,
                     MaskingPolicyMode.Strict => sensitive ? ColumnAccessLevel.Deny : raw,
-                    _ => raw
+                    // Fail closed: an unknown mode must never turn an implicit Clear into an explicit one (which would unmask a sensitive column).
+                    _ => sensitive ? ColumnAccessLevel.Deny : raw
                 };
             }
 
             colAccess[col.ColumnName] = level;
         }
 
-        var restricted = consent with { ColumnAccess = colAccess };
-        if (rowPolicy != null)
-        {
-            return restricted.WithAdditionalRowPolicy(rowPolicy);
-        }
-
-        return string.IsNullOrWhiteSpace(profile.RowFilterPredicate)
-            ? restricted
-            : restricted.WithAdditionalRowFilter(profile.RowFilterPredicate);
+        return consent with { ColumnAccess = colAccess };
     }
 
-    private async Task<AccessProfile?> ResolveActiveAccessProfileAsync(TableAccessQuery query, CancellationToken ct)
+    /// <summary>
+    /// The active profiles of the caller that match the table, most restrictive first (<see cref="AccessProfileAssignmentRules.Order"/>);
+    /// empty when none applies.
+    /// </summary>
+    private async Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesAsync(TableAccessQuery query, CancellationToken ct)
     {
         if (_accessProfileCache == null && _accessProfileRepository == null)
         {
-            return null;
+            return [];
         }
 
         var tenant = query.Tenant;
         if (string.IsNullOrWhiteSpace(query.UserSid.Value))
         {
-            return null;
+            return [];
         }
 
         // WP-SC-03: ONE lookup with every identity of the caller (SIDs, aliases), its groups and its roles. Group and role mappings only match through
@@ -240,14 +298,13 @@ public sealed partial class TableAccessPolicy
 
         if (profiles == null || profiles.Count == 0)
         {
-            return null;
+            return [];
         }
 
-        // Most restrictive wins across ALL matched profiles (Strict, Default, Unmasked); the cached entry is re-checked for expiry on every use.
+        // The most restrictive masking mode wins across ALL matched profiles (Strict, Default, Unmasked) and every row filter applies; the cached
+        // entry is re-checked for expiry on every use.
         var table = query.Metadata.Identifier;
         var now = DateTimeOffset.UtcNow;
-        return AccessProfileAssignmentRules
-            .Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)))
-            .FirstOrDefault();
+        return AccessProfileAssignmentRules.Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)));
     }
 }

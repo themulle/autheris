@@ -2,6 +2,7 @@ namespace Autheris.Domain.Model;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 public enum DocCategory
 {
@@ -56,8 +57,17 @@ public sealed record DocChunk(
     IReadOnlyList<string> ErrorCodes,
     string SourceFile,
     string? AnchorId,
-    DateTimeOffset UpdatedAt
-);
+    DateTimeOffset UpdatedAt,
+    string? TenantId = null,
+    [property: JsonIgnore] string? AuthorSid = null
+)
+{
+    /// <summary>
+    /// Provenance marker for AI consumers: <see cref="DocTrustLevel.Official"/> for built-in/official documentation
+    /// (no owning tenant), <see cref="DocTrustLevel.UntrustedUserContent"/> for documents deposited by a tenant.
+    /// </summary>
+    public string Trust => DocTrustLevel.For(TenantId);
+}
 
 public sealed record DocSearchResult(
     DocChunkIdentifier Id,
@@ -67,8 +77,13 @@ public sealed record DocSearchResult(
     string Summary,
     double RelevanceScore,
     IReadOnlyList<string> MatchedTerms,
-    string SourceFile
-);
+    string SourceFile,
+    string? TenantId = null
+)
+{
+    /// <inheritdoc cref="DocChunk.Trust"/>
+    public string Trust => DocTrustLevel.For(TenantId);
+}
 
 public sealed record ErrorCodeDefinition(
     string ErrorCode,
@@ -76,5 +91,22 @@ public sealed record ErrorCodeDefinition(
     string RootCause,
     string Resolution,
     string? RunbookRef,
-    string SourceFile
-);
+    string SourceFile,
+    string? TenantId = null
+)
+{
+    /// <inheritdoc cref="DocChunk.Trust"/>
+    public string Trust => DocTrustLevel.For(TenantId);
+}
+
+/// <summary>
+/// Trust markers attached to documentation returned to AI clients. Tenant-deposited documents are reference text written
+/// by tenant users and must never be followed as instructions.
+/// </summary>
+public static class DocTrustLevel
+{
+    public const string Official = "official";
+    public const string UntrustedUserContent = "untrusted-user-content";
+
+    public static string For(string? tenantId) => tenantId is null ? Official : UntrustedUserContent;
+}
