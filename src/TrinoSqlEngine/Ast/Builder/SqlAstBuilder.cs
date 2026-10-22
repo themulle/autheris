@@ -1000,7 +1000,18 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     }
 
     private static long ParseIntervalAmount(IntervalLiteralExpression interval) =>
-        long.Parse(interval.Value, NumberStyles.None, CultureInfo.InvariantCulture);
+        BoundDateAmount(long.TryParse(interval.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ? parsed : long.MaxValue, "INTERVAL");
+
+    /// <summary>
+    /// SQLE-06: the amount of a date addition is later multiplied (year*12, week*7) by the generators; it is bounded here so that no
+    /// multiplication can wrap to a small, valid amount (Trino raises an overflow error instead).
+    /// </summary>
+    private const long MaxDateAmount = int.MaxValue;
+
+    private static long BoundDateAmount(long amount, string function) =>
+        amount is >= -MaxDateAmount and <= MaxDateAmount
+            ? amount
+            : throw Unsupported($"{function} amount outside +/-{MaxDateAmount}");
 
     private static DateUnit ParseDateUnit(string unit, string function) => unit.ToLowerInvariant() switch
     {
@@ -1056,8 +1067,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
     private static long IntegerArgument(Expression argument, string function) => argument switch
     {
-        LiteralExpression { Type: LiteralType.Integer, Value: long value } => value,
-        UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression { Type: LiteralType.Integer, Value: long value } } => -value,
+        LiteralExpression { Type: LiteralType.Integer, Value: long value } => BoundDateAmount(value, function),
+        UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression { Type: LiteralType.Integer, Value: long value } } => -BoundDateAmount(value, function),
         _ => throw Unsupported($"{function} amount that is not an integer literal")
     };
 
