@@ -1285,8 +1285,10 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         var current = TryLoadVerifiedAnchor(out var anchorInvalid);
         if (anchorInvalid)
         {
-            // An invalid stored anchor is never overwritten by a write path; startup/verification flags it.
-            return;
+            // PERS-18: an invalid stored anchor is never overwritten, and the write path no longer succeeds silently: the chain is
+            // latched and the caller (which records the failure) refuses to acknowledge the Tier-A event.
+            FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+            throw new InvalidOperationException("The stored audit chain anchor is invalid.");
         }
 
         if (current == null || current.Sequence < anchor.Sequence)

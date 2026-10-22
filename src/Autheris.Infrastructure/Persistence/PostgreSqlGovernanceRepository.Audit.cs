@@ -537,7 +537,14 @@ public partial class PostgreSqlGovernanceRepository
                     // SR-L-07: same monotonic check as the batch path; replicas sharing one anchor store must never move it backwards.
                     var anchor = CreateSignedAnchor(state.LastSeq, state.LastHash);
                     var current = TryLoadVerifiedAnchor(out var anchorInvalid);
-                    if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                    if (anchorInvalid)
+                    {
+                        // PERS-18: an invalid stored anchor faults the write: the chain is latched and the Tier-A event is not acknowledged.
+                        FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+                        throw new InvalidOperationException("The stored audit chain anchor is invalid.");
+                    }
+
+                    if (current == null || current.Sequence < anchor.Sequence)
                     {
                         _auditAnchorStore.Save(anchor);
                     }
@@ -788,7 +795,14 @@ public partial class PostgreSqlGovernanceRepository
             {
                 // Monotonic: replicas sharing one anchor store must never move the anchor backwards.
                 var current = TryLoadVerifiedAnchor(out var anchorInvalid);
-                if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                if (anchorInvalid)
+                {
+                    // PERS-18: an invalid stored anchor faults the write: the chain is latched and the Tier-A event is not acknowledged.
+                    FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+                    throw new InvalidOperationException("The stored audit chain anchor is invalid.");
+                }
+
+                if (current == null || current.Sequence < anchor.Sequence)
                 {
                     _auditAnchorStore.Save(anchor);
                 }
@@ -1018,6 +1032,8 @@ public partial class PostgreSqlGovernanceRepository
         AuditChainAnchor? anchor = TryLoadVerifiedAnchor(out bool anchorInvalid);
         if (anchorInvalid)
         {
+            // PERS-18: an invalid stored anchor latches the violation (as on SQLite) instead of only failing this verification.
+            FlagAuditChainViolation("External audit chain anchor has an invalid signature or format.");
             return false;
         }
 
