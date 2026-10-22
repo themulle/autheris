@@ -521,7 +521,10 @@ public sealed class Mutation
         var approveFingerprint = IdempotencyFingerprint(
             ResolveMutationTenantId(httpContextAccessor, approvePrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(approvePrincipal)).Value,
             requestId,
-            validatedDescription ?? string.Empty);
+            validatedDescription ?? string.Empty,
+            // GQL-06: a retry with the same key but different restrictions must not replay the earlier result.
+            rowFilter == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(rowFilter),
+            columnMasking == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(columnMasking));
         var existing = await TryGetIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
