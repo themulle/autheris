@@ -176,6 +176,38 @@ public sealed partial class AiDataGuardrailService
         return single == null ? null : [single.Value];
     }
 
+    /// <summary>
+    /// Applies the per-call token budget (MCP-08): a result above <c>Mcp.MaxTokensPerCall</c> is replaced by a truncation notice.
+    /// Shared by dataset tools and doc tools so no tool skips the budget.
+    /// </summary>
+    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated)
+    {
+        int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
+        estimatedTokens = Math.Max(1, json.Length / 4);
+        truncated = false;
+
+        if (estimatedTokens > maxTokens)
+        {
+            _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
+            int maxChars = maxTokens * 4;
+            if (json.Length > maxChars)
+            {
+                json = JsonSerializer.Serialize(new
+                {
+                    _meta = new
+                    {
+                        truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
+                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                    }
+                });
+                estimatedTokens = Math.Max(1, json.Length / 4);
+                truncated = true;
+            }
+        }
+
+        return json;
+    }
+
     private async Task<IReadOnlyList<TableIdentifier>?> ResolveGraphQlTablesAsync(string? argumentsJson, CancellationToken ct)
     {
         if (_graphQlCatalogMap == null || !McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var query) || string.IsNullOrWhiteSpace(query))

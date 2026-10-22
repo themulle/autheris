@@ -233,10 +233,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             bool docWasMasked = false;
             string scrubbedDocJson = !_options.Value.IsMcpUnmaskedAllowed ? ScrubPiiAndSensitiveData(rawDocJson, out docWasMasked) : rawDocJson;
             bool isError = TryGetExecutorError(rawDocJson, out var docErr);
+            // MCP-08: doc tools run under the same per-call token budget as dataset tools.
+            scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated);
             await RecordAuditEventAsync(tool.Name, sessionContext, isError ? "DENY" : "ALLOW",
                 isError ? $"Doc tool returned error ({docErr ?? "ERROR"})." : "Document MCP tool executed successfully under AI guardrails.",
-                docWasMasked, false, Math.Max(1, scrubbedDocJson.Length / 4), cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, IsMasked: docWasMasked);
+                docWasMasked, docTruncated, docTokens, cancellationToken).ConfigureAwait(false);
+            return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, EstimatedTokens: docTokens, IsMasked: docWasMasked, TruncatedDueToBudget: docTruncated);
         }
 
         string? sqlSyntaxError = null;
@@ -490,28 +492,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return new McpToolCallResult(IsSuccess: false, ContentJson: scrubbedJson, ErrorMessage: scrubbedJson, IsMasked: wasMasked);
         }
 
-        int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
-        int estimatedTokens = Math.Max(1, scrubbedJson.Length / 4);
-        bool truncated = false;
-
-        if (estimatedTokens > maxTokens)
-        {
-            _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", tool.Name, estimatedTokens, maxTokens);
-            int maxChars = maxTokens * 4;
-            if (scrubbedJson.Length > maxChars)
-            {
-                scrubbedJson = JsonSerializer.Serialize(new
-                {
-                    _meta = new
-                    {
-                        truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
-                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
-                    }
-                });
-                estimatedTokens = Math.Max(1, scrubbedJson.Length / 4);
-                truncated = true;
-            }
-        }
+        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated);
 
         await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
 
