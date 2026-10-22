@@ -32,11 +32,14 @@ public sealed class McpRecursiveCteGuardrailTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task SEC_277_04_KeywordlessSelfReference_SameResponseForExistingAndUnknownTable()
+    public async Task SEC_277_04_KeywordlessSelfReference_SameResponseForExistingForbiddenAndUnknownTable()
     {
         var existing = await RunAsync("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders");
         var unknown = await RunAsync("WITH ghost_table AS (SELECT id FROM ghost_table) SELECT id FROM ghost_table");
 
+        var forbidden = await RunAsync("WITH payroll AS (SELECT id FROM payroll) SELECT id FROM payroll");
+
+        forbidden.ErrorMessage.ShouldBe(existing.ErrorMessage);
         existing.IsSuccess.ShouldBeFalse();
         existing.ErrorMessage.ShouldStartWith("SQL_CONSTRUCT_NOT_SUPPORTED");
         unknown.ErrorMessage.ShouldBe(existing.ErrorMessage);

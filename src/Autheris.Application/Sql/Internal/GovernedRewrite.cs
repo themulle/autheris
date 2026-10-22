@@ -28,5 +28,8 @@ internal sealed class DmlAuditContext
 
     public IReadOnlyList<string> Tables { get; set; } = [];
 
+    /// <summary>SEC-277-09: the analysis found a <c>WITH RECURSIVE</c>; known before any compile, so rejection audits can carry the flag.</summary>
+    public bool HasRecursiveCte { get; set; }
+
     public bool IsDml => StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete;
 }

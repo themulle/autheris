@@ -211,9 +211,20 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         // SEC-277-04 / SEC-277-03: answered from the analysis alone, before any table lookup, so the response never depends on whether a
         // name is an existing, a forbidden or an unknown table. A recursive WITH in DML is never permitted (read-only scope).
+        if (dmlContext != null)
+        {
+            dmlContext.HasRecursiveCte = metadata.HasRecursiveCte;
+        }
+
         if (metadata.HasNonRecursiveSelfReference ||
             (metadata.HasRecursiveCte && (!webSqlOptions.AllowRecursiveCte || metadata.StatementType != SqlStatementType.Select)))
         {
+            if (dmlContext != null && metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
+            {
+                dmlContext.StatementType = metadata.StatementType;   // so the rejection is audited as a DML rejection
+                dmlContext.Tables = metadata.ReferencedTables.Select(t => t.FullName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "recursive common table expression");
         }
 

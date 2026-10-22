@@ -277,7 +277,7 @@ public sealed partial class GovernedSqlExecutor
             {
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
-                var detailsJson = new AuditDetailsBuilder()
+                var deniedDetails = new AuditDetailsBuilder()
                     .WithField("originalSql", redactedOriginalSql)
                     .WithField("originalSqlHash", originalSqlHash)
                     .WithField("dataSource", auditDs)
@@ -287,8 +287,13 @@ public sealed partial class GovernedSqlExecutor
                         SecurityException => "SECURITY_VIOLATION",
                         _ => reason
                     })
-                    .WithField("error", reason)
-                    .Build();
+                    .WithField("error", reason);
+                if (dmlContext.HasRecursiveCte)
+                {
+                    deniedDetails.WithField("recursiveCte", true);   // SEC-277-09
+                }
+
+                var detailsJson = deniedDetails.Build();
 
                 await _auditWriter.RecordAsync(new AuditLogEntry
                 {
@@ -883,6 +888,11 @@ public sealed partial class GovernedSqlExecutor
             ["reason"] = reason,
             ["synthetic"] = synthetic
         };
+        if (compiled is null && dmlContext.HasRecursiveCte)
+        {
+            fields["recursiveCte"] = true;   // SEC-277-09: a rejection before the compile still carries the flag
+        }
+
         if (compiled is not null)
         {
             AddCompiledAuditFields(fields, compiled);

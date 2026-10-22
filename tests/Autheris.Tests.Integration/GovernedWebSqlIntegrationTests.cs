@@ -279,6 +279,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         return string.Join("|", doc.RootElement.EnumerateObject().Where(p => p.Name != "traceId").Select(p => p.Name + "=" + p.Value));
     }
 
+    [Trait("Category", "Security")]
     [Fact]
     public async Task WebSql_RecursiveCte_Enabled_Returns200AndOnlyTenantRows()
     {

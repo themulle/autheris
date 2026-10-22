@@ -122,6 +122,45 @@ public sealed class GovernedSqlRejectionAuditTests
         Details(rejected).GetProperty("reason").GetString().ShouldBe(code);
     }
 
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_277_09_RecursiveQueryRejectedBeforeCompile_IsAuditedWithTheRecursiveFlag()
+    {
+        var (service, audit) = CreateService();
+
+        await Should.ThrowAsync<TrinoSqlEngine.SqlCompileNotSupportedException>(() => service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("WITH RECURSIVE t(n) AS (SELECT id FROM orders UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t"), Writer(), new TenantId(Tenant)));
+
+        var denied = audit.ShouldHaveSingleItem();
+        denied.EventType.ShouldBe(AuditEventTypes.WebSqlQueryDenied);
+        Details(denied).GetProperty("recursiveCte").GetBoolean().ShouldBeTrue();
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task SEC_277_09_RecursiveDmlRejected_IsAuditedWithTheRecursiveFlag()
+    {
+        var (service, audit) = CreateService();
+
+        await Should.ThrowAsync<TrinoSqlEngine.SqlCompileNotSupportedException>(() => service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id IN (WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t)"),
+            Writer(), new TenantId(Tenant)));
+
+        var rejected = audit.ShouldHaveSingleItem();
+        rejected.EventType.ShouldBe(AuditEventTypes.WebSqlDmlRejected);
+        Details(rejected).GetProperty("recursiveCte").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task NonRecursiveRejection_HasNoRecursiveFlag()
+    {
+        var (service, audit) = CreateService();
+
+        await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELEC id FROM orders"), Writer(), new TenantId(Tenant)));
+
+        audit.ShouldHaveSingleItem().DetailsJson.ShouldNotContain("recursiveCte");
+    }
+
     [Fact]
     public async Task GovernedSqlExecutor_DeniedQuery_WritesDenyThroughWriter()
     {

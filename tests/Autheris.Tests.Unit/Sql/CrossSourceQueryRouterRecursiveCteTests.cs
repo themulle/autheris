@@ -49,6 +49,8 @@ public sealed class CrossSourceQueryRouterRecursiveCteTests
                 var id = call.Arg<TableIdentifier>();
                 return string.Equals(id.TableName, "orders", StringComparison.OrdinalIgnoreCase)
                     ? Table("crm", "orders")
+                    : string.Equals(id.TableName, "secret", StringComparison.OrdinalIgnoreCase)
+                        ? Table("crm", "secret") with { Table = Table("crm", "secret").Table with { IsActive = false } }   // exists, but the caller may not use it
                     : string.Equals(id.TableName, "shipments", StringComparison.OrdinalIgnoreCase)
                         ? Table("logistics", "shipments", "logistics")
                         : null;
@@ -105,7 +107,7 @@ public sealed class CrossSourceQueryRouterRecursiveCteTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task SEC_277_04_KeywordlessSelfReference_SameResponseForExistingAndUnknownTable()
+    public async Task SEC_277_04_KeywordlessSelfReference_SameResponseForExistingForbiddenAndUnknownTable()
     {
         var (router, repo) = CreateRouter(allowRecursive: false);
 
@@ -114,6 +116,11 @@ public sealed class CrossSourceQueryRouterRecursiveCteTests
         var unknown = await Should.ThrowAsync<SqlCompileNotSupportedException>(
             () => Route(router, "WITH ghost AS (SELECT id FROM ghost) SELECT id FROM ghost"));
 
+        var forbidden = await Should.ThrowAsync<SqlCompileNotSupportedException>(
+            () => Route(router, "WITH secret AS (SELECT id FROM secret) SELECT id FROM secret"));
+
+        forbidden.Message.ShouldBe(existing.Message);
+        forbidden.Reason.ShouldBe(existing.Reason);
         unknown.GetType().ShouldBe(existing.GetType());
         unknown.Message.ShouldBe(existing.Message);
         unknown.Reason.ShouldBe(existing.Reason);
