@@ -30,10 +30,10 @@ public sealed class ConsentMaterializationGuardTests
     private static CallerAttributeConsentGuard Guard(Func<CallerAttributeSnapshot> snapshot, CallerAttributeOptions? options = null)
     {
         var registry = Substitute.For<ICallerAttributeRegistry>();
-        registry.GetAsync(Arg.Any<CancellationToken>()).Returns(_ => Task.FromResult(snapshot()));
+        registry.GetAsync(Arg.Any<CancellationToken>()).Returns(_ => new ValueTask<CallerAttributeSnapshot>(snapshot()));
         var tables = Substitute.For<ITableMetadataRepository>();
         return new CallerAttributeConsentGuard(
-            () => registry, () => tables, Options.Create(new GatewayOptions { CallerAttributes = options ?? Options(true) }));
+            () => registry, () => tables, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = options ?? Options(true) }));
     }
 
     [Fact]
