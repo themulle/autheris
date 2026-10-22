@@ -87,7 +87,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         {
             if (k.IndexOfAny(CrlfChars) >= 0 || v.IndexOfAny(CrlfChars) >= 0)
             {
-                _logger.LogWarning("CRLF injection detected in Envoy ext_authz header '{Key}'", k);
+                _logger.LogWarning("CRLF injection detected in Envoy ext_authz header '{Key}'", ForLog(k));
                 return EnvoyCheckResponse.Deny(400, "Bad Request: Header smuggling / CRLF detected.");
             }
         }
@@ -96,7 +96,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         var normalizedPath = NormalizePath(rawPath);
         if (normalizedPath == null)
         {
-            _logger.LogWarning("Path traversal or invalid path detected: {RawPath}", rawPath);
+            _logger.LogWarning("Path traversal or invalid path detected: {RawPath}", ForLog(rawPath));
             return EnvoyCheckResponse.Deny(400, "Bad Request: Invalid or traversing path.");
         }
 
@@ -206,7 +206,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
                 : $"Access to resource '{resourceName}' denied for subject '{principal}' in tenant '{tenantStr}'.";
 
             _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}', Method '{Method}' - Reason: {Reason}",
-                principal, tenantStr, resourceName, method, reason);
+                ForLog(principal), ForLog(tenantStr), ForLog(resourceName), ForLog(method), ForLog(reason));
 
             // Security review: the denied reasons describe policy internals; they stay in the log, the caller gets a generic message.
             return EnvoyCheckResponse.Deny(403, DeniedByPolicyMessage);
@@ -218,7 +218,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         if (IsRestricted(decision))
         {
             _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}', Method '{Method}' - the decision requires row filtering or column restrictions that ext_authz cannot enforce. Reasons: {Reasons}",
-                principal, tenantStr, resourceName, method, string.Join("; ", decision.DeniedReasons));
+                ForLog(principal), ForLog(tenantStr), ForLog(resourceName), ForLog(method), ForLog(string.Join("; ", decision.DeniedReasons)));
             return EnvoyCheckResponse.Deny(403, RestrictedMessage);
         }
 
@@ -238,13 +238,13 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             if (covering != null)
             {
                 _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Resource '{Resource}' is restricted by the access profile '{Profile}'.",
-                    principal, resourceName, covering.Name);
+                    ForLog(principal), ForLog(resourceName), ForLog(covering.Name));
                 return EnvoyCheckResponse.Deny(403, $"Access to resource '{resourceName}' is restricted by virtual filters; use a governed data channel.");
             }
         }
 
         _logger.LogInformation("Envoy ext_authz ALLOWED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}'",
-            principal, tenantStr, resourceName);
+            ForLog(principal), ForLog(tenantStr), ForLog(resourceName));
 
         // SEC C-1: Do not leak raw CombinedRowFilterSql in header response
         return EnvoyCheckResponse.Allow(principal, tenantStr);
@@ -481,4 +481,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             throw new ArgumentException("WasmPluginTag must be pinned to a concrete version and cannot be 'latest'.", nameof(opts));
         }
     }
+
+    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
 }

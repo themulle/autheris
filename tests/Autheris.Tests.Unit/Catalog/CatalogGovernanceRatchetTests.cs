@@ -311,7 +311,7 @@ public sealed class CatalogGovernanceRatchetTests
             OwnerTenantId = "tenant-other",
             ReleaseProfileToCatalogViewers = false,
             ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly,
-            DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys,
+            DeletedKeyPolicy = DeletedKeyPolicy.KnownKeysOnly,
             Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" },
             Columns = [new TableColumn { ColumnName = "a" }]
         };
@@ -321,7 +321,7 @@ public sealed class CatalogGovernanceRatchetTests
         merged.OwnerTenantId.ShouldBe("tenant-a");
         merged.ReleaseProfileToCatalogViewers.ShouldBeTrue();
         merged.ProfilePublicationPolicy.ShouldBe(DatasetProfilePublicationPolicy.FullCoarsenedProfile);
-        merged.DeletedKeyPolicy.ShouldBe(DeletedKeyPolicy.KnownKeysOnly);
+        merged.DeletedKeyPolicy.ShouldBe(DeletedKeyPolicy.AllDeletedKeys);
     }
 
     private static readonly HashSet<string> CatalogOwnedMetadataProperties = new(StringComparer.Ordinal)

@@ -117,7 +117,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ReBAC cluster generation bump or publish failed for tenant {Tenant}. Entering degraded state.", tenant);
+                _logger.LogError(ex, "ReBAC cluster generation bump or publish failed for tenant {Tenant}. Entering degraded state.", ForLog(tenant));
                 _degradedTenants[tenant] = true;
                 InvalidateLocal(tenant);
                 throw;
@@ -131,7 +131,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         _tenantGenerationCache.TryRemove(tenant, out _);
         if (_cache.TryRemove(tenant, out _))
         {
-            _logger.LogDebug("F-SEC-04 ReBAC invalidated decision cache for tenant {Tenant}", tenant);
+            _logger.LogDebug("F-SEC-04 ReBAC invalidated decision cache for tenant {Tenant}", ForLog(tenant));
         }
         return tenant;
     }
@@ -162,7 +162,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read ReBAC generation counter for tenant {Tenant}. Cache validation failed-closed to cache miss.", tenant);
+            _logger.LogWarning(ex, "Failed to read ReBAC generation counter for tenant {Tenant}. Cache validation failed-closed to cache miss.", ForLog(tenant));
             return null;
         }
     }
@@ -243,7 +243,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", canonicalUser, request.Relation, request.Object, tenant);
+            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", ForLog(canonicalUser), ForLog(request.Relation), ForLog(request.Object), ForLog(tenant));
             return RebacCheckResult.Denied;
         }
     }
@@ -352,7 +352,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         {
             _logger.LogWarning(
                 "F-SEC-04 ReBAC recursion depth {Depth} exceeded max {MaxDepth} for {User}#{Rel}@{Obj}. Decision: Denied.",
-                depth, maxDepth, user, relation, obj);
+                depth, maxDepth, ForLog(user), ForLog(relation), ForLog(obj));
             return false;
         }
 
@@ -365,7 +365,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         if (!onStack.Add(visitKey))
         {
             // True cycle detected on current call stack! Fail-closed
-            _logger.LogWarning("F-SEC-04 ReBAC cyclic relationship detected: {CycleKey}. Decision: Denied.", visitKey);
+            _logger.LogWarning("F-SEC-04 ReBAC cyclic relationship detected: {CycleKey}. Decision: Denied.", ForLog(visitKey));
             return false;
         }
 
@@ -502,4 +502,6 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             RegisterInheritance("can_query", "editor", "owner");
         }
     }
+
+    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
 }
