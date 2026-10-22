@@ -459,15 +459,58 @@ public sealed partial class AiDataGuardrailService
         return null;
     }
 
-    private static string ScrubPiiAndSensitiveData(string input, out bool wasModified)
+    internal static string ScrubPiiAndSensitiveData(string input, out bool wasModified)
     {
         wasModified = false;
         if (string.IsNullOrWhiteSpace(input)) return input;
         string result = input;
+        // MCP-10: the default JSON encoder escapes '+' as \u002B, which would split an e-mail local part; decode it first.
+        if (result.Contains("\\u002B", StringComparison.OrdinalIgnoreCase))
+        {
+            result = result.Replace("\\u002B", "+", StringComparison.OrdinalIgnoreCase);
+        }
+
         if (EmailRegex.IsMatch(result)) { result = EmailRegex.Replace(result, "$1***@$2"); wasModified = true; }
-        if (IbanRegex.IsMatch(result)) { result = IbanRegex.Replace(result, "**** **** **** 1234"); wasModified = true; }
+        var ibanScrubbed = IbanRegex.Replace(result, m => IsValidIban(m.Value) ? "**** **** **** 1234" : m.Value);
+        if (!ReferenceEquals(ibanScrubbed, result) && ibanScrubbed != result) { result = ibanScrubbed; wasModified = true; }
         if (GdprArt9Regex.IsMatch(result)) { result = GdprArt9Regex.Replace(result, @"""$1"":""[REDACTED-GDPR-ART9]"""); wasModified = true; }
         return result;
+    }
+
+    /// <summary>ISO 7064 mod-97-10 check of an IBAN candidate (spaces ignored, 15-34 characters).</summary>
+    internal static bool IsValidIban(string candidate)
+    {
+        Span<char> buffer = stackalloc char[40];
+        var n = 0;
+        foreach (var c in candidate)
+        {
+            if (c == ' ') continue;
+            if (n >= buffer.Length) return false;
+            buffer[n++] = char.ToUpperInvariant(c);
+        }
+
+        if (n is < 15 or > 34) return false;
+
+        // Move the first four characters to the end, then compute the remainder digit by digit.
+        var remainder = 0;
+        for (var i = 0; i < n; i++)
+        {
+            var c = buffer[(i + 4) % n];
+            if (c is >= '0' and <= '9')
+            {
+                remainder = ((remainder * 10) + (c - '0')) % 97;
+            }
+            else if (c is >= 'A' and <= 'Z')
+            {
+                remainder = ((remainder * 100) + (c - 'A' + 10)) % 97;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return remainder == 1;
     }
 
     private static string GenerateRawToolResponse(McpToolDefinition tool, string argumentsJson, string tenantId)

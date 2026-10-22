@@ -56,7 +56,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
-    private static readonly Regex IbanRegex = new(@"\b[A-Z]{2}[0-9]{2}(?:[ ]?[0-9]{4}){3,7}(?:[ ]?[0-9]{1,4})?\b", RegexOptions.Compiled, DefaultRegexTimeout);
+    // MCP-10: ISO 13616 structure (letters allowed in the BBAN, any case); candidates are confirmed with the mod-97 check.
+    private static readonly Regex IbanRegex = new(@"\b[A-Z]{2}[0-9]{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
     private static readonly Regex GdprArt9Regex = new(@"""(healthCondition|diagnosis|medicalRecord|biometricData|geneticMarker|religiousAffiliation|politicalBelief)""\s*:\s*""([^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
 
     public AiDataGuardrailService(
