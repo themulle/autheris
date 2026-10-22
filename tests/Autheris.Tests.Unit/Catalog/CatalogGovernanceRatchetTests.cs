@@ -124,6 +124,7 @@ public sealed class CatalogGovernanceRatchetTests
         PrimaryKeyColumns = ["a"],
         RowFilterEvaluation = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 100),
         CatalogTags = ["dbt"],
+        CatalogView = DatasetCatalogView.ViewersAndConsentsOnly,
         ReleaseProfileToCatalogViewers = true,
         ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FullCoarsenedProfile,
         PredefinedSyntheticSamples = [new Dictionary<string, object?> { ["a"] = 1 }],

@@ -205,10 +205,6 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
                             {
                                 targetTables = candidates;
                             }
-                            else if (knownModels.Count == 0 && TryParseFallbackModel(testPart, out var fallbackModel, out _))
-                            {
-                                targetTables = [new TableIdentifier(tenant.Value, "default", fallbackModel)];
-                            }
                             else
                             {
                                 unattributedFailures.Add(uniqueId);
@@ -361,39 +357,5 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
 
         var split = testPart.Split('_');
         return (split[0], null);
-    }
-
-    private static bool TryParseFallbackModel(string testPart, out string modelName, out string? columnName)
-    {
-        modelName = string.Empty;
-        columnName = null;
-
-        string[] standardPrefixes = ["not_null_", "unique_", "accepted_values_", "relationships_"];
-        string? remainder = null;
-        foreach (var prefix in standardPrefixes)
-        {
-            if (testPart.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                remainder = testPart[prefix.Length..];
-                break;
-            }
-        }
-
-        remainder ??= testPart;
-        var lastUnderscore = remainder.LastIndexOf('_');
-        if (lastUnderscore > 0)
-        {
-            modelName = remainder[..lastUnderscore];
-            columnName = remainder[(lastUnderscore + 1)..];
-            return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(remainder))
-        {
-            modelName = remainder;
-            return true;
-        }
-
-        return false;
     }
 }
