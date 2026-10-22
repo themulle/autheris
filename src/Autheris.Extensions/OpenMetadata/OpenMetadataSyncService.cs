@@ -693,6 +693,35 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         }
     }
 
+    private async Task<bool> IsAmbiguousAcrossDatabasesAsync(
+        OpenMetadataTable eventTable,
+        OpenMetadataTableIdentity.ResolvedTable resolved,
+        OpenMetadataOptions omOptions,
+        CancellationToken ct)
+    {
+        var serviceFilter = string.IsNullOrWhiteSpace(omOptions.ServiceFilter) ? null : omOptions.ServiceFilter;
+        var siblings = await _client.GetTablesAsync(serviceFilter, ct).ConfigureAwait(false);
+
+        var candidates = new List<(OpenMetadataTable Item, OpenMetadataTableIdentity.ResolvedTable Resolved)> { (eventTable, resolved) };
+        foreach (var sibling in siblings)
+        {
+            if (string.Equals(sibling.FullyQualifiedName, eventTable.FullyQualifiedName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (OpenMetadataTableIdentity.TryResolve(sibling, omOptions, out var siblingResolved, out _) &&
+                siblingResolved.Identifier == resolved.Identifier)
+            {
+                candidates.Add((sibling, siblingResolved));
+            }
+        }
+
+        var collided = false;
+        OpenMetadataTableIdentity.RejectDatabaseCollisions(candidates, _ => collided = true);
+        return collided;
+    }
+
     private async Task<bool> ProcessWebhookEventCoreAsync(OpenMetadataWebhookEvent webhookEvent, OpenMetadataOptions omOptions, CancellationToken ct)
     {
         _logger.LogInformation(
@@ -713,6 +742,18 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
 
                 var tableId = resolved.Identifier;
+
+                // EXT-16: the full sync's database-collision rule applies to the webhook path as well. Without an explicit
+                // ServiceDatabaseToDomainMap, a sibling table of another database with the same service.schema.table is ambiguous
+                // and must not be merged into the shared catalog entry. If the siblings cannot be listed, nothing is written (retry).
+                if (omOptions.ServiceDatabaseToDomainMap.Count == 0 && await IsAmbiguousAcrossDatabasesAsync(omTable, resolved, omOptions, ct).ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "Ignoring OpenMetadata webhook table event for {Fqn}: {Identifier} is ambiguous across databases (configure OpenMetadata.ServiceDatabaseToDomainMap).",
+                        omTable.FullyQualifiedName, tableId);
+                    return true;
+                }
+
                 // SEC M-32: webhook-triggered updates use the same tighten-only merge.
                 TableMetadata? existing;
                 try
