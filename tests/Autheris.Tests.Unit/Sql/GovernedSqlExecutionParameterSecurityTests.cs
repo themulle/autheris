@@ -243,7 +243,8 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         merged.ShouldNotBeNull();
         merged["__gql_tf_0"].ShouldBe(Sentinel);
         text.ShouldNotContain(Sentinel);
-        text.ShouldContain("@__param___gql_tf_0");
+        text.ShouldContain("__param___gql_tf_0");
+        text.ShouldNotContain("@__gql_tf_0");
         names.ShouldContain("__gql_tf_0");
     }
 

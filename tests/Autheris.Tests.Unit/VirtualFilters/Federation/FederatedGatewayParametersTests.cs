@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
