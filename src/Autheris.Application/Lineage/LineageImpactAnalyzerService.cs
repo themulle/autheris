@@ -402,7 +402,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             {
                 // General Tier: Non-privileged caller
                 // Personal SIDs suppressed, query names suppressed, k-anonymity (k=3) cell folding applied
-                var (folded, suppressed) = ConsumerFolding.Fold(summaries, actorCounts, minActors: 3);
+                var (folded, suppressed) = ConsumerFolding.Fold(summaries, minActors: 3);
                 applicationUsages = folded;
                 suppressedSmallGroups = suppressed;
             }
