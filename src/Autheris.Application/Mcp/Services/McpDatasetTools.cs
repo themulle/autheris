@@ -83,11 +83,9 @@ public static class McpDatasetTools
 
         if (string.Equals(toolName, GetTableSchema, StringComparison.OrdinalIgnoreCase))
         {
-            if (TryGetStringArgument(argumentsJson, "dataset", out var ds) && McpDatasetCatalog.TryParseDatasetId(ds, out var id))
-            {
-                return id;
-            }
-            return CatalogTable;
+            // A batch call names several tables, which one table cannot describe: the guardrail resolves all of them via
+            // TableSchemaTargets. Only an unambiguous single-table call answers here; anything else is fail-closed (null).
+            return TableSchemaTargets(argumentsJson) is { Count: 1 } single ? single[0] : null;
         }
 
         if (string.Equals(toolName, ListDatasources, StringComparison.OrdinalIgnoreCase))
@@ -446,6 +444,142 @@ public static class McpDatasetTools
             ? raw["procedure:".Length..].Trim()
             : raw.Trim();
         return string.IsNullOrWhiteSpace(clean) ? null : clean;
+    }
+
+    /// <summary>Upper bound of the datasets one <c>get_table_schema</c> call may name (larger batches are fail-closed).</summary>
+    public const int MaxTableSchemaDatasets = 50;
+
+    /// <summary>
+    /// The datasets a <c>get_table_schema</c> call names: the <c>dataset</c> string and every entry of the <c>datasets</c> array, parsed
+    /// as dataset ids (domain.schema.table) and de-duplicated. Shared by the guardrail (ABAC targets) and the executor, so the schemas
+    /// returned are always exactly the tables that were checked. False (fail closed) when the arguments are malformed: no JSON object,
+    /// a repeated or wrongly typed property, a non-string entry, an entry that is no dataset id, or more than
+    /// <see cref="MaxTableSchemaDatasets"/> datasets. Blank strings and null values name nothing and are skipped.
+    /// </summary>
+    public static bool TryGetTableSchemaDatasets(string? argumentsJson, out IReadOnlyList<TableIdentifier> datasets)
+    {
+        datasets = [];
+        if (string.IsNullOrWhiteSpace(argumentsJson))
+        {
+            return true;
+        }
+
+        var requested = new List<string>();
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            bool seenDataset = false, seenDatasets = false;
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "dataset", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (seenDataset)
+                    {
+                        return false;
+                    }
+
+                    seenDataset = true;
+                    if (prop.Value.ValueKind == JsonValueKind.Null)
+                    {
+                        continue;
+                    }
+
+                    if (prop.Value.ValueKind != JsonValueKind.String)
+                    {
+                        return false;
+                    }
+
+                    requested.Add(prop.Value.GetString()!);
+                }
+                else if (string.Equals(prop.Name, "datasets", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (seenDatasets)
+                    {
+                        return false;
+                    }
+
+                    seenDatasets = true;
+                    if (prop.Value.ValueKind == JsonValueKind.Null)
+                    {
+                        continue;
+                    }
+
+                    if (prop.Value.ValueKind != JsonValueKind.Array)
+                    {
+                        return false;
+                    }
+
+                    foreach (var item in prop.Value.EnumerateArray())
+                    {
+                        if (item.ValueKind != JsonValueKind.String)
+                        {
+                            return false;
+                        }
+
+                        requested.Add(item.GetString()!);
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        var tables = new List<TableIdentifier>();
+        foreach (var entry in requested)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            TableIdentifier id;
+            try
+            {
+                if (!McpDatasetCatalog.TryParseDatasetId(entry, out id))
+                {
+                    return false;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+
+            if (!tables.Contains(id))
+            {
+                tables.Add(id);
+            }
+
+            if (tables.Count > MaxTableSchemaDatasets)
+            {
+                return false;
+            }
+        }
+
+        datasets = tables;
+        return true;
+    }
+
+    /// <summary>
+    /// The ABAC targets of a <c>get_table_schema</c> call: every requested dataset (<see cref="TryGetTableSchemaDatasets"/>), the catalog
+    /// object when the call names none (the executor then answers with an invalid-params error), or null (fail closed) when the
+    /// arguments are malformed.
+    /// </summary>
+    public static IReadOnlyList<TableIdentifier>? TableSchemaTargets(string? argumentsJson)
+    {
+        if (!TryGetTableSchemaDatasets(argumentsJson, out var datasets))
+        {
+            return null;
+        }
+
+        return datasets.Count == 0 ? [CatalogTable] : datasets;
     }
 
     /// <summary>

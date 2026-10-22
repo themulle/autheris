@@ -133,9 +133,13 @@ public sealed class CrossChannelIntegrationFixesTests
             session,
             CancellationToken.None);
 
-        // Assert
-        resultJson.ShouldContain("Unauthorized");
-        resultJson.ShouldContain("Subject lacks permission to access dataset 'sales.orders'.");
+        // Assert: a structured tool error (isError:true) with a fixed text; the exception message (policy details) is never echoed.
+        resultJson.ShouldContain("\"isError\":true");
+        resultJson.ShouldContain("FORBIDDEN");
+        resultJson.ShouldContain("Access denied by data governance policy.");
+        resultJson.ShouldNotContain("Subject lacks permission");
+        AiDataGuardrailService.TryGetExecutorError(resultJson, out var code).ShouldBeTrue();
+        code.ShouldBe("FORBIDDEN");
     }
 
     // =========================================================================

@@ -223,7 +223,8 @@ public static class McpEndpoints
         var roles = isAuthenticated
             ? (securityContext != null ? securityContext.TenantRoles.Concat(securityContext.ClusterRoles).ToList() : RolesWithoutUntrustedClusterAdmin(principal))
             : new List<string>();
-        var groupSids = isAuthenticated
+        // SR-M-08: group SIDs are user-level grants; an app-only identity (no user SID) carries none on any MCP path.
+        var groupSids = isAuthenticated && !string.IsNullOrWhiteSpace(userSid)
             ? (securityContext != null ? securityContext.GroupSids.Select(s => s.Value).ToList() : principal.GetGroupSids().Select(s => s.Value).ToList())
             : new List<string>();
         var clientIp = securityContext?.ClientIp?.ToString()

@@ -52,7 +52,7 @@ public sealed class McpDatasetCatalogAdminToolTests
         _datasets.ApplyAsync(default, default!, default!, default!, default, default).ReturnsForAnyArgs(new DatasetCatalogResult(
             DatasetCatalogOutcome.Applied, Orders, new DatasetCatalogSettings([new DatasetTag("pii", DatasetTagSource.Admin)], DatasetVisibility.Summary), true));
 
-        var result = await Run("""{"dataset":"sales.dbo.orders","tags":["pii"],"visibility":"Summary"}""");
+        var result = await Run("""{"dataset":"sales.dbo.orders","tags":["pii"],"visibility":"Summary","planId":"plan_1","confirmationToken":"tok"}""");
 
         result.IsSuccess.ShouldBeTrue();
         result.ContentJson.ShouldContain("\"visibility\":\"Summary\"");
@@ -90,10 +90,40 @@ public sealed class McpDatasetCatalogAdminToolTests
     {
         _datasets.ApplyAsync(default, default!, default!, default!, default, default).ReturnsForAnyArgs(new DatasetCatalogResult(outcome));
 
-        var result = await Run("""{"dataset":"a.b.c","visibility":"Full"}""");
+        var result = await Run("""{"dataset":"a.b.c","visibility":"Full","planId":"plan_1","confirmationToken":"tok"}""");
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage.ShouldBe(code);
+    }
+
+    [Fact]
+    public async Task WithoutConfirmation_TheEditIsOnlyPlanned_AndTheServiceIsNotCalled()
+    {
+        _planning.PlanAdminOperationAsync(default!, default!, default!, default!, default, default)
+            .ReturnsForAnyArgs(new AdminPlanAccessResult("plan_9", "a.b.c", [], [], DateTimeOffset.UtcNow.AddMinutes(10)));
+
+        var result = await Run("""{"dataset":"a.b.c","visibility":"Full"}""");
+
+        result.IsSuccess.ShouldBeTrue();
+        result.ContentJson.ShouldContain("CONFIRMATION_REQUIRED");
+        result.ContentJson.ShouldContain("plan_9");
+        _datasets.ReceivedCalls().ShouldBeEmpty();
+        await _planning.Received(1).PlanAdminOperationAsync(
+            McpAdminTools.SetDatasetCatalog, "a.b.c", Arg.Is<string>(d => d.Length == 64), "S-1-5-21-99999999-500", "tenant-a", Arg.Any<CancellationToken>());
+        await _planning.DidNotReceiveWithAnyArgs().ConsumeAdminOperationAsync(default!, default!, default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task ARejectedConfirmation_RunsNothing()
+    {
+        _planning.ConsumeAdminOperationAsync(default!, default!, default!, default!, default, default)
+            .ReturnsForAnyArgs<Task>(_ => throw new System.Security.SecurityException("The confirmed plan does not match this operation and its arguments."));
+
+        var result = await Run("""{"dataset":"a.b.c","visibility":"Full","planId":"plan_1","confirmationToken":"tok"}""");
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("does not match");
+        _datasets.ReceivedCalls().ShouldBeEmpty();
     }
 
     [Fact]

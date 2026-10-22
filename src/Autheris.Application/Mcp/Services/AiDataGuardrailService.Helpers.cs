@@ -61,6 +61,33 @@ public sealed partial class AiDataGuardrailService
         }
     }
 
+    /// <summary>The subject of a session for ABAC and audit: the user SID, or the application identity of an app-only session.</summary>
+    private static string CallerSidOf(McpSessionContext sessionContext) =>
+        !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId;
+
+    /// <summary>
+    /// The Casbin ABAC request of a session for one target table. SR-M-08: an app-only session (no user SID) is evaluated without group
+    /// SIDs, exactly like its principal (<see cref="McpProtocolHandler.BuildPrincipalFromSession"/>).
+    /// </summary>
+    private static SecurityEvaluationContext BuildSecurityContext(McpSessionContext sessionContext, TableIdentifier targetTable)
+    {
+        var groupSids = !string.IsNullOrWhiteSpace(sessionContext.UserSid) && sessionContext.GroupSids is { Count: > 0 }
+            ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
+            : [];
+        var clientIp = !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp)
+            ? parsedIp : System.Net.IPAddress.None;
+
+        return new SecurityEvaluationContext(
+            UserSid: new Sid(CallerSidOf(sessionContext)), GroupSids: groupSids, Tenant: new TenantId(sessionContext.TenantId),
+            TargetTable: targetTable, RequestedColumns: [], ClientIp: clientIp,
+            Timestamp: DateTimeOffset.UtcNow, PurposeId: "MCP_AI_AGENT_QUERY");
+    }
+
+    /// <summary>
+    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>) or the bare
+    /// legacy shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
+    /// nothing else). Both are audited as DENY and returned with <c>isError: true</c>.
+    /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
         errorCode = null;
@@ -69,6 +96,12 @@ public sealed partial class AiDataGuardrailService
         {
             using var doc = JsonDocument.Parse(resultJson);
             var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && IsLegacyErrorShape(root, out var legacyCode))
+            {
+                errorCode = legacyCode;
+                return true;
+            }
+
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("isError", out var isErrorProp) || isErrorProp.ValueKind != JsonValueKind.True)
             {
                 return false;
@@ -84,6 +117,32 @@ public sealed partial class AiDataGuardrailService
         {
             return false;
         }
+    }
+
+    private static bool IsLegacyErrorShape(JsonElement root, out string? errorCode)
+    {
+        errorCode = null;
+        string? error = null;
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, "error", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String)
+            {
+                error = prop.Value.GetString();
+            }
+            else if (!(string.Equals(prop.Name, "message", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String))
+            {
+                return false;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return false;
+        }
+
+        // Only a code-like value (no blanks, short) is reported as the code; a free-text error is reported as ERROR.
+        errorCode = error.Length <= 64 && !error.Any(char.IsWhiteSpace) ? error : "ERROR";
+        return true;
     }
 
     internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(
@@ -102,6 +161,12 @@ public sealed partial class AiDataGuardrailService
         if (string.Equals(tool.Name, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase))
         {
             return McpDataTargetResolver.ResolveInvokeApiTables(argumentsJson, sqlEngine, defaultDataSourceName);
+        }
+        if (string.Equals(tool.Name, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase))
+        {
+            // Every requested dataset ('dataset' and each 'datasets' entry) is an ABAC target, parsed exactly as the executor parses
+            // them; malformed or unresolvable arguments are null (fail closed).
+            return McpDatasetTools.TableSchemaTargets(argumentsJson);
         }
         if (tool.TargetTable == null && !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) && !IsBuiltInTableTool(tool.Name))
         {

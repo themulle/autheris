@@ -153,7 +153,7 @@ public static class GatewayMcpServer
         var resourceProvider = context.Services!.GetRequiredService<IMcpResourceProvider>();
         if (resourceProvider.IsNativeResource(uri))
         {
-            return await ReadNativeResourceAsync(uri, resourceProvider, Caller(context.Services!), ct).ConfigureAwait(false);
+            return await ReadGuardedNativeResourceAsync(context.Services!, uri, resourceProvider, ct).ConfigureAwait(false);
         }
 
         if (uri.StartsWith(DatasetResourcePrefix, StringComparison.OrdinalIgnoreCase))
@@ -176,12 +176,76 @@ public static class GatewayMcpServer
 
         var compiler = context.Services!.GetService<ISemanticMcpCompiler>()
             ?? throw new McpProtocolException($"Resource '{uri}' not found.", McpErrorCode.ResourceNotFound);
-        var principal = McpProtocolHandler.BuildPrincipalFromSession(Caller(context.Services!));
-        var resources = await compiler.GetSemanticResourcesAsync(null, principal, ct).ConfigureAwait(false);
-        var resource = resources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase))
-            ?? throw new McpProtocolException($"Resource '{uri}' not found.", McpErrorCode.ResourceNotFound);
-        return new ReadResourceResult { Contents = [new TextResourceContents { Uri = resource.Uri, MimeType = resource.MimeType, Text = resource.Text }] };
+        return await ReadGuardedSemanticResourceAsync(context.Services!, uri, compiler, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// A native resource read through the guardrail (Casbin ABAC on the objects the resource discloses, PII scrubbing, token budget,
+    /// MCP_TOOL_EXECUTION audit), like the dataset template's describe_dataset call. Unknown, closed and denied resources answer alike.
+    /// </summary>
+    internal static async Task<ReadResourceResult> ReadGuardedNativeResourceAsync(IServiceProvider services, string uri, IMcpResourceProvider provider, CancellationToken ct)
+    {
+        // PLAN-SEC-115 C-115-6: a closed resource answers like an unknown URI without reaching the guardrail or the provider.
+        var targets = provider.IsResourceEnabled(uri) ? McpResourceProvider.GuardTargets(uri) : null;
+        if (targets is null)
+        {
+            throw NotFound(uri);
+        }
+
+        var session = Caller(services);
+        McpResourceContent? content = null;
+        var result = await services.GetRequiredService<IAiDataGuardrailService>().ReadResourceWithGuardrailAsync(
+            uri,
+            targets,
+            async token =>
+            {
+                content = await provider.ReadAsync(uri, session, token).ConfigureAwait(false);
+                return content.Text;
+            },
+            session,
+            applyTokenBudget: !McpResourceProvider.IsStaticDocumentation(uri),
+            ct).ConfigureAwait(false);
+
+        if (result is not { IsSuccess: true } || content is null)
+        {
+            throw NotFound(uri);
+        }
+
+        return new ReadResourceResult { Contents = [new TextResourceContents { Uri = content.Uri, MimeType = content.MimeType, Text = result.ContentJson }] };
+    }
+
+    /// <summary>
+    /// A semantic resource (glossary, dbt, examples) read through the guardrail; its ABAC object is the semantic catalog, like the
+    /// semantic tools. The resource list is consent-filtered for the caller; a URI outside it answers as not found.
+    /// </summary>
+    internal static async Task<ReadResourceResult> ReadGuardedSemanticResourceAsync(IServiceProvider services, string uri, ISemanticMcpCompiler compiler, CancellationToken ct)
+    {
+        var session = Caller(services);
+        McpResourceItem? resource = null;
+        var result = await services.GetRequiredService<IAiDataGuardrailService>().ReadResourceWithGuardrailAsync(
+            uri,
+            [McpSemanticTools.SemanticCatalogTable],
+            async token =>
+            {
+                var principal = McpProtocolHandler.BuildPrincipalFromSession(session);
+                var resources = await compiler.GetSemanticResourcesAsync(null, principal, token).ConfigureAwait(false);
+                resource = resources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new McpResourceNotFoundException(uri);
+                return resource.Text;
+            },
+            session,
+            applyTokenBudget: true,
+            ct).ConfigureAwait(false);
+
+        if (result is not { IsSuccess: true } || resource is null)
+        {
+            throw NotFound(uri);
+        }
+
+        return new ReadResourceResult { Contents = [new TextResourceContents { Uri = resource.Uri, MimeType = resource.MimeType, Text = result.ContentJson }] };
+    }
+
+    private static McpProtocolException NotFound(string uri) => new($"Resource '{uri}' not found.", McpErrorCode.ResourceNotFound);
 
     internal static ValueTask<ListPromptsResult> ListPromptsAsync(RequestContext<ListPromptsRequestParams> context, CancellationToken ct) =>
         ValueTask.FromResult(new ListPromptsResult { Prompts = GetAvailablePrompts(context.Services!.GetService<IReadPathSwitches>()).ToList() });
@@ -197,7 +261,11 @@ public static class GatewayMcpServer
         return ValueTask.FromResult(result);
     }
 
-    public static async Task<ReadResourceResult> ReadNativeResourceAsync(string uri, IMcpResourceProvider provider, McpSessionContext session, CancellationToken ct = default)
+    /// <summary>
+    /// The provider read mapped to the SDK types, without the guardrail. The request path uses <see cref="ReadGuardedNativeResourceAsync"/>;
+    /// this helper only maps the provider's not-found answer.
+    /// </summary>
+    internal static async Task<ReadResourceResult> ReadNativeResourceAsync(string uri, IMcpResourceProvider provider, McpSessionContext session, CancellationToken ct = default)
     {
         try
         {

@@ -33,6 +33,16 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
+    // Structured tool errors (isError:true) use the stable codes of the MCP query executor; the messages are fixed texts.
+    private const string InvalidParamsCode = "INVALID_PARAMS";
+    private const string ForbiddenCode = "FORBIDDEN";
+    private const string AccessDeniedMessage = "Access denied by data governance policy.";
+    private const string InvalidSearchQueryMessage = "The search query is invalid or too long.";
+
+    /// <summary>Documented maximum and default of the candidate tables search_catalog / find_relevant_tables return.</summary>
+    internal const int MaxCatalogSearchResults = 20;
+    internal const int DefaultCatalogSearchResults = 5;
+
     private readonly IGovernedSqlExecutionService _sqlExecutionService;
     private readonly IGovernedDataQueryService _dataQueryService;
     private readonly ICatalogDiscoveryService _catalogDiscoveryService;
@@ -103,8 +113,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         bool isClusterAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
         var requestContext = RequestContext.FromCaller(
             new CallerSecurityContext(
-                UserSid: new Sid(sessionContext.UserSid ?? sessionContext.ServicePrincipalId),
-                GroupSids: (sessionContext.GroupSids ?? []).Select(g => new Sid(g)).ToArray(),
+                UserSid: new Sid(!string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId),
+                // SR-M-08: an app-only session (no user SID) carries no group SIDs, exactly like its principal.
+                GroupSids: string.IsNullOrWhiteSpace(sessionContext.UserSid) ? [] : (sessionContext.GroupSids ?? []).Select(g => new Sid(g)).ToArray(),
                 Roles: roles,
                 Tenant: tenantId,
                 IsGovernanceAdmin: isGovAdmin,
@@ -117,7 +128,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var query = root.TryGetProperty("query", out var qProp) ? qProp.GetString() : null;
             if (string.IsNullOrWhiteSpace(query))
             {
-                return JsonSerializer.Serialize(new { error = "InvalidParams", message = "Missing required argument 'query'." }, JsonOpts);
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing required argument 'query'.");
             }
 
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
@@ -134,7 +145,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var dataset = root.TryGetProperty("dataset", out var dsProp) ? dsProp.GetString() : null;
             if (string.IsNullOrWhiteSpace(dataset) || !McpDatasetCatalog.TryParseDatasetId(dataset, out var tableId))
             {
-                return JsonSerializer.Serialize(new { error = "InvalidParams", message = "Missing or invalid required argument 'dataset'." }, JsonOpts);
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing or invalid required argument 'dataset'.");
             }
 
             IReadOnlyList<string>? select = null;
@@ -154,9 +165,10 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 var result = await _dataQueryService.ExecuteQueryAsync(datasetRequest, requestContext, ct).ConfigureAwait(false);
                 return JsonSerializer.Serialize(result, JsonOpts);
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException)
             {
-                return JsonSerializer.Serialize(new { error = "Unauthorized", message = ex.Message }, JsonOpts);
+                // Fixed text: the exception message can carry policy details (denied reasons, hidden table or column names).
+                return CreateMcpError(sessionContext.TenantId, tool.Name, ForbiddenCode, AccessDeniedMessage);
             }
         }
 
@@ -164,7 +176,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             var query = root.TryGetProperty("query", out var qProp) ? qProp.GetString() ?? "" : "";
             var domain = root.TryGetProperty("domain", out var dProp) ? dProp.GetString() : null;
-            var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? l : 5;
+            // The limit is caller-controlled: clamped to the documented maximum (default 5, max 20), like find_relevant_tables.
+            var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? Math.Clamp(l, 1, MaxCatalogSearchResults) : DefaultCatalogSearchResults;
             var modeStr = root.TryGetProperty("mode", out var mProp) ? mProp.GetString() : "hybrid";
             var language = root.TryGetProperty("language", out var langProp) ? langProp.GetString() : null;
 
@@ -176,7 +189,16 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             };
 
             var searchQuery = new CatalogSearchQuery(query, domain, limit, mode, ExpandRelations: true, Language: language);
-            var results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+            IReadOnlyList<CatalogSearchHit> results;
+            try
+            {
+                results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+            }
+            catch (GatewayInvalidQueryException)
+            {
+                // Fixed text (e.g. CATALOG_SEARCH_QUERY_TOO_LONG): the query is never echoed.
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, InvalidSearchQueryMessage);
+            }
 
             return JsonSerializer.Serialize(new
             {
@@ -206,11 +228,20 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var useCase = root.TryGetProperty("use_case", out var ucProp) ? ucProp.GetString() ?? "" :
                           (root.TryGetProperty("query", out var qProp) ? qProp.GetString() ?? "" : "");
             var domain = root.TryGetProperty("domain", out var dProp) ? dProp.GetString() : null;
-            var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? Math.Clamp(l, 1, 20) : 5;
+            var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? Math.Clamp(l, 1, MaxCatalogSearchResults) : DefaultCatalogSearchResults;
             var language = root.TryGetProperty("language", out var langProp) ? langProp.GetString() : null;
 
             var searchQuery = new CatalogSearchQuery(useCase, domain, limit, CatalogSearchMode.Hybrid, ExpandRelations: true, Language: language);
-            var results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+            IReadOnlyList<CatalogSearchHit> results;
+            try
+            {
+                results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+            }
+            catch (GatewayInvalidQueryException)
+            {
+                // Fixed text (e.g. CATALOG_SEARCH_QUERY_TOO_LONG): the use case is never echoed.
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, InvalidSearchQueryMessage);
+            }
 
             var candidates = results.Select(h => new McpUseCaseCandidate(
                 Dataset: h.DatasetId ?? $"{h.TableIdentifier.Domain}.{h.TableIdentifier.TableName}",
@@ -235,36 +266,20 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
         if (string.Equals(tool.Name, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase))
         {
-            var requestedDatasets = new List<string>();
-            if (root.TryGetProperty("dataset", out var dsProp) && dsProp.GetString() is { } ds && !string.IsNullOrWhiteSpace(ds))
+            // Same parser as the guardrail's ABAC targets (McpDatasetTools.TableSchemaTargets): only the tables that were checked are read.
+            if (!McpDatasetTools.TryGetTableSchemaDatasets(argumentsJson, out var requestedTables))
             {
-                requestedDatasets.Add(ds.Trim());
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Invalid argument 'dataset' or 'datasets'.");
             }
 
-            if (root.TryGetProperty("datasets", out var dssProp) && dssProp.ValueKind == JsonValueKind.Array)
+            if (requestedTables.Count == 0)
             {
-                foreach (var item in dssProp.EnumerateArray())
-                {
-                    if (item.GetString() is { } str && !string.IsNullOrWhiteSpace(str))
-                    {
-                        requestedDatasets.Add(str.Trim());
-                    }
-                }
-            }
-
-            if (requestedDatasets.Count == 0)
-            {
-                return JsonSerializer.Serialize(new { error = "InvalidParams", message = "Missing required argument 'dataset' or 'datasets'." }, JsonOpts);
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing required argument 'dataset' or 'datasets'.");
             }
 
             var briefSchemas = new List<McpTableBriefSchema>();
-            foreach (var dsName in requestedDatasets.Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var tableId in requestedTables)
             {
-                if (!McpDatasetCatalog.TryParseDatasetId(dsName, out var tableId))
-                {
-                    continue;
-                }
-
                 var detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
                 if (detail == null)
                 {
@@ -312,7 +327,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var dataset = root.TryGetProperty("dataset", out var dsProp) ? dsProp.GetString() : null;
             if (string.IsNullOrWhiteSpace(dataset) || !McpDatasetCatalog.TryParseDatasetId(dataset, out var tableId))
             {
-                return JsonSerializer.Serialize(new { error = "InvalidParams", message = "Missing or invalid required argument 'dataset'." }, JsonOpts);
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing or invalid required argument 'dataset'.");
             }
 
             var detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
@@ -344,14 +359,13 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var datasourceScope = CallerScopeResolver.Resolve(userPrincipal, _tenancyMode);
             if (!CallerScopeResolver.IsAdminView(datasourceScope))
             {
-                return JsonSerializer.Serialize(new
-                {
-                    error = "Forbidden",
-                    message = datasourceScope == CallerScope.Claimless &&
-                              CallerScopeResolver.HoldsGovernanceAdminRole(userPrincipal)
+                return CreateMcpError(
+                    sessionContext.TenantId,
+                    tool.Name,
+                    ForbiddenCode,
+                    datasourceScope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(userPrincipal)
                         ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
-                        : "Listing data sources requires a governance administrator."
-                }, JsonOpts);
+                        : "Listing data sources requires a governance administrator.");
             }
 
             var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() : null;
@@ -370,7 +384,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var dataset = root.TryGetProperty("dataset", out var dsProp) ? dsProp.GetString() : null;
             if (string.IsNullOrWhiteSpace(dataset))
             {
-                return JsonSerializer.Serialize(new { error = "InvalidParams", message = "Missing required argument 'dataset'." }, JsonOpts);
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing required argument 'dataset'.");
             }
 
             var node = _lineageGraphStore.GetNode(dataset);

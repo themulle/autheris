@@ -616,6 +616,75 @@ public class AccessPlanningService : IAccessPlanningService
         return stored;
     }
 
+    // ---- Mutating MCP administrator operations (two-phase confirmation, ADR-03) ----
+
+    public async Task<AdminPlanAccessResult> PlanAdminOperationAsync(
+        string operation,
+        string target,
+        string argumentsDigest,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        ArgumentException.ThrowIfNullOrWhiteSpace(argumentsDigest);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
+
+        var now = _time.GetUtcNow();
+        var planId = $"plan_{Guid.NewGuid():N}";
+        var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
+        var result = new AdminPlanAccessResult(
+            planId,
+            target,
+            [],
+            [$"Confirms the administrator operation '{operation}' on '{target}'. Confirm with TOTP, then repeat the call with the same arguments, the planId and the confirmation token."],
+            now.Add(planTtl));
+
+        // The plan carries no grants: ApplyAccessAsync rejects it by its kind, and the operation runs only through ConsumeAdminOperationAsync.
+        var stored = new StoredAccessPlan(
+            result,
+            new AdminPlanAccessRequest(target, [], string.Empty),
+            adminSid,
+            TenantId: NormalizeTenant(tenantId),
+            PlanKind: AccessPlanKind.AdminOperation,
+            AdminOperation: new AdminOperationPlan(operation, argumentsDigest));
+
+        if (!await _store.TrySavePlanAsync(stored, planTtl, _planOptions.MaxPendingPlansPerAdmin, ct).ConfigureAwait(false))
+        {
+            throw new SecurityException(
+                $"Too many pending access plans for this administrator (limit {_planOptions.MaxPendingPlansPerAdmin}). Apply or wait for existing plans to expire.");
+        }
+
+        return result;
+    }
+
+    public async Task ConsumeAdminOperationAsync(
+        AdminApplyAccessRequest request,
+        string operation,
+        string argumentsDigest,
+        string adminSid,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(argumentsDigest);
+
+        // The binding is checked before the token is consumed, so a mismatched call does not burn the confirmation.
+        await ConsumeConfirmedPlanAsync(request, adminSid, tenantId, AccessPlanKind.AdminOperation, (plan, _) =>
+        {
+            var bound = plan.AdminOperation;
+            if (bound is null ||
+                !string.Equals(bound.Operation, operation, StringComparison.Ordinal) ||
+                !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(bound.ArgumentsDigest ?? string.Empty), Encoding.UTF8.GetBytes(argumentsDigest)))
+            {
+                throw new SecurityException("The confirmed plan does not match this operation and its arguments.");
+            }
+
+            return Task.CompletedTask;
+        }, ct).ConfigureAwait(false);
+    }
+
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
