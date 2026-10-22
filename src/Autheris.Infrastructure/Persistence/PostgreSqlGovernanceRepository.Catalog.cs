@@ -705,15 +705,19 @@ public partial class PostgreSqlGovernanceRepository
                     {
                         insertMaskCmd.Transaction = tx;
                         insertMaskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                                      VALUES (@id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId)
-                                                      ON CONFLICT (id) DO NOTHING";
-                        insertMaskCmd.Parameters.AddWithValue("@id", (maskRule.Id == Guid.Empty ? Guid.NewGuid() : maskRule.Id).ToString());
+                                                      VALUES (@id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId)";
+                        // PERS-14: the rule id is always server-generated (a client id is ignored): a reused id must never make the insert
+                        // a silent no-op that leaves the column without its masking rule.
+                        insertMaskCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
                         insertMaskCmd.Parameters.AddWithValue("@colId", colId.ToString());
                         insertMaskCmd.Parameters.AddWithValue("@ruleType", maskRule.RuleType);
                         insertMaskCmd.Parameters.AddWithValue("@pattern", (object?)maskRule.PatternOrFormat ?? DBNull.Value);
                         insertMaskCmd.Parameters.AddWithValue("@replacement", (object?)maskRule.Replacement ?? DBNull.Value);
                         insertMaskCmd.Parameters.AddWithValue("@hmacKeyId", (object?)maskRule.HmacKeyId ?? DBNull.Value);
-                        await insertMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                        if (await insertMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
+                        {
+                            throw new InvalidOperationException($"The masking rule of column '{col.ColumnName}' could not be stored.");
+                        }
                     }
                 }
             }

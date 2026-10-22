@@ -785,7 +785,8 @@ public partial class SqliteGovernanceRepository
                         insertMaskCmd.Transaction = tx;
                         insertMaskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
                                                       VALUES (@id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId)";
-                        insertMaskCmd.Parameters.AddWithValue("@id", (maskRule.Id == Guid.Empty ? Guid.NewGuid() : maskRule.Id).ToString());
+                        // PERS-14: always a new id (a client id is ignored), as on PostgreSQL and SQL Server.
+                        insertMaskCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
                         insertMaskCmd.Parameters.AddWithValue("@colId", colId.ToString());
                         insertMaskCmd.Parameters.AddWithValue("@ruleType", maskRule.RuleType);
                         insertMaskCmd.Parameters.AddWithValue("@pattern", (object?)maskRule.PatternOrFormat ?? DBNull.Value);

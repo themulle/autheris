@@ -2,6 +2,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
 
@@ -20,6 +21,7 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
     protected IIdentityStoreRepository Identity { get; private set; } = null!;
     protected IFunctionalRightRepository Rights { get; private set; } = null!;
     protected IRecertificationRepository Recert { get; private set; } = null!;
+    protected ITableMetadataRepository Catalog { get; private set; } = null!;
     protected bool Available { get; private set; }
 
     /// <summary>The repository (implements all three store interfaces) or null when the engine is not available.</summary>
@@ -36,6 +38,7 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
             Identity = (IIdentityStoreRepository)repo;
             Rights = (IFunctionalRightRepository)repo;
             Recert = (IRecertificationRepository)repo;
+            Catalog = (ITableMetadataRepository)repo;
         }
     }
 
@@ -278,5 +281,48 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
 
         pending.ShouldContain(i => i.CampaignId == expiredCampaign && i.ItemId == expiredItem);
         pending.ShouldNotContain(i => i.ItemId == openItem);
+    }
+
+    // ------------------------------------------------------------------ catalog masking rules (PERS-14)
+
+    private static TableMetadata MaskedTable(string tableName, Guid ruleId, params string[] maskedColumns)
+    {
+        var id = Guid.NewGuid();
+        var columns = maskedColumns.Select(c => new TableColumn { TableId = id, ColumnName = c, DataType = "TEXT", IsSensitive = true }).ToList();
+        return new TableMetadata
+        {
+            Identifier = new TableIdentifier("MaskDomain", "dbo", tableName),
+            Table = new Table { Id = id, SourceName = "MaskDomain", SchemaName = "dbo", TableName = tableName, Sensitivity = "LOW", IsActive = true },
+            Columns = columns,
+            ColumnMaskingRules = maskedColumns.ToDictionary(c => c, c => new MaskingRule { Id = ruleId, RuleType = "REDACT" })
+        };
+    }
+
+    [Fact]
+    public async Task Upsert_ReusedRuleIdAcrossColumns_BothColumnsMasked()
+    {
+        if (!Available) return;
+        var name = Id("mask");
+
+        await Catalog.UpsertTableMetadataAsync(MaskedTable(name, Guid.NewGuid(), "email", "phone"));
+
+        var read = await Catalog.GetTableMetadataAsync(new TableIdentifier("MaskDomain", "dbo", name));
+        read.ShouldNotBeNull();
+        read!.ColumnMaskingRules.Keys.ShouldBe(["email", "phone"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task Upsert_RuleIdOfOtherTable_ColumnMasked()
+    {
+        if (!Available) return;
+        var shared = Guid.NewGuid();
+        var first = Id("maskA");
+        var second = Id("maskB");
+
+        await Catalog.UpsertTableMetadataAsync(MaskedTable(first, shared, "email"));
+        await Catalog.UpsertTableMetadataAsync(MaskedTable(second, shared, "email"));
+
+        (await Catalog.GetTableMetadataAsync(new TableIdentifier("MaskDomain", "dbo", first)))!.ColumnMaskingRules.ShouldContainKey("email");
+        (await Catalog.GetTableMetadataAsync(new TableIdentifier("MaskDomain", "dbo", second)))!.ColumnMaskingRules.ShouldContainKey("email");
     }
 }
