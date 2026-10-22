@@ -232,4 +232,25 @@ public sealed class SqlaPushdownSecurityTests
 
         Push("SELECT * FROM crm.public.orders o LEFT JOIN crm.public.items i ON o.id = i.oid WHERE i.status = __param_s", t.Items, t.ItemsMeta, t.All).ShouldBeNull();
     }
+
+    // ---- SQLA-13 ----
+
+    [Fact]
+    public void ParameterPushdown_SkippedCandidate_TrinoFormUsesTheSameMarkersAsTheBoundParameters()
+    {
+        var meta = Table("orders");
+        var contract = FederatedParameterContract.Create(new Dictionary<string, object?> { ["x"] = null, ["y"] = "open" });
+        var candidates = new[]
+        {
+            new PushedConjunctCandidate("id", "=", "x"),
+            new PushedConjunctCandidate("status", "=", "y")
+        };
+
+        var clause = OptimizationBuilder.BuildClause(meta, Clear(meta), candidates, contract, null, out _);
+
+        clause.ShouldNotBeNull();
+        clause.SqlPredicate.ShouldBe("\"status\" = @p_pd_0_0");
+        clause.Parameters.Keys.ShouldBe(["@p_pd_0_0"]);
+        clause.TrinoSqlFactory!(c => c).ShouldBe("\"status\" = @p_pd_0_0");
+    }
 }

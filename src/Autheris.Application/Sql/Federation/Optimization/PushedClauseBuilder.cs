@@ -76,6 +76,7 @@ public static class PushedClauseBuilder
         }
 
         var pushedClauses = new List<string>();
+        var rendered = new List<(string Column, string Operator, string[] Markers, bool IsList)>();
         var pushedParameters = new Dictionary<string, object?>(StringComparer.Ordinal);
         var pushedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pushedParamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -132,6 +133,7 @@ public static class PushedClauseBuilder
                 }
 
                 pushedClauses.Add($"\"{c.ColumnName}\" {c.Operator} ({string.Join(", ", paramMarkers)})");
+                rendered.Add((c.ColumnName, c.Operator, paramMarkers.ToArray(), true));
                 pushedCols.Add(c.ColumnName);
                 pushedParamNames.Add(c.ParameterName);
                 listCounts[c.ParameterName] = listValues.Count;
@@ -152,6 +154,7 @@ public static class PushedClauseBuilder
                 }
 
                 pushedClauses.Add($"\"{c.ColumnName}\" {c.Operator} {paramName}");
+                rendered.Add((c.ColumnName, c.Operator, [paramName], false));
                 pushedCols.Add(c.ColumnName);
                 pushedParamNames.Add(c.ParameterName);
                 conjunctIdx++;
@@ -175,43 +178,11 @@ public static class PushedClauseBuilder
             pushedParameters,
             refCols)
         {
-            TrinoSqlFactory = resolve =>
-            {
-                var trinoParts = new List<string>();
-                int cIdx = 0;
-                foreach (var c in candidates)
-                {
-                    var effectiveAccess = decision.GetEffectiveColumnAccess(c.ColumnName, metadata);
-                    if (effectiveAccess is ColumnAccessLevel.Mask or ColumnAccessLevel.Deny)
-                        continue;
-
-                    var col = metadata.GetColumn(c.ColumnName);
-                    if (col == null) continue;
-                    var colClass = InferColumnTypeClass(col.DataType);
-                    if (colClass is not (ColumnTypeClass.Integer or ColumnTypeClass.Decimal or ColumnTypeClass.Boolean or ColumnTypeClass.String))
-                        continue;
-
-                    string resolvedCol = $"\"{resolve(c.ColumnName)}\"";
-                    if (c.IsList)
-                    {
-                        if (contract.TryGetList(c.ParameterName, colClass, 10000, out var items))
-                        {
-                            var markers = Enumerable.Range(0, items.Count).Select(i => $"@p_pd_{cIdx}_{i}");
-                            trinoParts.Add($"{resolvedCol} {c.Operator} ({string.Join(", ", markers)})");
-                            cIdx++;
-                        }
-                    }
-                    else
-                    {
-                        if (contract.TryGetScalar(c.ParameterName, colClass, out _))
-                        {
-                            trinoParts.Add($"{resolvedCol} {c.Operator} @p_pd_{cIdx}_0");
-                            cIdx++;
-                        }
-                    }
-                }
-                return string.Join(" AND ", trinoParts);
-            }
+            // SQLA-13: rendered from the conjuncts BuildClause actually bound, so markers and bound parameters can never diverge.
+            TrinoSqlFactory = resolve => string.Join(" AND ", rendered.Select(r =>
+                r.Markers.Length == 1 && !r.IsList
+                    ? $"\"{resolve(r.Column)}\" {r.Operator} {r.Markers[0]}"
+                    : $"\"{resolve(r.Column)}\" {r.Operator} ({string.Join(", ", r.Markers)})"))
         };
     }
 
