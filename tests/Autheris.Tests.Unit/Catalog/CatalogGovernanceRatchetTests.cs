@@ -131,7 +131,8 @@ public sealed class CatalogGovernanceRatchetTests
         EstimatedRowCount = 42,
         ExpectedRows = 43,
         MinGroupSize = 7,
-        SmallGroupStrategy = SmallGroupStrategy.Suppress
+        SmallGroupStrategy = SmallGroupStrategy.Suppress,
+        DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys
     };
 
     /// <summary>SEC-RATCHET-01: a catalog snapshot only carries catalog fields; it must not wipe anything else on the next sync.</summary>
