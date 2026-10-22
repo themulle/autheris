@@ -410,6 +410,17 @@ public sealed class McpDatasetCatalogScopeLevelTests
         ShouldShowNoValues(await DescribeAsync(sensitive, anonymous));
     }
 
+    // MCP-17: the bypass path must not serve inactive (quarantined) tables.
+    [Fact]
+    public async Task Describe_McpAuthBypass_InactiveTable_IsNotFound()
+    {
+        var bypass = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
+        var anonymous = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
+        var catalog = CreateCatalog(CreateTable() with { IsActive = false }, [], gatewayOptions: bypass);
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => DescribeAsync(catalog, anonymous));
+    }
+
     // ST-11: access profile Strict is not modelled; the catalog reports Mask (no values) for a sensitive column.
     [Fact]
     public async Task Describe_SensitiveColumn_NoValues()
