@@ -676,10 +676,49 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
             if (effectiveQualifier != null)
             {
-                return new ColumnReference(new SqlQualifiedName([new SqlIdentifier(effectiveQualifier, false), colName]));
+                return new ColumnReference(new SqlQualifiedName([new SqlIdentifier(effectiveQualifier, false), StagedSubtreeColumn(qualifierParts, rawQualifier, colName)]));
             }
 
             return node;
+        }
+
+        /// <summary>
+        /// SQLA-17: a subtree stages a column that two members share as "&lt;alias&gt;_&lt;column&gt;"; a reference to a member's column must name that
+        /// staged column. Any other column keeps its name.
+        /// </summary>
+        private SqlIdentifier StagedSubtreeColumn(List<string> qualifierParts, string rawQualifier, SqlIdentifier column)
+        {
+            if (_subtrees == null || qualifierParts.Count == 0)
+            {
+                return column;
+            }
+
+            foreach (var st in _subtrees)
+            {
+                if (st.ProjectedColumns.Contains(column.Value, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;   // staged under its own name: not ambiguous
+                }
+
+                foreach (var member in st.MemberTables)
+                {
+                    var memberQualifier = member.Target.Alias ?? member.Target.TableName;
+                    bool matches = string.Equals(rawQualifier, member.Target.FullName, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(qualifierParts[^1], memberQualifier, StringComparison.OrdinalIgnoreCase);
+                    if (!matches)
+                    {
+                        continue;
+                    }
+
+                    var staged = $"{memberQualifier}_{column.Value}";
+                    if (st.ProjectedColumns.Contains(staged, StringComparer.OrdinalIgnoreCase))
+                    {
+                        return new SqlIdentifier(staged, false);
+                    }
+                }
+            }
+
+            return column;
         }
 
         public override SqlNode VisitWildcardSelectItem(WildcardSelectItem node)
