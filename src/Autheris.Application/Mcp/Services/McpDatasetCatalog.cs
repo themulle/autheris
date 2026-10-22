@@ -718,7 +718,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             Tags: null,
             DataOwner: null,
             DataOwnerDelegates: null,
-            AccessStatus: "GRANTED",
+            AccessStatus: accessStatus,
             Indexes: null,
             View: null,
             Kind: "procedure",
@@ -1262,7 +1262,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         if (IsBypassed)
         {
             var found = await _metadataRepository.GetTableMetadataAsync(requested, ct).ConfigureAwait(false);
-            return found != null && Shape(true, found) != CatalogOutputShape.NotFound
+            // MCP-17: the single-row read does not filter is_active; inactive/quarantined tables stay NotFound.
+            return found is { IsActive: true } && Shape(true, found) != CatalogOutputShape.NotFound
                 ? (found, Shape(true, found))
                 : throw new TableNotFoundException(requested);
         }

@@ -132,11 +132,7 @@ public sealed partial class ColumnValueProfileService : IColumnValueProfileServi
             minValue = dateValues.Min().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             maxValue = dateValues.Max().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
-        else if (nonEmptyStrings.Count > 0)
-        {
-            minValue = nonEmptyStrings.Min(StringComparer.Ordinal);
-            maxValue = nonEmptyStrings.Max(StringComparer.Ordinal);
-        }
+        // MCP-16: lexicographic string extremes are real values and are never published by default.
 
         int? typicalLength = nonEmptyStrings.Count > 0
             ? (int)Math.Round(nonEmptyStrings.Average(s => s.Length), MidpointRounding.AwayFromZero)
@@ -282,7 +278,8 @@ public sealed partial class ColumnValueProfileService : IColumnValueProfileServi
         {
             allowedValues = obsLow;
         }
-        else if (distinctCount is > 20 && snapshot?.ObservedAllowedValues is { Count: > 0 } obsSamples)
+        // MCP-16: real observed samples need the same release decision as the value list.
+        else if (IsValueListReleased(column, options) && distinctCount is > 20 && snapshot?.ObservedAllowedValues is { Count: > 0 } obsSamples)
         {
             sampleValues = obsSamples.Take(5).ToList();
         }

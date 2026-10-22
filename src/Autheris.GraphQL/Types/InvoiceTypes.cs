@@ -15,6 +15,6 @@ public sealed class InvoiceRecordExtensions
     {
         // N+1 & Zero-Trust: Batch DataLoader batches queries across all parent records in 1 roundtrip,
         // and LoadInvoiceItemsBatchAsync enforces consent and audits the child table once.
-        return await dataLoader.LoadAsync(invoice.Id, ct);
+        return invoice.Id == null ? null : await dataLoader.LoadAsync(invoice.Id, ct);
     }
 }

@@ -230,6 +230,33 @@ public sealed class GoldenQuerySecurityTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task MCP_15_GetGoldenQueries_WithoutConsentRepository_FailsClosed()
+    {
+        var guardrail = new AiDataGuardrailService(
+            _toolRegistry,
+            Options.Create(new GatewayOptions()),
+            NullLogger<AiDataGuardrailService>.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, tableMetadataRepository: _metadataRepo,
+            goldenQueryService: _goldenService);
+        var session = new McpSessionContext(
+            SessionId: "sess-norepo",
+            ServicePrincipalId: "sp-1",
+            TenantId: "tenant-1",
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActiveAt: DateTimeOffset.UtcNow,
+            UserSid: "S-1-5-21-AGENT1",
+            Roles: ["AiAgent"],
+            GroupSids: []);
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest(ToolName: "get_golden_queries", ArgumentsJson: "{}", SessionId: session.SessionId), session);
+
+        result.IsSuccess.ShouldBeTrue();
+        ExtractQueryIds(result.ContentJson).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task GetGoldenQueries_AdminCaller_BypassesConsentCheck()
     {
         // MCP-5: ClusterAdmin or GovernanceAdmin receives all queries without explicit consent

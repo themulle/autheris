@@ -93,6 +93,30 @@ public sealed class LoggingRedactionDep8Tests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void INF_12_MessageIpPrincipalAndKeyAttributes_AreRedacted()
+    {
+        var (logger, records) = CreateTestLogger(includeTenant: false);
+        logger.LogWarning(
+            "Failed {Message} {ErrorMessage} {Ip} {Principal} {IdempotencyKey} {DataSource}",
+            "Key (email)=(alice@x) already exists",
+            "driver detail",
+            "10.1.2.3",
+            "Alice Example",
+            "idem-123",
+            "orders_db");
+
+        var record = records[0];
+        record.Attributes.ShouldNotBeNull();
+        foreach (var key in new[] { "Message", "ErrorMessage", "Ip", "Principal", "IdempotencyKey" })
+        {
+            record.Attributes.First(a => a.Key == key).Value.ShouldBe("[redacted]");
+        }
+
+        record.Attributes.First(a => a.Key == "DataSource").Value.ShouldBe("orders_db");
+    }
+
+    [Fact]
     public void Exceptions_AreWrappedInRedactedException()
     {
         var (logger, records) = CreateTestLogger(includeTenant: false);

@@ -518,11 +518,14 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     public static string ComputeSubjectContextHash(IReadOnlySet<Sid>? groupSids, IReadOnlySet<string>? roles, IReadOnlySet<string>? scopes = null) =>
         IConsentCacheService.ComputeSubjectContextHash(groupSids, roles, scopes);
 
+    // INF-03: ':' is legal in table components, so each part is escaped to keep the key unambiguous.
+    private static string EscapeTablePart(string part) => Uri.EscapeDataString(part.ToLowerInvariant());
+
     private static string BuildCacheKey(TenantId tenant, Sid userSid, TableIdentifier table, string? contextHash = null)
     {
         var safeSid = Uri.EscapeDataString(userSid.Value.ToUpperInvariant());
         var safeContext = Uri.EscapeDataString(string.IsNullOrWhiteSpace(contextHash) ? "default" : contextHash);
-        return $"{tenant.Value}:consent:{safeSid}:{safeContext}:{table.Domain.ToLowerInvariant()}:{table.Schema.ToLowerInvariant()}:{table.TableName.ToLowerInvariant()}";
+        return $"{tenant.Value}:consent:{safeSid}:{safeContext}:{EscapeTablePart(table.Domain)}:{EscapeTablePart(table.Schema)}:{EscapeTablePart(table.TableName)}";
     }
 
     private static bool MatchesTable(CachedConsentEnvelope env, TableIdentifier table)
