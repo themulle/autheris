@@ -48,115 +48,8 @@ public sealed class Issue143ConsumersTests
 
     private static IReadOnlyList<Consent> BaseClear() => [Allow(IdClear, GradeClear)];
 
-    // ---------------------------------------------------------------- D-7 aggregation fallback (T-GOV143-11)
-
-    private static TableAccessDecision Fallback(TableMetadata meta, TableAccessDecision? existing) =>
-        (TableAccessDecision)typeof(GovernedAggregationService)
-            .GetMethod("BuildMetricScopedFallbackDecision", BindingFlags.NonPublic | BindingFlags.Static)!
-            .Invoke(null, [meta, existing])!;
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void T_GOV143_11_AggregationFallback_ExistingNull_SensitiveMasked_ExistingClearance_Kept()
-    {
-        Fallback(Meta, null).GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Mask);
-
-        var existing = Resolve(BaseClear(), Restricted);
-        existing.ScopeClearance.ShouldNotBeNull();
-        var rebuilt = Fallback(Meta, existing);
-
-        rebuilt.ScopeClearance.ShouldBeSameAs(existing.ScopeClearance);
-        rebuilt.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Mask);
-        rebuilt.GetEffectiveColumnAccess("id", Meta).ShouldBe(ColumnAccessLevel.Clear);
-
-        // An unrestricted caller keeps what it had (no clearance is invented).
-        var unrestricted = Fallback(Meta, Resolve(BaseClear()));
-        unrestricted.ScopeClearance.ShouldBeNull();
-        unrestricted.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Clear);
-    }
-
-    [Fact]
-    public void AggregationFallback_KeepsClearance()
-    {
-        var existing = Resolve([Allow(IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Clear, Restricted))], Restricted);
-
-        var rebuilt = Fallback(Meta, existing);
-
-        rebuilt.ScopeClearance.ShouldBeSameAs(existing.ScopeClearance);
-        rebuilt.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Clear);
-    }
-
-    // ---------------------------------------------------------------- D-7 metrics fallback without resolver (T-GOV143-12)
-
-    private static readonly DbtMetric Mrr = new("mrr", "simple", null, null, null, "{ \"measure\": \"total\" }", [], ["total"],
-        new Dictionary<string, string> { ["model"] = "m" });
-
-    private static Consent MetricConsent(IReadOnlyList<ConsentColumnRule> rules, IReadOnlyList<ConsentRowFilter>? filters = null) => new()
-    {
-        TableIdentifier = new TableIdentifier("sales", "public", "metric:mrr"),
-        TableId = Meta.Table.Id,
-        TenantId = new TenantId(Tenant),
-        Effect = ConsentEffect.Allow,
-        GranteeType = GranteeType.User,
-        GranteeSid = new Sid(UserSid),
-        ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-        ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-        ColumnRules = rules,
-        RowFilters = filters ?? []
-    };
-
-    private static async Task<TableAccessDecision> MetricDecisionWithoutResolverAsync(ClaimsPrincipal principal, Consent metricConsent)
-    {
-        var repo = Substitute.For<IConsentRepository>();
-        repo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
-            .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>([]));
-        repo.GetAllActiveConsentsForSubjectsAsync(default!, default, default, default, default)
-            .ReturnsForAnyArgs(Task.FromResult<IReadOnlyList<Consent>>([metricConsent]));
-        var service = new SemanticMetricQueryService(
-            Substitute.For<ISemanticCatalogService>(),
-            Substitute.For<IGovernedAggregationService>(),
-            Substitute.For<ITableMetadataRepository>(),
-            consentRepository: repo);
-
-        var task = (Task<(TableAccessDecision Decision, bool HasMetricConsent)>)typeof(SemanticMetricQueryService)
-            .GetMethod("ResolveMetricAndTableDecisionAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(service, [principal, new Sid(UserSid), new TenantId(Tenant), Meta, new List<DbtMetric> { Mrr }, CancellationToken.None])!;
-        var (decision, hasMetricConsent) = await task;
-        hasMetricConsent.ShouldBeTrue();
-        return decision;
-    }
-
-    [Fact]
-    public async Task MetricWithoutResolver_RestrictedMasked()
-    {
-        var consent = MetricConsent([IdClear, GradeClear]);
-
-        var restricted = await MetricDecisionWithoutResolverAsync(WithScopes(Restricted), consent);
-        restricted.IsAllowed.ShouldBeTrue();
-        restricted.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Mask);
-
-        var other = await MetricDecisionWithoutResolverAsync(WithScopes(ScopeA), consent);
-        other.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Clear);
-
-        var scopeClear = await MetricDecisionWithoutResolverAsync(WithScopes(Restricted),
-            MetricConsent([IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Clear, Restricted)]));
-        scopeClear.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Clear);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task T_GOV143_12_MetricFallback_DoesNotWiden_VsLegacyBranch()
-    {
-        // The legacy branch released the table without any row filter and without the scope restriction; the shared resolver keeps both.
-        var filtered = await MetricDecisionWithoutResolverAsync(WithScopes(Restricted), MetricConsent([IdClear, GradeClear], [RowFilter("7")]));
-        filtered.CombinedRowFilterSql.ShouldNotBeNullOrWhiteSpace();
-        filtered.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Mask);
-
-        // Scope-bound Deny and a scope-only Allow stay as the resolver computes them.
-        var denied = await MetricDecisionWithoutResolverAsync(WithScopes(Restricted),
-            MetricConsent([IdClear, GradeClear, Rule("grade", ColumnAccessLevel.Deny, Restricted)]));
-        denied.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Deny);
-    }
+    // MISC-06: the aggregation metric-consent fallback and the resolver-less metric branch were removed; metric consents are only
+    // evaluated inside the PDP pipeline (see SemanticMetricConsentPdpTests).
 
     // ---------------------------------------------------------------- D-7 connector reader
 
@@ -364,7 +257,6 @@ public sealed class Issue143ConsumersTests
             MaskedColumnSet.For(Meta, decision).ShouldContain("grade");                                              // OLAP and SQL federation staging
             GovernedConnectorReader.ProjectRow(new Dictionary<string, object?> { ["grade"] = "x" }, Meta, decision, Tenant,
                 new GovernedRowPolicy(masking, null), alreadyMasked: false)["grade"].ShouldBe("MASKED");             // export / connectors
-            Fallback(Meta, decision).GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Mask);       // governed aggregation
             decision.IsMaskedByScopeRestriction("grade", Meta).ShouldBeTrue();                                       // describe / explain
         }
 

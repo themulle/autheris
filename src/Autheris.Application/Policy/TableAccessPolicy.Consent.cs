@@ -19,7 +19,9 @@ public sealed partial class TableAccessPolicy
         var table = query.Metadata.Identifier;
         var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims);
         string? contextHash = null;
-        if (_cacheService != null)
+        // MISC-06: a query with supplemental (metric) consents is never answered from, nor written to, the per-user decision cache.
+        var useCache = _cacheService != null && query.SupplementalConsents is not { Count: > 0 };
+        if (useCache)
         {
             contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);
             var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
@@ -30,7 +32,7 @@ public sealed partial class TableAccessPolicy
         }
 
         // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-        var epochAtLoad = _cacheService != null ? await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
+        var epochAtLoad = useCache ? await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
         IEnumerable<Sid> userSids = query.AllUserSids != null && query.AllUserSids.Count > 0
             ? query.AllUserSids
             : [query.UserSid];
@@ -41,6 +43,16 @@ public sealed partial class TableAccessPolicy
         var activeConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, DateTimeOffset.UtcNow, query.Tenant, ct).ConfigureAwait(false))
             .Where(c => c.TenantId == query.Tenant) // multi-tenancy isolation
             .ToList();
+        if (query.SupplementalConsents is { Count: > 0 } supplemental)
+        {
+            foreach (var extra in supplemental)
+            {
+                if (extra.TenantId == query.Tenant && activeConsents.All(existing => existing.Id != extra.Id))
+                {
+                    activeConsents.Add(extra);
+                }
+            }
+        }
 
         var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
             ? query.AllUserSids
@@ -59,7 +71,9 @@ public sealed partial class TableAccessPolicy
             return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");
         }
 
-        if (_cacheService != null)
+        decision = ClassifyConsentDenial(decision, activeConsents);
+
+        if (useCache)
         {
             // SEC: TTL bounded by the earliest consent ValidTo; shorter for highly sensitive tables.
             var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
@@ -74,6 +88,26 @@ public sealed partial class TableAccessPolicy
         }
 
         return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// MISC-06: tags a consent-stage denial with its kind from the consents themselves (never from reason text). Only "no ALLOW consent at
+    /// all" is <see cref="TableAccessDenialKind.ConsentMissing"/>; a DENY consent is <see cref="TableAccessDenialKind.ConsentDeny"/>; any other
+    /// denial (e.g. a restricted-scope or purpose limit despite an ALLOW consent) is final policy.
+    /// </summary>
+    private static TableAccessDecision ClassifyConsentDenial(TableAccessDecision decision, IReadOnlyList<Consent> activeConsents)
+    {
+        if (decision.IsAllowed)
+        {
+            return decision;
+        }
+
+        var kind = activeConsents.Any(c => c.Effect == ConsentEffect.Deny)
+            ? TableAccessDenialKind.ConsentDeny
+            : activeConsents.Any(c => c.Effect == ConsentEffect.Allow)
+                ? TableAccessDenialKind.Policy
+                : TableAccessDenialKind.ConsentMissing;
+        return decision with { DenialKind = kind };
     }
 
     /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>

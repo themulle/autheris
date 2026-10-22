@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
+    <InternalsVisibleTo Include="Autheris.Application" />
   </ItemGroup>
 
 </Project>
