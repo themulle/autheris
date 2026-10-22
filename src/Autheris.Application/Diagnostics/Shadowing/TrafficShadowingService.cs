@@ -29,6 +29,7 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
 
     private long _enqueuedCount;
     private long _droppedCount;
+    private long _unparseableDroppedCount;
     private long _replayedCount;
 
     public TrafficShadowingService(
@@ -53,6 +54,8 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
 
     public bool IsEnabled => _gatewayOptions.Value.TrafficShadowing.Enabled;
     public long EnqueuedRequestsCount => Interlocked.Read(ref _enqueuedCount);
+    /// <summary>MISC-14 metric <c>shadow_dropped_unparseable</c>: requests dropped because their body could not be parsed.</summary>
+    public long UnparseableDroppedRequestsCount => Interlocked.Read(ref _unparseableDroppedCount);
     public long DroppedRequestsCount => Interlocked.Read(ref _droppedCount);
     public long ReplayedRequestsCount => Interlocked.Read(ref _replayedCount);
 
@@ -89,11 +92,17 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
         // Apply PII redaction prior to queueing
         var options = _gatewayOptions.Value.TrafficShadowing;
         var sanitizedHeaders = PiiShadowingRedactor.RedactHeaders(request.Headers, options.StripPiiHeaders);
-        var sanitizedBody = PiiShadowingRedactor.RedactBody(request.Body);
+        if (!PiiShadowingRedactor.TryRedactBody(request.Body, out var sanitizedBody))
+        {
+            // MISC-14: a GraphQL or SQL text that cannot be parsed cannot be redacted reliably, so the request is not shadowed.
+            Interlocked.Increment(ref _unparseableDroppedCount);
+            _logger.LogWarning("shadow_dropped_unparseable: request body could not be parsed for redaction; request not shadowed.");
+            return false;
+        }
 
         var sanitizedRequest = request with
         {
-            PathAndQuery = PiiShadowingRedactor.RedactPathAndQuery(request.PathAndQuery),
+            PathAndQuery = PiiShadowingRedactor.RedactPathAndQuery(request.PathAndQuery, options.AllowedPathSegments),
             Headers = sanitizedHeaders,
             Body = sanitizedBody
         };
