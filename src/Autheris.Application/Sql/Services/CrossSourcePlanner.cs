@@ -444,7 +444,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                         dec,
                         t.Metadata.Dialect,
                         vfPlan,
-                        options.PredicatePushdown);
+                        options.PredicatePushdown,
+                        parameters?.ClientValues);
 
                     if (evalResult.IsPushable)
                     {
@@ -454,12 +455,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
                 if (pushableConjuncts.Count > 0)
                 {
-                    pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
+                    try
+                    {
+                        pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata, parameters?.ClientValues);
+                    }
+                    catch (Autheris.Application.Sql.Federation.Pushdown.PushdownRejectedException)
+                    {
+                        // SQLA-09: an unresolvable parameter means nothing is pushed for this table; DuckDB evaluates the filter after staging.
+                        pushdownFilter = null;
+                    }
                 }
             }
             else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
-                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, out paramAudit);
+                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, plannedTables, out paramAudit);
             }
 
             KeySetPlanInfo? keySetPlanInfo = null;

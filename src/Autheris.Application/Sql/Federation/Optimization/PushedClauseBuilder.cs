@@ -7,6 +7,8 @@ using System.Linq;
 using System.Security;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Sql.Federation.Conjuncts;
+using Autheris.Application.Sql.Services;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Common;
@@ -219,15 +221,42 @@ public static class PushedClauseBuilder
         TableMetadata metadata,
         TableAccessDecision decision,
         FederatedParameterContract contract,
+        IReadOnlyList<ResolvedSourceTable> allTables,
         out PushedParameterAudit? parameterAudit)
     {
+        ArgumentNullException.ThrowIfNull(allTables);
         parameterAudit = null;
         if (statement is not SelectStatement select || select.Body is not QuerySpecification querySpec || querySpec.Where == null)
         {
             return null;
         }
 
-        var candidates = ExtractCandidates(querySpec.Where, target, metadata);
+        // SQLA-12: only WHERE conjuncts that the splitter allows for this table (never the null-supplying side of an outer join; a full outer join
+        // yields no conjuncts at all) are candidates.
+        var leaves = new List<TableSource>();
+        if (querySpec.From != null)
+        {
+            CollectLeaves(querySpec.From, leaves);
+        }
+
+        var targetSources = leaves.OfType<NamedTableSource>().Where(l => IsSourceOf(l, target)).ToList();
+        if (targetSources.Count != 1)
+        {
+            return null;   // the table cannot be identified in the FROM clause unambiguously: nothing is pushed
+        }
+
+        var whereConjuncts = new List<Expression>();
+        foreach (var conjunct in SqlConjunctSplitter.Split(statement))
+        {
+            if (conjunct.Origin == ConjunctOrigin.Where &&
+                (conjunct.AllowedTableSources is null || conjunct.AllowedTableSources.Contains(targetSources[0])))
+            {
+                whereConjuncts.Add(conjunct.Expression);
+            }
+        }
+
+        bool hasDerivedSources = leaves.Any(static l => l is not NamedTableSource);
+        var candidates = ExtractCandidates(whereConjuncts, target, metadata, allTables, hasDerivedSources);
         if (candidates.Count == 0)
         {
             return null;
@@ -236,14 +265,30 @@ public static class PushedClauseBuilder
         return BuildClause(metadata, decision, candidates, contract, DialectCapabilityTable.Default.Get(TargetSqlDialect.DuckDb), out parameterAudit);
     }
 
-    private static List<PushedConjunctCandidate> ExtractCandidates(
-        Expression expression,
-        TableAccessTarget target,
-        TableMetadata metadata)
+    private static void CollectLeaves(TableSource source, List<TableSource> leaves)
     {
-        var conjuncts = new List<Expression>();
-        FlattenAnd(expression, conjuncts);
+        if (source is JoinedTableSource join)
+        {
+            CollectLeaves(join.Left, leaves);
+            CollectLeaves(join.Right, leaves);
+        }
+        else
+        {
+            leaves.Add(source);
+        }
+    }
 
+    private static bool IsSourceOf(NamedTableSource source, TableAccessTarget target) =>
+        string.Equals(source.Name.Parts[^1].Value, target.TableName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(source.Alias?.Value ?? string.Empty, target.Alias ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+    private static List<PushedConjunctCandidate> ExtractCandidates(
+        IReadOnlyList<Expression> conjuncts,
+        TableAccessTarget target,
+        TableMetadata metadata,
+        IReadOnlyList<ResolvedSourceTable> allTables,
+        bool hasDerivedSources)
+    {
         var candidates = new List<PushedConjunctCandidate>();
         foreach (var conjunct in conjuncts)
         {
@@ -264,14 +309,14 @@ public static class PushedClauseBuilder
                 {
                     if (binary.Left is ColumnReference colRef && binary.Right is ParameterReference paramRef)
                     {
-                        if (BelongsToTable(colRef.Name, target, metadata, out var colName))
+                        if (BelongsToTable(colRef.Name, target, metadata, allTables, hasDerivedSources, out var colName))
                         {
                             candidates.Add(new PushedConjunctCandidate(colName, opStr, paramRef.Name, IsList: false));
                         }
                     }
                     else if (binary.Right is ColumnReference colRef2 && binary.Left is ParameterReference paramRef2)
                     {
-                        if (BelongsToTable(colRef2.Name, target, metadata, out var colName))
+                        if (BelongsToTable(colRef2.Name, target, metadata, allTables, hasDerivedSources, out var colName))
                         {
                             candidates.Add(new PushedConjunctCandidate(colName, opStr, paramRef2.Name, IsList: false));
                         }
@@ -280,7 +325,7 @@ public static class PushedClauseBuilder
             }
             else if (conjunct is InListExpression inList && inList.Items.Count == 1 && inList.Items[0] is ParameterReference paramRef)
             {
-                if (inList.Operand is ColumnReference colRef && BelongsToTable(colRef.Name, target, metadata, out var colName))
+                if (inList.Operand is ColumnReference colRef && BelongsToTable(colRef.Name, target, metadata, allTables, hasDerivedSources, out var colName))
                 {
                     candidates.Add(new PushedConjunctCandidate(colName, inList.IsNotIn ? "NOT IN" : "IN", paramRef.Name, IsList: true));
                 }
@@ -290,20 +335,18 @@ public static class PushedClauseBuilder
         return candidates;
     }
 
-    private static void FlattenAnd(Expression expr, List<Expression> result)
-    {
-        if (expr is BinaryExpression { Operator: BinaryOperator.And } andExpr)
-        {
-            FlattenAnd(andExpr.Left, result);
-            FlattenAnd(andExpr.Right, result);
-        }
-        else
-        {
-            result.Add(expr);
-        }
-    }
-
-    private static bool BelongsToTable(SqlQualifiedName name, TableAccessTarget target, TableMetadata metadata, out string columnName)
+    /// <summary>
+    /// SQLA-12: attributes a column reference to <paramref name="target"/>. A qualifier must name the table's alias (or, without an alias, its table
+    /// name or full name); a schema alone is no table identity. An unqualified column is accepted only when no other table of the statement (and no derived
+    /// source) can expose a column of that name. Anything else is "not this table" and nothing is pushed.
+    /// </summary>
+    private static bool BelongsToTable(
+        SqlQualifiedName name,
+        TableAccessTarget target,
+        TableMetadata metadata,
+        IReadOnlyList<ResolvedSourceTable> allTables,
+        bool hasDerivedSources,
+        out string columnName)
     {
         columnName = string.Empty;
         if (name.Parts.Count == 0) return false;
@@ -316,19 +359,23 @@ public static class PushedClauseBuilder
 
         if (name.Parts.Count == 1)
         {
+            if (hasDerivedSources) return false;
+            foreach (var other in allTables)
+            {
+                if (other.Target.Equals(target)) continue;
+                if (other.Metadata.GetColumn(colName) != null) return false;
+            }
+
             columnName = colName;
             return true;
         }
 
         string qualifier = string.Join(".", name.Parts.Take(name.Parts.Count - 1).Select(p => p.Value));
-        if (string.Equals(qualifier, target.Alias, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(qualifier, target.TableName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(qualifier, target.FullName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(qualifier, target.Schema, StringComparison.OrdinalIgnoreCase))
-        {
-            columnName = colName;
-            return true;
-        }
+        bool matches = !string.IsNullOrEmpty(target.Alias)
+            ? string.Equals(qualifier, target.Alias, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(qualifier, target.TableName, StringComparison.OrdinalIgnoreCase) ||
+              string.Equals(qualifier, target.FullName, StringComparison.OrdinalIgnoreCase);
+        if (!matches) return false;
 
         columnName = colName;
         return true;
