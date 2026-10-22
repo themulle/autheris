@@ -77,3 +77,11 @@ Dependencies: WP-B lands after EP WP-EP-1 (removes the policy methods of `Rights
 5. An invalid stored audit anchor faults the pipeline and blocks Tier-A acknowledgement on every provider.
 6. Every fix ships a provider-parity contract test (SQLite in Unit, PostgreSQL and SQL Server in Integration via Testcontainers).
 7. Time comparisons on string-stored timestamps use only UTC-normalized values produced by one helper.
+
+## Changelog
+
+- 2026-10-22 (G-PLAN-REBASE, implementation on `fix/sec-impl-b-gov`): PERS-10/PERS-11 are obsolete (EP D-0 removed the scoped policy API; the dead store methods and `AccessPolicy` model are removed as well). PERS-03 regression tests already exist (`AtomicApprovalFourEyesTests`, `ConsentDecisionStatusGuardContractBase`). PostgreSQL consent revocation (PERS-05) was already transactional with the already-revoked guard; SQLite was brought in line.
+- 2026-10-22: PERS-04 `ExtendConsentExpiryAsync` still accepts expired consents: rejecting them contradicts the SEC-SC-20 contract (`SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150_AndAfterExpiry`) and the OpenMetadata sync refresh, so only the scan fix (filter, ordering, `maxResults`) is applied. Open decision for the owner.
+- 2026-10-22: PERS-13 `VirtualFilterChangeSet.ExpectedGeneration` is nullable (`null` = unconditional, used by direct repository tests); the administration service always sets it.
+- 2026-10-22: PERS-14 the unique index on `COLUMN_MASKING_RULES(table_column_id)` is not added to the baselines (shape snapshots would need regeneration); the insert fix does not depend on it. PERS-06 changes the assignment primary key in all three baselines and shape snapshots.
+- 2026-10-22: PERS-17 epoch validation applies to the single and the batch read path on PostgreSQL and SQL Server; the writers that change cached fields were not re-audited for an epoch bump.
