@@ -456,8 +456,8 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
         // Changes between v10 and v15:
         // - id=1: Inserted in EU (matches RLS) -> should be in Upserted (with masked email)
         // - id=2: Updated from region='EU' to region='US' (RLS-exit transition!) -> should be in Removed!
-        // - id=3: Physically deleted, AND caller passes id=3 in KnownKeys -> should be in Removed!
-        // - id=99: Physically deleted foreign row (not in KnownKeys, no pre-image) -> must NOT be leaked under KnownKeysOnly!
+        // - id=3: Physically deleted with a pre-image the caller could see (and listed in KnownKeys) -> should be in Removed!
+        // - id=99: Physically deleted foreign row (no pre-image) -> must NOT be leaked (VF-11: knownKeys never authorize, scoped tables need a pre-image)!
         versionStore.RecordChange(
             customersKnownOnly.Identifier,
             new SourceChangeRecord(
@@ -478,7 +478,8 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             new SourceChangeRecord(
                 new Dictionary<string, object?> { ["id"] = 3 },
                 CdcOperation.Delete,
-                ChangeVersion: 13L));
+                ChangeVersion: 13L,
+                PreImage: new Dictionary<string, object?> { ["id"] = 3, ["region"] = "EU", ["tenant_id"] = "tenant-a" }));
 
         versionStore.RecordChange(
             customersKnownOnly.Identifier,
@@ -516,7 +517,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
         deltaKnownOnly.Upserted[0]["email"].Should().Be("***@***", "masked columns must remain masked in Upserted");
 
         var removedIdsKnownOnly = deltaKnownOnly.Removed.Select(r => Convert.ToInt32(r["id"])).ToList();
-        removedIdsKnownOnly.Should().BeEquivalentTo([2, 3], "id=2 (RLS-exit) and id=3 (in KnownKeys) are returned, while foreign deleted key id=99 is not leaked");
+        removedIdsKnownOnly.Should().BeEquivalentTo([2, 3], "id=2 (RLS-exit) and id=3 (visible pre-image, in KnownKeys) are returned, while foreign deleted key id=99 is not leaked");
 
         // Act 2: Opt-in AllDeletedKeys policy on the table
         var customersAllDeleted = CreateCustomersTable(DeletedKeyPolicy.AllDeletedKeys);
@@ -531,7 +532,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
                 KnownKeys: null));
 
         var removedIdsAll = deltaAllDeleted.Removed.Select(r => Convert.ToInt32(r["id"])).ToList();
-        removedIdsAll.Should().BeEquivalentTo([2, 3, 99], "under DeletedKeyPolicy.AllDeletedKeys, all deleted/RLS-exited keys are disclosed");
+        removedIdsAll.Should().BeEquivalentTo([2, 3], "on a scoped table AllDeletedKeys never discloses a key without a visible pre-image (VF-11)");
     }
 
     [Fact]

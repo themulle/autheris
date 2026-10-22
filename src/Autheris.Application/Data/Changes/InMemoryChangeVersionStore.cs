@@ -7,26 +7,21 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Data.Relations;
-using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// In-memory and watermark-backed implementation of <see cref="IChangeVersionProvider"/> (#77).
-/// Supports seeding versions, minimum valid versions, change logs, and current table rows for unit and integration testing,
-/// while delegating watermark lookups to <see cref="IMssqlWatermarkStore"/> when configured.
+/// In-memory implementation of <see cref="IChangeVersionProvider"/> (#77) for unit and integration testing: it supports seeding versions,
+/// minimum valid versions, change logs and current table rows. It is not a production registration (VF-13): without a real change log
+/// the production default is <see cref="NoChangeLogVersionProvider"/>.
 /// </summary>
 public sealed class InMemoryChangeVersionStore : IChangeVersionProvider
 {
-    private readonly IMssqlWatermarkStore? _watermarkStore;
     private readonly ConcurrentDictionary<TableIdentifier, long> _currentVersions = new();
     private readonly ConcurrentDictionary<TableIdentifier, long> _minValidVersions = new();
     private readonly ConcurrentDictionary<TableIdentifier, List<SourceChangeRecord>> _changes = new();
     private readonly ConcurrentDictionary<TableIdentifier, List<IReadOnlyDictionary<string, object?>>> _currentRows = new();
 
-    public InMemoryChangeVersionStore(IMssqlWatermarkStore? watermarkStore = null)
-    {
-        _watermarkStore = watermarkStore;
-    }
+    public bool ProvidesPreImages => true;
 
     /// <summary>Counter tracking how many times <see cref="ReadCurrentRowsByPrimaryKeysAsync"/> was invoked (for verifying 0-row reads on 304 Not Modified).</summary>
     public int RowReadInvocationCount { get; private set; }
@@ -57,20 +52,8 @@ public sealed class InMemoryChangeVersionStore : IChangeVersionProvider
         _minValidVersions.TryAdd(table, 0);
     }
 
-    public async ValueTask<long?> GetCurrentVersionAsync(TableIdentifier table, CancellationToken ct = default)
-    {
-        if (_currentVersions.TryGetValue(table, out var ver))
-        {
-            return ver;
-        }
-
-        if (_watermarkStore != null)
-        {
-            return await _watermarkStore.GetWatermarkAsync(table, ct).ConfigureAwait(false);
-        }
-
-        return null;
-    }
+    public ValueTask<long?> GetCurrentVersionAsync(TableIdentifier table, CancellationToken ct = default) =>
+        ValueTask.FromResult<long?>(_currentVersions.TryGetValue(table, out var ver) ? ver : null);
 
     public ValueTask<long?> GetMinValidVersionAsync(TableIdentifier table, CancellationToken ct = default)
     {
@@ -86,6 +69,7 @@ public sealed class InMemoryChangeVersionStore : IChangeVersionProvider
         TableIdentifier table,
         long sinceVersion,
         long upToVersion,
+        int maxRecords,
         CancellationToken ct = default)
     {
         if (!_changes.TryGetValue(table, out var list))
@@ -99,6 +83,7 @@ public sealed class InMemoryChangeVersionStore : IChangeVersionProvider
             matching = list
                 .Where(c => c.ChangeVersion > sinceVersion && c.ChangeVersion <= upToVersion)
                 .OrderBy(c => c.ChangeVersion)
+                .Take(Math.Max(0, maxRecords))
                 .ToList();
         }
 
