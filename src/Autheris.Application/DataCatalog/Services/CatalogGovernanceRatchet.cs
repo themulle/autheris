@@ -2,6 +2,8 @@ namespace Autheris.Application.DataCatalog.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -27,6 +29,10 @@ public static class CatalogGovernanceRatchet
         var exTable = existing.Table;
         var tableId = exTable.Id != Guid.Empty ? exTable.Id : inTable.Id;
 
+        int? mergedMinGroupSize = exTable.MinGroupSize.HasValue && inTable.MinGroupSize.HasValue
+            ? Math.Max(exTable.MinGroupSize.Value, inTable.MinGroupSize.Value)
+            : exTable.MinGroupSize ?? inTable.MinGroupSize;
+
         // SEC-RATCHET-01: the merge starts from the persisted table so every property a catalog does not own (required filter
         // columns / groups, enforcement mode, physical database, location, row filter, group size, tags, visibility, expected
         // rows, routing fields) survives the sync. Only catalog-owned descriptive fields and the ratcheted governance flags are
@@ -45,7 +51,21 @@ public static class CatalogGovernanceRatchet
             DocumentationSource = inTable.DocumentationSource ?? exTable.DocumentationSource,
             Sensitivity = StricterSensitivity(exTable.Sensitivity, inTable.Sensitivity),
             RequiresFourEyes = exTable.RequiresFourEyes || inTable.RequiresFourEyes,
-            IsActive = exTable.IsActive && inTable.IsActive
+            IsActive = exTable.IsActive && inTable.IsActive,
+            DataSourceType = exTable.DataSourceType != DataSourceType.Sql ? exTable.DataSourceType : inTable.DataSourceType,
+            EnforcementMode = exTable.EnforcementMode != Autheris.Domain.Options.EnforcementMode.AutherisEnforced ? exTable.EnforcementMode : inTable.EnforcementMode,
+            PhysicalDatabaseName = !string.IsNullOrWhiteSpace(exTable.PhysicalDatabaseName) ? exTable.PhysicalDatabaseName : inTable.PhysicalDatabaseName,
+            Location = !string.IsNullOrWhiteSpace(exTable.Location) ? exTable.Location : inTable.Location,
+            HttpEndpoint = exTable.HttpEndpoint ?? inTable.HttpEndpoint,
+            PluginName = !string.IsNullOrWhiteSpace(exTable.PluginName) ? exTable.PluginName : inTable.PluginName,
+            Tags = UnionTags(exTable.Tags, inTable.Tags),
+            Visibility = exTable.Visibility != DatasetVisibility.Hidden ? exTable.Visibility : inTable.Visibility,
+            RlsExpression = !string.IsNullOrWhiteSpace(exTable.RlsExpression) ? exTable.RlsExpression : inTable.RlsExpression,
+            MinGroupSize = mergedMinGroupSize,
+            SmallGroupStrategy = exTable.SmallGroupStrategy ?? inTable.SmallGroupStrategy,
+            RequiredFilterColumns = UnionRequiredFilterColumns(exTable.RequiredFilterColumns, inTable.RequiredFilterColumns),
+            RequiredFilterColumnGroups = UnionRequiredFilterColumnGroups(exTable.RequiredFilterColumnGroups, inTable.RequiredFilterColumnGroups),
+            ExpectedRows = inTable.ExpectedRows ?? exTable.ExpectedRows
         };
 
         var existingColumns = new Dictionary<string, TableColumn>(StringComparer.OrdinalIgnoreCase);
@@ -116,12 +136,206 @@ public static class CatalogGovernanceRatchet
         {
             Table = table,
             Identifier = incoming.Identifier,
+            OwnerTenantId = existing.OwnerTenantId,
             Columns = mergedColumns,
             ColumnMaskingRules = mergedRules,
             PrimaryKeyColumns = replace ? incoming.PrimaryKeyColumns : existing.PrimaryKeyColumns,
             Indexes = replace ? incoming.Indexes : existing.Indexes,
-            ReplaceKeyDefinition = replace
+            RowFilterEvaluation = existing.RowFilterEvaluation,
+            CatalogView = existing.CatalogView,
+            CatalogTags = UnionTags(existing.CatalogTags, incoming.CatalogTags),
+            ReplaceKeyDefinition = replace,
+            ReleaseProfileToCatalogViewers = existing.ReleaseProfileToCatalogViewers,
+            ProfilePublicationPolicy = existing.ProfilePublicationPolicy,
+            PredefinedSyntheticSamples = existing.PredefinedSyntheticSamples,
+            EstimatedRowCount = incoming.EstimatedRowCount ?? existing.EstimatedRowCount,
+            ExpectedRows = incoming.ExpectedRows ?? existing.ExpectedRows,
+            MinGroupSize = existing.MinGroupSize,
+            SmallGroupStrategy = existing.SmallGroupStrategy,
+            DeletedKeyPolicy = existing.DeletedKeyPolicy
         };
+    }
+
+    public static ImmutableArray<string> UnionRequiredFilterColumns(ImmutableArray<string> stored, ImmutableArray<string> incoming)
+    {
+        var s = stored.IsDefault ? ImmutableArray<string>.Empty : stored;
+        var inc = incoming.IsDefault ? ImmutableArray<string>.Empty : incoming;
+        if (s.IsEmpty && inc.IsEmpty) return ImmutableArray<string>.Empty;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var builder = ImmutableArray.CreateBuilder<string>();
+        foreach (var col in s)
+        {
+            if (!string.IsNullOrWhiteSpace(col) && seen.Add(col))
+            {
+                builder.Add(col);
+            }
+        }
+        foreach (var col in inc)
+        {
+            if (!string.IsNullOrWhiteSpace(col) && seen.Add(col))
+            {
+                builder.Add(col);
+            }
+        }
+        return builder.ToImmutable();
+    }
+
+    public static ImmutableArray<ImmutableArray<string>> UnionRequiredFilterColumnGroups(
+        ImmutableArray<ImmutableArray<string>> stored,
+        ImmutableArray<ImmutableArray<string>> incoming)
+    {
+        var s = stored.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : stored;
+        var inc = incoming.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : incoming;
+        if (s.IsEmpty && inc.IsEmpty) return ImmutableArray<ImmutableArray<string>>.Empty;
+        if (s.IsEmpty) return inc;
+        if (inc.IsEmpty) return s;
+
+        var builder = ImmutableArray.CreateBuilder<ImmutableArray<string>>();
+        var seenKeySets = new List<HashSet<string>>();
+
+        foreach (var g in s)
+        {
+            if (g.IsDefaultOrEmpty) continue;
+            var set = new HashSet<string>(g, StringComparer.OrdinalIgnoreCase);
+            if (set.Count > 0 && !seenKeySets.Any(existing => existing.SetEquals(set)))
+            {
+                seenKeySets.Add(set);
+                builder.Add(g);
+            }
+        }
+
+        foreach (var g in inc)
+        {
+            if (g.IsDefaultOrEmpty) continue;
+            var set = new HashSet<string>(g, StringComparer.OrdinalIgnoreCase);
+            if (set.Count > 0 && !seenKeySets.Any(existing => existing.SetEquals(set)))
+            {
+                seenKeySets.Add(set);
+                builder.Add(g);
+            }
+        }
+
+        return builder.ToImmutable();
+    }
+
+    public static IReadOnlyList<string> UnionTags(IEnumerable<string>? existing, IEnumerable<string>? incoming)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (existing != null)
+        {
+            foreach (var t in existing)
+            {
+                if (!string.IsNullOrWhiteSpace(t) && seen.Add(t))
+                    result.Add(t);
+            }
+        }
+        if (incoming != null)
+        {
+            foreach (var t in incoming)
+            {
+                if (!string.IsNullOrWhiteSpace(t) && seen.Add(t))
+                    result.Add(t);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// EXT-06: Disclosure-based masking relaxation check.
+    /// Returns false if incoming tier is higher (strictly tighter);
+    /// returns true if lower (relaxation);
+    /// at equal tier false only when RuleType is equal and every disclosure parameter is equal or stricter:
+    /// KeepPrefix/KeepSuffix/FixedLength-revealed chars not larger, Decimals not larger, RadiusMeters not smaller,
+    /// and PatternOrFormat, Replacement, MaskChar, HmacKeyId, Mode, TokenDomain equal.
+    /// Everything else (incl. type change inside a tier) is a relaxation.
+    /// </summary>
+    public static bool IsMaskingRelaxation(MaskingRule stored, MaskingRule incoming)
+    {
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(incoming);
+
+        var storedTier = MaskingRuleStrength(stored);
+        var incomingTier = MaskingRuleStrength(incoming);
+
+        if (incomingTier > storedTier)
+        {
+            return false;
+        }
+
+        if (incomingTier < storedTier)
+        {
+            return true;
+        }
+
+        // Equal tier: rule type must be equal
+        if (!string.Equals(stored.RuleType, incoming.RuleType, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // KeepPrefix: not larger
+        if ((incoming.KeepPrefix ?? 0) > (stored.KeepPrefix ?? 0))
+        {
+            return true;
+        }
+
+        // KeepSuffix: not larger
+        if ((incoming.KeepSuffix ?? 0) > (stored.KeepSuffix ?? 0))
+        {
+            return true;
+        }
+
+        // FixedLength: if stored hides length (true), incoming must not reveal length (false/null)
+        if (stored.FixedLength == true && incoming.FixedLength != true)
+        {
+            return true;
+        }
+
+        // Decimals: not larger
+        if ((incoming.Decimals ?? 0) > (stored.Decimals ?? 0))
+        {
+            return true;
+        }
+
+        // RadiusMeters: not smaller (larger radius = more noise = stricter privacy)
+        if ((incoming.RadiusMeters ?? 0.0) < (stored.RadiusMeters ?? 0.0))
+        {
+            return true;
+        }
+
+        // Parameters that must be equal
+        if (!string.Equals(stored.PatternOrFormat ?? string.Empty, incoming.PatternOrFormat ?? string.Empty, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.Equals(stored.Replacement ?? string.Empty, incoming.Replacement ?? string.Empty, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (stored.MaskChar != incoming.MaskChar)
+        {
+            return true;
+        }
+
+        if (!string.Equals(stored.HmacKeyId ?? string.Empty, incoming.HmacKeyId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.Equals(stored.Mode ?? string.Empty, incoming.Mode ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.Equals(stored.TokenDomain ?? string.Empty, incoming.TokenDomain ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -46,9 +46,24 @@ public static class DbtEndpoints
             var dryRun = context.Request.Query.ContainsKey("dryRun") &&
                          bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
 
+            Autheris.Domain.Security.SecurityPrincipalContext security;
+            try
+            {
+                security = EndpointSecurity.GetSecurityContext(context);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var caller = new DbtGovernanceImportCaller(
+                new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
+                EndpointSecurity.GetRequestTenant(context),
+                EndpointSecurity.IsCanonicalClusterAdmin(context.User));
+
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, dryRun, EndpointSecurity.GetRequestTenant(context), context.RequestAborted);
+                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, caller, dryRun, context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, manifestTooLarge);
         }).RequireAuthorization()
@@ -257,7 +272,8 @@ public static class DbtEndpoints
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var report = await circuitBreaker.RecordRunResultsAsync(context.Request.Body, context.RequestAborted);
+                var tenant = EndpointSecurity.GetRequestTenant(context);
+                var report = await circuitBreaker.RecordRunResultsAsync(context.Request.Body, tenant, context.RequestAborted);
                 return Results.Ok(report);
             }, runResultsTooLarge);
         }).RequireAuthorization()

@@ -20,7 +20,7 @@ using Xunit;
 
 public sealed class DbtTests
 {
-    private static readonly TenantId CallerTenant = new("tenant_lwe");
+    private static readonly TenantId CallerTenant = new("postgres");
 
     // The direct governance import runs as the calling governance administrator, never as the sync.
     private static readonly DbtGovernanceImportCaller Caller =
@@ -481,7 +481,9 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestWithRelationshipsJson));
-        var (models, relationships, _) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
+        var parsed = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
+        var models = parsed.Models;
+        var relationships = parsed.Relationships;
 
         models.Count.ShouldBe(2);
         relationships.Count.ShouldBeGreaterThanOrEqualTo(1);

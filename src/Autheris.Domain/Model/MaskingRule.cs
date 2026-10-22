@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 
 public sealed record MaskingRule
 {
+    public const int MaxRevealedChars = 16;
+
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TableColumnId { get; init; }
 

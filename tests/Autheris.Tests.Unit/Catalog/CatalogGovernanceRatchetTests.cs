@@ -232,4 +232,166 @@ public sealed class CatalogGovernanceRatchetTests
         colA.Description.ShouldBe("catalog a");
         colA.IsSensitive.ShouldBeTrue();
     }
+
+    [Fact]
+    public void Merge_KeepsStoredRequiredFilterColumns_WhenIncomingHasNone()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var existing = FullyPopulatedExisting(id);
+        var incoming = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" },
+            Columns = [new TableColumn { ColumnName = "a" }]
+        };
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        merged.RequiredFilterColumns.SequenceEqual(new[] { "a" }).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Merge_UnionsRequiredFilterColumnGroups()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var existing = FullyPopulatedExisting(id); // has group ["a", "b"]
+        var incoming = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                SourceName = "d", SchemaName = "s", TableName = "t",
+                RequiredFilterColumnGroups = ImmutableArray.Create(ImmutableArray.Create("c", "d"))
+            },
+            Columns = [new TableColumn { ColumnName = "a" }, new TableColumn { ColumnName = "b" }, new TableColumn { ColumnName = "c" }, new TableColumn { ColumnName = "d" }]
+        };
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        merged.RequiredFilterColumnGroups.Length.ShouldBe(2);
+        merged.RequiredFilterColumnGroups[0].SequenceEqual(new[] { "a", "b" }).ShouldBeTrue();
+        merged.RequiredFilterColumnGroups[1].SequenceEqual(new[] { "c", "d" }).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Merge_KeepsMinGroupSizeAndSmallGroupStrategy()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var existing = FullyPopulatedExisting(id); // MinGroupSize = 11 on Table, 7 on Metadata; SmallGroupStrategy = MergeIntoOther on Table, Suppress on Metadata
+        var incoming = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                SourceName = "d", SchemaName = "s", TableName = "t",
+                MinGroupSize = 5, // smaller than existing 11
+                SmallGroupStrategy = SmallGroupStrategy.MergeToOther
+            },
+            Columns = [new TableColumn { ColumnName = "a" }]
+        };
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        merged.Table.MinGroupSize.ShouldBe(11); // Max(11, 5) = 11
+        merged.Table.SmallGroupStrategy.ShouldBe(SmallGroupStrategy.MergeIntoOther); // existing kept
+        merged.MinGroupSize.ShouldBe(7); // metadata-level governance kept
+        merged.SmallGroupStrategy.ShouldBe(SmallGroupStrategy.Suppress);
+    }
+
+    [Fact]
+    public void Merge_KeepsOwnerTenantAndReleasePolicies()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var existing = FullyPopulatedExisting(id);
+        var incoming = new TableMetadata
+        {
+            Identifier = id,
+            OwnerTenantId = "tenant-other",
+            ReleaseProfileToCatalogViewers = false,
+            ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly,
+            DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys,
+            Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" },
+            Columns = [new TableColumn { ColumnName = "a" }]
+        };
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        merged.OwnerTenantId.ShouldBe("tenant-a");
+        merged.ReleaseProfileToCatalogViewers.ShouldBeTrue();
+        merged.ProfilePublicationPolicy.ShouldBe(DatasetProfilePublicationPolicy.FullCoarsenedProfile);
+        merged.DeletedKeyPolicy.ShouldBe(DeletedKeyPolicy.KnownKeysOnly);
+    }
+
+    private static readonly HashSet<string> CatalogOwnedMetadataProperties = new(StringComparer.Ordinal)
+    {
+        nameof(TableMetadata.Table),
+        nameof(TableMetadata.Identifier),
+        nameof(TableMetadata.Columns),
+        nameof(TableMetadata.ColumnMaskingRules),
+        nameof(TableMetadata.PrimaryKeyColumns),
+        nameof(TableMetadata.Indexes),
+        nameof(TableMetadata.ReplaceKeyDefinition),
+        nameof(TableMetadata.CatalogTags),
+        nameof(TableMetadata.EstimatedRowCount),
+        nameof(TableMetadata.ExpectedRows)
+    };
+
+    [Fact]
+    public void Merge_CopiesOrAllowListsEveryTableAndMetadataProperty()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var existing = FullyPopulatedExisting(id);
+        var incoming = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" },
+            Columns = [new TableColumn { ColumnName = "a", DataType = "int" }, new TableColumn { ColumnName = "b", DataType = "varchar" }]
+        };
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        // 1. Table properties
+        var tableProperties = typeof(Table).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.SetMethod != null);
+
+        foreach (var property in tableProperties)
+        {
+            if (CatalogOwnedTableProperties.Contains(property.Name))
+            {
+                continue;
+            }
+
+            var expected = property.GetValue(existing.Table);
+            var actual = property.GetValue(merged.Table);
+
+            if (property.Name != nameof(Table.Id))
+            {
+                Equals(expected, property.GetValue(new Table())).ShouldBeFalse(
+                    $"fixture must set a non-default value for Table.{property.Name}");
+            }
+
+            Equals(actual, expected).ShouldBeTrue($"Table.{property.Name} must survive the merge without drift");
+        }
+
+        // 2. TableMetadata properties
+        var metadataProperties = typeof(TableMetadata).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.SetMethod != null);
+
+        foreach (var property in metadataProperties)
+        {
+            if (CatalogOwnedMetadataProperties.Contains(property.Name))
+            {
+                continue;
+            }
+
+            var expected = property.GetValue(existing);
+            var actual = property.GetValue(merged);
+
+            Equals(expected, property.GetValue(new TableMetadata())).ShouldBeFalse(
+                $"fixture must set a non-default value for TableMetadata.{property.Name}");
+
+            Equals(actual, expected).ShouldBeTrue(
+                $"TableMetadata.{property.Name} must survive the merge without drift");
+        }
+    }
 }

@@ -104,4 +104,33 @@ public sealed record MultiWatermarkVector
             return Empty;
         }
     }
+
+    public bool Equals(MultiWatermarkVector? other)
+    {
+        if (ReferenceEquals(null, other)) return false;
+        if (ReferenceEquals(this, other)) return true;
+        if (Dimensions.Count != other.Dimensions.Count) return false;
+
+        foreach (var (k, v) in Dimensions)
+        {
+            if (!other.Dimensions.TryGetValue(k, out var otherVal) ||
+                !string.Equals(v, otherVal, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var key in Dimensions.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            hash.Add(key, StringComparer.OrdinalIgnoreCase);
+            hash.Add(Dimensions[key], StringComparer.Ordinal);
+        }
+        return hash.ToHashCode();
+    }
 }
