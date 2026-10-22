@@ -514,35 +514,9 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             return;
         }
 
-        bool IsSatisfied(string reqCol)
-        {
-            if (!isAggregate &&
-                metadata.TenantColumnName != null &&
-                string.Equals(metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
-                rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
-            {
-                return true;
-            }
-
-            if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) &&
-                decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (filter != null &&
-                filter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            return false;
-        }
+        // MISC-04: whole-identifier rule shared with every other read path (no substring matching on the row filter text).
+        bool IsSatisfied(string reqCol) =>
+            RequiredFilterColumnRule.IsColumnSatisfied(reqCol, metadata, decision, filter?.ReferencedColumns, tenantColumnCounts: !isAggregate);
 
         if (metadata.RequiredFilterColumnGroups.Length > 0)
         {

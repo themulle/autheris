@@ -120,25 +120,10 @@ public sealed partial class GovernedTableReadPlanner
         // 3. Enforce Required Filter Columns & Groups (#163 / #221 / #236 / SEC-DATA178-04)
         if (metadata.RequiredFilterColumns.Length > 0 || metadata.RequiredFilterColumnGroups.Length > 0)
         {
-            bool IsSatisfied(string req)
-            {
-                if (request.Filter != null && IsColumnConstrained(request.Filter, req))
-                {
-                    return true;
-                }
-
-                if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) && decision.CombinedRowFilterSql.Contains(req, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls && rls.Predicate.ReferencedColumns.Contains(req.ToLowerInvariant()))
-                {
-                    return true;
-                }
-
-                return false;
-            }
+            // MISC-04: the row filter text counts only through whole identifiers (shared rule); the typed client filter keeps its own check.
+            bool IsSatisfied(string req) =>
+                (request.Filter != null && IsColumnConstrained(request.Filter, req)) ||
+                RequiredFilterColumnRule.IsColumnSatisfied(req, metadata, decision, clientFilterColumns: null, tenantColumnCounts: false);
 
             if (metadata.RequiredFilterColumnGroups.Length > 0)
             {

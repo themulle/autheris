@@ -93,34 +93,10 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
             if (req.Metadata.RequiredFilterColumns.Length > 0 || req.Metadata.RequiredFilterColumnGroups.Length > 0)
             {
-                bool IsSatisfied(string reqCol)
-                {
-                    if (req.Metadata.TenantColumnName != null &&
-                        string.Equals(req.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    if (req.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
-                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
-                    {
-                        return true;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(req.Decision.CombinedRowFilterSql) &&
-                        req.Decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    if (req.PushdownFilter != null &&
-                        req.PushdownFilter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return true;
-                    }
-
-                    return false;
-                }
+                // MISC-04: shared whole-identifier rule.
+                bool IsSatisfied(string reqCol) =>
+                    Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+                        reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ReferencedColumns, tenantColumnCounts: true);
 
                 if (req.Metadata.RequiredFilterColumnGroups.Length > 0)
                 {
