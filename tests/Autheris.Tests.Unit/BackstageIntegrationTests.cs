@@ -209,7 +209,7 @@ public sealed class BackstageIntegrationTests
         var entities = await service.ExportCatalogEntitiesAsync();
 
         // Assert
-        var tableEntity = entities.FirstOrDefault(e => e.Metadata.Name == "data-crm-customers");
+        var tableEntity = entities.FirstOrDefault(e => e.Metadata.Name.StartsWith("data-", StringComparison.Ordinal) && e.Metadata.Annotations.GetValueOrDefault("autheris.io/table-name") == "customers");
         tableEntity.ShouldNotBeNull();
         tableEntity.Metadata.Title.ShouldBe("CRM Customers");
         tableEntity.Metadata.Description.ShouldBe("Global customer master data synced with dbt.");
