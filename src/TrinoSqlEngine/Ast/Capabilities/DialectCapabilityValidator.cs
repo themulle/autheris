@@ -31,6 +31,10 @@ public static class DialectCapabilityValidator
                 case MergeStatement merge when capabilities.MergeShape == MergeClauseShape.OracleSingleClause:
                     ValidateSingleClauseMerge(merge);
                     break;
+                case SetOperationQuery { Right: SetOperationQuery } when !capabilities.IntersectBindsTighter:
+                    // SQLE-03: a right-nested set operation arises only from INTERSECT precedence (parenthesized primaries are rejected by the
+                    // builder); the emitter prints the operands flat, so a dialect that evaluates left to right would change the result.
+                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INTERSECT mixed with UNION/EXCEPT");
                 case SetOperationQuery setOperation when capabilities.MaxCompoundSelectTerms is { } maxTerms:
                     int terms = CountTerms(setOperation);
                     if (terms > maxTerms)

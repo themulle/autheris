@@ -406,15 +406,21 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         _ => throw new NotSupportedException($"Unknown operator: {op}")
     };
 
-    private static bool NeedsParentheses(Expression child, BinaryOperator parentOp, bool isLeft)
+    private bool NeedsParentheses(Expression child, BinaryOperator parentOp, bool isLeft)
     {
         if (child is BinaryExpression childBinary)
         {
             int parentPrec = GetPrecedence(parentOp);
             int childPrec = GetPrecedence(childBinary.Operator);
             if (childPrec < parentPrec) return true;
-            if (childPrec == parentPrec && !isLeft && (parentOp == BinaryOperator.Subtract || parentOp == BinaryOperator.Divide || parentOp == BinaryOperator.Modulo))
-                return true;
+            if (childPrec == parentPrec)
+            {
+                // SQLE-05: a comparison of a comparison is never chained (also on the left); a right operand of equal precedence is
+                // parenthesized unless the operator is the associative AND / OR chain (no noise for those).
+                if (childPrec == ComparisonPrecedence) return true;
+                if (!isLeft && !(parentOp == childBinary.Operator && parentOp is BinaryOperator.And or BinaryOperator.Or)) return true;
+            }
+
             return false;
         }
 
@@ -441,7 +447,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         return false;
     }
 
-    private static int GetPrecedence(BinaryOperator op) => op switch
+    private const int ComparisonPrecedence = 3;
+
+    /// <summary>Binding strength of a binary operator; a dialect overrides it where its operator text differs (SQL Server <c>+</c> concatenation).</summary>
+    protected virtual int GetPrecedence(BinaryOperator op) => op switch
     {
         BinaryOperator.Or => 1,
         BinaryOperator.And => 2,
