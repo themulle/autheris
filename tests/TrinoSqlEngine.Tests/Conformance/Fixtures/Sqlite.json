@@ -1061,7 +1061,7 @@
       "Group": "operator",
       "Sql": "SELECT +a AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT NOT (\"a\") AS \"r\" FROM \"t\"",
+      "Expected": "SELECT \"a\" AS \"r\" FROM \"t\"",
       "Parameters": []
     },
     {
@@ -4646,9 +4646,9 @@
       "Id": "source-026",
       "Group": "source",
       "Sql": "SELECT a FROM t1 AS x (c1, c2)",
-      "Outcome": "ok",
-      "Expected": "SELECT \"a\" FROM \"t1\" AS \"x\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "source-027",

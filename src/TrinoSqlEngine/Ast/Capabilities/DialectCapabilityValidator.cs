@@ -31,9 +31,11 @@ public static class DialectCapabilityValidator
                 case MergeStatement merge when capabilities.MergeShape == MergeClauseShape.OracleSingleClause:
                     ValidateSingleClauseMerge(merge);
                     break;
-                case SetOperationQuery { Right: SetOperationQuery } when !capabilities.IntersectBindsTighter:
+                case SetOperationQuery { Right: SetOperationQuery right } outer when !capabilities.IntersectBindsTighter
+                    && !IsAssociativeUnionPair(outer, right):
                     // SQLE-03: a right-nested set operation arises only from INTERSECT precedence (parenthesized primaries are rejected by the
                     // builder); the emitter prints the operands flat, so a dialect that evaluates left to right would change the result.
+                    // Exception: UNION of the same kind is associative, so the balanced INSERT check-option row tree (CR-ADG-44) stays valid.
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INTERSECT mixed with UNION/EXCEPT");
                 case SetOperationQuery setOperation when capabilities.MaxCompoundSelectTerms is { } maxTerms:
                     int terms = CountTerms(setOperation);
@@ -67,6 +69,9 @@ public static class DialectCapabilityValidator
     }
 
     /// <summary>The leaves of one connected UNION/INTERSECT/EXCEPT tree (SQLite counts them against SQLITE_MAX_COMPOUND_SELECT).</summary>
+    private static bool IsAssociativeUnionPair(SetOperationQuery outer, SetOperationQuery right) =>
+        outer.Operator == SetOperator.Union && right.Operator == SetOperator.Union && outer.Distinct == right.Distinct;
+
     private static int CountTerms(QueryBody body)
     {
         int count = 0;

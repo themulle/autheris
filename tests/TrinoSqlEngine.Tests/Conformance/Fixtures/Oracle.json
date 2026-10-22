@@ -1102,7 +1102,7 @@
       "Group": "operator",
       "Sql": "SELECT +a AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CASE WHEN NOT (\"A\") THEN 1 ELSE 0 END AS \"R\" FROM \"T\"",
+      "Expected": "SELECT \"A\" AS \"R\" FROM \"T\"",
       "Parameters": []
     },
     {
@@ -4790,9 +4790,9 @@
       "Id": "source-026",
       "Group": "source",
       "Sql": "SELECT a FROM t1 AS x (c1, c2)",
-      "Outcome": "ok",
-      "Expected": "SELECT \"A\" FROM \"T1\" \"X\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "source-027",

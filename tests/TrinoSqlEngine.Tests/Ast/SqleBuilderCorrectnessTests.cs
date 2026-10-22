@@ -19,7 +19,7 @@ public sealed class SqleBuilderCorrectnessTests
     private SqlStatement Build(string sql)
     {
         var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions { EnforceReadOnlyQueries = false }).BuildStatement(tree);
     }
 
     // ---- SQLE-01 ----
@@ -44,7 +44,7 @@ public sealed class SqleBuilderCorrectnessTests
     [Fact]
     public void UnaryPlus_InDeleteWhere_Sqlite_NoNot()
     {
-        var compiled = CompilerTestHelpers.Generate(TargetSqlDialect.Sqlite, "DELETE FROM t WHERE id = +5");
+        var compiled = CompilerTestHelpers.Generate(TargetSqlDialect.Sqlite, Build("DELETE FROM t WHERE id = +5"));
 
         Assert.DoesNotContain("NOT", compiled.Sql, StringComparison.OrdinalIgnoreCase);
     }
