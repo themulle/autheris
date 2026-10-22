@@ -624,7 +624,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             .Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null);
 
         long deliveredRowLimit = probeExtraRow && !isDml && maxRows > 0 ? maxRows : 0;
-        long enforcedMaxRows = deliveredRowLimit > 0 ? maxRows + 1 : maxRows;
+        long enforcedMaxRows = deliveredRowLimit > 0 && maxRows < long.MaxValue ? maxRows + 1 : maxRows;
 
         if (!targetDatabaseDialect.HasValue || !SqlDialectMapper.IsExecutable(targetDatabaseDialect.Value))
         {
