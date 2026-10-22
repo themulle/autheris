@@ -18,6 +18,57 @@ using Microsoft.Extensions.Options;
 
 public static class WebhookEndpoints
 {
+    /// <summary>EP-14: reads the EventGrid validation code defensively; false when the body is not a well-formed handshake.</summary>
+    internal static bool TryReadValidationCode(string payload, out string? validationCode)
+    {
+        validationCode = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in root.EnumerateArray())
+                {
+                    if (TryGetCode(item, out validationCode))
+                    {
+                        return true;
+                    }
+                }
+
+                return true;
+            }
+
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            TryGetCode(root, out validationCode);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        static bool TryGetCode(JsonElement element, out string? code)
+        {
+            code = null;
+            if (element.ValueKind == JsonValueKind.Object
+                && element.TryGetProperty("data", out var data)
+                && data.ValueKind == JsonValueKind.Object
+                && data.TryGetProperty("validationCode", out var vc)
+                && vc.ValueKind == JsonValueKind.String)
+            {
+                code = vc.GetString();
+                return true;
+            }
+
+            return false;
+        }
+    }
+
     public static IEndpointRouteBuilder MapWebhookEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
         app.MapPost("/api/webhooks/openmetadata", async (
@@ -99,27 +150,10 @@ public static class WebhookEndpoints
             if (context.Request.Headers.TryGetValue("Aeg-Event-Type", out var eventType) &&
                 string.Equals(eventType.FirstOrDefault(), "SubscriptionValidation", StringComparison.OrdinalIgnoreCase))
             {
-                using var doc = JsonDocument.Parse(payload);
-                string? validationCode = null;
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in doc.RootElement.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("data", out var dataElem) &&
-                            dataElem.TryGetProperty("validationCode", out var vcProp))
-                        {
-                            validationCode = vcProp.GetString();
-                            break;
-                        }
-                    }
-                }
-                else if (doc.RootElement.TryGetProperty("data", out var dataElem) &&
-                         dataElem.TryGetProperty("validationCode", out var vcProp))
-                {
-                    validationCode = vcProp.GetString();
-                }
-
-                return Results.Ok(new { validationResponse = validationCode ?? "" });
+                // EP-14: malformed handshake bodies are a 400, never an unhandled exception on this anonymous route.
+                return TryReadValidationCode(payload, out var validationCode)
+                    ? Results.Ok(new { validationResponse = validationCode ?? "" })
+                    : Results.BadRequest(new { error = "Invalid EventGrid validation payload." });
             }
 
             string? signature = null;
@@ -199,27 +233,10 @@ public static class WebhookEndpoints
             if (context.Request.Headers.TryGetValue("Aeg-Event-Type", out var eventType) &&
                 string.Equals(eventType.FirstOrDefault(), "SubscriptionValidation", StringComparison.OrdinalIgnoreCase))
             {
-                using var doc = JsonDocument.Parse(payload);
-                string? validationCode = null;
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in doc.RootElement.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("data", out var dataElem) &&
-                            dataElem.TryGetProperty("validationCode", out var vcProp))
-                        {
-                            validationCode = vcProp.GetString();
-                            break;
-                        }
-                    }
-                }
-                else if (doc.RootElement.TryGetProperty("data", out var dataElem) &&
-                         dataElem.TryGetProperty("validationCode", out var vcProp))
-                {
-                    validationCode = vcProp.GetString();
-                }
-
-                return Results.Ok(new { validationResponse = validationCode ?? "" });
+                // EP-14: malformed handshake bodies are a 400, never an unhandled exception on this anonymous route.
+                return TryReadValidationCode(payload, out var validationCode)
+                    ? Results.Ok(new { validationResponse = validationCode ?? "" })
+                    : Results.BadRequest(new { error = "Invalid EventGrid validation payload." });
             }
 
             string? signature = null;
