@@ -32,7 +32,7 @@ public sealed class TrinoMetadataColumnDenyTests
         TenantId = Tenant,
         Effect = ConsentEffect.Allow,
         GranteeType = type,
-        GranteeSid = sid == null ? null : new Sid(sid),
+        GranteeSid = sid == null ? (Sid?)null : new Sid(sid),
         RoleName = roleName,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
         ValidTo = DateTimeOffset.UtcNow.AddDays(1),
