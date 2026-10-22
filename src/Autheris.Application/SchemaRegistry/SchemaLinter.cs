@@ -13,7 +13,20 @@ public sealed class SchemaLinter : ISchemaLinter
 
     public SchemaDiffResult Compare(DocumentNode baselineDoc, DocumentNode targetDoc)
     {
+        // MISC-16: both sides are normalised first (extensions merged, duplicates rejected), so the maps below are duplicate-safe.
+        var (baseline, baselineErrors) = SchemaDocumentNormalizer.Normalize(baselineDoc);
+        var (target, targetErrors) = SchemaDocumentNormalizer.Normalize(targetDoc);
+        if (baseline == null || target == null)
+        {
+            throw new SchemaCompareException(
+                [.. baselineErrors.Select(e => $"baseline: {e}"), .. targetErrors.Select(e => $"target: {e}")]);
+        }
+
+        baselineDoc = baseline.Document;
+        targetDoc = target.Document;
         var changes = new List<SchemaChange>();
+        DiffRootOperationTypes(baseline, target, changes);
+        DiffDirectiveDefinitions(baseline, target, changes);
 
         var baselineTypes = baselineDoc.Definitions
             .OfType<ITypeDefinitionNode>()
@@ -44,10 +57,12 @@ public sealed class SchemaLinter : ISchemaLinter
             {
                 case ObjectTypeDefinitionNode baseObj when targetType is ObjectTypeDefinitionNode targetObj:
                     DiffObjectOrInterfaceFields(typeName, baseObj.Fields, targetObj.Fields, changes);
+                    DiffImplementedInterfaces(typeName, baseObj.Interfaces, targetObj.Interfaces, changes);
                     break;
 
                 case InterfaceTypeDefinitionNode baseIface when targetType is InterfaceTypeDefinitionNode targetIface:
                     DiffObjectOrInterfaceFields(typeName, baseIface.Fields, targetIface.Fields, changes);
+                    DiffImplementedInterfaces(typeName, baseIface.Interfaces, targetIface.Interfaces, changes);
                     break;
 
                 case EnumTypeDefinitionNode baseEnum when targetType is EnumTypeDefinitionNode targetEnum:
@@ -74,6 +89,50 @@ public sealed class SchemaLinter : ISchemaLinter
         }
 
         return SchemaDiffResult.FromChanges(changes);
+    }
+
+    private static void DiffRootOperationTypes(NormalizedSchema baseline, NormalizedSchema target, List<SchemaChange> changes)
+    {
+        foreach (var (operation, baseName) in baseline.RootOperationTypes)
+        {
+            if (!target.RootOperationTypes.TryGetValue(operation, out var targetName))
+            {
+                changes.Add(SchemaChange.Breaking("ROOT_OPERATION_TYPE_REMOVED", operation, $"Root {operation} type '{baseName}' was removed."));
+            }
+            else if (!string.Equals(baseName, targetName, StringComparison.Ordinal))
+            {
+                changes.Add(SchemaChange.Breaking("ROOT_OPERATION_TYPE_CHANGED", operation,
+                    $"Root {operation} type changed from '{baseName}' to '{targetName}'."));
+            }
+        }
+    }
+
+    private static void DiffDirectiveDefinitions(NormalizedSchema baseline, NormalizedSchema target, List<SchemaChange> changes)
+    {
+        foreach (var (name, baseDirective) in baseline.Directives)
+        {
+            if (!target.Directives.TryGetValue(name, out var targetDirective))
+            {
+                changes.Add(SchemaChange.Breaking("DIRECTIVE_REMOVED", $"@{name}", $"Directive '@{name}' was removed."));
+                continue;
+            }
+
+            var targetLocations = targetDirective.Locations.Select(l => l.Value).ToHashSet(StringComparer.Ordinal);
+            foreach (var location in baseDirective.Locations.Select(l => l.Value).Where(l => !targetLocations.Contains(l)))
+            {
+                changes.Add(SchemaChange.Breaking("DIRECTIVE_LOCATION_REMOVED", $"@{name}", $"Directive '@{name}' no longer allows location '{location}'."));
+            }
+        }
+    }
+
+    private static void DiffImplementedInterfaces(
+        string typeName, IReadOnlyList<NamedTypeNode> baseInterfaces, IReadOnlyList<NamedTypeNode> targetInterfaces, List<SchemaChange> changes)
+    {
+        var targetSet = targetInterfaces.Select(i => i.Name.Value).ToHashSet(StringComparer.Ordinal);
+        foreach (var name in baseInterfaces.Select(i => i.Name.Value).Where(n => !targetSet.Contains(n)))
+        {
+            changes.Add(SchemaChange.Breaking("INTERFACE_REMOVED", typeName, $"Type '{typeName}' no longer implements interface '{name}'."));
+        }
     }
 
     private static void DiffObjectOrInterfaceFields(

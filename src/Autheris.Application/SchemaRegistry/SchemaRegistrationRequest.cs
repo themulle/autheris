@@ -18,4 +18,7 @@ public sealed class SchemaRegistrationResponse
     public required string Message { get; init; }
     public RegisteredSchema? Schema { get; init; }
     public required SchemaDiffResult Diff { get; init; }
+
+    /// <summary>Stable error code of a rejected registration (for example <c>SCHEMA_COMPARE_FAILED</c>); null otherwise.</summary>
+    public string? ErrorCode { get; init; }
 }
