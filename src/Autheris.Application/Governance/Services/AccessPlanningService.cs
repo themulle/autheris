@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -59,10 +60,23 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly IGrantPolicy _grantPolicy;
     private readonly IRowFilterEvaluationAdminService? _rowFilterEvaluationAdmin;
 
-    private void EnsureGrantsAllowed(AdminPlanAccessRequest request, TableMetadata? meta, IReadOnlyList<AccessPlanDiffItem> diffs, DateTimeOffset now)
+    private void EnsureGrantsAllowed(
+        AdminPlanAccessRequest request,
+        TableMetadata? meta,
+        IReadOnlyList<AccessPlanDiffItem> diffs,
+        DateTimeOffset now,
+        HashSet<string> actorIdentifiers,
+        bool rejectFourEyes)
     {
         foreach (var grant in request.Grants)
         {
+            // GOV-04: an administrator never grants access to themselves (any identifier form, group or role they hold).
+            if (ActorIdentifiers.IsActorSubject(actorIdentifiers, grant.Principal) ||
+                ActorIdentifiers.IsActorSubject(actorIdentifiers, RebacSubject.Parse(grant.Principal).Canonical))
+            {
+                throw new SecurityException("Self-grant is not allowed: an administrator cannot grant access to themselves.");
+            }
+
             var clearPii = diffs.Any(d => d.IsPii
                 && string.Equals(d.Principal, grant.Principal, StringComparison.Ordinal)
                 && string.Equals(d.AfterState, "clear", StringComparison.OrdinalIgnoreCase));
@@ -78,6 +92,17 @@ public class AccessPlanningService : IAccessPlanningService
                 sensitivity,
                 Justification: request.Reason));
             GrantPolicyViolationException.ThrowIfDenied(decision);
+
+            // GOV-04: the single-actor path never grants sensitive access; those grants go through the consent workflow
+            // (two independent approvers). An unknown table is not classified here (no table to gate yet).
+            if (rejectFourEyes && decision.RequiresFourEyes && (meta is not null || clearPii))
+            {
+                throw new GrantPolicyViolationException(GrantDecision.Deny(
+                    GrantErrorCodes.FourEyesRequired,
+                    "This grant requires four-eyes approval; use the consent request workflow instead of the single-administrator access plan.",
+                    decision.Class,
+                    decision.MaxValidTo));
+            }
         }
     }
 
@@ -148,7 +173,8 @@ public class AccessPlanningService : IAccessPlanningService
         AdminPlanAccessRequest request,
         string adminSid,
         string? tenantId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        ClaimsPrincipal? caller = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -191,7 +217,7 @@ public class AccessPlanningService : IAccessPlanningService
         var now = _time.GetUtcNow();
 
         // WP-SC-16: every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
-        EnsureGrantsAllowed(request, meta, diffs, now);
+        EnsureGrantsAllowed(request, meta, diffs, now, ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: false);
 
         var planId = $"plan_{Guid.NewGuid():N}";
         var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
@@ -278,8 +304,15 @@ public class AccessPlanningService : IAccessPlanningService
         AdminApplyAccessRequest request,
         string adminSid,
         TenantId tenantId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        ClaimsPrincipal? caller = null)
     {
+        // GOV-04: the tuples are scoped to the caller tenant only; a missing tenant is never replaced by a domain or default.
+        if (string.IsNullOrWhiteSpace(tenantId.Value))
+        {
+            throw new SecurityException("A tenant is required to apply an access plan.");
+        }
+
         var stored = await ConsumeConfirmedPlanAsync(request, adminSid, tenantId.Value, AccessPlanKind.Access, (plan, token) =>
         {
             foreach (var grant in plan.Request.Grants)
@@ -297,7 +330,7 @@ public class AccessPlanningService : IAccessPlanningService
 
         // WP-SC-16: re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
         var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-        EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, _time.GetUtcNow());
+        EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, _time.GetUtcNow(), ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: true);
 
         // EP-04: the caller's tenant strictly scopes the ReBAC tuples and audit; no Domain or default fallback.
         var effectiveTenantId = tenantId.Value;
@@ -308,12 +341,9 @@ public class AccessPlanningService : IAccessPlanningService
             var parsed = RebacSubject.Parse(grant.Principal);
             var canonicalPrincipal = parsed.Canonical;
 
-            tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, "can_query", $"table:{stored.Request.DatasetId}") { ExpiresAt = grant.ValidUntil });
-
-            foreach (var (column, access) in grant.Columns)
-            {
-                tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, $"access:{access}", $"column:{stored.Request.DatasetId}.{column}") { ExpiresAt = grant.ValidUntil });
-            }
+            // GOV-04: exactly the tuple RebacTableGate checks: the raw subject and the normalised table object id.
+            // Column levels have no ReBAC consumer and are reported as not applied.
+            tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, RebacTableGate.Relation, RebacTableGate.ObjectId(tableId)) { ExpiresAt = grant.ValidUntil });
         }
 
         await _rebacStore.AddTuplesAsync(tuples, ct).ConfigureAwait(false);
@@ -363,7 +393,14 @@ public class AccessPlanningService : IAccessPlanningService
                 TenantId: NormalizeTenant(tenantId) ?? stored.TenantId), ct).ConfigureAwait(false);
         }
 
-        return new AdminApplyAccessResult(true, request.PlanId, tuples.Count, "Access applied successfully.");
+        var columnsNotApplied = stored.Request.Grants.Any(g => g.Columns.Count > 0);
+        return new AdminApplyAccessResult(
+            true,
+            request.PlanId,
+            tuples.Count,
+            columnsNotApplied
+                ? "Table access applied successfully. Column-level access levels are not applied (no ReBAC consumer)."
+                : "Access applied successfully.");
     }
 
     // ---- Issue #107: row filter evaluation plans (SEC-RF107-14) ----

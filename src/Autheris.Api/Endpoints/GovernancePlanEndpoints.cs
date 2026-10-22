@@ -38,7 +38,7 @@ public static class GovernancePlanEndpoints
                 return Results.BadRequest(new { error = "DatasetId and Grants are required." });
             }
 
-            var result = await planningService.PlanAccessAsync(request, adminSid, EndpointSecurity.GetRequestTenant(context).Value, ct).ConfigureAwait(false);
+            var result = await planningService.PlanAccessAsync(request, adminSid, EndpointSecurity.GetRequestTenant(context).Value, ct, context.User).ConfigureAwait(false);
             return Results.Ok(result);
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
@@ -112,7 +112,7 @@ public static class GovernancePlanEndpoints
                     : request with { PlanId = planId };
 
                 var callerTenant = EndpointSecurity.GetRequestTenant(context);
-                var result = await planningService.ApplyAccessAsync(effectiveRequest, adminSid, callerTenant, ct: ct).ConfigureAwait(false);
+                var result = await planningService.ApplyAccessAsync(effectiveRequest, adminSid, callerTenant, ct: ct, caller: context.User).ConfigureAwait(false);
                 return Results.Ok(result);
             }
             catch (SecurityException sex)

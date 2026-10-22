@@ -71,6 +71,24 @@ public sealed class AdminMcpTwoPhaseTests
             .Returns(_mockMetadata);
     }
 
+    // GOV-04: the single-administrator apply path rejects grants that need four-eyes approval, so the apply tests use a
+    // non-sensitive table (the default mock carries PII columns and a CONFIDENTIAL classification).
+    private void UseRegularTable()
+    {
+        var regular = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "public", "orders"),
+            Table = new Table { Id = Guid.NewGuid(), SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
+            Columns = new List<TableColumn>
+            {
+                new() { TableId = Guid.NewGuid(), ColumnName = "id", DataType = "int", IsSensitive = false },
+                new() { TableId = Guid.NewGuid(), ColumnName = "total_amount", DataType = "numeric", IsSensitive = false }
+            },
+            PrimaryKeyColumns = ["id"]
+        };
+        _tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(regular);
+    }
+
     [Fact]
     public async Task AdminPlanAccess_GeneratesDiffAndWarnings_WithoutModifyingState()
     {
@@ -172,6 +190,7 @@ public sealed class AdminMcpTwoPhaseTests
     public async Task AdminApplyAccess_WithValidConfirmationToken_AppliesMutationsAndCreatesWormAudit()
     {
         // Arrange
+        UseRegularTable();
         var service = _service;
         var planRequest = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
@@ -442,6 +461,7 @@ public sealed class AdminMcpTwoPhaseTests
     public async Task AdminConfirmAndApplyAccess_WhenAdminSidContainsColons_Succeeds()
     {
         // Arrange: adminSid has colons (e.g. user:david.admin or tenant:cluster:admin)
+        UseRegularTable();
         const string colonAdminSid = "user:david:governance_admin";
         var planRequest = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
