@@ -406,7 +406,8 @@ public sealed class PluginManager : IPluginManager, IDisposable
         _actionHandlers.Clear();
     }
 
-    private static Dictionary<string, string> LoadManifest(string manifestPath)
+    /// <summary>Shared by <c>AuthPluginHost</c> (EXT-18): flat object, <c>{"plugins": {..}}</c> and <c>{"plugins":[{file,sha256}]}</c>. Parse errors throw (fail closed).</summary>
+    internal static Dictionary<string, string> LoadManifest(string manifestPath)
     {
         var json = File.ReadAllText(manifestPath);
         using var doc = JsonDocument.Parse(json);
