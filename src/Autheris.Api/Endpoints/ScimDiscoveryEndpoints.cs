@@ -22,7 +22,7 @@ public static class ScimDiscoveryEndpoints
                 documentationUri = "https://tools.ietf.org/html/rfc7644",
                 patch = new { supported = true },
                 bulk = new { supported = false, maxOperations = 0, maxPayloadSize = 0 },
-                filter = new { supported = true, maxResults = 1000 },
+                filter = new { supported = false, maxResults = 0 },
                 changePassword = new { supported = false },
                 sort = new { supported = false },
                 etag = new { supported = false },
