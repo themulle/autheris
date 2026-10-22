@@ -158,16 +158,23 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
 
         Directory.CreateDirectory(targetCategoryDir);
 
-        await File.WriteAllTextAsync(filePath, request.Content, ct).ConfigureAwait(false);
+        // A tenant deposit records its tenant and author as a provenance block in the same write as the content, so the
+        // document keeps its owner across restarts (startup sync) and is never promoted to official documentation.
+        var fileContent = DocProvenance.Compose(request.Content, request.TenantId, request.AuthorSid);
+        await File.WriteAllTextAsync(filePath, fileContent, ct).ConfigureAwait(false);
+
+        // Index exactly what a later sync of the file would index (same body, same provenance).
+        var (body, tenantId, authorSid) = DocProvenance.Parse(fileContent);
 
         // Index in-memory for instant discovery (< 100ms)
         var chunks = await _ingestor.IngestMarkdownContentAsync(
-            request.Content,
+            body,
             safeDocId,
             safeAppId,
             request.Category,
-            filePath,
+            ToRelativeSourcePath(filePath),
             ct).ConfigureAwait(false);
+        chunks = WithProvenance(chunks, tenantId, authorSid ?? request.AuthorSid);
 
         await _searchService.IndexChunksAsync(chunks, ct).ConfigureAwait(false);
 
@@ -301,7 +308,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 var category = ResolveCategoryFromPath(relativePath);
                 try
                 {
-                    var chunks = await _ingestor.IngestMarkdownFileAsync(canonicalFile, safeAppId, category, ct).ConfigureAwait(false);
+                    var chunks = await IngestStoredFileAsync(canonicalFile, safeAppId, category, ct).ConfigureAwait(false);
                     allChunks.AddRange(chunks);
                 }
                 catch (Exception ex)
@@ -352,18 +359,10 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    var content = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
-                    var docId = Path.GetFileNameWithoutExtension(file);
                     var relativePath = Path.GetRelativePath(dir, file);
                     var category = ResolveCategoryFromPath(relativePath);
 
-                    var chunks = await _ingestor.IngestMarkdownContentAsync(
-                        content,
-                        docId,
-                        appId,
-                        category,
-                        file,
-                        ct).ConfigureAwait(false);
+                    var chunks = await IngestStoredFileAsync(file, appId, category, ct).ConfigureAwait(false);
 
                     allChunks.AddRange(chunks);
                 }
@@ -421,6 +420,46 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         }
 
         return (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath);
+    }
+
+    /// <summary>
+    /// Indexes a markdown file of the store: the provenance block (if any) is stripped from the content and applied to the
+    /// chunks, and the recorded source path is relative to the store root (never an absolute server path).
+    /// </summary>
+    private async Task<IReadOnlyList<DocChunk>> IngestStoredFileAsync(string file, string appId, DocCategory category, CancellationToken ct)
+    {
+        var fileContent = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
+        var (body, tenantId, authorSid) = DocProvenance.Parse(fileContent);
+        var docId = Path.GetFileNameWithoutExtension(file);
+
+        var chunks = await _ingestor.IngestMarkdownContentAsync(
+            body,
+            docId,
+            appId,
+            category,
+            ToRelativeSourcePath(file),
+            ct).ConfigureAwait(false);
+
+        return WithProvenance(chunks, tenantId, authorSid);
+    }
+
+    private string ToRelativeSourcePath(string fullPath) =>
+        DocProvenance.ToSafeSourcePath(Path.GetRelativePath(_rootPath, fullPath));
+
+    private static IReadOnlyList<DocChunk> WithProvenance(IReadOnlyList<DocChunk> chunks, string? tenantId, string? authorSid)
+    {
+        if (tenantId is null && authorSid is null)
+        {
+            return chunks;
+        }
+
+        var result = new List<DocChunk>(chunks.Count);
+        foreach (var chunk in chunks)
+        {
+            result.Add(chunk with { TenantId = tenantId, AuthorSid = authorSid });
+        }
+
+        return result;
     }
 
     private static DocCategory ResolveCategoryFromPath(string relativePath)

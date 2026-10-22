@@ -38,7 +38,8 @@ public sealed partial class MarkdownDocIngestor : IDocIngestor
 
         var content = await File.ReadAllTextAsync(fullPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
         var docId = Path.GetFileNameWithoutExtension(fullPath);
-        return await IngestMarkdownContentAsync(content, docId, appId, category, fullPath, cancellationToken).ConfigureAwait(false);
+        // The source path is returned to clients (search results, error-code lookups): never record the absolute server path.
+        return await IngestMarkdownContentAsync(content, docId, appId, category, Path.GetFileName(fullPath), cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<DocChunk>> IngestMarkdownContentAsync(
@@ -57,6 +58,8 @@ public sealed partial class MarkdownDocIngestor : IDocIngestor
             return Task.FromResult<IReadOnlyList<DocChunk>>(Array.Empty<DocChunk>());
         }
 
+        // Defense in depth: callers pass a store-relative path, but a rooted path is reduced to the file name.
+        var safeSourceFile = DocProvenance.ToSafeSourcePath(sourceFile);
         var lines = markdownContent.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
         var chunks = new List<DocChunk>();
 
@@ -90,7 +93,7 @@ public sealed partial class MarkdownDocIngestor : IDocIngestor
                 Summary: summary,
                 Keywords: keywords,
                 ErrorCodes: errorCodes,
-                SourceFile: sourceFile,
+                SourceFile: safeSourceFile,
                 AnchorId: currentSectionId,
                 UpdatedAt: DateTimeOffset.UtcNow
             ));
