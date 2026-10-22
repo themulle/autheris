@@ -5,6 +5,8 @@ Method: parallel static audit by area-scoped agents. Each finding is appended
 immediately after discovery. Findings are unverified until fixed/tested;
 severity is the auditor's estimate.
 
+Status marker: "[RESOLVED <sha>]" at the end of a heading = fixed per the fix commit message (checked 2026-10-22).
+
 Entry format:
 [<AREA>-<NN>] <SEVERITY: CRITICAL|HIGH|MEDIUM|LOW> | <bug|security> | <short title>
   Location : <file>:<line>
@@ -118,7 +120,7 @@ Entry format:
   Fix hint : Key by a principal fingerprint (sid + sorted roles + group SIDs + relevant claims) and refuse caching when SID is
              null; invalidate on consent/grant change events.
 
-[EP-01] MEDIUM | security | Unmasked profile approval skips data-owner check when the pattern matches no catalogued table
+[EP-01] MEDIUM | security | Unmasked profile approval skips data-owner check when the pattern matches no catalogued table  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs:472-492
   Problem  : ApproveProfileAssignmentAsync enforces "route (b)" (approver must be the data owner/delegate of every matched
              table) by iterating the tables that the profile pattern matches *right now* in ITableMetadataRepository. If the
@@ -218,7 +220,7 @@ Entry format:
   Scenario : { finance { invoices(after: 2147483647) { totalCount } } } repeated within the cost budget -> expensive full scans.
   Fix hint : Centralize the offset bound inside ExecutePageCoreAsync (reject < 0 or > MaxAllowedOffset) so every resolver inherits it.
 
-[API-01] MEDIUM | security | Entra ID tokens accepted as API access tokens (nonce heuristic only), bypassing read-only scope restriction
+[API-01] MEDIUM | security | Entra ID tokens accepted as API access tokens (nonce heuristic only), bypassing read-only scope restriction  [RESOLVED eaaf7552]
   Location : src/Autheris.Api/Security/EntraTokenPolicy.cs:36-44,49-59 ; src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs:313-314
   Problem  : The JwtBearer scheme accepts the Entra ClientId as a valid audience (needed for v2 access tokens), so an OIDC ID token
              issued for the gateway's own app registration (aud = ClientId) passes signature/issuer/audience/lifetime validation.
@@ -245,7 +247,7 @@ Entry format:
              both epochs are equal (typically both bootstrapped to 1).
   Fix hint : Escape each table component (Uri.EscapeDataString) or length-prefix them, and verify the envelope's table on L1 hits.
 
-[EP-02] MEDIUM | security | Differential-privacy budget self-reset guard (SG-29) bypassed with tenant-qualified client id
+[EP-02] MEDIUM | security | Differential-privacy budget self-reset guard (SG-29) bypassed with tenant-qualified client id  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs:395-408 (with ResolveTenantBoundClientId, GovernanceEndpoints.Access.cs:635-654)
   Problem  : The self-reset check compares the raw route value {clientId} with the caller's client id. The budget key is then
              derived by ResolveTenantBoundClientId, which maps both "me" and "<myTenant>:me" to the same key "<myTenant>:me".
@@ -257,7 +259,7 @@ Entry format:
   Fix hint : Normalize first (compute targetKey for both the route value and the caller id via ResolveTenantBoundClientId) and
              compare the normalized keys; better: require a different principal (four-eyes) for budget resets.
 
-[EP-03] MEDIUM | security | OpenLineage sync resolves tenant from raw "tenant_id" claim (ignores realm binding / tid), defaults to "default"
+[EP-03] MEDIUM | security | OpenLineage sync resolves tenant from raw "tenant_id" claim (ignores realm binding / tid), defaults to "default"  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs:572-573
   Problem  : The handler builds the tenant via context.User.FindFirst("tenant_id") ?? "default" instead of
              EndpointSecurity.GetRequestTenant (SecurityPrincipalContext / realm TenantBinding / tid claim). Any DataOwner
@@ -320,7 +322,7 @@ Entry format:
   Scenario : approveConsentRequest(requestId, description:"Q4 audit", rowFilter:...) -> payload shows description, consent has none.
   Fix hint : Set Description on the atomic consent; include a canonical serialization of rowFilter/columnMasking in the fingerprint.
 
-[EP-04] MEDIUM | bug | REST plan apply omits the caller tenant: ReBAC grants land in a tenant named after the dataset domain
+[EP-04] MEDIUM | bug | REST plan apply omits the caller tenant: ReBAC grants land in a tenant named after the dataset domain  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/GovernancePlanEndpoints.cs:114 (-> Application/Governance/Services/AccessPlanningService.cs:283,292)
   Problem  : POST /api/governance/plans/{planId}/apply calls ApplyAccessAsync(request, adminSid, ct: ct) without tenantId
              (the MCP path passes sessionContext.TenantId). With tenantId == null, ConsumeConfirmedPlanAsync skips the
@@ -422,7 +424,7 @@ Entry format:
   Fix hint : Only strip the last segment when it ends with ".metadata.json" / known metadata file suffixes (or require an
              explicit MetadataLocation + TableRoot in config); never infer a file from an arbitrary dot.
 
-[API-02] MEDIUM | bug | SCIM endpoints reference a non-existent authorization policy "Scim" (every SCIM request fails with 500)
+[API-02] MEDIUM | bug | SCIM endpoints reference a non-existent authorization policy "Scim" (every SCIM request fails with 500)  [RESOLVED eaaf7552]
   Location : src/Autheris.Api/Endpoints/ScimUsersEndpoints.cs:22 ; src/Autheris.Api/Endpoints/ScimGroupsEndpoints.cs:22 ;
              src/Autheris.Api/Security/GatewayPolicies.cs:87-114
   Problem  : Both SCIM route groups call .RequireAuthorization(GatewayAuthSchemes.Scim). RequireAuthorization(string) takes a
@@ -437,7 +439,7 @@ Entry format:
   Fix hint : Register a dedicated policy, e.g. options.AddPolicy("ScimProvisioner", p => p.AddAuthenticationSchemes(GatewayAuthSchemes.Scim)
              .RequireAuthenticatedUser().RequireRole("SCIM_PROVISIONER")), and reference it by name; add an endpoint-level test.
 
-[API-03] MEDIUM | security | SCIM bearer secret grants global ClusterAdmin and lets the caller pick any realm from the URL
+[API-03] MEDIUM | security | SCIM bearer secret grants global ClusterAdmin and lets the caller pick any realm from the URL  [RESOLVED eaaf7552]
   Location : src/Autheris.Api/Security/ScimAuthenticationHandler.cs:48-63,82-91
   Problem  : The SCIM handler validates one global secret pair (IdentityRealmsOptions.Scim.Primary/SecondarySecret) and then
              builds a principal whose realm is taken verbatim from the request path segment after /scim/v2/ and which carries
@@ -587,7 +589,7 @@ Entry format:
   Fix hint : Use the parsed referenced-column set of the row policy (as done for PolicyPredicateRowPolicy) or tokenise the filter and
              compare whole identifiers; fail closed if the filter cannot be analysed.
 
-[EP-05] LOW | security | REST Data API echoes PDP deny reasons and exposes a table-existence oracle
+[EP-05] LOW | security | REST Data API echoes PDP deny reasons and exposes a table-existence oracle  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs:198-209 (messages from Application/Policy/GovernedQueryStages.cs:89-90 and Application/Data/Services/GovernedDataQueryService.cs:89-99)
   Problem  : The UnauthorizedAccessException handler writes ex.Message verbatim. That message is built from
              decision.DeniedReasons (consent/ReBAC/ABAC/virtual-filter diagnostics, e.g. "(ReBAC: Allowed, Consent: Denied ...)",
@@ -717,7 +719,7 @@ Entry format:
   Fix hint : Count IsNull only when Value is true (and Eq/In only with non-null, non-empty values); align the tree check
              with the engine's semantics and add a regression test.
 
-[EP-06] MEDIUM | security | GET synthetic-samples returns predefined rows of any dataset to any authenticated user (no dataset/column authorization)
+[EP-06] MEDIUM | security | GET synthetic-samples returns predefined rows of any dataset to any authenticated user (no dataset/column authorization)  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs:279-285, 643-661
   Problem  : GET /api/v1/catalog/datasets/{id}/synthetic-samples (and /api/catalog/...) only requires authentication. The handler
              resolves any active dataset and returns PredefinedSyntheticSamples (admin- or dbt-supplied rows, explicitly
@@ -1018,7 +1020,7 @@ Entry format:
              (or never match) a qualifier that is the alias of any other source in the same FROM (including derived and
              lateral sources); match unqualified names only when no other source can expose the column.
 
-[EP-07] LOW | security | Classification proposal detail readable by any authenticated user (list is GovernanceAdmin-only)
+[EP-07] LOW | security | Classification proposal detail readable by any authenticated user (list is GovernanceAdmin-only)  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs:145-152
   Problem  : GET /api/governance/classification/proposals/{proposalId} has only RequireAuthorization(); there is no role, owner,
              reviewer or tenant check, while the pending inbox (line 142) and classify/transition require GovernanceAdmin. A
@@ -1326,7 +1328,7 @@ Entry format:
   Scenario : A tenant admin who may create mappings (CreateMappingAsync stores approved_by NULL until ApproveMappingAsync) creates "my-group -> governance.admin/unmask" and never gets it approved (or approves it himself). On the next HTTP request every member of my-group carries the privileged functional-right claim and passes [RequireFunctionalRight] policies - four-eyes on functional rights and the customer-realm ceiling are bypassed for all HTTP endpoints.
   Fix hint : Filter in SQL: "AND approved_by IS NOT NULL AND approved_at IS NOT NULL" (and exclude approved_by = created_by for privileged rights), and route EnterpriseClaimsTransformation through FunctionalRightMapper so there is a single authoritative filter.
 
-[EP-08] MEDIUM | security | ReBAC tuple API: time-bound individual-grant rule (WP-SC-16) only applies to "user:"-prefixed subjects, but query paths evaluate bare SIDs
+[EP-08] MEDIUM | security | ReBAC tuple API: time-bound individual-grant rule (WP-SC-16) only applies to "user:"-prefixed subjects, but query paths evaluate bare SIDs  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/RebacEndpoints.cs:125-138, 158-159 (IsIndividualUserTuple)
              vs src/Autheris.Application/Policy/RebacTableGate.cs:70 (subject = query.UserSid.Value) and
              src/Autheris.Application/Security/Rebac/Services/ZanzibarRebacEvaluator.cs:362 (exact, case-insensitive User match)
@@ -1411,7 +1413,7 @@ Entry format:
   Fix hint : Push negations only after normalising NOT into the guarded operator forms (or apply the collation check to
              every operand under NOT), and treat string range comparisons like negative filters unless exact_compare=true.
 
-[API-04] MEDIUM | security | AccessAuditMiddleware writes raw exception messages (DB errors incl. data values) into the hash-chained audit log, with a wrong status code
+[API-04] MEDIUM | security | AccessAuditMiddleware writes raw exception messages (DB errors incl. data values) into the hash-chained audit log, with a wrong status code  [RESOLVED eaaf7552]
   Location : src/Autheris.Api/Middleware/AccessAuditMiddleware.cs:75-86,105,141-160,205-211
   Problem  : On any unhandled exception the middleware calls auditContext.Error(ex.Message, ...), so the raw exception text becomes
              ReasonCode and is persisted as "reasonCode" in DetailsJson (only control chars stripped, 1024 chars kept). Provider
@@ -1877,7 +1879,7 @@ Entry format:
   Fix hint : Keep the storage kind (ColumnValueKind from DataType) for filters/aggregates and only change the OUTPUT scalar; reject
              string operators on numeric storage kinds; add "MASKED" to the whitelisted codes (fixed message).
 
-[EP-09] MEDIUM | security | WebSQL/Trino statement ownership keyed on PrimarySid ?? "sub" ?? "anonymous": OIDC users share one owner
+[EP-09] MEDIUM | security | WebSQL/Trino statement ownership keyed on PrimarySid ?? "sub" ?? "anonymous": OIDC users share one owner  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/WebSqlEndpoints.Execution.cs (HandleTrinoQueuedStatementRequest / HandleTrinoCancelStatementRequest,
              routes WebSqlEndpoints.cs:64-97) -> src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs:83-91, 332-342
   Problem  : Statement sessions are owned by ResolveUserSid(user) = PrimarySid ?? "sub" ?? "anonymous", which differs from the
@@ -2002,7 +2004,7 @@ Entry format:
   Fix hint : Release the in-memory and cluster registration when processing fails (or register only after success, guarded by a
              short in-flight lock).
 
-[EP-10] LOW | bug | WebSQL wait_timeout / X-Trino-Wait-Timeout parsing throws (OverflowException/ArgumentException) outside the try -> 500
+[EP-10] LOW | bug | WebSQL wait_timeout / X-Trino-Wait-Timeout parsing throws (OverflowException/ArgumentException) outside the try -> 500  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs:338-362 (ParseDuration), called unguarded at
              WebSqlEndpoints.Execution.cs:113 and :416
   Problem  : ParseDuration feeds any parsable double into TimeSpan.FromSeconds/FromMinutes/FromMilliseconds. Values such as
@@ -2448,7 +2450,7 @@ Entry format:
              configured person-key claim; make the guard check a positive "delegated user token" signal per realm instead of a
              negative heuristic.
 
-[EP-11] MEDIUM | security | Scoped access policy API (/api/v1/tenants/{t}/governance/policies) manages policies that are never enforced; created active without approval
+[EP-11] MEDIUM | security | Scoped access policy API (/api/v1/tenants/{t}/governance/policies) manages policies that are never enforced; created active without approval  [RESOLVED b1ae7a42]
   Location : src/Autheris.Api/Endpoints/AccessPolicyEndpoints.cs:50-121 -> src/Autheris.Application/Governance/Policies/ScopedAccessPolicyEngine.cs:42-124 (EvaluateAsync), 229-238
   Problem  : IScopedAccessPolicyEngine.EvaluateAsync has no caller in src/ (only the endpoints and the DI registration reference the
              engine; IAccessPolicyRepository is otherwise only read by recertification). Policies created or updated here - including
