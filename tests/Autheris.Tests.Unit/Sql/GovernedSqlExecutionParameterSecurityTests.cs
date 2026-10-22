@@ -371,9 +371,12 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         }
 
         var service = CreateService(CreateTable(new TableIdentifier(DataSource, "public", "orders")));
-        var rejected = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+        // Fail closed either way: with a gateway map the normalizer rejects the text (policy 4xx); without one the statement
+        // references an unbound placeholder and the executor rejects it as a bad request before anything reaches the source.
+        var rejected = await Should.ThrowAsync<Exception>(async () =>
             await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
 
+        rejected.ShouldBeAssignableTo(withGatewayMap ? typeof(WebSqlPolicyException) : typeof(ArgumentException));
         rejected.Message.ShouldNotContain(Sentinel);
     }
 
