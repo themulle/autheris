@@ -101,7 +101,8 @@ public sealed class SqlaDataSourceAllowlistTests
     [Fact]
     public void EffectiveDataSource_EmptyEverywhere_IsDeniedByTheGuard()
     {
-        var meta = Table("", "");
+        // A TableIdentifier cannot be constructed with an empty domain; a default value is the only way to reach "empty everywhere".
+        var meta = Table("ds1", "") with { Identifier = default };
 
         var effective = DataSourceAllowlistGuard.EffectiveDataSource(Web("ds1"), meta);
 

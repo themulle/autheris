@@ -64,7 +64,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = true },
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm", "crm_db"] });
 
         var target = new TableAccessTarget("crm", "public", "customers", null, "crm.public.customers");
         var sqlMeta = CreateMetadata([target]);
@@ -87,7 +87,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = true },
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm", "crm_db"] });
 
         var target1 = new TableAccessTarget("crm", "public", "customers", "c", "crm.public.customers");
         var target2 = new TableAccessTarget("crm", "public", "orders", "o", "crm.public.orders");
@@ -111,7 +111,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = true },
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm", "erp"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm", "crm_db", "erp", "erp_db"] });
 
         var target1 = new TableAccessTarget("crm", "public", "customers", "c", "crm.public.customers");
         var target2 = new TableAccessTarget("erp", "public", "invoices", "i", "erp.public.invoices");
@@ -136,7 +136,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = true },
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm", "logistics"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["crm", "crm_db", "logistics"] });
 
         var target1 = new TableAccessTarget("crm", "public", "customers", "c", "crm.public.customers");
         var target2 = new TableAccessTarget("logistics", "public", "shipments", "s", "logistics.public.shipments");
@@ -182,7 +182,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = false }, // Disabled!
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["cat1", "cat2"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["cat1", "cat2", "db1", "db2"] });
 
         var target1 = new TableAccessTarget("cat1", "public", "orders", "a", "cat1.public.orders");
         var target2 = new TableAccessTarget("cat2", "public", "orders", "b", "cat2.public.orders");
@@ -207,7 +207,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = true },
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["cat1", "cat2"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["cat1", "cat2", "db1", "db2"] });
 
         var target1 = new TableAccessTarget("cat1", "public", "orders", "a", "cat1.public.orders");
         var target2 = new TableAccessTarget("cat2", "public", "orders", "b", "cat2.public.orders");
@@ -232,7 +232,7 @@ public sealed class QueryRoutingTests
         var router = new CrossSourceQueryRouter(
             repo,
             new CrossSourceOptions { Enabled = true },
-            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["cat1", "cat2"] });
+            new WebSqlOptions { DefaultDataSourceName = "default", AllowedDataSources = ["cat1", "cat2", "db1", "db2"] });
 
         var target1 = new TableAccessTarget("cat1", "public", "orders", "a", "cat1.public.orders");
         var target2 = new TableAccessTarget("cat2", "public", "orders", "b", "cat2.public.orders");

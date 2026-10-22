@@ -30,12 +30,19 @@ public class LineagePdfAndOpenLineageTests
         }
     }
 
+    // NSubstitute cannot proxy the ReadOnlySpan parameters of IAuditAnchorSigner (invalid program), so a plain stub is used.
+    private sealed class FixedSigner(string signature) : IAuditAnchorSigner
+    {
+        public string Sign(ReadOnlySpan<byte> data) => signature;
+
+        public bool Verify(ReadOnlySpan<byte> data, string sig) => sig == signature;
+    }
+
     [Fact]
     public void GdprAuditReportPdfExporter_ShouldGenerateValidPdfDocumentAndAuditSeal()
     {
         // Arrange
-        var signer = Substitute.For<IAuditAnchorSigner>();
-        signer.Sign(default).ReturnsForAnyArgs("abc123sig");
+        var signer = new FixedSigner("abc123sig");
         var exporter = new GdprAuditReportPdfExporter(signer);
         var report = new GdprDisclosureReport(
             TargetTable: "finance.dbo.salary",
