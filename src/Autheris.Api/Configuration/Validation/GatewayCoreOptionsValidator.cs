@@ -40,6 +40,21 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             failures.Add("Gateway:WebSql:AdditionalAllowedFunctions must not list a time zone function; convert_timezone is the governed one.");
         }
 
+        // Issue #277 (FR-11, SEC-277-05/-07): the recursion bound is validated at start (never taken from SQL text), and with the
+        // opt-in on the timeout is the work bound of a recursive statement, so it must be finite and sane.
+        if (opts.WebSql is { } webSql)
+        {
+            if (webSql.MaxRecursionDepth is < 1 or > 10_000)
+            {
+                failures.Add("Gateway:WebSql:MaxRecursionDepth must be between 1 and 10000.");
+            }
+
+            if (webSql.AllowRecursiveCte && webSql.ExecutionTimeoutSeconds is < 1 or > 300)
+            {
+                failures.Add("Gateway:WebSql:AllowRecursiveCte requires Gateway:WebSql:ExecutionTimeoutSeconds between 1 and 300.");
+            }
+        }
+
         if (!opts.Tenancy.IsValid)
         {
             failures.Add("Gateway:Tenancy:Mode must be Single or Multi (empty means Multi).");

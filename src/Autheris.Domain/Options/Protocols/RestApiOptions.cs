@@ -41,6 +41,19 @@ public sealed class WebSqlOptions
     public int MaxTotalStatementSessions { get; init; } = 1000;
     public int StatementRetentionMinutes { get; init; } = 5;
 
+    /// <summary>
+    /// Issue #277 (SEC-277-03): opt-in switch for <c>WITH RECURSIVE</c> in governed read statements. Default <c>false</c>; never enabled by
+    /// a profile. Requires <see cref="ExecutionTimeoutSeconds"/> in 1..300 (the timeout is the work bound, SEC-277-07) and the provider
+    /// temp-space prerequisites of the feature doc (SEC-277-08).
+    /// </summary>
+    public bool AllowRecursiveCte { get; init; } = false;
+
+    /// <summary>
+    /// Issue #277: recursion depth bound (1..10,000) emitted as <c>OPTION (MAXRECURSION n)</c> on SQL Server when
+    /// <see cref="AllowRecursiveCte"/> is on. Validated at start; never taken from SQL text.
+    /// </summary>
+    public int MaxRecursionDepth { get; init; } = 100;
+
     /// <summary>REQ-SQL-128: maximum number of distinct values of one list parameter (1..10,000). Clamped per dialect at runtime.</summary>
     [Range(1, 10_000)]
     public int MaxListParameterValues { get; init; } = 1000;

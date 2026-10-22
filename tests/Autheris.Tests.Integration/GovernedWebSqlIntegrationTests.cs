@@ -77,6 +77,10 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             CREATE TABLE secure_users (id TEXT, email TEXT, tenant_id TEXT);
             CREATE TABLE hr_employees (id TEXT, ssn TEXT, tenant_id TEXT);
             CREATE TABLE payroll (id TEXT, ssn TEXT, tenant_id TEXT);
+            CREATE TABLE org (id TEXT, parent_id TEXT, name TEXT, ssn TEXT, tenant_id TEXT);
+            INSERT INTO org VALUES ('1',NULL,'root','111-11-1111','tenant_alpha'),('2','1','child','222-22-2222','tenant_alpha'),
+                ('3','2','grandchild','333-33-3333','tenant_alpha'),('9',NULL,'foreignroot','999-99-9999','tenant_other'),
+                ('10','9','foreignchild','888-88-8888','tenant_other');
             """;
         cmd.ExecuteNonQuery();
         using var rows = conn.CreateCommand();
@@ -216,12 +220,187 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
 
         // The compiler refuses the self-referencing CTE (it needs WITH RECURSIVE), so nothing is executed and no row can leak. The
         // rewritten form below proves that the physical 'accounts' inside a CTE definition stays tenant scoped.
-        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(attackSql, User("usr_eve", "tenant_evil"), "tenant_evil"));
+        await Should.ThrowAsync<TrinoSqlEngine.SqlCompileNotSupportedException>(() => RunAsync(attackSql, User("usr_eve", "tenant_evil"), "tenant_evil"));
 
         var scoped = await RunAsync(
             "WITH acc AS (SELECT * FROM accounts WHERE tenant_id = 'victim') SELECT * FROM acc",
             User("usr_eve", "tenant_evil"), "tenant_evil");
         scoped.Rows.ShouldBeEmpty();
+    }
+
+    // ---- issue #277: WITH RECURSIVE (opt-in, bounded) ----
+
+    private const string OrgWalk =
+        "WITH RECURSIVE w(id, name) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.name FROM org o JOIN w ON o.parent_id = w.id) SELECT id, name FROM w ORDER BY id";
+
+    private WebApplicationFactory<Program> RecursiveEnabled() =>
+        _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:WebSql:AllowRecursiveCte", "true");
+            builder.UseSetting("Gateway:WebSql:MaxRecursionDepth", "100");
+        });
+
+    private static async Task RegisterOrgAsync(WebApplicationFactory<Program> factory, bool withSsn, Dictionary<string, MaskingRule>? masking = null)
+    {
+        using var scope = factory.Services.CreateScope();
+        var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
+        var columns = new List<TableColumn>
+        {
+            new() { ColumnName = "id", DataType = "varchar" }, new() { ColumnName = "parent_id", DataType = "varchar" },
+            new() { ColumnName = "name", DataType = "varchar" }, new() { ColumnName = "tenant_id", DataType = "varchar" }
+        };
+        if (withSsn)
+        {
+            columns.Add(new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true });
+        }
+
+        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "main", SourceName = "default", SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "main", "org"),
+            Columns = columns,
+            ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
+        });
+    }
+
+    private static async Task<(HttpStatusCode Status, string Body)> PostSqlAsync(WebApplicationFactory<Program> factory, string sql, string tenant = "tenant_alpha")
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant);
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    private static string Code(string body) => JsonDocument.Parse(body).RootElement.GetProperty("code").GetString()!;
+
+    private static string WithoutTrace(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        return string.Join("|", doc.RootElement.EnumerateObject().Where(p => p.Name != "traceId").Select(p => p.Name + "=" + p.Value));
+    }
+
+    [Fact]
+    public async Task WebSql_RecursiveCte_Enabled_Returns200AndOnlyTenantRows()
+    {
+        var factory = RecursiveEnabled();
+        await RegisterOrgAsync(factory, withSsn: true);
+
+        var (status, body) = await PostSqlAsync(factory, OrgWalk);
+
+        status.ShouldBe(HttpStatusCode.OK, body);
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(3);   // root, child, grandchild of tenant_alpha
+        body.ShouldContain("grandchild");
+        body.ShouldNotContain("foreign");                                  // the other tenant's hierarchy is never reached
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task WebSql_RecursiveCte_RowPolicyAndMaskApplyToBothMembers()
+    {
+        var factory = RecursiveEnabled();
+        await RegisterOrgAsync(factory, withSsn: true, new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX-XX-XXXX" } });
+
+        var (status, body) = await PostSqlAsync(factory,
+            "WITH RECURSIVE w(id, ssn) AS (SELECT id, ssn FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id, ssn FROM w ORDER BY id");
+
+        status.ShouldBe(HttpStatusCode.OK, body);
+        using (var doc = JsonDocument.Parse(body))
+        {
+            doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(3);   // anchor and both recursive levels, tenant_alpha only
+        }
+
+        foreach (var raw in new[] { "111-11-1111", "222-22-2222", "333-33-3333", "999-99-9999", "888-88-8888" })
+        {
+            body.ShouldNotContain(raw);                                        // anchor row and recursive members are masked, other tenant absent
+        }
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("WITH RECURSIVE w(id, ssn) AS (SELECT id, ssn FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT max(ssn) FROM w")]
+    [InlineData("WITH RECURSIVE w(id, ssn) AS (SELECT id, ssn FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id FROM w WHERE ssn = '222-22-2222'")]
+    [InlineData("WITH RECURSIVE w(id, ssn) AS (SELECT id, '000' FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT count(*) FROM w GROUP BY ssn")]
+    public async Task WebSql_RecursiveCte_MaskedColumnThroughRecursion_GuardsReject(string sql)
+    {
+        var factory = RecursiveEnabled();
+        await RegisterOrgAsync(factory, withSsn: true, new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX-XX-XXXX" } });
+
+        var (status, body) = await PostSqlAsync(factory, sql);
+
+        status.ShouldBe(HttpStatusCode.Forbidden, body);
+        body.ShouldNotContain("222-22-2222");
+    }
+
+    [Fact]
+    public async Task WebSql_RecursiveCte_DeniedColumnInRecursiveMember_BehavesLikeANonRecursiveReference()
+    {
+        var factory = RecursiveEnabled();
+        await RegisterOrgAsync(factory, withSsn: false);   // ssn is not part of the verified catalog: no access
+
+        var recursive = await PostSqlAsync(factory,
+            "WITH RECURSIVE w(id, x) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.ssn FROM org o JOIN w ON o.parent_id = w.id) SELECT id FROM w");
+        var plain = await PostSqlAsync(factory, "SELECT id, ssn FROM org");
+
+        // The recursive member gets no wider column access than a plain reference: same failure, no row, no value.
+        recursive.Status.ShouldNotBe(HttpStatusCode.OK, recursive.Body);
+        recursive.Status.ShouldBe(plain.Status);
+        Code(recursive.Body).ShouldBe(Code(plain.Body));
+        recursive.Body.ShouldNotContain("111-11-1111");
+    }
+
+    [Fact]
+    public async Task WebSql_RecursiveCte_Disabled_Returns422ConstructNotSupported()
+    {
+        await RegisterOrgAsync(_factory, withSsn: true);
+
+        var (status, body) = await PostSqlAsync(_factory, OrgWalk);
+
+        status.ShouldBe(HttpStatusCode.UnprocessableEntity, body);
+        Code(body).ShouldBe("SQL_CONSTRUCT_NOT_SUPPORTED");
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WebSql_KeywordlessSelfReference_Returns422ConstructNotSupported(bool recursiveEnabled)
+    {
+        var factory = recursiveEnabled ? RecursiveEnabled() : _factory;
+        await RegisterOrgAsync(factory, withSsn: true);
+
+        var existing = await PostSqlAsync(factory, "WITH org AS (SELECT id FROM org) SELECT id FROM org");
+        var unknown = await PostSqlAsync(factory, "WITH ghost AS (SELECT id FROM ghost) SELECT id FROM ghost");
+
+        existing.Status.ShouldBe(HttpStatusCode.UnprocessableEntity, existing.Body);
+        Code(existing.Body).ShouldBe("SQL_CONSTRUCT_NOT_SUPPORTED");
+        unknown.Status.ShouldBe(existing.Status);
+        WithoutTrace(unknown.Body).ShouldBe(WithoutTrace(existing.Body));   // no existence oracle (SEC-277-04)
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task WebSql_UserMaxRecursionHint_IsSyntaxError()
+    {
+        var factory = RecursiveEnabled();
+        await RegisterOrgAsync(factory, withSsn: true);
+
+        var (status, body) = await PostSqlAsync(factory, OrgWalk + " OPTION (MAXRECURSION 32000)");
+
+        status.ShouldBe(HttpStatusCode.BadRequest, body);
+        Code(body).ShouldBe("SQL_SYNTAX_ERROR");
+    }
+
+    [Fact]
+    public async Task WebSql_TablelessRecursiveCte_IsRejectedLikeEveryTablelessStatement()
+    {
+        var factory = RecursiveEnabled();
+
+        var (status, body) = await PostSqlAsync(factory,
+            "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t");
+
+        // WebSQL statements must reference a governed catalog table (existing policy, unchanged by the recursion switch).
+        status.ShouldBe(HttpStatusCode.Forbidden, body);
     }
 
     [Fact]

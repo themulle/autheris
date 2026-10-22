@@ -32,6 +32,7 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
     private static readonly TableIdentity Notes = new("main", "Notes");
     private static readonly TableIdentity Big = new("main", "Big");
     private static readonly TableIdentity Ledger = new("main", "Ledger");
+    private static readonly TableIdentity Org = new("main", "Org");
 
     private readonly FastSqlEngine _engine = new();
     private readonly Policies _policies = new();
@@ -52,6 +53,8 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
             INSERT INTO "Notes" VALUES (1, 'acme', 'exact'), (2, 'acme ', 'trailing space'), (3, 'acme  ', 'two spaces'), (4, 'other', 'foreign');
             CREATE TABLE "Ledger" ("Id" INTEGER PRIMARY KEY, "TenantId" NUMERIC NOT NULL, "Memo" TEXT);
             INSERT INTO "Ledger" VALUES (1, '7', 'seven'), (2, '007', 'stored as 7');
+            CREATE TABLE "Org" ("Id" INTEGER PRIMARY KEY, "TenantId" TEXT NOT NULL, "ParentId" INTEGER);
+            INSERT INTO "Org" VALUES (1, 'acme', NULL), (2, 'acme', 1), (3, 'acme', 1), (4, 'acme', 2), (5, 'other', NULL), (6, 'other', 5);
             CREATE TABLE "Big" ("Id" INTEGER PRIMARY KEY, "TenantId" TEXT NOT NULL);
             WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 3000) INSERT INTO "Big" SELECT i, 'acme' FROM s;
             """);
@@ -74,6 +77,8 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
         new TableCatalogEntry(Notes, ImmutableArray.Create(
             new CatalogColumn("Id", "INTEGER"), new CatalogColumn("TenantId", "TEXT"), new CatalogColumn("Body", "TEXT")), "TenantId", 1),
         new TableCatalogEntry(Big, ImmutableArray.Create(new CatalogColumn("Id", "INTEGER"), new CatalogColumn("TenantId", "TEXT")), "TenantId", 1),
+        new TableCatalogEntry(Org, ImmutableArray.Create(
+            new CatalogColumn("Id", "INTEGER"), new CatalogColumn("TenantId", "TEXT"), new CatalogColumn("ParentId", "INTEGER")), "TenantId", 1),
         new TableCatalogEntry(Ledger, ImmutableArray.Create(
             new CatalogColumn("Id", "INTEGER"), new CatalogColumn("TenantId", "NUMERIC"), new CatalogColumn("Memo", "TEXT")), "TenantId", 1)
     }, "main");
@@ -324,6 +329,48 @@ public sealed class AstCompilerSqliteExecutionTests : IAsyncLifetime
         await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
             _conn, TimeSpan.FromMilliseconds(400), () => RunAsync(compiled), CancellationToken.None));
         clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    // ---- issue #277: recursive CTE hierarchy walk and bounds ----
+
+    [Fact]
+    public async Task RecursiveCte_HierarchyWalk_ReturnsSameRowsAsUnsecuredQuery()
+    {
+        NoRowPolicy(Org);
+        var secured = await IdsAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parentid IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parentid = w.id) SELECT id FROM w");
+
+        await using var raw = _conn.CreateCommand();
+        raw.CommandText = """
+            WITH RECURSIVE w(id) AS (SELECT "Id" FROM "Org" WHERE "ParentId" IS NULL AND "TenantId" = 'acme'
+                UNION ALL SELECT o."Id" FROM "Org" o JOIN w ON o."ParentId" = w.id WHERE o."TenantId" = 'acme')
+            SELECT id FROM w ORDER BY id
+            """;
+        var unsecured = new List<long>();
+        await using (var reader = await raw.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync()) unsecured.Add(reader.GetInt64(0));
+        }
+
+        secured.ShouldBe(unsecured);
+        secured.ShouldBe(new long[] { 1, 2, 3, 4 });
+        (await IdsAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parentid IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parentid = w.id) SELECT id FROM w", tenant: "other")).ShouldBe(new long[] { 5, 6 });
+    }
+
+    [Fact]
+    public async Task RecursiveCte_CounterToThree_ReturnsThreeRows() =>
+        (await IdsAsync("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t")).ShouldBe(new long[] { 1, 2, 3 });
+
+    [Fact]
+    public async Task RecursiveCte_OuterAggregateOverRunaway_IsBounded()
+    {
+        var compiled = Compile("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c");
+        var clock = Stopwatch.StartNew();
+
+        var ex = await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
+            _conn, TimeSpan.FromMilliseconds(500), () => RunAsync(compiled), CancellationToken.None));
+
+        Autheris.Application.Common.DataAccessErrorClassifier.Classify(ex).ShouldBe(Autheris.Application.Common.DataAccessErrorKind.Timeout);
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
     }
 
     [Fact]

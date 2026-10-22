@@ -34,6 +34,7 @@ using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
+using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
 /// <summary>WP-X0a (SEC-X1-01): no governed error surface returns or persists <c>Exception.Message</c> in any environment.</summary>
@@ -125,6 +126,45 @@ public sealed class SqlErrorSurfacesTests
         await WebSqlEndpoints.WriteWebSqlErrorAsync(b, new TrinoSqlEngine.Governance.PolicyConflictException("exists"), NullLogger.Instance, CancellationToken.None);
 
         (await ReadAsync(a)).ShouldBe(await ReadAsync(b));
+    }
+
+    [Fact]
+    public async Task RecursiveCteDisabled_Is422ConstructNotSupported()
+    {
+        var context = Context("Production");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(
+            context, new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, HostileMarker), NullLogger.Instance, CancellationToken.None);
+
+        var (status, body) = await ReadAsync(context);
+
+        status.ShouldBe(422);
+        body.ShouldNotContain(HostileMarker);
+        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("SQL_CONSTRUCT_NOT_SUPPORTED");
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer, 530)]
+    [InlineData(TargetSqlDialect.Oracle, 32044)]
+    public async Task SEC_277_07_RecursionLimitProviderError_ResponseContainsNoDriverText(TargetSqlDialect dialect, int number)
+    {
+        var mapped = DmlErrorSanitizer.Map(dialect, new FakeRecursionDbException(HostileMarker, number));
+        var context = Context("Production");
+
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, mapped, NullLogger.Instance, CancellationToken.None);
+
+        var (status, body) = await ReadAsync(context);
+        status.ShouldBe(422);
+        body.ShouldNotContain(HostileMarker);
+        mapped.Message.ShouldNotContain(HostileMarker);
+        var root = JsonDocument.Parse(body).RootElement;
+        root.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
+        root.GetProperty("message").GetString().ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage("SQL_LIMIT_EXCEEDED"));
+    }
+
+    private sealed class FakeRecursionDbException(string message, int number) : System.Data.Common.DbException(message)
+    {
+        public int Number { get; } = number;
     }
 
     [Fact]

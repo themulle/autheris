@@ -209,6 +209,14 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             throw new ArgumentException("The SQL statement could not be parsed.", nameof(rawSql), parseEx);
         }
 
+        // SEC-277-04 / SEC-277-03: answered from the analysis alone, before any table lookup, so the response never depends on whether a
+        // name is an existing, a forbidden or an unknown table. A recursive WITH in DML is never permitted (read-only scope).
+        if (metadata.HasNonRecursiveSelfReference ||
+            (metadata.HasRecursiveCte && (!webSqlOptions.AllowRecursiveCte || metadata.StatementType != SqlStatementType.Select)))
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "recursive common table expression");
+        }
+
         if (metadata.StatementType == SqlStatementType.Ddl)
         {
             throw new WebSqlPolicyException("DDL statements (CREATE, DROP, ALTER, TRUNCATE, GRANT, REVOKE) are strictly forbidden in WebSQL.");

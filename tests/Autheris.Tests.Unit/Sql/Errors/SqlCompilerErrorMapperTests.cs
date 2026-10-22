@@ -52,6 +52,7 @@ public sealed class SqlCompilerErrorMapperTests
         { "affected-rows", () => new GovernedSqlException(GovernedSqlErrorCodes.AffectedRowsLimit, TargetSqlDialect.PostgreSql), 422, "DML_AFFECTED_ROWS_LIMIT", null },
         { "data-error", () => new GovernedSqlException(GovernedSqlErrorCodes.DataError, TargetSqlDialect.PostgreSql), 422, "SQL_DATA_ERROR", null },
         { "provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.PostgreSql), 502, "SQL_PROVIDER_ERROR", null },
+        { "recursion-limit", () => new GovernedSqlException(GovernedSqlErrorCodes.LimitExceeded, TargetSqlDialect.SqlServer), 422, "SQL_LIMIT_EXCEEDED", null },
         // REQ-SQL-130 (T-27): one stable code per cause; the exception is not a SecurityException, so it is never the generic 403.
         { "timezone-invalid", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid), 400, "SQL_TIMEZONE_INVALID", null },
         { "timezone-argument", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument), 422, "SQL_TIMEZONE_ARGUMENT", null },

@@ -9,6 +9,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 
 public enum QuerySourceClass
@@ -74,6 +75,19 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
+        // SEC-277-04: a keyword-less self-reference is answered before any table lookup, so the response is the same whether the name is an
+        // existing, a forbidden or an unknown table (no existence oracle).
+        if (metadata.HasNonRecursiveSelfReference)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "a CTE that references itself requires the RECURSIVE keyword");
+        }
+
+        // SEC-277-03: the opt-in gate runs before any table lookup (also for table-less statements).
+        if (metadata.HasRecursiveCte && !_webSqlOptions.AllowRecursiveCte)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE is not enabled");
+        }
+
         if (metadata.ReferencedTables.Count == 0)
         {
             return new QueryRoutingDecision(QuerySourceClass.HomogeneousSql, Array.Empty<ResolvedSourceTable>());
@@ -133,6 +147,12 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
 
         if (isCrossSource)
         {
+            // SEC-277-12 / D-8: no recursive CTE across sources (the staging engine rejects RECURSIVE); decided before planning or staging.
+            if (metadata.HasRecursiveCte)
+            {
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE across data sources");
+            }
+
             if (isDml)
             {
                 throw new WebSqlPolicyException("DML statements across multiple data sources or HTTP APIs are not permitted in WebSQL.");

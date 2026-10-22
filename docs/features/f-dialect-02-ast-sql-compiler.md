@@ -207,7 +207,7 @@ Applies to data sources whose provider is Oracle (`DataSources:Connections:<name
 
 - **Functions.** `DialectCapabilities.Functions` is a declarative per-dialect map built from the WebSQL allowlist (`SqlFunctionAllowlists`) plus the Trino functions the compiler rewrites. A function without a rule is rejected. `WebSql:AdditionalAllowedFunctions` and `CompileRequest.AllowedFunctions` can only narrow the map; qualified function names are never accepted from the caller list. A built-in deny list (for example `reflect`, `java_method`, `secret`, `IS_ROLEMEMBER`, `DBURITYPE`, `XMLTYPE`; on SQLite `load_extension`, `pragma_*`, `sqlite_*` and `gateway_hmac_sha256` from user SQL) is never permitted. Table functions are rejected.
 - **CAST.** Closed target-type set (section 2.2 step 4). The emitter spells types through the dialect's map; request text is never emitted as a type.
-- **CTEs.** The CTE definition is emitted as a delimited identifier and every reference to it is rewritten to the same identifier. A recursive CTE name that equals a catalog table is rejected; recursive CTEs are not usable in WebSQL. CTE names that differ only by case within one visible scope are rejected. A non-recursive CTE that shadows a physical table has its body secured.
+- **CTEs.** The CTE definition is emitted as a delimited identifier and every reference to it is rewritten to the same identifier. `WITH RECURSIVE` is opt-in (`Gateway:WebSql:AllowRecursiveCte`, default `false`) and read-only: with the switch off, and for any recursive WITH in INSERT, UPDATE, DELETE or MERGE, the statement is a 422 `SQL_CONSTRUCT_NOT_SUPPORTED`; the check runs first, before any table lookup, in the router, the rewriter and the compiler. With the switch on, the analyzer and the compiler agree on scope: the name of a CTE of a `WITH RECURSIVE` is in scope inside its own body (and, per CTE in order, for the following CTEs), so a self-reference is a CTE reference and never a table. The `RECURSIVE` keyword is required in the input: a CTE that references its own name without it is a 422 `SQL_CONSTRUCT_NOT_SUPPORTED` before any table lookup (on the router, the MCP target resolver and the rewriter), whether the name is an existing, a forbidden or an unknown table, because in Trino SQL such a reference names the outer table. A recursive CTE name that equals a table of the request catalog is rejected; a name that equals a table the statement does not reference is a plain CTE and behaves like any unknown name. A recursive CTE across data sources is a 422 before any provider call or staging; the OLAP/DuckDB staging path rejects `RECURSIVE`. Tenant filter, row policy and masks are applied at every table scan, so the anchor and the recursive member are secured identically; the masked-output set of a recursive CTE is the fixed point over all members, so the predicate, aggregate and join guards behave as for a non-recursive CTE. Policy fragments, virtual filters and every request not built by `CompileRequestFactory` keep the switch off. CTE names that differ only by case within one visible scope are rejected. A non-recursive CTE that shadows a physical table has its body secured.
 - **Names.** Three-part names select the catalog and are checked against the data source; one- and two-part names that are ambiguous across catalogs are rejected. Unqualified names resolve through the pinned default schema.
 
 ### 5.3 Byte-exact tenant comparison
@@ -279,6 +279,7 @@ The client message is always the fixed message of the code; it never contains `E
 | `SqlCompileNotSupportedException` (reason `Construct`), `AstBuildException` | 422 | `SQL_CONSTRUCT_NOT_SUPPORTED` |
 | `SqlCompileNotSupportedException` (reason `StatementClass`) | 403 | `SQL_STATEMENT_NOT_PERMITTED` |
 | `SqlCompileNotSupportedException` (reason `Dialect`) | 501 | `SQL_DIALECT_NOT_SUPPORTED` |
+| `GovernedSqlException` `SQL_LIMIT_EXCEEDED` (SQL Server error 530 `MAXRECURSION` exhausted, Oracle ORA-32044 cycle in a recursive WITH) | 422 | `SQL_LIMIT_EXCEEDED` (no `limit`, fixed message) |
 | `SqlLimitExceededException` (any `SqlLimitKind`), compile budget (`OperationCanceledException` with inner `TimeoutException`) | 422 | `SQL_LIMIT_EXCEEDED` (+ `limit`) |
 | `UnfilteredDmlException` | 403 | `SQL_UNFILTERED_DML` |
 | `MaskedAggregationException` (masked column as aggregate argument or `GROUP BY` expression) | 403 | `AGGREGATION_ON_MASKED_COLUMN` |
@@ -297,6 +298,7 @@ The client message is always the fixed message of the code; it never contains `E
 | Execution timeout / source unavailable (`DataAccessErrorClassifier`, after all rules) | 504 / 503 | `SQL_TIMEOUT` / `SQL_SOURCE_UNAVAILABLE` |
 
 - `SQL_POLICY_DENIED` is the one code for "table not usable": not registered, inactive, no columns, case-spelling conflict, governance column missing in the database, catalog load failure, unparsable or conflicting policy, access-decision deny. A denied (hidden) column and a column that does not exist produce the same code and message, so a response never tells whether a table or column exists.
+- A recursive statement that is not stopped by a depth or cycle error ends at `Gateway:WebSql:ExecutionTimeoutSeconds` as 504 `SQL_TIMEOUT` (PostgreSQL, SQLite through the execution guard, Oracle when the database does not raise ORA-32044). The driver text of a 530 or ORA-32044 error is never part of the response, the audit record or the log message.
 - `SQL_POLICY_VIOLATION` is reserved for statement-level rules that do not depend on a table: DDL, a function that is not permitted, a read-only token, a missing writer role, a table-less statement.
 - `SQL_COMPILER_INVARIANT` and `DML_CHECKED_EXECUTION_REQUIRED` are counted by `autheris_sql_compiler_invariant_failures_total`.
 - Other codes of the tenant middleware: 403 `TENANT_UNKNOWN`, 429 `TENANT_REGISTRATION_RATE_LIMITED`, 503 `TENANT_REGISTRY_UNAVAILABLE`, 403 `CROSS_TENANT_ACCESS_FORBIDDEN`, 401 `UNAUTHORIZED_NO_SID`.
@@ -325,6 +327,7 @@ Every governed statement writes an audit record with:
 | `compiler_version` | `CompiledSql.CompilerVersion` (for example `ast-compiler/1.0`) |
 | `dialect` | The target dialect of the compiled statement |
 | `bind_count` | Number of bound parameters (never values) |
+| `recursiveCte` | `true` when the statement contains a `WITH RECURSIVE`; absent otherwise. Written on the success record and on the failure, timeout and limit records of the statement, also when the compiled template came from the cache |
 | `sql.compiled_digest` | `HMAC-SHA256(k_digest, CompilerVersion ‖ Dialect ‖ CompiledSql.Sql ‖ parameter shape)`; the shape is (ordinal, type, origin) only; 64 hex characters |
 | `originalSqlHash` | `HMAC-SHA256(k_original, redacted statement)`: the client statement with every literal replaced by `@p_redacted`; statements that differ only in values share the hash |
 | `compiledSql` | The compiled text (markers only, no values by construction), only when `Gateway:Audit:StoreCompiledSql = true` (default `false`) |
@@ -364,6 +367,8 @@ Correlated consent filters (Casbin) are covered by the pre-deploy lint `tools/Po
 | `Gateway:WebSql:DmlWriterRoles` | empty | Roles allowed to run DML |
 | `Gateway:WebSql:MaxAffectedRows` | `1000` | Affected-row limit per DML statement, enforced in the transaction; `0` = unlimited (listed as a DANGER bypass when DML is enabled) |
 | `Gateway:WebSql:ExecutionTimeoutSeconds` | `30` | Command timeout; SQLite statements are interrupted at this time (504) |
+| `Gateway:WebSql:AllowRecursiveCte` | `false` | Permits `WITH RECURSIVE` in read statements. Requires `ExecutionTimeoutSeconds` between 1 and 300 (the start fails otherwise) and logs one startup warning that names the temp-space prerequisite below |
+| `Gateway:WebSql:MaxRecursionDepth` | `100` | Recursion depth, 1 to 10000 (the start fails outside the range); emitted on SQL Server as `OPTION (MAXRECURSION n)`, the only text the invariant checker accepts as an `OPTION` clause. Never taken from SQL text; a user-written `OPTION (...)` is a syntax error |
 | `Gateway:WebSql:AdditionalAllowedFunctions` | empty | Narrows the dialect function map; never widens it |
 | `Gateway:WebSql:DefaultMaxRows`, `MaxAllowedRows` | `1000`, `10000` | Row caps, enforced in the compiled statement |
 | `Gateway:DataSources:Connections:<name>:DefaultSchema` | unset | Default schema pinned per rental (PostgreSQL, Oracle) |
@@ -378,6 +383,8 @@ Correlated consent filters (Casbin) are covered by the pre-deploy lint `tools/Po
 | `Gateway:TenantIsolation:Registry:WindowSeconds` | `60` | Budget window |
 | `Gateway:TenantIsolation:Registry:CacheTtlSeconds` | `60` | Positive cache TTL; a collision recorded by another replica takes effect within this time |
 | `Gateway:TenantIsolation:Registry:MaxCacheEntries`, `MaxTrackedIssuers` | `10000`, `1024` | Cache and issuer bounds |
+
+**Deployment prerequisite for `AllowRecursiveCte`.** The depth is not a work bound (fan-out multiplies rows per level); the execution timeout is. A recursive statement can fill provider temp space until the timeout fires, and the gateway has no in-code bound for it. Before enabling the switch, limit temp space on the gateway database role: PostgreSQL `temp_file_limit` and `work_mem`, an Oracle temp tablespace quota or profile, and SQL Server tempdb limits. The gateway applies the same concurrency and rate limits, row cap and timeout to recursive statements as to every WebSQL statement.
 
 Removed or inert settings:
 
@@ -413,6 +420,8 @@ On a pull request the `sql-compiler-gate` job starts in parallel with the other 
 
 **Accepted differences.** Every differential outcome that deviates from the frozen legacy result is recorded in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json`. `entries` group statements per dialect, class (`ast-stricter`) and reason (for example `SecurityException`, `MaskedAggregationException`, `UnfilteredDmlException`) and carry a concrete `justification`, an `issue`, a `reviewer` and an `approval` of `pending` or `approved`. `legacyDefects` record statements where the legacy result itself was wrong (for example an unexpanded `WITH RECURSIVE` member). `AcceptedDifferencesWriter` proposes new entries as `pending` with a placeholder justification. Under `SQLGATE_PROFILE=cutover`, `CutoverPrecondition_EveryAcceptedDifferenceIsApproved` fails while any entry is `pending`.
 
+**Recursive CTE tests (issue #277).** `CrossSourceQueryRouterRecursiveCteTests` (gate order, keyword-less self-reference without an existence oracle, cross-source rejection), `WebSqlRecursionOptionsValidationTests` (depth range, timeout 1..300, startup warning), `SqlErrorSurfacesTests.RecursiveCteDisabled_Is422ConstructNotSupported`, `McpRecursiveCteGuardrailTests`, `GovernedSqlExecutorX1Tests` (`recursiveCte` audit field on success, failure and limit records, no driver text), `GovernedWebSqlIntegrationTests.WebSql_RecursiveCte_*` and `WebSql_KeywordlessSelfReference_*` (endpoint level: tenant rows, row policy and masks on both members, guards, 422 codes, user `OPTION` hint is a syntax error), and per provider `RecursiveCte_HierarchyWalk_ReturnsSameRowsAsUnsecuredQuery`, `RecursiveCte_CounterToThree_ReturnsThreeRows`, `RecursiveCte_OuterAggregateOverRunaway_IsBounded` (SQL Server `SQL_LIMIT_EXCEEDED`; PostgreSQL and SQLite timeout; Oracle ORA-32044 or timeout), SQL Server `RecursiveCte_CyclicData_StopsAtMaxRecursionDepth` and Oracle `RecursiveCte_CyclicData_MapsCycleErrorToLimitExceeded`.
+
 ### 8.2 Architecture guards
 
 `tests/Autheris.Tests.Architecture/CutoverArchitectureTests.cs` scans every project under `src` at IL level. Each scan has a positive control.
@@ -432,7 +441,8 @@ On a pull request the `sql-compiler-gate` job starts in parallel with the other 
 - Literal bind types follow the literal's type. Comparing a literal with a column of another type (for example a numeric literal against a text tenant column) is rejected or can raise a provider conversion error.
 - Triggers that change policy columns after an insert are not covered by the check option. Governed tables must not have such triggers.
 - The catalog `DataType` and `Collation` come from database metadata; the INSERT check option, the bind types and the Databricks collation shortcut trust them.
-- Not usable on the governed path: recursive CTEs, table functions, qualified function names, and on SQL Server and SQLite any `[` token (bracket lexer differential guard).
+- Not usable on the governed path: table functions, qualified function names, and on SQL Server and SQLite any `[` token (bracket lexer differential guard).
+- Recursive CTEs (opt-in, section 5.2) are read-only and single-source. The bound per dialect: SQL Server stops at `MaxRecursionDepth` (`OPTION (MAXRECURSION n)`, error 530, `SQL_LIMIT_EXCEEDED`); Oracle stops on a detected cycle (ORA-32044, `SQL_LIMIT_EXCEEDED`; the database also raises it for an unbounded counter); every other runaway, including a non-cyclic one on PostgreSQL and SQLite, ends at the execution timeout (`SQL_TIMEOUT`). The row cap of the outer statement stops a streaming plan early on PostgreSQL, SQLite and SQL Server, but a blocking operator (aggregate, `ORDER BY`, `DISTINCT`, hash join) defeats it, so the cap is best effort and never the bound. A table-less recursive statement is refused like every table-less WebSQL statement.
 - Client-named parameters are not supported in federated (cross-source) queries; such a statement fails closed.
 - The GraphQL tree compiler and the OLAP/staging reads (section 2.1) do not run through `Compile`; they render the typed policy model.
 - Oracle uses `Oracle.ManagedDataAccess.Core` under the Oracle Free Use Terms and Conditions; the license review is a release gate for announcing Oracle as supported.
@@ -476,7 +486,7 @@ Reference for operators and API clients moving from a release with the legacy to
 - Constant-only DML predicates count as unfiltered DML.
 - Qualified functions are not accepted from the caller list; `AdditionalAllowedFunctions` only narrows the dialect function map; an allowlisted table function is still rejected.
 - `FETCH FIRST ... WITH TIES` is downgraded under an enforced row cap.
-- Recursive CTEs are not usable.
+- A recursive CTE is accepted only with `Gateway:WebSql:AllowRecursiveCte` (default `false`), read-only and single-source; the bound is the per-dialect rule of section 9.
 - HMAC-masked columns are rejected in predicates and joins.
 - A masked column cannot be an aggregate argument (including `FILTER` and the ordered-aggregate `ORDER BY`) or a grouping expression in any SELECT (`AGGREGATION_ON_MASKED_COLUMN`); a bare whole-row reference (`SELECT t FROM t`, `to_json(t)`) to a table with masked columns is rejected in a SELECT list, enforced by the visitor and again by the coverage verifier.
 - An INSERT that names a foreign tenant is a security rejection.

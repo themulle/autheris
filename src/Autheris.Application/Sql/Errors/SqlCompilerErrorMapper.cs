@@ -163,6 +163,9 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.ConstraintViolation => Of(409, code),
         GovernedSqlErrorCodes.AffectedRowsLimit => Of(422, code),
         GovernedSqlErrorCodes.DataError => Of(422, code),
+        // Issue #277 (SEC-277-06): SQL Server MAXRECURSION (530) and Oracle cycle detection (ORA-32044) end a recursive statement; a limit, like the
+        // compile-time limits (422), with the fixed message and no limit kind.
+        GovernedSqlErrorCodes.LimitExceeded => Of(422, code),
         GovernedSqlErrorCodes.ProviderError => Of(502, code),
         GovernedSqlErrorCodes.CheckedExecutionRequired => Of(500, code),
         // An unknown governed code is a gateway defect: fail closed.

@@ -23,6 +23,21 @@ using Microsoft.Extensions.Logging;
 
 public static class GatewayStartupValidator
 {
+    /// <summary>
+    /// Issue #277 (SEC-277-08): with <c>WebSql:AllowRecursiveCte</c> on, a recursive statement can fill provider temp space until the
+    /// execution timeout fires; the gateway has no in-code bound for it. One warning names the values and the deployment prerequisite.
+    /// </summary>
+    internal static void WarnAboutRecursiveCte(GatewayOptions options, ILogger? logger)
+    {
+        if (options.WebSql is { AllowRecursiveCte: true } webSql)
+        {
+            logger?.LogWarning(
+                "WebSQL WITH RECURSIVE is enabled (MaxRecursionDepth {MaxRecursionDepth}, ExecutionTimeoutSeconds {TimeoutSeconds}). The timeout is the work bound; " +
+                "limit temp space on the gateway database roles (PostgreSQL temp_file_limit/work_mem, Oracle temp tablespace quota or profile, SQL Server tempdb limits).",
+                webSql.MaxRecursionDepth, webSql.ExecutionTimeoutSeconds);
+        }
+    }
+
     public static void ValidateStartup(
         GatewayOptions options,
         IHostEnvironment environment,
@@ -47,6 +62,7 @@ public static class GatewayStartupValidator
         ValidateTenantCollisions(options, environment, logger);
         ValidateWebhookSubscriptions(options);
         ValidateQueryCostOptions(options.QueryCost, environment);
+        WarnAboutRecursiveCte(options, logger);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
         var egressErrors = EgressAllowlist.Validate(options.Egress);

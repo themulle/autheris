@@ -87,6 +87,10 @@ public sealed class AstCompilerSqlServerFixture : IAsyncLifetime
                 (6, N'acme',  N'EU', N'closed', 60.00, NULL);
             INSERT dbo.Entitlements VALUES
                 (1, N'acme',  1), (2, N'other', 2), (3, N'acme', 6), (4, N'ACME', 3);
+            CREATE TABLE dbo.Org (Id int NOT NULL PRIMARY KEY, TenantId nvarchar(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, ParentId int NULL);
+            INSERT dbo.Org VALUES (1, N'acme', NULL), (2, N'acme', 1), (3, N'acme', 1), (4, N'acme', 2), (5, N'other', NULL), (6, N'other', 5);
+            CREATE TABLE dbo.Cyc (Id int NOT NULL PRIMARY KEY, TenantId nvarchar(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, ParentId int NULL);
+            INSERT dbo.Cyc VALUES (1, N'acme', 2), (2, N'acme', 1);
             """;
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = ddl;
@@ -103,6 +107,8 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");
     private static readonly TableIdentity Entitlements = new("dbo", "Entitlements");
+    private static readonly TableIdentity Org = new("dbo", "Org");
+    private static readonly TableIdentity Cyc = new("dbo", "Cyc");
 
     private readonly SqlServerTestDatabase _db;
     private readonly AstCompilerSqlServerFixture _fixture;
@@ -126,7 +132,11 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
             "TenantId", 1),
         new TableCatalogEntry(Entitlements, ImmutableArray.Create(
             new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("OrderId", "int")),
-            "TenantId", 1)
+            "TenantId", 1),
+        new TableCatalogEntry(Org, ImmutableArray.Create(
+            new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("ParentId", "int")), "TenantId", 1),
+        new TableCatalogEntry(Cyc, ImmutableArray.Create(
+            new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("ParentId", "int")), "TenantId", 1)
     }, "dbo");
 
     private sealed class Policies : IPolicyPredicateProvider, IColumnMaskProvider
@@ -160,12 +170,13 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         }
     };
 
-    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null, bool translateDates = false)
+    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null, bool translateDates = false, int? commandTimeoutSeconds = null)
     {
         var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = new SqlConnection(connectionString ?? _db.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
+        if (commandTimeoutSeconds is { } timeout) cmd.CommandTimeout = timeout;
         _binder.Bind(cmd, compiled, client ?? new Dictionary<string, object?>());
         var rows = new List<object?[]>();
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -397,6 +408,63 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(
             "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM orders WHERE n < 3) SELECT id FROM orders",
             "acme"));
+    }
+
+    // ---- issue #277: recursive CTE hierarchy walk and bounds ----
+
+    [Fact]
+    public async Task RecursiveCte_HierarchyWalk_ReturnsSameRowsAsUnsecuredQuery()
+    {
+        if (!_db.IsAvailable) return;
+        var secured = Ids(await RunAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parentid IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parentid = w.id) SELECT id FROM w", "acme"));
+
+        await using var conn = new SqlConnection(_db.ConnectionString);
+        await conn.OpenAsync();
+        await using var raw = conn.CreateCommand();
+        raw.CommandText = """
+            WITH w(id) AS (SELECT Id FROM dbo.Org WHERE ParentId IS NULL AND TenantId = N'acme'
+                UNION ALL SELECT o.Id FROM dbo.Org o JOIN w ON o.ParentId = w.id WHERE o.TenantId = N'acme')
+            SELECT id FROM w ORDER BY id
+            """;
+        var unsecured = new List<int>();
+        await using (var reader = await raw.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync()) unsecured.Add(reader.GetInt32(0));
+        }
+
+        secured.ShouldBe(unsecured);
+        secured.ShouldBe(new List<int> { 1, 2, 3, 4 });
+        Ids(await RunAsync("WITH RECURSIVE w(id) AS (SELECT id FROM org WHERE parentid IS NULL UNION ALL SELECT o.id FROM org o JOIN w ON o.parentid = w.id) SELECT id FROM w", "other")).ShouldBe(new List<int> { 5, 6 });
+    }
+
+    [Fact]
+    public async Task RecursiveCte_CounterToThree_ReturnsThreeRows()
+    {
+        if (!_db.IsAvailable) return;
+        Ids(await RunAsync("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t", "acme")).ShouldBe(new List<int> { 1, 2, 3 });
+    }
+
+    [Fact]
+    public async Task RecursiveCte_OuterAggregateOverRunaway_IsBounded()
+    {
+        if (!_db.IsAvailable) return;
+        // The aggregate cannot stop the recursion early: MAXRECURSION ends it with error 530, which maps to the fixed limit error.
+        var ex = await Should.ThrowAsync<SqlException>(() => RunAsync("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c", "acme", commandTimeoutSeconds: 30));
+
+        ex.Number.ShouldBe(530);
+        DmlErrorSanitizer.Map(TargetSqlDialect.SqlServer, ex).Code.ShouldBe(GovernedSqlErrorCodes.LimitExceeded);
+    }
+
+    [Fact]
+    public async Task RecursiveCte_CyclicData_StopsAtMaxRecursionDepth()
+    {
+        if (!_db.IsAvailable) return;
+        var ex = await Should.ThrowAsync<SqlException>(() => RunAsync(
+            "WITH RECURSIVE w(id) AS (SELECT id FROM cyc WHERE id = 1 UNION ALL SELECT c.id FROM cyc c JOIN w ON c.parentid = w.id) SELECT id FROM w",
+            "acme", commandTimeoutSeconds: 30));
+
+        ex.Number.ShouldBe(530);
+        DmlErrorSanitizer.Map(TargetSqlDialect.SqlServer, ex).Code.ShouldBe(GovernedSqlErrorCodes.LimitExceeded);
     }
 
     // ---- user query shapes in bound mode ----

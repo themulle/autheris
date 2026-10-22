@@ -233,6 +233,17 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
         }
 
+        if (string.Equals(sqlSyntaxError, McpDataTargetResolver.ConstructNotSupportedMarker, StringComparison.Ordinal))
+        {
+            // SEC-277-04: identical text for every table state (existing, forbidden, unknown); fixed message, no request text.
+            var constructMessage = $"{TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported}: " +
+                                   TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported);
+            activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+            McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+            await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", constructMessage, false, false, 0, cancellationToken).ConfigureAwait(false);
+            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: constructMessage);
+        }
+
         if (sqlSyntaxError != null)
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");

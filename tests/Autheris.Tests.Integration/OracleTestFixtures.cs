@@ -71,6 +71,25 @@ public sealed class AstCompilerOracleFixture : IAsyncLifetime
                 INTO {AppUser}.ENTITLEMENTS VALUES (4, 'ACME', 3)
             SELECT 1 FROM DUAL
             """,
+            // Issue #277: a hierarchy (ORG) and a cyclic parent chain (CYC) for the recursive CTE tests.
+            $"CREATE TABLE {AppUser}.ORG (ID NUMBER(10) PRIMARY KEY, TENANT_ID VARCHAR2(64) NOT NULL, PARENT_ID NUMBER(10))",
+            $"""
+            INSERT ALL
+                INTO {AppUser}.ORG VALUES (1, 'acme', NULL)
+                INTO {AppUser}.ORG VALUES (2, 'acme', 1)
+                INTO {AppUser}.ORG VALUES (3, 'acme', 1)
+                INTO {AppUser}.ORG VALUES (4, 'acme', 2)
+                INTO {AppUser}.ORG VALUES (5, 'other', NULL)
+                INTO {AppUser}.ORG VALUES (6, 'other', 5)
+            SELECT 1 FROM DUAL
+            """,
+            $"CREATE TABLE {AppUser}.CYC (ID NUMBER(10) PRIMARY KEY, TENANT_ID VARCHAR2(64) NOT NULL, PARENT_ID NUMBER(10))",
+            $"""
+            INSERT ALL
+                INTO {AppUser}.CYC VALUES (1, 'acme', 2)
+                INTO {AppUser}.CYC VALUES (2, 'acme', 1)
+            SELECT 1 FROM DUAL
+            """,
             // X1: the dialect end-to-end scenarios (GovernedDialectEndToEndTests) run DML, so they own a table.
             $"CREATE TABLE {AppUser}.X1_ORDERS (ID NUMBER(10) PRIMARY KEY, TENANT_ID VARCHAR2(64) NOT NULL, REGION VARCHAR2(20) NOT NULL, EMAIL VARCHAR2(200))",
             $"""
