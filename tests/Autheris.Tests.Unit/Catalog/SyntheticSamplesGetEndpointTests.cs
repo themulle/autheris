@@ -73,17 +73,37 @@ public sealed class SyntheticSamplesGetEndpointTests
         return (status, JsonSerializer.Serialize(((IValueHttpResult)result).Value));
     }
 
+    /// <summary>Endpoint construction binds each handler parameter; every interface counts as a registered service so none is inferred as a body.</summary>
+    private sealed class PermissiveProvider(IServiceProvider inner) : IServiceProvider, IServiceProviderIsService
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IServiceProviderIsService) ? this : inner.GetService(serviceType);
+
+        public bool IsService(Type serviceType) => serviceType.IsInterface || inner.GetService(serviceType) != null;
+
+        public bool IsKeyedService(Type serviceType, object? serviceKey) => false;
+    }
+
+    private sealed class TestRouteBuilder(IServiceProvider serviceProvider) : IEndpointRouteBuilder
+    {
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+        public ICollection<EndpointDataSource> DataSources { get; } = [];
+
+        public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
+    }
+
     [Fact]
     public void SyntheticSamplesGet_NonAdmin_Returns403_RouteRequiresGovernanceAdmin()
     {
         // MCP-01: both GET routes carry the GovernanceAdmin policy, so a non-admin is rejected before the handler runs.
-        var builder = WebApplication.CreateBuilder();
-        builder.Services.AddRouting();
-        builder.Services.AddAuthorization();
-        var app = builder.Build();
-        app.MapCatalogEndpoints();
+        var services = new ServiceCollection();
+        services.AddRouting();
+        services.AddAuthorization();
+        var routes = new TestRouteBuilder(new PermissiveProvider(services.BuildServiceProvider()));
+        routes.MapCatalogEndpoints();
 
-        var endpoints = ((IEndpointRouteBuilder)app).DataSources
+        var endpoints = routes.DataSources
             .SelectMany(d => d.Endpoints)
             .OfType<RouteEndpoint>()
             .Where(e => e.RoutePattern.RawText != null &&
