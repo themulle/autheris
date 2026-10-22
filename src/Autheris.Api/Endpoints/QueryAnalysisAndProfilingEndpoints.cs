@@ -113,7 +113,18 @@ public static class QueryAnalysisAndProfilingEndpoints
             }
 
             // Administrator and simulation roles in TargetRoles are dropped; the service never applies administrator semantics to a target.
-            targetPrincipal = QueryAnalysisService.CreateSimulatedTargetPrincipal(request.TargetSubjectId!, request.TargetRoles);
+            // GOV-10: the simulated target inherits the caller's tenant (fail closed when the tenant cannot be resolved).
+            string callerTenant;
+            try
+            {
+                callerTenant = EndpointSecurity.GetRequestTenant(httpContext).Value;
+            }
+            catch (System.Security.SecurityException)
+            {
+                return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by governance policy.", httpContext);
+            }
+
+            targetPrincipal = QueryAnalysisService.CreateSimulatedTargetPrincipal(request.TargetSubjectId!, request.TargetRoles, callerTenant);
         }
 
         try
