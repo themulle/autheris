@@ -74,7 +74,7 @@ Entry format:
              reject subqueries in sql definitions; alternatively inject the tenant predicate on the AST for every
              NamedTableSource instead of checking author text.
 
-[EXT-01] MEDIUM | security | OData $metadata CSDL cache key ignores per-caller column visibility (hidden column names leak)
+[EXT-01] MEDIUM | security | OData $metadata CSDL cache key ignores per-caller column visibility (hidden column names leak)  [RESOLVED]
   Location : src/Autheris.Extensions/OData/ODataHandler.cs:56-67 (key), :178-187 (column filtering)
   Problem  : The CSDL cache key is "odata:csdl:{tenant}:s{structureVersion}:{visibilityHash}" where visibilityHash is
              CatalogVisibleBitSet.ComputeSha256 over the visible TABLE IDENTIFIERS only. The cached XML, however, is built
@@ -86,7 +86,7 @@ Entry format:
   Fix hint : Include the per-table allowed-column set (or a hash over table+allowed columns+keys) in the cache key, or
              key the CSDL cache by the same tenant+principal key used for the authorized-tables cache.
 
-[GQL-01] MEDIUM | security | InvoiceItem DataLoader falls back to raw (unmasked/denied) values and misaligns rows after in-memory RLS
+[GQL-01] MEDIUM | security | InvoiceItem DataLoader falls back to raw (unmasked/denied) values and misaligns rows after in-memory RLS  [RESOLVED]
   Location : src/Autheris.Application/Services/BatchRelationLoader.cs:174-196 (called from src/Autheris.GraphQL/Loaders/InvoiceItemDataLoader.cs:30, Types/InvoiceTypes.cs:18)
   Problem  : After GovernedConnectorReader.Apply (which strips Deny columns and, without RLS pushdown, DROPS rows via FilterRows), the
              loader pairs processedRows[i] with rawRows[i] and, when the governed row has no/empty "id" or join column, reads the
@@ -286,7 +286,7 @@ Entry format:
              through the central masking engine (HMAC with the keyed pseudonymisation secret) and fail closed on unknown types;
              compare column names case-insensitively.
 
-[GQL-04] HIGH | security | approveConsentRequest with rowFilter/columnMasking bypasses four-eyes (single approver completes approval)
+[GQL-04] HIGH | security | approveConsentRequest with rowFilter/columnMasking bypasses four-eyes (single approver completes approval)  [RESOLVED]
   Location : src/Autheris.GraphQL/Types/MutationTypes.cs:684-729 ; src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs:1453-1520 (same in Sqlite/SqlServer)
   Problem  : When the approver passes rowFilter or columnMasking, the mutation takes the "atomic" path
              (ExecuteAtomicApprovalWithConsentAsync) instead of ApproveConsentRequestStepAsync. (1) isFinalStep is computed from
@@ -302,7 +302,7 @@ Entry format:
              and enforce the distinct-approver + StatusAfterApproval logic inside ExecuteAtomicApprovalWithConsentAsync under the
              row lock (or route all approvals through one repository method that also persists the restrictions).
 
-[GQL-05] MEDIUM | security | Row filters / column masks given by the first approver of a four-eyes request are silently discarded
+[GQL-05] MEDIUM | security | Row filters / column masks given by the first approver of a four-eyes request are silently discarded  [RESOLVED]
   Location : src/Autheris.GraphQL/Types/MutationTypes.cs:685-773
   Problem  : On a non-final step (four-eyes, first approval) the else-branch calls ApproveConsentRequestStepAsync(requestId,
              approverSid) which persists neither builtRowFilters nor columnRules; they are only used if this very call yields
@@ -453,7 +453,7 @@ Entry format:
   Fix hint : Do not grant ClusterAdmin; use only a SCIM_PROVISIONER role checked by the SCIM policy. Bind secrets per realm
              (Scim secrets keyed by realmId) and reject a path realm that does not own the presented secret; reject unknown realms.
 
-[GQL-07] MEDIUM | security | syncDataCatalog: non-canonical ClusterAdmin / DeveloperAdmin / tenant GovernanceAdmin trigger a cluster-wide catalog sync
+[GQL-07] MEDIUM | security | syncDataCatalog: non-canonical ClusterAdmin / DeveloperAdmin / tenant GovernanceAdmin trigger a cluster-wide catalog sync  [RESOLVED]
   Location : src/Autheris.GraphQL/Types/MutationTypes.cs:1112-1146
   Problem  : The sibling syncOpenMetadata (SR-L-23) only admits the canonical ClusterAdmin (ClusterAdminPolicy, never
              ForwardAuth) and confines GovernanceAdmins to their tenant. syncDataCatalog checks raw role strings
@@ -619,7 +619,7 @@ Entry format:
   Fix hint : Use subscriber.GetTenantId() (or a tenant resolved once at subscribe time and passed in explicitly) and reject when
              it differs from any raw tenant claim; make ClaimsNormalizer overwrite tenant_id with the realm-bound tenant.
 
-[EXT-05] HIGH | security | dbt manifest sync (DbtAdmin) silently relaxes governance and writes into any tenant's tables
+[EXT-05] HIGH | security | dbt manifest sync (DbtAdmin) silently relaxes governance and writes into any tenant's tables  [RESOLVED]
   Location : src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs:323, :499-578 (vs. governance path :1034-1047, :1278-1297)
              src/Autheris.Api/Endpoints/DbtEndpoints.cs:31-33 (DbtAdmin allowed on /api/extensions/dbt/sync)
   Problem  : (1) For every model the stored TableMetadata is upserted directly (not as a proposal) with values taken from the
@@ -743,7 +743,7 @@ Entry format:
   Scenario : A data owner revokes a consent with reason "security incident"; later the grantee (allowed by isGranteeSelf) calls revoke again with reason "no longer needed" -> CONSENTS row now shows the grantee as revoker and the incident reason/time is gone (only recoverable from the audit log). Every repeated revoke also writes an additional CONSENT_REVOKED audit event and bumps the epoch.
   Fix hint : Mirror PG: read is_revoked inside a transaction, return early when already revoked, guard the UPDATE with "AND is_revoked = 0", and run update + epoch + audit (RecordAuditEventInternalAsync(conn, entry, ct, tx)) in one transaction, invalidating the epoch after commit.
 
-[GQL-10] MEDIUM | bug | Cluster-wide CDC subscription counter is per TENANT but compared with the per-SUBJECT limit
+[GQL-10] MEDIUM | bug | Cluster-wide CDC subscription counter is per TENANT but compared with the per-SUBJECT limit  [RESOLVED]
   Location : src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs:126-171
   Problem  : In cluster mode the key is "cdc:subs:{tenant}" (no SID) but the threshold is MaxSubscriptionsPerSubject (default 10).
              So the whole tenant is capped at 10 concurrent subscriptions across the cluster, and a single user who opens 10
@@ -790,7 +790,7 @@ Entry format:
   Fix hint : Carry TimeoutSeconds in GovernedSqlQueryRequest and use min(endpoint timeout, global timeout) as the command
              timeout; reject non-positive values at load.
 
-[EXT-06] MEDIUM | security | dbt governance import "no-relaxation" ratchet compares only rule-type tiers; parameter relaxations (PARTIAL_MASK keep_prefix, GEO_JITTER decimals, TOKENIZE domain) pass
+[EXT-06] MEDIUM | security | dbt governance import "no-relaxation" ratchet compares only rule-type tiers; parameter relaxations (PARTIAL_MASK keep_prefix, GEO_JITTER decimals, TOKENIZE domain) pass  [RESOLVED]
   Location : src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs:895-907 (ApplyMaskingRule), :1184-1231 (rule params)
              src/Autheris.Application/DataCatalog/Services/CatalogGovernanceRatchet.cs:143-149 (MaskingRuleStrength)
   Problem  : A stored masking rule may only be replaced when CatalogGovernanceRatchet.MaskingRuleStrength(new) >= strength(stored).
@@ -829,7 +829,7 @@ Entry format:
   Fix hint : Do not fold empty-string literals (or any string literal) for Oracle; compare delimited identifiers ordinally
              (use SqlIdentifierHelper.FoldIdentifierForScope semantics) in StructuralEquals.
 
-[EXT-07] MEDIUM | security | dbt governance import table updates are not tenant-bound and fall back to an arbitrary table of any tenant
+[EXT-07] MEDIUM | security | dbt governance import table updates are not tenant-bound and fall back to an arbitrary table of any tenant  [RESOLVED]
   Location : src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs:972-995, :1596-1611 (ParseTableIdentifier)
   Problem  : The import checks the tenant only for virtual filters and access profiles (:929-940, ClusterAdmin required for a
              foreign tenant). Table entries are addressed by the "database" (= table domain / tenant) given in the file, and when
@@ -895,7 +895,7 @@ Entry format:
   Fix hint : Never execute client text natively: parse with the governed engine (RejectComments, AST predicate whitelist,
              bound parameters) or accept only a typed filter tree; quote identifiers; apply a hard row cap in SQL.
 
-[GQL-11] MEDIUM | security | WebSocket connection_init token skips EnterpriseClaimsTransformation (token-supplied autheris:realm honoured, realm tenant binding/roles not applied)
+[GQL-11] MEDIUM | security | WebSocket connection_init token skips EnterpriseClaimsTransformation (token-supplied autheris:realm honoured, realm tenant binding/roles not applied)  [RESOLVED]
   Location : src/Autheris.Api/Security/JwtSocketTokenValidator.cs:79-95 ; src/Autheris.GraphQL/Subscriptions/WebSocketAuthInterceptor.cs:93-191 ;
              compare src/Autheris.Api/Security/EnterpriseClaimsTransformation.cs:41-61 and src/Autheris.Domain/Common/Sid.cs:174-184
   Problem  : The HTTP pipeline strips any client/token-supplied "autheris:realm" claim (AppSec K-1) and adds the authoritative realm
@@ -1079,7 +1079,7 @@ Entry format:
              contract, Casbin, hooks, virtual filters) or intersect it with the PDP result; fail closed for every non-consent
              denial reason using typed denial codes instead of substring matching.
 
-[GQL-12] HIGH | security | Query cost limit bypass: nested inline fragments / fragment spreads count as depth and zero the cost
+[GQL-12] HIGH | security | Query cost limit bypass: nested inline fragments / fragment spreads count as depth and zero the cost  [RESOLVED]
   Location : src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs:336-339, 515-549 (used by the validation rule,
              CostAndQuotaMiddleware.cs:122 and Analysis/HotChocolateGraphQlCostAnalysisEngine.cs:61-72)
   Problem  : CalculateSelectionSetCost returns 0 once currentDepth > _maxExecutionDepth, and every InlineFragmentNode and
@@ -1289,7 +1289,7 @@ Entry format:
   Fix hint : Fail when any effective min group size < 2 unless AllowDisabled is true; validate the per-table and per-dataset maps with
              the same rule.
 
-[EXT-08] MEDIUM | bug | dbt circuit breaker: wrong model attribution and nondeterministic name/prefix fallback quarantine the wrong tables and report quarantined ones healthy
+[EXT-08] MEDIUM | bug | dbt circuit breaker: wrong model attribution and nondeterministic name/prefix fallback quarantine the wrong tables and report quarantined ones healthy  [RESOLVED]
   Location : src/Autheris.Application/Dbt/Services/DbtHealthCircuitBreaker.cs:34-42 (fallback lookup), :212 (all states stored as
              default.default.<model>), :262-298 (ParseTestUniqueId)
   Problem  : (1) GetTableHealthAsync, when no exact key exists, iterates the ConcurrentDictionary (unordered) and returns the FIRST
@@ -1590,7 +1590,7 @@ Entry format:
   Scenario : Policy "Permit role Admin on finance.*" is created for the workforce realm. A customer/B2C realm (or a partner realm whose IdP lets users influence role/group names) issues role "Admin" to an external user of the same tenant -> the external caller matches the workforce policy and is permitted on finance tables.
   Fix hint : Add "AND g.realm_id = @realmId" (load grantees filtered by realm in SQL), compare realm in the C# match, and push grantee matching into one joined query with a bounded IN list instead of loading all policies.
 
-[EXT-09] MEDIUM | bug | Custom-query CDC poller never persists the watermark when a whole batch is suppressed as duplicates (stream stalls forever)
+[EXT-09] MEDIUM | bug | Custom-query CDC poller never persists the watermark when a whole batch is suppressed as duplicates (stream stalls forever)  [RESOLVED]
   Location : src/Autheris.Extensions/Cdc/CustomQuery/CustomQueryPollerService.cs:156-161 (early return), :236-243 (dedup advances only in memory)
   Problem  : ProcessBatchRowsAsync advances candidateVector for rows whose payload equals the stored prior image and skips them.
              When every row of the batch is such a duplicate, PollStreamBatchAsync returns 0 without calling AppendAsync, so the
@@ -1641,7 +1641,7 @@ Entry format:
   Fix hint : Compute the rendered conjunct list once in BuildClause and let both renderers use that list (as the
              Pushdown builder does with its RenderedConjunct closures).
 
-[GQL-15] MEDIUM | security | Federated result masking is a silent no-op on Hot Chocolate 16 (ResultDocument, original formatter kept)
+[GQL-15] MEDIUM | security | Federated result masking is a silent no-op on Hot Chocolate 16 (ResultDocument, original formatter kept)  [RESOLVED]
   Location : src/Autheris.GraphQL/Federation/SubgraphResultMaskingMiddleware.cs:37-61 ; src/Autheris.Application/Federation/Services/SubgraphResultMasker.cs:185-240
   Problem  : On HC 16.6.8 OperationResult.Data.Value is HotChocolate.Text.Json.ResultDocument (verified with a probe executor:
              ValueType=ResultDocument, IReadOnlyDictionary=false, Formatter=the ResultDocument itself). MaskRecursive only walks
@@ -1911,7 +1911,7 @@ Entry format:
   Fix hint : Push down context.Tenant (the resolved SecurityPrincipalContext tenant) and fail closed if it is missing or differs from
              a tenant claim; never read tenant claims directly in executors.
 
-[EXT-11] HIGH | security | Every DataCatalog / OpenMetadata / OpenAPI sync silently wipes RequiredFilterColumns of existing tables (CatalogGovernanceRatchet.Merge drops them)
+[EXT-11] HIGH | security | Every DataCatalog / OpenMetadata / OpenAPI sync silently wipes RequiredFilterColumns of existing tables (CatalogGovernanceRatchet.Merge drops them)  [RESOLVED]
   Location : src/Autheris.Application/DataCatalog/Services/CatalogGovernanceRatchet.cs:28-45 (new Table without RequiredFilterColumns/
              RequiredFilterColumnGroups); callers src/Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs:166-222,
              src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs:145, :687, OpenApiIngestionService.cs:385;
@@ -2031,7 +2031,7 @@ Entry format:
   Fix hint : Only push conjuncts into a cluster that is not null-supplying for any enclosing outer join (compute the
              preserved/null-supplying sets as SqlConjunctSplitter does), or only push null-rejecting predicates.
 
-[GQL-18] MEDIUM | security | Lineage/GDPR GraphQL resolvers derive IsClusterAdmin from the raw role string (ForwardAuth/tenant-asserted) -> cross-tenant bypass
+[GQL-18] MEDIUM | security | Lineage/GDPR GraphQL resolvers derive IsClusterAdmin from the raw role string (ForwardAuth/tenant-asserted) -> cross-tenant bypass  [RESOLVED]
   Location : src/Autheris.GraphQL/Types/QueryTypes.cs:697-725 (GetCallerSecurityContext), 600, 660-664 ; consumed by
              src/Autheris.Application/Lineage/LineageImpactAnalyzerService.cs:66-70, 86, 194
   Problem  : GetCallerSecurityContext sets IsClusterAdmin = roles.Contains("ClusterAdmin") from any role claim, whereas the rest of
