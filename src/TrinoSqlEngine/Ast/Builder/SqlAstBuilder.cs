@@ -422,6 +422,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitSetOperation(SqlBaseParser.SetOperationContext context)
     {
         using var _ = EnterScope();
+        // SQLE-02: CORRESPONDING changes the column matching; it is rejected instead of silently dropped.
+        if (context.corresponding() != null) throw Unsupported("CORRESPONDING");
         var left = (QueryBody)Visit(context.left);
         var right = (QueryBody)Visit(context.right);
 
@@ -611,6 +613,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             colAliases = context.columnAliases().identifier().Select(ToSqlIdentifier).ToList();
         }
+
+        // SQLE-04: a column alias list on a plain table reference would rename columns; it is rejected instead of dropped.
+        if (source is NamedTableSource && colAliases is not null) throw Unsupported("column aliases on a table reference");
 
         if (alias != null)
         {
@@ -908,12 +913,17 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             case SqlBaseParser.BooleanTestContext bt:
                 {
+                    // SQLE-12: IS [NOT] TRUE|FALSE is a total (never NULL) test. CASE WHEN treats NULL as not matched, which gives the
+                    // three-valued semantics on every dialect without comparing a predicate with a boolean literal.
                     bool truth = bt.truthValue.Type == SqlBaseLexer.TRUE;
                     bool isNot = bt.NOT() != null;
+                    Expression condition = truth ? left : new UnaryExpression(UnaryOperator.Not, left);
+                    var whenTrue = new LiteralExpression(isNot ? 0L : 1L, LiteralType.Integer);
+                    var whenOther = new LiteralExpression(isNot ? 1L : 0L, LiteralType.Integer);
                     return new BinaryExpression(
-                        left,
-                        isNot ? BinaryOperator.NotEqual : BinaryOperator.Equal,
-                        new LiteralExpression(truth, LiteralType.Boolean));
+                        new CaseExpression(null, new[] { new WhenClause(condition, whenTrue) }, whenOther),
+                        BinaryOperator.Equal,
+                        new LiteralExpression(1L, LiteralType.Integer));
                 }
             default:
                 throw new AstBuildException($"Unsupported predicate type: {predicate.GetType().Name}");
@@ -940,8 +950,13 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         var operand = (Expression)Visit(context.valueExpression());
-        var op = context.@operator.Type == SqlBaseLexer.MINUS ? UnaryOperator.Negate : UnaryOperator.Not;
-        return new UnaryExpression(op, operand);
+        // SQLE-01: unary plus is the identity; an unknown operator never maps to another semantics (it used to become NOT).
+        return context.@operator.Type switch
+        {
+            SqlBaseLexer.MINUS => new UnaryExpression(UnaryOperator.Negate, operand),
+            SqlBaseLexer.PLUS => operand,
+            _ => throw Unsupported("arithmetic unary operator")
+        };
     }
 
     public override SqlNode VisitArithmeticBinary(SqlBaseParser.ArithmeticBinaryContext context)
