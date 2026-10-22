@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
+using TrinoSqlEngine.Ast.Buffer;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
@@ -38,7 +39,7 @@ public static class DialectCapabilityValidator
                     }
 
                     break;
-                case LikeExpression { Pattern: PolicyParameterExpression { Origin: ParameterOrigin.Policy } } when capabilities.LikeIsCaseInsensitive:
+                case LikeExpression lk when capabilities.LikeIsCaseInsensitive && LikePatternEscaper.ContainsPolicyParameter(lk.Pattern):
                     // SEC-ADG-18: the dialect LIKE is looser than the policy author expects (SQLite: ASCII case-insensitive).
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "policy LIKE on a case-insensitive LIKE dialect");
                 case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max

@@ -36,7 +36,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                     throw new NotSupportedException("Policy parameters require a bound emitter context (use Generate).");
                 }
 
-                builder.Append(context.BindPolicy(policyParameter));
+                builder.Append(context.BindPolicy(policyParameter, escapeLikePattern: context.EmittingLikePattern && !policyParameter.IsLikePattern));
                 break;
             case ColumnReference col:
                 FormatQualifiedName(ref builder, col.Name, context);
@@ -61,11 +61,22 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             case LikeExpression lk:
                 GeneratePredicateOperand(lk.Operand, ref builder, context);
                 builder.Append(lk.IsNotLike ? " NOT LIKE " : " LIKE ");
-                if (context.IsBound && lk.Escape == null && lk.Pattern is PolicyParameterExpression policyPattern)
+                if (context.IsBound && lk.Escape == null && LikePatternEscaper.ContainsPolicyParameter(lk.Pattern))
                 {
-                    // SEC-ADG-18: LIKE semantics differ per dialect ([...] classes, default escapes). A policy pattern always has
-                    // an explicit ESCAPE from a constant template, and structured values are escaped when bound.
-                    builder.Append(context.BindPolicy(policyPattern, escapeLikePattern: !policyPattern.IsLikePattern));
+                    // SEC-ADG-18 / SQLE-09: LIKE semantics differ per dialect ([...] classes, default escapes). A policy pattern always has
+                    // an explicit ESCAPE from a constant template, and every declared value inside the pattern (also in a || chain) is escaped
+                    // when bound; the policy parser admits only literals, declared parameters and || in a pattern.
+                    bool previous = context.EmittingLikePattern;
+                    context.EmittingLikePattern = true;
+                    try
+                    {
+                        GeneratePredicateOperand(lk.Pattern, ref builder, context);
+                    }
+                    finally
+                    {
+                        context.EmittingLikePattern = previous;
+                    }
+
                     builder.Append(" ESCAPE ");
                     int escapeStart = builder.Length;
                     builder.Append("'\\'");

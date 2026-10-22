@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Buffer;
 
 using System;
+using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
 /// SEC-ADG-18 / SQLE-10: escapes a gateway value that is used as (part of) a LIKE pattern, so the value never acts as a pattern
@@ -20,4 +21,13 @@ internal static class LikePatternEscaper
 
         return sb.ToString();
     }
+
+    /// <summary>True when a LIKE pattern tree (literal, parameter, || chain, parentheses) contains a policy parameter.</summary>
+    public static bool ContainsPolicyParameter(Expression pattern) => pattern switch
+    {
+        PolicyParameterExpression => true,
+        BinaryExpression { Operator: BinaryOperator.Concat } b => ContainsPolicyParameter(b.Left) || ContainsPolicyParameter(b.Right),
+        ParenthesizedExpression p => ContainsPolicyParameter(p.Expression),
+        _ => false
+    };
 }

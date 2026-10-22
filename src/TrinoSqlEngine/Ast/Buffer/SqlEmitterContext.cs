@@ -74,6 +74,9 @@ public sealed class SqlEmitterContext
     /// <summary>True when values are collected as <see cref="BoundParameter"/> (compiler path).</summary>
     public bool IsBound => _bound != null;
 
+    /// <summary>True while the pattern of a policy LIKE is emitted: declared policy values are bound escaped (SQLE-09).</summary>
+    public bool EmittingLikePattern { get; set; }
+
     public SqlEmitterContext(TargetSqlDialect dialect, int maxParameterBudget = int.MaxValue)
     {
         Dialect = dialect;
