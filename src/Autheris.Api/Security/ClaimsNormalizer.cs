@@ -106,8 +106,34 @@ public static class ClaimsNormalizer
             }
         }
 
-        // 3. Ensure canonical tenant_id claim is populated
-        if (identity.FindFirst("tenant_id") == null)
+        // 3. Ensure canonical tenant_id claim is populated (INF-08)
+        var realmId = clonedPrincipal.FindFirst("autheris:realm")?.Value;
+        var realm = (!string.IsNullOrWhiteSpace(realmId) && Sid.RealmLookup != null)
+            ? Sid.RealmLookup(realmId)
+            : null;
+
+        if (realm != null && (realm.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.Fixed ||
+                              realm.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.ClaimMapped))
+        {
+            TenantId? boundTenant = null;
+            try
+            {
+                boundTenant = clonedPrincipal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+            }
+
+            if (boundTenant is { } bTenant)
+            {
+                foreach (var claim in identity.FindAll("tenant_id").ToList())
+                {
+                    identity.RemoveClaim(claim);
+                }
+                identity.AddClaim(new Claim("tenant_id", bTenant.Value));
+            }
+        }
+        else if (identity.FindFirst("tenant_id") == null)
         {
             // API-7: an invalid tenant claim must not fail the authentication pipeline with 500; the claim is left as is
             // and SecurityContextResolutionMiddleware rejects the request with 403.

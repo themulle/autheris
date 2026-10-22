@@ -32,11 +32,12 @@ public sealed class EpochRevokeRedisFailureTests
         public required IConnectionMultiplexer Multiplexer { get; init; }
         public required IDatabase Db { get; init; }
         public Func<string, Task>? InvalidationHandler { get; set; }
+        public Microsoft.Extensions.Time.Testing.FakeTimeProvider? Time { get; init; }
 
         public Task DeliverInvalidationAsync(TableIdentifier table) => InvalidationHandler!(table.ToString().ToLowerInvariant());
     }
 
-    private static Harness Create()
+    private static Harness Create(Microsoft.Extensions.Time.Testing.FakeTimeProvider? time = null)
     {
         var db = Substitute.For<IDatabase>();
         db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"5"));
@@ -58,9 +59,10 @@ public sealed class EpochRevokeRedisFailureTests
 
         harness = new Harness
         {
-            Service = new EpochValidationService(Options.Create(new GatewayOptions()), bus, sensitivity, multiplexer),
+            Service = new EpochValidationService(Options.Create(new GatewayOptions()), bus, sensitivity, multiplexer, timeProvider: time),
             Multiplexer = multiplexer,
             Db = db,
+            Time = time,
         };
         return harness;
     }
@@ -201,5 +203,39 @@ public sealed class EpochRevokeRedisFailureTests
             Arg.Any<string>(), Arg.Any<RedisKey[]>(), Arg.Is<RedisValue[]>(v => v.Length == 1 && v[0] == "6"), Arg.Any<CommandFlags>());
         h.Db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"6"));
         (await h.Service.IsEpochValidAsync(A, 6)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Peer_AfterReconnect_WithinGrace_TreatsRedisEpochAsNonAuthoritative()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var h = Create(time);
+        (await h.Service.GetCurrentEpochAsync(A)).ShouldBe(5);
+
+        // Redis reconnects
+        await h.Service.OnConnectionRestoredAsync();
+
+        // Within grace period (5 seconds default): Redis epoch is treated as non-authoritative
+        time.Advance(TimeSpan.FromSeconds(2));
+        var authEpochs = await h.Service.TryGetAuthoritativeEpochsAsync([A]);
+        authEpochs.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Peer_AfterGraceExpired_RedisAuthoritativeAgain()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var h = Create(time);
+        (await h.Service.GetCurrentEpochAsync(A)).ShouldBe(5);
+
+        // Redis reconnects
+        await h.Service.OnConnectionRestoredAsync();
+
+        // Advance past grace period (5 seconds)
+        time.Advance(TimeSpan.FromSeconds(6));
+
+        var authEpochs = await h.Service.TryGetAuthoritativeEpochsAsync([A]);
+        authEpochs.ShouldNotBeNull();
+        authEpochs[A].ShouldBe(5);
     }
 }

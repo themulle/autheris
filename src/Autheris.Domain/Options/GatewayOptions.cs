@@ -69,6 +69,7 @@ public sealed class GatewayOptions
     [Required] public FieldSunsettingOptions FieldSunsetting { get; init; } = new();
     [Required] public QueryCostOptions QueryCost { get; init; } = new();
     [Required] public GovernanceOptions Governance { get; init; } = new();
+    [Required] public DatabricksOptions Databricks { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".

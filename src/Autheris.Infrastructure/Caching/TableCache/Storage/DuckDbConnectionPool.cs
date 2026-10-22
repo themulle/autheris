@@ -10,17 +10,20 @@ using DuckDB.NET.Data;
 /// <summary>
 /// Manages leased reader and writer connections to DuckDB storage instances.
 /// Ensures safe multi-reader single-writer semantics and bounds connection concurrency.
+/// Supports initialization/attach SQL for encrypted native databases.
 /// </summary>
 public sealed class DuckDbConnectionPool : IDisposable
 {
     private readonly string _connectionString;
+    private readonly string? _attachSql;
     private readonly SemaphoreSlim _writerLock = new(1, 1);
     private readonly ConcurrentBag<DuckDBConnection> _idleReaders = new();
     private bool _disposed;
 
-    public DuckDbConnectionPool(string connectionString)
+    public DuckDbConnectionPool(string connectionString, string? attachSql = null)
     {
         _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
+        _attachSql = attachSql;
     }
 
     public async Task<DbConnection> LeaseReaderAsync(CancellationToken ct = default)
@@ -39,6 +42,14 @@ public sealed class DuckDbConnectionPool : IDisposable
 
         var newConn = new DuckDBConnection(_connectionString);
         await newConn.OpenAsync(ct).ConfigureAwait(false);
+
+        if (!string.IsNullOrWhiteSpace(_attachSql))
+        {
+            using var cmd = newConn.CreateCommand();
+            cmd.CommandText = _attachSql;
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
         return newConn;
     }
 
