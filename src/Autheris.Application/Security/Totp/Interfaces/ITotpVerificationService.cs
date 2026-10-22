@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// RFC 6238 TOTP Two-Factor Authentication Engine.
-/// Provides key generation, otpauth:// URI creation, RFC 6238 validation (HMAC-SHA1/SHA256, 30s window),
+/// Provides key generation, otpauth:// URI creation, RFC 6238 validation (HMAC-SHA1, 30s window),
 /// tolerance intervals, and cluster-wide replay protection.
 /// </summary>
 public interface ITotpVerificationService
