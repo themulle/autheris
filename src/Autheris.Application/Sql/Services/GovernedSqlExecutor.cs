@@ -683,15 +683,16 @@ public sealed partial class GovernedSqlExecutor
 
         // Issue #280: gateway-generated parameters of a planned read (typed scalars, validated by MergeGatewayParameters). Add, not the
         // indexer: a duplicate name throws instead of overwriting a client value.
-        foreach (var (name, value) in request.GatewayParameters ?? EmptyParameters)
+        if (request.GatewayParameters is { } gatewayParameters)
         {
-            values.Add(name.TrimStart('@'), value);
+            foreach (var (name, value) in gatewayParameters)
+            {
+                values.Add(name.TrimStart('@'), value);
+            }
         }
 
         return values;
     }
-
-    private static readonly IReadOnlyDictionary<string, object?> EmptyParameters = new Dictionary<string, object?>();
 
     private void AddClientValues(
         GovernedSqlQueryRequest request,

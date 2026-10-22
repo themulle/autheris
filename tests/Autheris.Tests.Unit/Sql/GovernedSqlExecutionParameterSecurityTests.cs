@@ -310,6 +310,28 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
         ex.Message.ShouldContain("reserved gateway parameter name");
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("SELECT id FROM orders WHERE id = @__gql_tf_0")]
+    [InlineData("SELECT id FROM orders WHERE region = @__gql_rls_0")]
+    [InlineData("SELECT id FROM orders WHERE id = @__gql_tf_0 OR region = @__gql_rls_0")]
+    public async Task SEC_280_6_ClientSqlText_ReferencingGatewayParameterNames_IsRejected_WhenPlannedRead(string sql)
+    {
+        var table = CreateTable(new TableIdentifier(DataSource, "public", "orders"));
+        var service = CreateService(table);
+        var request = new GovernedSqlQueryRequest(
+            Sql: sql,
+            Parameters: null,
+            DataSourceName: DataSource,
+            Transport: SqlTransports.Rest,
+            PlannedTableRead: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(async () =>
+            await service.ExecuteQueryBufferedAsync(request, CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("reserved gateway identifier");
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public void Issue280_GatewayAndClientNameCollision_FailsClosed()
@@ -447,7 +469,7 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void Issue280_GatewayValues_NotInLogsAuditOrExceptionMessages()
+    public void Issue280_GatewayValues_NotInExceptionMessages()
     {
         var messages = new List<string>();
         var cases = new GovernedSqlQueryRequest[]
