@@ -129,3 +129,43 @@ Mandatory tests (all `[Trait("Category","Security")]`), in addition to plan test
 - `Issue280_Aggregation_ClientWhereText_CannotReferenceGatewayMarker` (client-controlled text naming `@__gql_tf_0` is rejected or never reaches SQL).
 - `Issue280_GatewayParameters_OverLimit_FailsClosed`.
 - `Issue280_ApplicationInternalsVisibleTo_OnlyKnownTestAssemblies` (reflection over `InternalsVisibleToAttribute`).
+
+## 6. Addendum A (2026-10-22): text-level reserved guard rejects gateway placeholders
+
+Finding (lead integration run, `GovernedAggregationWhereParams*` on PostgreSQL and SQL Server): `GovernedSqlExecutor` (l. 251-252) normalizes `@__gql_tf_0` to `__param___gql_tf_0`; `GovernedSqlRewriter.RewriteCoreAsync` (l. 171-175) then rejects every text containing `__gql_`/`__rls_ks` ("reserved gateway identifier"). Unit tests covered merge/normalize only.
+
+Option chosen: executor-side alias (A). Rejected: (B) planner emits a non-reserved prefix. `TreeFilterClauseBuilder.ParameterPrefix` is shared with the tree path, `MergeGatewayParameters` validates on it, and a planner-chosen neutral name would be matched by plain `supplied.Contains` in client-style normalization, so client-shaped text could bind it. (C) relaxing the rewriter guard for planned reads breaks SEC-280-6 and SEC-RF107-07(e). Default taken: A. The text guard and `EnsureClientParameterNames` stay unchanged.
+
+A1. `GovernedSqlExecutionService`: add `internal const string GatewayParameterAliasPrefix = "gw_tf_";` and `internal static string GatewayParameterAlias(string name)`, which returns `GatewayParameterAliasPrefix + name.TrimStart('@')[tfPrefix.Length..]`. The alias has no `__gql_`, `__rls_ks`, `__param_`, `p_rls_`, `rls_` or `p_pd_` prefix, so it can never equal a rewriter-generated RLS/mask/VF/caller/key-set name. Those names all use reserved prefixes.
+
+A2. `MergeGatewayParameters`: after the existing prefix check, require the suffix after `__gql_tf_` to be 1-6 ASCII digits (else `InvalidOperationException`, no name in the message). Key the merged entry by `GatewayParameterAlias(trimmed)`. Fail closed (`SecurityException`, existing message) when the client parameters already contain the original name or the alias (`merged.ContainsKey(trimmed) || !merged.TryAdd(alias, value)`). Two gateway names that map to the same alias (`__gql_tf_0`/`__GQL_TF_0`) collide on `TryAdd` and fail closed.
+
+A3. `NormalizeClientParameters(string sql, IReadOnlyDictionary<string, object?>? parameters, IReadOnlyDictionary<string, object?>? gatewayParameters, out IReadOnlyCollection<string> replacedNames)`. Add the parameter (default `null` keeps all other call sites) and build `gatewayNames` (trimmed, OrdinalIgnoreCase). Build `supplied` from `parameters` keys minus every alias, so text `@gw_tf_0` is never replaced and stays unbound. In the lexer branch, a name in `gatewayNames` appends `ClientParameterPlaceholderPrefix + GatewayParameterAlias(name)` and adds the alias to `names`. Otherwise the existing `supplied` branch runs. Quoting rules are unchanged: a `@__gql_tf_0` inside a literal stays in the text and the rewriter guard rejects it (fail closed). The value is never inlined; only the name changes.
+
+A4. `GovernedSqlExecutor`: l. 252 passes `request.GatewayParameters` to `NormalizeClientParameters`. In `BuildClientValues` (l. 686-692), use `values.Add(GovernedSqlExecutionService.GatewayParameterAlias(name), value)`. `Add` stays the second collision net. Downstream binding is unchanged: `SqlAstBuilder` (l. 1060) turns `__param_gw_tf_N` into `ParameterReference("gw_tf_N")`, which is bound from `clientValues["gw_tf_N"]` like any client scalar, so PostgreSQL and SQL Server need no dialect work. The federated path (SEC-280-7) is unchanged.
+
+A5. Tests. Phase 4 builds nothing; the lead runs them.
+- Update in `tests/Autheris.Tests.Unit/Sql/GovernedSqlExecutionParameterSecurityTests.cs`. `Issue280_PlannedRead_GatewayParameters_Eq_BindsValue_NeverInText` expects `merged["gw_tf_0"]`, text containing `__param_gw_tf_0`, text containing no `__gql_` at all, and `names` containing `gw_tf_0`; the call passes `request.GatewayParameters`. `Issue280_PlannedRead_GatewayParameters_InAndBetween_Bind` uses keys `gw_tf_0..3`. `Issue280_GatewayAndClientNameCollision_FailsClosed` gets one case for the original name and one for the alias (`gw_tf_0`).
+- New `Issue280_PlannedRead_GatewayParameters_PassRewriterTextGuard`. Run the real `GovernedSqlRewriter` (existing rewriter fixture in this file or `GovernedSqlRewriterTests`) on the normalized text of a planned read with `region = @__gql_tf_0`. Expect no `WebSqlPolicyException`, and expect a `ParameterReference` named `gw_tf_0` bound to the sentinel. This test reproduces the integration failure in Red.
+- New `Issue280_ClientTextAlias_NotBoundToGatewayValue`. Planned read text `... = @gw_tf_0` plus gateway `@__gql_tf_0`: the text keeps `@gw_tf_0` (not replaced), and execution fails, never binding the sentinel.
+- New `Issue280_GatewayParameterSuffixNotDigits_FailsClosed` (`__gql_tf_x`, `__gql_tf_`, `__gql_tf_0a`).
+- New `Issue280_GatewayCaseVariantAliasCollision_FailsClosed`.
+- Unchanged and must stay green: `SEC_280_6_ClientSqlText_ReferencingGatewayParameterNames_IsRejected_WhenPlannedRead` and `Issue280_PolicyParameterValue_NotOverriddenByGatewayParameter`. Integration `GovernedAggregationWhereParams*` (PostgreSQL, SQL Server) is the acceptance gate.
+
+### 6.1 Phase 3 review of Addendum A (csharp-security-expert, 2026-10-22)
+
+Verdict: APPROVED WITH CONDITIONS. The text guard and client name guard stay unchanged, values are never inlined, and SEC-280-6 holds because client text containing `__gql_`/`__rls_ks` is still rejected by the rewriter. Alias `gw_tf_N` cannot collide with rewriter names (all use reserved prefixes). Default taken for a legitimate WebSQL client parameter named `gw_tf_N`: allowed when the request has no gateway map (normal client binding), fail closed (generic `SecurityException`) when a gateway map is present and the client supplies the same name or alias. The client can never bind or override a gateway value.
+
+- SEC-280-9: Alias and original-name comparison is `OrdinalIgnoreCase` everywhere (supplied-minus-alias in A3, `merged.ContainsKey` in A2); a client `GW_TF_0` with a gateway map must fail closed, not bind.
+- SEC-280-10: With a gateway map present, any client parameter whose normalized key equals a `gw_tf_` alias fails closed before binding (no silent drop, no name or value in the message). Without a gateway map, behavior is unchanged: client `gw_tf_0` binds as ordinary client scalar.
+- SEC-280-11: Client text containing `@__param_gw_tf_N` (pre-normalized form) must be rejected by `EnsureClientParameterNames`/reserved-prefix guard in both planned and ordinary reads; add a test that it never resolves to a gateway value.
+- SEC-280-12: The alias is applied only to names validated by A2 (digits-only suffix, prefix match); `GatewayParameterAlias` throws on anything else; no gateway name reaches the rewriter unaliased. Aliasing happens only after the federated rejection (SEC-280-7) and does not change the SEC-280-8 count bound.
+- SEC-280-13: Quoted-literal rule unchanged: `'@__gql_tf_0'` or `'@gw_tf_0'` inside a string/identifier literal is never replaced or bound; the former is rejected by the rewriter guard.
+
+Mandatory tests (`[Trait("Category","Security")]`):
+- `SEC_280_9_GatewayAliasCaseVariantClientParam_FailsClosed`
+- `SEC_280_10_ClientParamNamedAlias_WithGatewayMap_FailsClosed` and `SEC_280_10_ClientParamNamedGwTf0_WithoutGatewayMap_BindsAsClientValue`
+- `SEC_280_11_ClientTextPreNormalizedGatewayPlaceholder_IsRejected`
+- `SEC_280_12_GatewayParameterAlias_RejectsInvalidNames`
+- `SEC_280_13_GatewayPlaceholderInQuotedLiteral_NotReplaced_NotBound`
+- `SEC_280_6_ClientSqlText_ReferencingGatewayParameterNames_IsRejected_WhenPlannedRead` stays green (re-run as regression); integration `GovernedAggregationWhereParams*` on PostgreSQL and SQL Server must pass.
