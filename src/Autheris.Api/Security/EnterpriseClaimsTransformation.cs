@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Application.Governance.Rights;
 using Autheris.Domain.Interfaces;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
@@ -21,19 +22,19 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
     private readonly IIdentityRealmRegistry? _realmRegistry;
     private readonly IRoleResolver? _roleResolver;
-    private readonly IFunctionalRightRepository? _functionalRightRepo;
+    private readonly IFunctionalRightMapper? _functionalRightMapper;
     private readonly ILogger<EnterpriseClaimsTransformation>? _logger;
 
     public EnterpriseClaimsTransformation(
         IIdentityRealmRegistry? realmRegistry = null,
         IRoleResolver? roleResolver = null,
-        IFunctionalRightRepository? functionalRightRepo = null,
+        IFunctionalRightMapper? functionalRightMapper = null,
         ILogger<EnterpriseClaimsTransformation>? logger = null)
     {
         _logger = logger;
         _realmRegistry = realmRegistry;
         _roleResolver = roleResolver;
-        _functionalRightRepo = functionalRightRepo;
+        _functionalRightMapper = functionalRightMapper;
     }
 
     public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
@@ -113,14 +114,22 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
                 identity.AddClaim(new System.Security.Claims.Claim(ClaimTypes.Role, role));
             }
 
-            // Map functional rights for the groups and roles
-            if (_functionalRightRepo != null)
+            // PERS-09: functional-right claims come only from FunctionalRightMapper (four-eyes for privileged rights, customer-realm
+            // ceiling); a mapper failure yields no functional-right claims (fail closed).
+            if (_functionalRightMapper != null)
             {
                 var groupsAndRoles = rolesResolution.Groups.Concat(rolesResolution.Roles).Distinct().ToList();
-                var mappings = await _functionalRightRepo.GetApprovedMappingsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles).ConfigureAwait(false);
-                foreach (var m in mappings)
+                try
                 {
-                    identity.AddClaim(new System.Security.Claims.Claim(RequireFunctionalRightHandler.FunctionalRightClaimType, m.FunctionalRight.Name));
+                    var rights = await _functionalRightMapper.GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles).ConfigureAwait(false);
+                    foreach (var right in rights)
+                    {
+                        identity.AddClaim(new System.Security.Claims.Claim(RequireFunctionalRightHandler.FunctionalRightClaimType, right.Name));
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger?.LogError(ex, "Functional right mapping failed for realm {RealmId}; no functional-right claims are issued (fail-closed).", realmId);
                 }
             }
         }

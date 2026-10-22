@@ -3,7 +3,6 @@ namespace Autheris.Infrastructure.Persistence;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
-using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
@@ -29,6 +28,13 @@ internal sealed class RecertificationStore(
 {
     public RecertificationDialect Dialect => dialect;
 
+    private SqlDialect Sql => dialect switch
+    {
+        RecertificationDialect.Sqlite => SqlDialect.Sqlite,
+        RecertificationDialect.PostgreSql => SqlDialect.PostgreSql,
+        _ => SqlDialect.SqlServer
+    };
+
     // ---------------------------------------------------- CAMPAIGNS
 
     public async Task CreateCampaignAsync(RecertificationCampaign campaign, CancellationToken ct = default)
@@ -43,8 +49,8 @@ VALUES (@tenantId, @campaignId, @name, @recertClass, @status, @deadline, @create
         AddParam(cmd, "@name", campaign.Name);
         AddParam(cmd, "@recertClass", campaign.RecertClass.ToString());
         AddParam(cmd, "@status", campaign.Status.ToString());
-        AddParam(cmd, "@deadline", FormatIso(campaign.Deadline));
-        AddParam(cmd, "@createdAt", FormatIso(campaign.CreatedAt));
+        AddParam(cmd, "@deadline", DialectValueCodec.Ts(Sql, campaign.Deadline));
+        AddParam(cmd, "@createdAt", DialectValueCodec.Ts(Sql, campaign.CreatedAt));
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -112,7 +118,7 @@ VALUES (@tenantId, @campaignId, @itemId, @assetType, @assetKey, @assignedTo, @re
         AddParam(cmd, "@assignedTo", item.AssignedTo);
         AddParam(cmd, "@reviewerId", item.ReviewerId);
         AddParam(cmd, "@decision", item.Decision.ToString());
-        AddParam(cmd, "@decisionAt", item.DecisionAt.HasValue ? FormatIso(item.DecisionAt.Value) : null);
+        AddParam(cmd, "@decisionAt", DialectValueCodec.Ts(Sql, item.DecisionAt));
         AddParam(cmd, "@decisionBy", item.DecisionBy);
         AddParam(cmd, "@comments", item.Comments);
 
@@ -170,7 +176,7 @@ SELECT i.tenant_id, i.campaign_id, i.item_id, i.asset_type, i.asset_key, i.assig
 FROM RECERT_ITEMS i
 INNER JOIN RECERT_CAMPAIGNS c ON i.tenant_id = c.tenant_id AND i.campaign_id = c.campaign_id
 WHERE i.decision = 'Pending' AND c.deadline <= @deadlineUtc";
-        AddParam(cmd, "@deadlineUtc", FormatIso(deadlineUtc));
+        AddParam(cmd, "@deadlineUtc", DialectValueCodec.Ts(Sql, deadlineUtc));
 
         var list = new List<RecertificationItem>();
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -203,7 +209,7 @@ SET decision = @decision,
 WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId AND decision = @expected";
         AddParam(cmd, "@expected", expected.ToString());
         AddParam(cmd, "@decision", decision.ToString());
-        AddParam(cmd, "@decisionAt", FormatIso(DateTimeOffset.UtcNow));
+        AddParam(cmd, "@decisionAt", DialectValueCodec.Ts(Sql, DateTimeOffset.UtcNow));
         AddParam(cmd, "@decisionBy", decisionBy);
         AddParam(cmd, "@comments", comments);
         AddParam(cmd, "@tenantId", tenantId.Value);
@@ -215,20 +221,20 @@ WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId 
 
     // ---------------------------------------------------- HELPERS
 
-    private static RecertificationCampaign ReadCampaign(DbDataReader reader)
+    private RecertificationCampaign ReadCampaign(DbDataReader reader)
     {
         var tenantId = reader.GetString(0);
         var campaignId = reader.GetString(1);
         var name = reader.GetString(2);
         var recertClass = Enum.Parse<RecertClass>(reader.GetString(3), ignoreCase: true);
         var status = Enum.Parse<RecertCampaignStatus>(reader.GetString(4), ignoreCase: true);
-        var deadline = DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-        var createdAt = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        var deadline = DialectValueCodec.ReadRequiredTs(Sql, reader, 5);
+        var createdAt = DialectValueCodec.ReadRequiredTs(Sql, reader, 6);
 
         return new RecertificationCampaign(tenantId, campaignId, name, recertClass, status, deadline, createdAt);
     }
 
-    private static RecertificationItem ReadItem(DbDataReader reader)
+    private RecertificationItem ReadItem(DbDataReader reader)
     {
         var tenantId = reader.GetString(0);
         var campaignId = reader.GetString(1);
@@ -238,14 +244,12 @@ WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId 
         var assignedTo = reader.GetString(5);
         var reviewerId = reader.GetString(6);
         var decision = Enum.Parse<RecertDecision>(reader.GetString(7), ignoreCase: true);
-        var decisionAt = reader.IsDBNull(8) ? (DateTimeOffset?)null : DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        var decisionAt = DialectValueCodec.ReadTs(Sql, reader, 8);
         var decisionBy = reader.IsDBNull(9) ? null : reader.GetString(9);
         var comments = reader.IsDBNull(10) ? null : reader.GetString(10);
 
         return new RecertificationItem(tenantId, campaignId, itemId, assetType, assetKey, assignedTo, reviewerId, decision, decisionAt, decisionBy, comments);
     }
-
-    private static string FormatIso(DateTimeOffset dt) => dt.ToUniversalTime().ToString("O");
 
     private static void AddParam(DbCommand cmd, string name, object? value)
     {
