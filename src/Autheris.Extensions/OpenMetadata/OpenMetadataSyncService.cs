@@ -652,6 +652,49 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
             }
 
+        // EXT-12: the registration is released when processing fails, so the provider's retry is not dropped as a duplicate.
+        try
+        {
+            var processed = await ProcessWebhookEventCoreAsync(webhookEvent, omOptions, ct).ConfigureAwait(false);
+            if (!processed)
+            {
+                await ReleaseWebhookEventAsync(webhookEvent.Id).ConfigureAwait(false);
+            }
+
+            return processed;
+        }
+        catch
+        {
+            await ReleaseWebhookEventAsync(webhookEvent.Id).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task ReleaseWebhookEventAsync(Guid? eventId)
+    {
+        if (!eventId.HasValue)
+        {
+            return;
+        }
+
+        ProcessedWebhookEvents.TryRemove(eventId.Value, out _);
+        if (_clusterState == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _clusterState.RemoveAsync($"om:dedup:{eventId.Value}", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "OpenMetadata webhook deduplication: failed to release the event registration in the cluster state.");
+        }
+    }
+
+    private async Task<bool> ProcessWebhookEventCoreAsync(OpenMetadataWebhookEvent webhookEvent, OpenMetadataOptions omOptions, CancellationToken ct)
+    {
         _logger.LogInformation(
             "Processing OpenMetadata webhook event: Type={Type}, EntityType={Entity}, FQN={Fqn}",
             webhookEvent.EventType, webhookEvent.EntityType, webhookEvent.EntityFullyQualifiedName);
