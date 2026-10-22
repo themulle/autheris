@@ -24,7 +24,7 @@ public sealed partial class TableAccessPolicy
         if (useCache)
         {
             contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);
-            var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
+            var cached = await _cacheService!.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
             if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
             {
                 return await WithTypedConsentPolicyAsync(cached, query, ct).ConfigureAwait(false);
@@ -32,7 +32,7 @@ public sealed partial class TableAccessPolicy
         }
 
         // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-        var epochAtLoad = useCache ? await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
+        var epochAtLoad = useCache ? await _cacheService!.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
         IEnumerable<Sid> userSids = query.AllUserSids != null && query.AllUserSids.Count > 0
             ? query.AllUserSids
             : [query.UserSid];
@@ -77,7 +77,7 @@ public sealed partial class TableAccessPolicy
         {
             // SEC: TTL bounded by the earliest consent ValidTo; shorter for highly sensitive tables.
             var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
-            await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
+            await _cacheService!.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
         }
 
         if (query.Metadata.IsDelegatedSource && decision.IsAllowed)

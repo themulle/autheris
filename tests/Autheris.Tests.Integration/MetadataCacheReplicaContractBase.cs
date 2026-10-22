@@ -1,4 +1,5 @@
 using Autheris.Domain.Common;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Shouldly;

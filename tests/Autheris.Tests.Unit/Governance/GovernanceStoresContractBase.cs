@@ -1,4 +1,5 @@
 using Autheris.Domain.Common;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;

@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Federation;
 
 using System;
+using TrinoSqlEngine.Analysis;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Sql.Federation.Conjuncts;

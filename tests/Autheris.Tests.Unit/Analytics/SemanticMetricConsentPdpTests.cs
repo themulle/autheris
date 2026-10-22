@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Analytics;
 
 using System;
+using Autheris.Application.Dbt.Interfaces;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Security.Claims;

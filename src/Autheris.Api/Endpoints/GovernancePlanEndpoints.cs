@@ -38,7 +38,7 @@ public static class GovernancePlanEndpoints
                 return Results.BadRequest(new { error = "DatasetId and Grants are required." });
             }
 
-            var result = await planningService.PlanAccessAsync(request, adminSid, EndpointSecurity.GetRequestTenant(context).Value, ct, context.User).ConfigureAwait(false);
+            var result = await planningService.PlanAccessAsync(request, adminSid, EndpointSecurity.GetRequestTenant(context).Value, context.User, ct).ConfigureAwait(false);
             return Results.Ok(result);
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 

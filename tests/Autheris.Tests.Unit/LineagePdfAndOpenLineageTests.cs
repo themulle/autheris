@@ -35,7 +35,7 @@ public class LineagePdfAndOpenLineageTests
     {
         // Arrange
         var signer = Substitute.For<IAuditAnchorSigner>();
-        signer.Sign(Arg.Any<ReadOnlySpan<byte>>()).Returns("abc123sig");
+        signer.Sign(default).ReturnsForAnyArgs("abc123sig");
         var exporter = new GdprAuditReportPdfExporter(signer);
         var report = new GdprDisclosureReport(
             TargetTable: "finance.dbo.salary",

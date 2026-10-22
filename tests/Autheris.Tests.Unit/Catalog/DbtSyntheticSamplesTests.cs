@@ -182,7 +182,7 @@ public sealed class DbtSyntheticSamplesTests
         predefined.Count.ShouldBe(1);
         predefined.ContainsKey("__synthetic").ShouldBeTrue();
 
-        var generatedTable = PredefinedTable() with { PredefinedSyntheticSamples = null };
+        var generatedTable = PredefinedTable() with { PredefinedSyntheticSamples = Array.Empty<IReadOnlyDictionary<string, object?>>() };
         var generated = generator.GenerateRows(generatedTable, 1, columnAccessLevels: null)[0];
         generated.Count.ShouldBe(1);
         generated.ContainsKey("__synthetic").ShouldBeTrue();

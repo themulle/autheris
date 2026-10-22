@@ -173,8 +173,8 @@ public class AccessPlanningService : IAccessPlanningService
         AdminPlanAccessRequest request,
         string adminSid,
         string? tenantId = null,
-        CancellationToken ct = default,
-        ClaimsPrincipal? caller = null)
+        ClaimsPrincipal? caller = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
@@ -304,8 +304,8 @@ public class AccessPlanningService : IAccessPlanningService
         AdminApplyAccessRequest request,
         string adminSid,
         TenantId tenantId,
-        CancellationToken ct = default,
-        ClaimsPrincipal? caller = null)
+        ClaimsPrincipal? caller = null,
+        CancellationToken ct = default)
     {
         // GOV-04: the tuples are scoped to the caller tenant only; a missing tenant is never replaced by a domain or default.
         if (string.IsNullOrWhiteSpace(tenantId.Value))

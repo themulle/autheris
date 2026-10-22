@@ -18,8 +18,8 @@ public interface IAccessPlanningService
         AdminPlanAccessRequest request,
         string adminSid,
         string? tenantId = null,
-        CancellationToken ct = default,
-        ClaimsPrincipal? caller = null);
+        ClaimsPrincipal? caller = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Verifies TOTP 2FA for an access plan and issues an HMAC-signed confirmation token with TTL.
@@ -37,8 +37,8 @@ public interface IAccessPlanningService
         AdminApplyAccessRequest request,
         string adminSid,
         TenantId tenantId,
-        CancellationToken ct = default,
-        ClaimsPrincipal? caller = null);
+        ClaimsPrincipal? caller = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Issue #107: plans a change of the row filter key-set cache settings of one rule or one object. Validated against the current caps; no state

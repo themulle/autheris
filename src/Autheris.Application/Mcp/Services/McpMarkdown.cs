@@ -30,8 +30,8 @@ public static class McpMarkdown
                 case '\r':
                 case '\n':
                 case '\u0085':
-                case ' ':
-                case ' ':
+                case '\u2028':
+                case '\u2029':
                     sb.Append(' ');
                     break;
                 default:

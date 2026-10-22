@@ -121,8 +121,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
         // SR-M-04: atomic consume (a single winner per userSid/time step, in-process and cluster-wide)
         if (!await TryConsumeStepAsync(replayKey, now, ct).ConfigureAwait(false))
         {
-            await RegisterFailureAsync(failureKey, ct).ConfigureAwait(false);
-            return false; // Replay attempt rejected
+            return false; // Replay attempt rejected; the reserved attempt stays counted
         }
 
         await ResetFailuresAsync(failureKey, ct).ConfigureAwait(false);
