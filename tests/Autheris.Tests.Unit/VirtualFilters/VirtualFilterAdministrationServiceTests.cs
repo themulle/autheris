@@ -297,6 +297,22 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task ChangedFilterDefinitions_CountAsRelaxationsTowardsMaxRemovals_VF10()
+    {
+        var filters = Enumerable.Range(1, 3).Select(i => VirtualFilterModelTests.DavidFilter($"filter_{i}")).ToArray();
+        await _service.ApplySyncAsync(Desired("c1", [.. filters]), Sync);
+
+        // Three changed definitions (3 relaxations > limit 2) need force although nothing was removed.
+        var changed = filters.Select(f => f with { ValidToColumn = "crane.date_of_delivery" }).ToArray();
+        var plan = await _service.PlanSyncAsync(Desired("c2", [.. changed]));
+
+        plan.UpdateFilters.Count.ShouldBe(3);
+        plan.RequiresForce.ShouldBeTrue();
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => _service.ApplySyncAsync(Desired("c2", [.. changed]), Sync));
+    }
+
+    [Fact]
     public async Task WeakeningUncoveredPolicy_CountsAsRelaxationTowardsMaxRemovals()
     {
         // Setup 3 profiles with Uncovered = Deny

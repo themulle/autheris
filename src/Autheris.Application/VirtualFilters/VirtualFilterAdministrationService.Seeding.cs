@@ -146,7 +146,9 @@ public sealed partial class VirtualFilterAdministrationService
             }
         }
 
-        int planRelaxations = removedBindings + uncoveredWeakened + scopeChanged + deleteProfiles.Count + deleteFilters.Count;
+        // VF-10: a changed definition of a managed filter (weaker conditions, removed join) can widen what grantees see as much as a
+        // removed binding, so every updated filter counts as a relaxation as well.
+        int planRelaxations = removedBindings + uncoveredWeakened + scopeChanged + deleteProfiles.Count + deleteFilters.Count + updateFilters.Count;
 
         var windowStart = DateTimeOffset.UtcNow.AddMinutes(-Math.Max(1, _options.MaxRemovalsWindowMinutes));
         int pastRelaxations = 0;
