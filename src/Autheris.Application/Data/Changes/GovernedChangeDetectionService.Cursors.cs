@@ -389,7 +389,7 @@ public sealed partial class GovernedChangeDetectionService
             if (access == ColumnAccessLevel.Mask)
             {
                 var rule = metadata.ColumnMaskingRules.TryGetValue(colName, out var r) ? r : DefaultRedactRule;
-                var scopedRule = GatewayExecutionService.ScopeRuleForTenant(rule, tenantId.Value, null);
+                var scopedRule = GatewayExecutionService.ScopeRuleForTenant(rule, tenantId.Value, _maskingProvider.DefaultHmacKeyId);
                 projected[colName] = _maskingProvider.MaskValue(colName, val, scopedRule);
             }
             else
