@@ -657,7 +657,7 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
                 entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
@@ -762,7 +762,7 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
                 entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
@@ -871,7 +871,7 @@ public partial class PostgreSqlGovernanceRepository
         if (since != null)
         {
             whereClauses.Add("occurred_at >= @since");
-            cmd.Parameters.AddWithValue("@since", since.Value.ToString("O"));
+            cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since.Value));
         }
         if (tenantId != null)
         {
@@ -946,7 +946,7 @@ public partial class PostgreSqlGovernanceRepository
         if (query.Since is { } since)
         {
             where.Add("occurred_at >= @since");
-            cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+            cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since));
         }
 
         if (query.BeforeSequence is { } before)
@@ -1152,8 +1152,8 @@ public partial class PostgreSqlGovernanceRepository
         cmd.CommandText = @"SELECT MIN(rowid), MAX(rowid)
                             FROM AUDIT_LOG_ENTRIES
                             WHERE occurred_at >= @from AND occurred_at < @to";
-        cmd.Parameters.AddWithValue("@from", windowFrom.ToString("O"));
-        cmd.Parameters.AddWithValue("@to", windowTo.ToString("O"));
+        cmd.Parameters.AddWithValue("@from", AuditTimestamp.ToStorage(windowFrom));
+        cmd.Parameters.AddWithValue("@to", AuditTimestamp.ToStorage(windowTo));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false) || reader.IsDBNull(0) || reader.IsDBNull(1))
@@ -1274,7 +1274,7 @@ public partial class PostgreSqlGovernanceRepository
             sequence,
             id,
             prevHash,
-            occurredAt,
+            occurredAt.ToUniversalTime(),
             eventType,
             actorSid,
             targetTable,
