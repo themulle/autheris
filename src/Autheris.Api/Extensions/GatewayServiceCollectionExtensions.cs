@@ -153,6 +153,10 @@ public static class GatewayServiceCollectionExtensions
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<CrossSourceOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(_ => new ReadPathSwitchOptionsValidator(configuration));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new BulkStreamSigningKeyOptionsValidator(
+                environment,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<BulkStreamSigningKeyOptionsValidator>>()));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new CoLocationOptionsValidator(
                 configuration,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<CoLocationOptionsValidator>>()));

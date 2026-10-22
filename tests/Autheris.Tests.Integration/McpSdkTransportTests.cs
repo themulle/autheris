@@ -184,6 +184,7 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
                 b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
+                b.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "false");
                 b.UseSetting("Gateway:Mcp:AllowAnonymousDiscovery", "false");
                 b.ConfigureServices(services =>

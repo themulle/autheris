@@ -24,6 +24,13 @@ public sealed class RestDataEndpointOptions
 public sealed class BulkStreamOptions
 {
     public bool? Enabled { get; init; }
+
+    /// <summary>
+    /// HMAC key of the keyset cursors issued by the bulk stream endpoints (the same value must be configured on every node).
+    /// Outside Development it is required (at least 32 bytes) while the endpoints are enabled, otherwise the start fails
+    /// (<c>BulkStreamSigningKeyOptionsValidator</c>). In Development an unset key falls back to a random per-process key,
+    /// so cursors are only valid on this instance until restart.
+    /// </summary>
     public string? SigningKey { get; init; }
 }
 

@@ -184,19 +184,11 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         // 6. Casbin ABAC Policy Enforcement as additional gate + row filter (with full ABAC context)
         if (_policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
         {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in subscriber.Claims)
-            {
-                if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                attributes[claim.Type] = claim.Value;
-            }
-            attributes["action"] = "read";
-
-            var purpose = subscriber.FindFirst("purpose")?.Value ?? subscriber.FindFirst("purpose_id")?.Value;
+            // Same attribute map as the query path (TableAccessPolicy): action claims are ignored, empty values are missing, and a claim
+            // type with several distinct values is ambiguous (fail closed) instead of keeping the last value; the gateway action wins.
+            var (attributes, purpose) = Autheris.Application.Policy.TableAccessPolicy.BuildClaimAttributes(
+                subscriber.Claims,
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["action"] = "read" });
 
             var evalContext = new SecurityEvaluationContext(
                 UserSid: userSid,
