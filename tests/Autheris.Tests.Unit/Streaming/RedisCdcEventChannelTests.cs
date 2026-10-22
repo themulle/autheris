@@ -363,10 +363,10 @@ public sealed class RedisCdcEventChannelTests
                 new Sid("S-1-5-21-100"),
                 principal));
 
-        clusterState.IncrementAsync("cdc:subs:tenant-a", 1, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult<long?>(1L));
-        clusterState.IncrementAsync("cdc:subs:tenant-a", -1, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult<long?>(0L));
+        clusterState.TryAcquireSlotAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<bool?>(true));
+        clusterState.ReleaseSlotAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.CompletedTask);
 
         var lease = await governor.AdmitAsync(
             principal,
@@ -378,12 +378,12 @@ public sealed class RedisCdcEventChannelTests
 
         await lease.DisposeAsync();
 
-        await clusterState.Received(1).IncrementAsync("cdc:subs:tenant-a", 1, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
-        await clusterState.Received(1).IncrementAsync("cdc:subs:tenant-a", -1, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await clusterState.Received(2).TryAcquireSlotAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await clusterState.Received(2).ReleaseSlotAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
 
         // Now simulate ClusterStateUnavailableException -> fail closed
-        clusterState.IncrementAsync("cdc:subs:tenant-a", 1, Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<long?>>(_ => throw new ClusterStateUnavailableException("increment", "cdc:subs:tenant-a", new InvalidOperationException("redis down")));
+        clusterState.TryAcquireSlotAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<bool?>>(_ => throw new ClusterStateUnavailableException("slot", "cdc:subs:tenant-a", new InvalidOperationException("redis down")));
 
         var ex = await Should.ThrowAsync<GraphQLException>(() =>
             governor.AdmitAsync(

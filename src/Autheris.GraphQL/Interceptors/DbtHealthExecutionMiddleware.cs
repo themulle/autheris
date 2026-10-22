@@ -85,8 +85,19 @@ public sealed class DbtHealthExecutionMiddleware
         // 2. Check health for each referenced model
         foreach (var modelName in referencedModels)
         {
-            var tableId = new TableIdentifier("default", "default", modelName);
+            var tenant = principal.GetTenantId();
+            var tableId = new TableIdentifier(tenant.Value, "default", modelName);
             var health = await _circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted).ConfigureAwait(false);
+            if (health.Status == DbtModelHealthStatus.Healthy && !string.Equals(tenant.Value, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                var defaultTableId = new TableIdentifier("default", "default", modelName);
+                var defaultHealth = await _circuitBreaker.GetTableHealthAsync(defaultTableId, context.RequestAborted).ConfigureAwait(false);
+                if (defaultHealth.Status != DbtModelHealthStatus.Healthy)
+                {
+                    tableId = defaultTableId;
+                    health = defaultHealth;
+                }
+            }
 
             if (health.Status == DbtModelHealthStatus.Quarantined || health.Status == DbtModelHealthStatus.Degraded)
             {

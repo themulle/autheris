@@ -107,6 +107,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.CallerAttributeDefinitionDeleted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeServiceSetChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeSimulationRead] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.DataCatalogSync] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

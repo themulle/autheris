@@ -58,7 +58,7 @@ public static class CatalogGovernanceRatchet
             Location = !string.IsNullOrWhiteSpace(exTable.Location) ? exTable.Location : inTable.Location,
             HttpEndpoint = exTable.HttpEndpoint ?? inTable.HttpEndpoint,
             PluginName = !string.IsNullOrWhiteSpace(exTable.PluginName) ? exTable.PluginName : inTable.PluginName,
-            Tags = UnionTags(exTable.Tags, inTable.Tags),
+            Tags = exTable.Tags,
             Visibility = exTable.Visibility != DatasetVisibility.Hidden ? exTable.Visibility : inTable.Visibility,
             RlsExpression = !string.IsNullOrWhiteSpace(exTable.RlsExpression) ? exTable.RlsExpression : inTable.RlsExpression,
             MinGroupSize = mergedMinGroupSize,
@@ -143,7 +143,6 @@ public static class CatalogGovernanceRatchet
             Indexes = replace ? incoming.Indexes : existing.Indexes,
             RowFilterEvaluation = existing.RowFilterEvaluation,
             CatalogView = existing.CatalogView,
-            CatalogTags = UnionTags(existing.CatalogTags, incoming.CatalogTags),
             ReplaceKeyDefinition = replace,
             ReleaseProfileToCatalogViewers = existing.ReleaseProfileToCatalogViewers,
             ProfilePublicationPolicy = existing.ProfilePublicationPolicy,
@@ -158,19 +157,18 @@ public static class CatalogGovernanceRatchet
 
     public static ImmutableArray<string> UnionRequiredFilterColumns(ImmutableArray<string> stored, ImmutableArray<string> incoming)
     {
-        var s = stored.IsDefault ? ImmutableArray<string>.Empty : stored;
-        var inc = incoming.IsDefault ? ImmutableArray<string>.Empty : incoming;
-        if (s.IsEmpty && inc.IsEmpty) return ImmutableArray<string>.Empty;
+        if (incoming.IsDefaultOrEmpty) return stored;
+        if (stored.IsDefaultOrEmpty) return incoming;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var builder = ImmutableArray.CreateBuilder<string>();
-        foreach (var col in s)
+        foreach (var col in stored)
         {
             if (!string.IsNullOrWhiteSpace(col) && seen.Add(col))
             {
                 builder.Add(col);
             }
         }
-        foreach (var col in inc)
+        foreach (var col in incoming)
         {
             if (!string.IsNullOrWhiteSpace(col) && seen.Add(col))
             {
@@ -184,16 +182,13 @@ public static class CatalogGovernanceRatchet
         ImmutableArray<ImmutableArray<string>> stored,
         ImmutableArray<ImmutableArray<string>> incoming)
     {
-        var s = stored.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : stored;
-        var inc = incoming.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : incoming;
-        if (s.IsEmpty && inc.IsEmpty) return ImmutableArray<ImmutableArray<string>>.Empty;
-        if (s.IsEmpty) return inc;
-        if (inc.IsEmpty) return s;
+        if (incoming.IsDefaultOrEmpty) return stored;
+        if (stored.IsDefaultOrEmpty) return incoming;
 
         var builder = ImmutableArray.CreateBuilder<ImmutableArray<string>>();
         var seenKeySets = new List<HashSet<string>>();
 
-        foreach (var g in s)
+        foreach (var g in stored)
         {
             if (g.IsDefaultOrEmpty) continue;
             var set = new HashSet<string>(g, StringComparer.OrdinalIgnoreCase);
@@ -204,7 +199,7 @@ public static class CatalogGovernanceRatchet
             }
         }
 
-        foreach (var g in inc)
+        foreach (var g in incoming)
         {
             if (g.IsDefaultOrEmpty) continue;
             var set = new HashSet<string>(g, StringComparer.OrdinalIgnoreCase);

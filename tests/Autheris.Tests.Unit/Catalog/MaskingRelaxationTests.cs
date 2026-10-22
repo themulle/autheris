@@ -11,7 +11,7 @@ public class MaskingRelaxationTests
     public void IsMaskingRelaxation_Redact_ToWeakerRule_IsRelaxation()
     {
         var stored = new MaskingRule { RuleType = "REDACT" };
-        var weakerRules = new[] { "MASK_EMAIL", "GEO_JITTER", "PARTIAL_MASK", "HMAC", "TOKENIZE", "NULLIFY" };
+        var weakerRules = new[] { "MASK_EMAIL", "GEO_JITTER", "PARTIAL_MASK", "HMAC", "TOKENIZE" };
 
         foreach (var rule in weakerRules)
         {

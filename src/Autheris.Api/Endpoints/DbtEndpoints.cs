@@ -282,7 +282,8 @@ public static class DbtEndpoints
 
         app.MapGet("/api/extensions/dbt/health", async (
             HttpContext context,
-            IDbtHealthCircuitBreaker circuitBreaker) =>
+            IDbtHealthCircuitBreaker circuitBreaker,
+            IDbtTestTargetMap? testTargetMap) =>
         {
             // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
@@ -294,9 +295,18 @@ public static class DbtEndpoints
 
             if (context.Request.Query.TryGetValue("table", out var tableName) && !string.IsNullOrWhiteSpace(tableName))
             {
-                var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : "default";
-                var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
-                var tableId = new TableIdentifier(db, schema, tableName!);
+                var reqTenant = EndpointSecurity.GetRequestTenant(context);
+                TableIdentifier tableId;
+                if (testTargetMap != null && testTargetMap.TryResolveModel(reqTenant, tableName!, out var resolvedId))
+                {
+                    tableId = resolvedId;
+                }
+                else
+                {
+                    var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : reqTenant.Value;
+                    var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
+                    tableId = new TableIdentifier(db, schema, tableName!);
+                }
                 var health = await circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted);
                 return Results.Ok(health);
             }
@@ -307,7 +317,8 @@ public static class DbtEndpoints
 
         app.MapPost("/api/extensions/dbt/health/reset", async (
             HttpContext context,
-            IDbtHealthCircuitBreaker circuitBreaker) =>
+            IDbtHealthCircuitBreaker circuitBreaker,
+            IDbtTestTargetMap? testTargetMap) =>
         {
             // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
             // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
@@ -320,9 +331,18 @@ public static class DbtEndpoints
 
             if (context.Request.Query.TryGetValue("table", out var tableName) && !string.IsNullOrWhiteSpace(tableName))
             {
-                var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : "default";
-                var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
-                var tableId = new TableIdentifier(db, schema, tableName!);
+                var reqTenant = EndpointSecurity.GetRequestTenant(context);
+                TableIdentifier tableId;
+                if (testTargetMap != null && testTargetMap.TryResolveModel(reqTenant, tableName!, out var resolvedId))
+                {
+                    tableId = resolvedId;
+                }
+                else
+                {
+                    var db = context.Request.Query.TryGetValue("database", out var dbVal) && !string.IsNullOrWhiteSpace(dbVal) ? dbVal.ToString() : reqTenant.Value;
+                    var schema = context.Request.Query.TryGetValue("schema", out var schemaVal) && !string.IsNullOrWhiteSpace(schemaVal) ? schemaVal.ToString() : "default";
+                    tableId = new TableIdentifier(db, schema, tableName!);
+                }
                 await circuitBreaker.ResetTableHealthAsync(tableId, context.RequestAborted);
                 return Results.Ok(new { message = $"Table '{tableId}' health reset to healthy." });
             }

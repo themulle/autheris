@@ -98,11 +98,25 @@ public sealed class BatchRelationLoader
             ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
             ?? "parent_id";
 
-        if (decision.GetEffectiveColumnAccess(joinColumn, metadata) != ColumnAccessLevel.Clear)
+        var isSensitive = TableAccessDecision.IsCatalogSensitive(joinColumn, metadata);
+        var explicitAccess = decision.ColumnAccess.TryGetValue(joinColumn, out var direct) ? direct : (ColumnAccessLevel?)null;
+        var effectiveJoinAccess = explicitAccess ?? (isSensitive ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear);
+
+        if (effectiveJoinAccess != ColumnAccessLevel.Clear)
         {
             RecordReason(CrossSourceRelationErrorCodes.RelationKeyMasked);
             LastDispatchedChildQueryCount = 0;
             return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+        }
+
+        var effectiveDecision = decision;
+        if (explicitAccess == null && !isSensitive)
+        {
+            var augmented = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase)
+            {
+                [joinColumn] = ColumnAccessLevel.Clear
+            };
+            effectiveDecision = decision with { ColumnAccess = augmented };
         }
 
         var (result, dispatchedQueries) = await _chunkedQueryExecutor.ExecuteGroupedWithMetricsAsync<string, InvoiceItemRecord>(
@@ -145,7 +159,7 @@ public sealed class BatchRelationLoader
                 };
 
                 var requestedColumns = metadata.Columns
-                    .Where(c => decision.GetColumnAccess(c.ColumnName) != ColumnAccessLevel.Deny)
+                    .Where(c => effectiveDecision.GetColumnAccess(c.ColumnName) != ColumnAccessLevel.Deny)
                     .Select(c => c.ColumnName)
                     .ToList();
 
@@ -153,7 +167,7 @@ public sealed class BatchRelationLoader
                     SourceName: metadata.Table.SourceName,
                     Metadata: metadata,
                     Principal: principal ?? new ClaimsPrincipal(new ClaimsIdentity()),
-                    AccessDecision: decision,
+                    AccessDecision: effectiveDecision,
                     Arguments: new Dictionary<string, object?> { ["limit"] = Math.Max(100, chunkKeys.Count * 10), ["offset"] = 0 },
                     RequestedFields: requestedColumns,
                     RequestHeaders: null,
@@ -180,7 +194,7 @@ public sealed class BatchRelationLoader
                 var processedRows = GovernedConnectorReader.Apply(
                     rawRows,
                     metadata,
-                    decision,
+                    effectiveDecision,
                     tenantId.Value,
                     rlsPushdownAlreadyOccurred,
                     inDbMaskingAlreadyOccurred,

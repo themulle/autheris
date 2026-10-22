@@ -107,7 +107,8 @@ public sealed class EpochRevokeRedisFailureTests
     [Fact]
     public async Task RevokeWhileDisconnected_IsWrittenToRedisOnReconnect()
     {
-        var h = Create();
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var h = Create(time);
         (await h.Service.GetCurrentEpochAsync(A)).ShouldBe(5);
         h.Multiplexer.IsConnected.Returns(false);
 
@@ -121,6 +122,7 @@ public sealed class EpochRevokeRedisFailureTests
 
         await h.Db.Received(1).StringIncrementAsync(Arg.Any<RedisKey>(), Arg.Any<long>(), Arg.Any<CommandFlags>());
         h.Db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"6"));
+        time.Advance(TimeSpan.FromSeconds(6));
         (await h.Service.IsEpochValidAsync(A, 6)).ShouldBeTrue();
         (await h.Service.IsEpochValidAsync(A, 5)).ShouldBeFalse();
     }

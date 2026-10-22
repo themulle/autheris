@@ -66,7 +66,7 @@ public sealed class SubgraphFieldMaskingTypeInterceptor : TypeInterceptor
             }
 
             var options = context.Services.GetService<IOptions<GatewayOptions>>();
-            if (options?.Value?.Federation?.EnableResultMasking != true || options.Value.IsColumnMaskingDisabled)
+            if (options?.Value?.Federation?.Enabled != true || options.Value.Federation.EnableResultMasking != true || options.Value.IsColumnMaskingDisabled)
             {
                 return;
             }
