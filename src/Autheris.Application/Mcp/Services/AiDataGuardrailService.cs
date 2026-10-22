@@ -52,6 +52,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
     private readonly Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? _semanticCatalog;
+    private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -80,7 +81,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IReadPathSwitches? switches = null,
         Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null)
+        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null,
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -104,6 +106,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _datasetCatalogAdmin = datasetCatalogAdmin;
         _procedureRegistry = procedureRegistry;
         _semanticCatalog = semanticCatalog;
+        _catalogVisibility = catalogVisibility;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -393,7 +396,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
                 {
                     var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
+                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                     bool isVisible = visibleTables.Any(t =>
                         t.Identifier.Equals(resolvedTable.Value) ||
                         (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
@@ -456,7 +459,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             {
                 var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
                 var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
-                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, cancellationToken).ConfigureAwait(false);
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                 var visibleKeys = visibleTables.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 queries = queries.Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()))).ToList();
             }

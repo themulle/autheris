@@ -116,7 +116,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             "ping" => HandlePing(rpcId),
             "tools/list" => await HandleToolsListAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
             "tools/call" => await HandleToolsCallAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
-            "resources/list" => await HandleResourcesListAsync(rpcId, session, cancellationToken).ConfigureAwait(false),
+            "resources/list" => await HandleResourcesListAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
             "resources/read" => await HandleResourcesReadAsync(rpcId, root, session, cancellationToken).ConfigureAwait(false),
             _ => CreateErrorResponse(rpcId, -32601, $"Method '{method}' not found.")
         };
@@ -428,7 +428,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         return new System.Security.Claims.ClaimsPrincipal(identity);
     }
 
-    private async Task<string> HandleResourcesListAsync(object? id, McpSessionContext? session, CancellationToken ct)
+    private async Task<string> HandleResourcesListAsync(object? id, JsonElement root, McpSessionContext? session, CancellationToken ct)
     {
         if (_semanticCompiler == null)
         {
@@ -441,10 +441,18 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             """;
         }
 
+        string? cursor = null;
+        if (root.TryGetProperty("params", out var listParams) && listParams.ValueKind == JsonValueKind.Object &&
+            listParams.TryGetProperty("cursor", out var cursorProp) && cursorProp.ValueKind == JsonValueKind.String)
+        {
+            cursor = cursorProp.GetString();
+        }
+
+        // MCP-14: descriptors only, one page at a time; the resource text is rendered per read.
         var principal = BuildPrincipalFromSession(session);
-        var resources = await _semanticCompiler.GetSemanticResourcesAsync(null, principal, ct).ConfigureAwait(false);
-        var items = new List<string>(resources.Count);
-        foreach (var r in resources)
+        var page = await _semanticCompiler.ListSemanticResourceUrisAsync(principal, cursor, ct: ct).ConfigureAwait(false);
+        var items = new List<string>(page.Items.Count);
+        foreach (var r in page.Items)
         {
             items.Add($$"""
             {
@@ -456,12 +464,13 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             """);
         }
 
+        var nextCursor = page.NextCursor is null ? string.Empty : $", \"nextCursor\": \"{EscapeJson(page.NextCursor)}\"";
         return $$"""
         {
           "jsonrpc": "2.0",
           "id": {{FormatId(id)}},
           "result": {
-            "resources": [{{string.Join(",", items)}}]
+            "resources": [{{string.Join(",", items)}}]{{nextCursor}}
           }
         }
         """;
@@ -498,8 +507,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             async token =>
             {
                 var principal = BuildPrincipalFromSession(session);
-                var allResources = await compiler.GetSemanticResourcesAsync(null, principal, token).ConfigureAwait(false);
-                target = allResources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase))
+                target = await compiler.ReadSemanticResourceAsync(principal, uri, token).ConfigureAwait(false)
                     ?? throw new McpResourceNotFoundException(uri);
                 return target.Text;
             },
