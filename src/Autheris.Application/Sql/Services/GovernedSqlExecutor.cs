@@ -246,7 +246,7 @@ public sealed partial class GovernedSqlExecutor
             ? _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId)
             : null;
 
-        GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
+        GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters, request.PlannedTableRead);
 
         var bindNames = GovernedSqlExecutionService.MergeGatewayParameters(request);
         string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, bindNames, request.GatewayParameters, out var referencedNames);

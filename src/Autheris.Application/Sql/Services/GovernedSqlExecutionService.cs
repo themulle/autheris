@@ -375,13 +375,30 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         return true;
     }
 
-    internal static void EnsureClientParameterNames(IReadOnlyDictionary<string, object?>? parameters)
+    /// <summary>
+    /// SEC-PG-17: the only gateway-generated names a planned table read may carry that sit under a reserved prefix: the pushed-predicate
+    /// markers of <c>PushedClauseBuilder</c> (<c>p_pd_&lt;n&gt;</c>, list items <c>p_pd_&lt;n&gt;_&lt;i&gt;</c>), anchored, not the bare prefix.
+    /// </summary>
+    private static readonly Regex PushedPredicateParameterName =
+        new("^p_pd_[0-9]{1,4}(_[0-9]{1,4})?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    /// <param name="parameters">The request parameters.</param>
+    /// <param name="plannedTableRead">
+    /// SEC-PG-17: pass <c>request.PlannedTableRead</c> and nothing else (never client input). Admits only the anchored pushed-predicate
+    /// pattern; every other reserved prefix stays rejected. Default strict.
+    /// </param>
+    internal static void EnsureClientParameterNames(IReadOnlyDictionary<string, object?>? parameters, bool plannedTableRead = false)
     {
         if (parameters == null || parameters.Count == 0) return;
 
         foreach (var paramName in parameters.Keys)
         {
             var trimmed = paramName.TrimStart('@');
+            if (plannedTableRead && PushedPredicateParameterName.IsMatch(trimmed))
+            {
+                continue;
+            }
+
             if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase) ||

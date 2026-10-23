@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 using Autheris.Application.Connectors;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Sql.Federation.Optimization;
 using Autheris.Application.Sql.Services;
+using TrinoSqlEngine.Ast.Nodes;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -163,7 +165,7 @@ public sealed class FederatedSameTableNameTests
         plan.GeneratedDuckDbSql.ShouldNotContain("parity_sales");
     }
 
-    [Theory(Skip = "PARITY-GAP-018 reproduction, fixed in WP-F step 2")]
+    [Theory]
     [Trait("Category", "Security")]
     [InlineData("SELECT a.product, COUNT(*) n, SUM(b.amount) total " + JoinHead + " GROUP BY a.product")]
     [InlineData("SELECT b.amount, a.qty, a.region " + JoinHead + " ORDER BY a.id")]
@@ -183,7 +185,7 @@ public sealed class FederatedSameTableNameTests
         def.Projection.ShouldContain(sql.Contains("GROUP BY") ? "product" : "qty");
     }
 
-    [Fact(Skip = "PARITY-GAP-017 reproduction, fixed in WP-F step 2")]
+    [Fact]
     [Trait("Category", "Security")]
     public void Plan_SEC_PG_16_PushedPredicateParameters_AreAcceptedByTheSqlReadOfTheirOwnSource()
     {
@@ -200,7 +202,7 @@ public sealed class FederatedSameTableNameTests
         def.PushdownFilter!.Parameters.Count.ShouldBeGreaterThan(0);
         plan.StagingRequests.Single(r => r.Metadata.Identifier == s.SecondMeta.Identifier).PushdownFilter.ShouldBeNull();
 
-        Should.NotThrow(() => GovernedSqlExecutionService.EnsureClientParameterNames(def.PushdownFilter.Parameters));
+        Should.NotThrow(() => GovernedSqlExecutionService.EnsureClientParameterNames(def.PushdownFilter.Parameters, plannedTableRead: true));
     }
 
     [Fact]
@@ -237,10 +239,9 @@ public sealed class FederatedSameTableNameTests
         var requiring = s.DefaultMeta with { Table = s.DefaultMeta.Table with { RequiredFilterColumns = ["region"] } };
         var tables = s.Tables.Select(t => t.Metadata.Identifier == requiring.Identifier ? t with { Metadata = requiring } : t).ToArray();
 
-        var ex = Should.Throw<Autheris.Domain.Exceptions.GatewaySecurityException>(() =>
+        Should.Throw<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(() =>
             new CrossSourcePlanner(Engine).Plan(sql, s.Metadata, tables, s.Decisions, new CrossSourceOptions { Enabled = true },
                 PlannerTestIdentity.User, PlannerTestIdentity.Tenant));
-        ex.Message.ShouldNotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -309,5 +310,157 @@ public sealed class FederatedSameTableNameTests
         // The mask of "second" applies to its own rows only, never to the same-named table of "default".
         sec.GovernedRows.ShouldAllBe(r => (string?)r["amount"] == "***");
         def.GovernedRows.Select(r => (string?)r["amount"]).ShouldBe(["10.00", "20.00"]);
+    }
+
+    private static (bool Rejected, CrossSourcePlan? Plan) TryPlan(Setup s, string sql)
+    {
+        try
+        {
+            return (false, Plan(s, sql));
+        }
+        catch (Exception e) when (e is Autheris.Domain.Exceptions.GatewaySecurityException or Autheris.Application.Sql.WebSqlPolicyException)
+        {
+            return (true, null);
+        }
+    }
+
+    private const string AggSql = "SELECT a.product, SUM(b.amount) total " + JoinHead + " GROUP BY a.product HAVING SUM(b.amount) > 1 ORDER BY SUM(b.amount)";
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_AggregateOnlyColumn_IsStagedNotNull()
+    {
+        var plan = Plan(Build(AggSql), AggSql);
+
+        plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "second").Projection.ShouldContain("amount");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_DenyColumnInAggregate_FailsClosedNotNull()
+    {
+        var deny = new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["amount"] = ColumnAccessLevel.Deny };
+        var s = Build(AggSql, secondAccess: deny);
+
+        var (rejected, plan) = TryPlan(s, AggSql);
+
+        // Either the planner rejects, or the Deny column is not staged (the final query then fails unresolved); it is never staged or NULL-filled.
+        if (!rejected)
+        {
+            plan!.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "second").Projection.ShouldNotContain("amount");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_MaskedColumnInAggregate_UsesMaskedValues()
+    {
+        var mask = new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["amount"] = ColumnAccessLevel.Mask };
+        var masks = new Dictionary<string, MaskingRule> { ["amount"] = new() { RuleType = "REDACT" } };
+        var s = Build(AggSql, secondAccess: mask, secondMasks: masks);
+
+        var (rejected, plan) = TryPlan(s, AggSql);
+
+        // The masked column is staged only through the governed read (its decision keeps the Mask level); it is never staged raw.
+        if (!rejected)
+        {
+            var sec = plan!.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "second");
+            sec.Projection.ShouldContain("amount");
+            sec.Decision.GetEffectiveColumnAccess("amount", sec.Metadata).ShouldBe(ColumnAccessLevel.Mask);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_UnqualifiedColumn_StagedOnAllowedTablesOnly()
+    {
+        var sql = "SELECT a.product, SUM(qty) " + JoinHead + " GROUP BY a.product";
+        var deny = new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["qty"] = ColumnAccessLevel.Deny };
+        var s = Build(sql, secondAccess: deny);
+
+        var plan = Plan(s, sql);
+
+        plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "default").Projection.ShouldContain("qty");
+        plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "second").Projection.ShouldNotContain("qty");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_AmbiguousUnqualified_FailsInFinalQuery()
+    {
+        // The planner stages the unqualified column on both tables; it does not pick one source. The ambiguity is then raised by the final
+        // DuckDB query (both staged tables carry "qty"), never resolved silently.
+        var sql = "SELECT a.product, SUM(qty) " + JoinHead + " GROUP BY a.product";
+        var plan = Plan(Build(sql), sql);
+
+        plan.StagingRequests.ShouldAllBe(r => r.Projection.Contains("qty"));
+        plan.StagingNames.Distinct().Count().ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_UnknownQualifier_FailsUnresolved()
+    {
+        var sql = "SELECT a.product, SUM(zz.amount) " + JoinHead + " GROUP BY a.product";
+
+        var (rejected, plan) = TryPlan(Build(sql), sql);
+
+        // A qualifier that names no staged table stages nothing: the amount column is not staged for any source.
+        if (!rejected)
+        {
+            plan!.StagingRequests.ShouldAllBe(r => !r.Projection.Contains("amount"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_UnclassifiableNode_FailsClosedOrStagesAllAllowed()
+    {
+        var weird = new SelectStatement(null,
+            new QuerySpecification(false, [new ColumnSelectItem(new UnknownExpression(), null)], null, null, null, null), null, null);
+
+        var references = StatementColumnReferences.Collect(weird);
+
+        references.Unclassifiable.ShouldBeTrue();
+        references.Columns.ShouldBeEmpty();
+    }
+
+    private sealed record UnknownExpression : Expression;
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedProjection_SelectStar_ExcludesDeny()
+    {
+        var sql = "SELECT * " + JoinHead;
+        var deny = new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["amount"] = ColumnAccessLevel.Deny };
+        var plan = Plan(Build(sql, secondAccess: deny), sql);
+
+        var sec = plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "second");
+        sec.Projection.ShouldNotContain("amount");
+        sec.Projection.ShouldContain("id");
+        plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "default").Projection.ShouldContain("amount");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FederatedPushedPredicate_StillAppliesRowPolicyAndRequiredFilter()
+    {
+        var sql = "SELECT a.product, b.amount " + JoinHead + " WHERE a.region = 'North'";
+        var s = Build(sql, defaultRowFilter: "tenant_id = 'T1'", secondRowFilter: "tenant_id = 'T2'");
+
+        var plan = Plan(s, sql);
+
+        var def = plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "default");
+        var sec = plan.StagingRequests.Single(r => r.Metadata.Identifier.Domain == "second");
+        def.PushdownFilter.ShouldNotBeNull();
+        def.Decision.CombinedRowFilterSql.ShouldBe("tenant_id = 'T1'");
+        sec.Decision.CombinedRowFilterSql.ShouldBe("tenant_id = 'T2'");
+
+        // The required-filter rule of the other test stays enforced when a pushed predicate exists.
+        var requiring = s.DefaultMeta with { Table = s.DefaultMeta.Table with { RequiredFilterColumns = ["product"] } };
+        var tables = s.Tables.Select(t => t.Metadata.Identifier == requiring.Identifier ? t with { Metadata = requiring } : t).ToArray();
+        Should.Throw<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(() =>
+            new CrossSourcePlanner(Engine).Plan(sql, s.Metadata, tables, s.Decisions, new CrossSourceOptions { Enabled = true },
+                PlannerTestIdentity.User, PlannerTestIdentity.Tenant));
     }
 }

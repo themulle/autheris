@@ -132,25 +132,18 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             tableDecisions[i] = RequireDecision(decisions, tables[i]);
         }
 
+        var requiredFilterPending = new HashSet<TableIdentifier>();
         for (int i = 0; i < tables.Count; i++)
         {
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(tables[i].Target, tables[i].Metadata, tableDecisions[i], metadata);
 
             var t = tables[i];
             var dec = tableDecisions[i];
-            if (t.Metadata.RequiredFilterColumns.Length > 0)
+            if (!RequiredFiltersSatisfied(t, dec, clientFilterColumns: null))
             {
-                foreach (var reqCol in t.Metadata.RequiredFilterColumns)
-                {
-                    // MISC-04: shared whole-identifier rule (no substring matching on the row filter text).
-                    if (Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
-                            reqCol, t.Metadata, dec, clientFilterColumns: null, tenantColumnCounts: true))
-                    {
-                        continue;
-                    }
-
-                    throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException();
-                }
+                // PARITY-GAP-017: a pushed column predicate satisfies the rule too; a single staged table is judged again once its pushdown
+                // filter exists (below), every other table (subtree member) is rejected right after the partition. Never skipped.
+                requiredFilterPending.Add(DecisionKey(t));
             }
         }
 
@@ -273,6 +266,12 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         var partitionResult = SubtreeGraphPartitioner.Partition(statement, tables, options.MaxTablesPerSubtree);
         var subtreePlans = new List<SubtreeExecutionPlan>();
 
+        var singleIds = new HashSet<TableIdentifier>(partitionResult.RemainingSingleTables.Select(DecisionKey));
+        if (requiredFilterPending.Any(id => !singleIds.Contains(id)))
+        {
+            throw RequiredFilterMissing();
+        }
+
         foreach (var st in partitionResult.Subtrees)
         {
             var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine, user, tenantId);
@@ -338,6 +337,9 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 Subtree: stPlan));
         }
 
+        // PARITY-GAP-018: the staged projection comes from the AST (SEC-PG-21..24), never from the text of the select list.
+        var statementColumns = StatementColumnReferences.Collect(statement);
+
         // Process remaining single tables
         foreach (var t in partitionResult.RemainingSingleTables)
         {
@@ -374,19 +376,16 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             var dec = RequireDecision(decisions, t);
 
             var projected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            bool selectAll = metadata.ProjectedColumns.Any(p => p == "*");
 
             foreach (var col in t.Metadata.Columns)
             {
+                // SEC-PG-21: a Deny column is never staged; a Mask column is staged by the governed read, already masked.
                 if (dec.GetEffectiveColumnAccess(col.ColumnName, t.Metadata) == ColumnAccessLevel.Deny)
                     continue;
 
-                bool referenced = selectAll ||
-                    metadata.ProjectedColumns.Any(p => MatchesProjectedColumn(p, col.ColumnName, t.Target)) ||
+                if (IsReferenced(statementColumns, col.ColumnName, t.Target) ||
                     (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Any(jc => GovernedSqlExecutionService.ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, t.Target))) ||
-                    (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Any(fc => GovernedSqlExecutionService.ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, t.Target)));
-
-                if (referenced)
+                    (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Any(fc => GovernedSqlExecutionService.ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, t.Target))))
                 {
                     projected.Add(col.ColumnName);
                 }
@@ -444,6 +443,12 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
                 pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, plannedTables, out paramAudit);
+            }
+
+            if (requiredFilterPending.Contains(identifier) &&
+                !RequiredFiltersSatisfied(t, dec, pushdownFilter?.ReferencedColumns))
+            {
+                throw RequiredFilterMissing();
             }
 
             KeySetPlanInfo? keySetPlanInfo = null;
@@ -521,16 +526,56 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         return false;
     }
 
-    private static bool MatchesProjectedColumn(string p, string colName, TableAccessTarget target)
+    private static TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException RequiredFilterMissing() => new();
+
+    /// <summary>MISC-04: every required filter column is satisfied by the decision or by <paramref name="clientFilterColumns"/> (shared whole-identifier rule).</summary>
+    private static bool RequiredFiltersSatisfied(ResolvedSourceTable t, TableAccessDecision dec, IEnumerable<string>? clientFilterColumns)
     {
-        var dotIdx = p.LastIndexOf('.');
-        if (dotIdx >= 0)
+        foreach (var reqCol in t.Metadata.RequiredFilterColumns)
         {
-            var tableOrAlias = p[..dotIdx];
-            var referencedCol = p[(dotIdx + 1)..];
-            return GovernedSqlExecutionService.ReferencesColumn(tableOrAlias, referencedCol, colName, target);
+            if (!Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+                    reqCol, t.Metadata, dec, clientFilterColumns, tenantColumnCounts: true))
+            {
+                return false;
+            }
         }
-        return string.Equals(p, colName, StringComparison.OrdinalIgnoreCase);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the statement reads <paramref name="colName"/> of <paramref name="target"/>: a qualified reference is attributed through
+    /// <c>ReferencesColumn</c> only (a qualifier that names no table stages nothing); an unqualified reference counts for every table that has the
+    /// column (SEC-PG-22; an ambiguous one still fails in the final query). A wildcard stages every allowed column; an unclassifiable
+    /// node stages every allowed column of every table (SEC-PG-23).
+    /// </summary>
+    private static bool IsReferenced(StatementColumnReferences references, string colName, TableAccessTarget target)
+    {
+        if (references.Unclassifiable)
+        {
+            return true;
+        }
+
+        foreach (var wildcard in references.Wildcards)
+        {
+            if (wildcard is null ||
+                string.Equals(wildcard, target.Alias, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(wildcard, target.TableName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(wildcard, target.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        foreach (var (qualifier, column) in references.Columns)
+        {
+            if (GovernedSqlExecutionService.ReferencesColumn(qualifier, column, colName, target))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed class FederationAstRewriter : SqlAstRewriter
