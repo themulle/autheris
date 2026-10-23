@@ -74,4 +74,8 @@ public static class ColumnValueKinds
 
         return ColumnValueKind.String;
     }
+
+    /// <summary>True when the database type is a calendar date without a time part (<c>date</c>); filter values then compare as dates.</summary>
+    public static bool IsDateOnly(string? dataType) =>
+        !string.IsNullOrWhiteSpace(dataType) && string.Equals(dataType.Trim().Split('(', '[', ' ')[0], "date", StringComparison.OrdinalIgnoreCase);
 }

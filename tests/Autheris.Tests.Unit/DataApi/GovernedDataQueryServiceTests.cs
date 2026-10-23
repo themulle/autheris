@@ -307,6 +307,41 @@ public sealed class GovernedDataQueryServiceTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task PlannerCallerAudit_ZeroNeverBecomesDefault()
+    {
+        // SEC-PG-07 (#301 limit=0): 0 is an explicit zero-row page. It is neither the default 50 nor unbounded; the plan still runs
+        // (authorization, masking) and the statement is bounded to one look-ahead row.
+        AllowAll(CreateCustomerTableMetadata());
+        GovernedSqlQueryRequest? captured = null;
+        _sqlExecutionService.ExecuteQueryBufferedAsync(
+                Arg.Do<GovernedSqlQueryRequest>(r => captured = r),
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(3));
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 0, Offset: 0), Ctx());
+
+        result.Limit.ShouldBe(0);
+        result.Count.ShouldBe(0);
+        result.Data.ShouldBeEmpty();
+        result.HasMore.ShouldBeTrue();
+        captured.ShouldNotBeNull();
+        captured.Sql.ShouldEndWith("LIMIT 1");
+        captured.Sql.ShouldNotContain("LIMIT 0");
+        captured.Sql.ShouldNotContain("LIMIT 51");
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_NegativeLimit_IsRejected()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+
+        await Should.ThrowAsync<ArgumentException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: -1), Ctx()));
+    }
+
+    [Fact]
     public async Task ExecuteQueryAsync_WithOffset_LastPage_HasMoreFalse()
     {
         AllowAll(CreateCustomerTableMetadata());

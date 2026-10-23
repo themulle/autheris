@@ -245,6 +245,6 @@ internal static class AggregateGraphQlTypes
 
     private static Func<string, ColumnRef?> ResolveColumn(CatalogTableType table) => name =>
         table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase)) is { } column
-            ? new ColumnRef(column.ColumnName, GraphQlTreeBuilder.ToKind(column.FieldType))
+            ? new ColumnRef(column.ColumnName, GraphQlTreeBuilder.ToKind(column.FieldType), ColumnValueKinds.IsDateOnly(column.DataType))
             : null;
 }

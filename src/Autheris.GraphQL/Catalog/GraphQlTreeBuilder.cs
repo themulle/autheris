@@ -100,9 +100,10 @@ public static class GraphQlTreeBuilder
             else if (int.TryParse(Convert.ToString(firstVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedFirst)) limit = parsedFirst;
         }
 
-        if (limit < 1 || limit > maxAllowedLimit)
+        // #302: first: 0 is a valid bounded page (zero rows); negative stays INVALID_QUERY.
+        if (limit < 0 || limit > maxAllowedLimit)
         {
-            throw new GatewayInvalidQueryException($"The page size must be between 1 and {maxAllowedLimit}.");
+            throw new GatewayInvalidQueryException($"The page size must be between 0 and {maxAllowedLimit}.");
         }
 
         if (currentSelection.Arguments.TryGetValue("offset", out var offsetArg) && offsetArg?.ValueLiteral != null)
@@ -328,8 +329,9 @@ public static class GraphQlTreeBuilder
                     {
                         var opName = opField.Name.Value.ToLowerInvariant();
                         var opValLiteral = opField.Value is VariableNode opVn ? ResolveVariableLiteral(opVn, context) : opField.Value;
-                        // G-9: also isNull: null is rejected; it used to become IS NOT NULL.
-                        if (opValLiteral is NullValueNode)
+                        // G-9: also isNull: null is rejected; it used to become IS NOT NULL. #300: the comparison operators accept an
+                        // explicit null operand (bound NULL, matches no row).
+                        if (opValLiteral is NullValueNode && string.Equals(opName, "isnull", StringComparison.Ordinal))
                         {
                             throw new GatewayInvalidQueryException($"Value for operator '{opName}' on field '{fieldName}' cannot be null.");
                         }
@@ -353,8 +355,11 @@ public static class GraphQlTreeBuilder
                         _ => throw new GatewayInvalidQueryException($"Unsupported filter operator '{opName}' on '{fieldName}'.")
                     };
 
-                        object? typedValue = CoerceValue(rawVal, col.FieldType, filterOp);
-                        items.Add(new TreeComparison(col.ColumnName, filterOp, typedValue));
+                        object? typedValue = CoerceValue(rawVal, col.FieldType, filterOp, ColumnValueKinds.IsDateOnly(col.DataType));
+                        items.Add(new TreeComparison(col.ColumnName, filterOp, typedValue)
+                        {
+                            BindNullOperand = opValLiteral is NullValueNode
+                        });
                     }
                 }
             }
@@ -456,8 +461,8 @@ public static class GraphQlTreeBuilder
         };
     }
 
-    internal static object? CoerceValue(object? rawVal, CatalogFieldType type, TreeFilterOperator op) =>
-        FilterValueCoercion.Coerce(rawVal, ToKind(type), op);
+    internal static object? CoerceValue(object? rawVal, CatalogFieldType type, TreeFilterOperator op, bool dateOnly = false) =>
+        FilterValueCoercion.Coerce(rawVal, ToKind(type), op, dateOnly);
 
     internal static object? CoerceSingleValue(object? val, CatalogFieldType type) =>
         FilterValueCoercion.CoerceSingle(val, ToKind(type));
