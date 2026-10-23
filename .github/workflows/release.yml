@@ -57,7 +57,7 @@ jobs:
         run: docker pull apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314
 
       - name: Run Test Suite
-        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&FullyQualifiedName!~Autheris.Tests.Integration." --verbosity normal
+        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration." --verbosity normal
 
       - name: Build and Package Binaries
         run: |
