@@ -82,7 +82,7 @@ Estimates are production-test LOC (C#) including data tables; effort in develope
 2. Iterate the advertised SQL function list (capability endpoint/docs source of truth; exact source determined in Phase 2) and call each once with type-correct arguments on SQLite.
 3. AC: adding a function/field automatically adds a test; no hard-coded list.
 
-Total: ~4250 LOC, ~20 dev days incl. infrastructure (fixtures, matrix, KnownGap, workflow, guard ~600 LOC, 3d, counted in the above split by owner as P1).
+Total: ~4850 LOC, ~23 dev days: building blocks A-G ~4250 LOC / 20d plus infrastructure (fixtures, KnownGap, workflow, guard; section 7) ~600 LOC / 3d, delivered as P1. Phase 2 re-estimate per work package: ~5150 LOC (see the plan).
 
 ## 7. Infrastructure (WP-P0, P1, ~600 LOC, 3d)
 1. Test host reuse: `WebApplicationFactory` fixture from `Autheris.Tests.Common`, SQLite fixture data source, GraphQL aggregation enabled, test auth (`-p:AutherisIncludeTestAuth=true`).
