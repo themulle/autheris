@@ -74,6 +74,12 @@ public sealed record TableFilterClause(
     /// <summary>Issue #122: Optional structural pushed predicate metadata (zero parameter values or literals).</summary>
     public IReadOnlyList<PushdownPredicateInfo>? PushdownPredicates { get; init; }
 
+    /// <summary>
+    /// The columns this clause really constrains (strict single-source rule, see <c>RequiredFilterConstraint</c>). Only these satisfy a required
+    /// filter of a federated table; <see cref="ReferencedColumns"/> (every mentioned column) never does. Null = none (fail closed).
+    /// </summary>
+    public IReadOnlyList<string>? ConstrainedColumns { get; init; }
+
     /// <summary>Optional dialect-specific predicate builder when AST is available.</summary>
     public Func<DatabaseDialect, string>? DialectSqlFactory { get; init; }
 

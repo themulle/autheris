@@ -432,6 +432,11 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                     try
                     {
                         pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata, parameters?.ClientValues);
+                        pushdownFilter = pushdownFilter with
+                        {
+                            ConstrainedColumns = Autheris.Application.Sql.Federation.Pushdown.RequiredFilterConstraint.ConstrainedColumns(
+                                pushableConjuncts.Select(c => c.Predicate), t.Target, t.Metadata, tables)
+                        };
                     }
                     catch (Autheris.Application.Sql.Federation.Pushdown.PushdownRejectedException)
                     {
@@ -446,7 +451,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
 
             if (requiredFilterPending.Contains(identifier) &&
-                !RequiredFiltersSatisfied(t, dec, pushdownFilter?.ReferencedColumns))
+                !RequiredFiltersSatisfied(t, dec, pushdownFilter?.ConstrainedColumns))
             {
                 throw RequiredFilterMissing();
             }

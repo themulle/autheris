@@ -463,4 +463,62 @@ public sealed class FederatedSameTableNameTests
             new CrossSourcePlanner(Engine).Plan(sql, s.Metadata, tables, s.Decisions, new CrossSourceOptions { Enabled = true },
                 PlannerTestIdentity.User, PlannerTestIdentity.Tenant));
     }
+
+    private static void PlanWithRequiredRegion(string whereClause)
+    {
+        var sql = "SELECT a.product, b.amount " + JoinHead + " WHERE " + whereClause;
+        var s = Build(sql);
+        var requiring = s.DefaultMeta with { Table = s.DefaultMeta.Table with { RequiredFilterColumns = ["region"] } };
+        var tables = s.Tables.Select(t => t.Metadata.Identifier == requiring.Identifier ? t with { Metadata = requiring } : t).ToArray();
+        new CrossSourcePlanner(Engine).Plan(sql, s.Metadata, tables, s.Decisions, new CrossSourceOptions { Enabled = true },
+            PlannerTestIdentity.User, PlannerTestIdentity.Tenant);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("a.region = a.region")]
+    [InlineData("a.region IS NOT NULL OR 1 = 1")]
+    [InlineData("a.region = 'x' OR a.qty = 2")]
+    [InlineData("a.region <> 'x'")]
+    [InlineData("NOT (a.region = 'x')")]
+    [InlineData("lower(a.region) = 'x'")]
+    [InlineData("b.region = 'North'")]
+    [InlineData("a.qty = 1")]
+    public void FederatedRequiredFilter_WeakOrUnrelatedPredicate_DoesNotSatisfy_REQUIRED_FILTER_COLUMN_MISSING(string where) =>
+        Should.Throw<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(() => PlanWithRequiredRegion(where));
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("a.region = 'North'")]
+    [InlineData("a.region IN ('North', 'South')")]
+    [InlineData("a.region = 'North' AND b.qty > 1")]
+    [InlineData("a.region = 'x' OR a.region = 'y'")]
+    public void FederatedRequiredFilter_StrictConstrainingPredicate_Satisfies(string where) =>
+        Should.NotThrow(() => PlanWithRequiredRegion(where));
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StageAsync_RequiredFilterColumnGroup_IsEnforcedOnTheFederatedPath()
+    {
+        // The planner only checks RequiredFilterColumns; the column groups are enforced in StageAsync (before any read).
+        var meta = Sales("default");
+        meta = meta with { Table = meta.Table with { RequiredFilterColumnGroups = [["region"], ["product", "qty"]] } };
+        var request = (Microsoft.Extensions.Options.IOptions<GatewayOptions>)Options.Create(new GatewayOptions());
+        var service = new FederatedStagingService(
+            Substitute.For<IAutherisConnectorRegistry>(), Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
+            request, NullLogger<FederatedStagingService>.Instance);
+        var budget = new FederationBudget(5, 1000, 5000, 32 * 1024 * 1024, 128 * 1024 * 1024, 30, 4);
+
+        StagingTableRequest Req(TableFilterClause? filter) => new(
+            new TableAccessTarget(null, "main", "parity_sales", "parity_sales", "main.parity_sales"), meta,
+            TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            "s0", ["id"], filter);
+
+        // no filter, and a filter that only mentions the column (not constraining) -> rejected before any read
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(() =>
+            service.StageAsync([Req(null)], PlannerTestIdentity.User, PlannerTestIdentity.Tenant, budget));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(() =>
+            service.StageAsync([Req(new TableFilterClause("region = region", new Dictionary<string, object?>(), ["region"]))],
+                PlannerTestIdentity.User, PlannerTestIdentity.Tenant, budget));
+    }
 }

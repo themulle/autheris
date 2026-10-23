@@ -101,7 +101,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 // MISC-04: shared whole-identifier rule.
                 bool IsSatisfied(string reqCol) =>
                     Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
-                        reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ReferencedColumns, tenantColumnCounts: true);
+                        reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ConstrainedColumns, tenantColumnCounts: true);
 
                 if (req.Metadata.RequiredFilterColumnGroups.Length > 0)
                 {
