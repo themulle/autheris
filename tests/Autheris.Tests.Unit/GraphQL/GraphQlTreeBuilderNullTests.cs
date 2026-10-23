@@ -1,4 +1,7 @@
 using Autheris.Application.Analytics;
+using Autheris.Domain.Exceptions;
+using Autheris.GraphQL.Catalog;
+using HotChocolate.Language;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Sql.Tree;
@@ -97,6 +100,19 @@ public sealed class GraphQlTreeBuilderNullTests
     }
 
     [Fact]
+    public void NotInList_OnlyNull_IsAlwaysTrue_AndDropsNullItems()
+    {
+        var onlyNull = TreeFilterClauseBuilder.Build(
+            new TreeComparison("action", TreeFilterOperator.NotIn, new List<object?> { null }), Resolve);
+        onlyNull.SqlPredicate.ShouldBe("1 = 1");
+
+        var mixed = TreeFilterClauseBuilder.Build(
+            new TreeComparison("action", TreeFilterOperator.NotIn, new List<object?> { "a", null }), Resolve);
+        mixed.SqlPredicate.ShouldContain("NOT IN (@__gql_tf_0)");
+        mixed.Parameters.Values.ShouldBe(["a"]);
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public void EqNull_RequiredFilterColumn_ReturnsNoRowsAndKeepsPolicy()
     {
@@ -118,5 +134,65 @@ public sealed class GraphQlTreeBuilderNullTests
         compiled.Parameters.Values.ShouldContain("tenant-1");
         compiled.Parameters.Values.Count(v => v is null or System.DBNull).ShouldBe(1);
         compiled.Sql.ShouldNotContain("IS NULL");
+    }
+}
+
+/// <summary>#300: the where-object parser (<c>GraphQlTreeBuilder.ParseObjectFilter</c>) accepts null only for the comparison operators.</summary>
+public sealed class GraphQlTreeBuilderNullParseTests
+{
+    private static readonly TableIdentifier Orders = new("shop", "main", "orders");
+
+    private static CatalogTableType Table() => new(
+        Orders, "Orders", "orders", "OrdersFilter", "OrdersOrderBy", new TableMetadata { Identifier = Orders },
+        [
+            new CatalogColumnField("amount", "amount", CatalogFieldType.Decimal, "decimal", true),
+            new CatalogColumnField("note", "note", CatalogFieldType.String, "varchar", true)
+        ],
+        []);
+
+    private static TreeFilter? Parse(string where) =>
+        GraphQlTreeBuilder.ParseObjectFilter(
+            (ObjectValueNode)Utf8GraphQLParser.Syntax.ParseValueLiteral(where),
+            Table(),
+            NSubstitute.Substitute.For<HotChocolate.Resolvers.IResolverContext>());
+
+    [Theory]
+    [InlineData("eq", TreeFilterOperator.Eq)]
+    [InlineData("neq", TreeFilterOperator.Neq)]
+    [InlineData("gt", TreeFilterOperator.Gt)]
+    [InlineData("lte", TreeFilterOperator.Lte)]
+    [InlineData("contains", TreeFilterOperator.Contains)]
+    [Trait("Category", "Security")]
+    public void ComparisonNull_SetsBindNullOperand(string op, TreeFilterOperator expected)
+    {
+        // SEC-PG-06
+        var cmp = Parse($"{{ note: {{ {op}: null }} }}").ShouldBeOfType<TreeComparison>();
+
+        cmp.Operator.ShouldBe(expected);
+        cmp.Value.ShouldBeNull();
+        cmp.BindNullOperand.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ComparisonWithValue_DoesNotSetBindNullOperand() =>
+        Parse("{ note: { eq: \"x\" } }").ShouldBeOfType<TreeComparison>().BindNullOperand.ShouldBeFalse();
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void IsNullNull_StaysRejected() =>
+        Should.Throw<GatewayInvalidQueryException>(() => Parse("{ note: { isNull: null } }"));
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ColumnNull_StaysRejected() =>
+        Should.Throw<GatewayInvalidQueryException>(() => Parse("{ note: null }"));
+
+    [Theory]
+    [InlineData("in")]
+    [InlineData("nin")]
+    public void ListOperatorNull_IsRejectedWithAFixedMessage(string op)
+    {
+        var ex = Should.Throw<GatewayInvalidQueryException>(() => Parse($"{{ note: {{ {op}: null }} }}"));
+        ex.Message.ShouldBe($"Value for operator '{op}' on field 'note' must be a list.");
     }
 }

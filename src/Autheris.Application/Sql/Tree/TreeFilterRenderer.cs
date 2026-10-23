@@ -129,6 +129,7 @@ internal static class TreeFilterRenderer
             return null;
         }
 
+        // The NULL parameter is intentionally untyped: the column it is compared with types it.
         var clause = $"{column} {symbol} {target.AddParameter(null)}";
         return symbol == "LIKE" && target.AlwaysEmitLikeEscape ? clause + $" ESCAPE '{target.LikeEscape}'" : clause;
     }

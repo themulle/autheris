@@ -355,6 +355,12 @@ public static class GraphQlTreeBuilder
                         _ => throw new GatewayInvalidQueryException($"Unsupported filter operator '{opName}' on '{fieldName}'.")
                     };
 
+                        // #300: only the comparison operators take a null operand; list operators reject it with a fixed message.
+                        if (opValLiteral is NullValueNode && filterOp is TreeFilterOperator.In or TreeFilterOperator.NotIn)
+                        {
+                            throw new GatewayInvalidQueryException($"Value for operator '{opName}' on field '{fieldName}' must be a list.");
+                        }
+
                         object? typedValue = CoerceValue(rawVal, col.FieldType, filterOp, ColumnValueKinds.IsDateOnly(col.DataType));
                         items.Add(new TreeComparison(col.ColumnName, filterOp, typedValue)
                         {
