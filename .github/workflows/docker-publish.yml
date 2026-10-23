@@ -105,7 +105,6 @@ jobs:
           image-ref: autheris:scan
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          limit-severities-for-sarif: true
           trivyignores: .trivyignore
           exit-code: '1'
           format: sarif
