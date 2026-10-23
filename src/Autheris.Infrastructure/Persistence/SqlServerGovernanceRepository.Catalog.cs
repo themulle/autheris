@@ -213,11 +213,16 @@ public partial class SqlServerGovernanceRepository
         }
     }
 
+    // PERS-17: epoch rows are matched by the natural key (domain, schema, table): a write inserts the row with its own id, which is not TABLES.id.
+    private const string EpochJoin = "POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name)";
+    internal const string EpochByTableIdSql = "SELECT MAX(p.epoch) FROM " + EpochJoin + " WHERE t.id = @tableId";
+    internal const string AllEpochsSql = "SELECT t.id, MAX(p.epoch) FROM " + EpochJoin + " GROUP BY t.id";
+
     // PERS-17: the table epoch (POLICY_EPOCHS) authorises cache hits across replicas; -1 means the table has no epoch row yet.
-    private static async Task<long> ReadTableEpochAsync(System.Data.Common.DbConnection conn, Guid tableId, CancellationToken ct)
+    internal static async Task<long> ReadTableEpochAsync(System.Data.Common.DbConnection conn, Guid tableId, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT epoch FROM POLICY_EPOCHS WHERE table_id = @tableId";
+        cmd.CommandText = EpochByTableIdSql;
         var p = cmd.CreateParameter();
         p.ParameterName = "@tableId";
         p.Value = tableId.ToString();
@@ -226,11 +231,11 @@ public partial class SqlServerGovernanceRepository
         return value is null or DBNull ? -1 : Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static async Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
+    internal static async Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(System.Data.Common.DbConnection conn, CancellationToken ct)
     {
         var epochs = new Dictionary<Guid, long>();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT table_id, epoch FROM POLICY_EPOCHS";
+        cmd.CommandText = AllEpochsSql;
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
