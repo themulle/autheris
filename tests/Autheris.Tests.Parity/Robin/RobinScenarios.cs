@@ -587,7 +587,7 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(body);
-                Walk(doc.RootElement, amountKeys);
+                Walk(doc.RootElement, amountKeys, null);
             }
             catch (System.Text.Json.JsonException)
             {
@@ -595,7 +595,11 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
             }
         }
 
-        private static void Walk(System.Text.Json.JsonElement element, string[] amountKeys)
+        private static readonly HashSet<string> NonAmountKeys = new(["id", "qty", "region_id"], StringComparer.OrdinalIgnoreCase);
+
+        private static readonly HashSet<decimal> ClearAmounts = ParitySeed.Sales.Where(s => s.Amount is not null).Select(s => s.Amount!.Value).ToHashSet();
+
+        private static void Walk(System.Text.Json.JsonElement element, string[] amountKeys, string? key)
         {
             switch (element.ValueKind)
             {
@@ -607,14 +611,26 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
                             throw new DeniedRequestSucceededException($"masked column key '{p.Name}' carries a value.");
                         }
 
-                        Walk(p.Value, amountKeys);
+                        Walk(p.Value, amountKeys, p.Name);
                     }
 
                     break;
                 case System.Text.Json.JsonValueKind.Array:
                     foreach (var item in element.EnumerateArray())
                     {
-                        Walk(item, amountKeys);
+                        Walk(item, amountKeys, key);
+                    }
+
+                    break;
+                case System.Text.Json.JsonValueKind.Number:
+                case System.Text.Json.JsonValueKind.String:
+                    // Whole amounts (100, 200.00) in number or quoted-string form under any key that is not an id or a count (SEC-R100-15).
+                    if ((key is null || !NonAmountKeys.Contains(key))
+                        && decimal.TryParse(element.ValueKind == System.Text.Json.JsonValueKind.Number ? element.GetRawText() : element.GetString(),
+                            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+                        && ClearAmounts.Contains(value))
+                    {
+                        throw new DeniedRequestSucceededException($"a clear masked amount appears as a value under key '{key}'.");
                     }
 
                     break;

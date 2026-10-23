@@ -483,8 +483,6 @@ public sealed partial class RobinScenarios
             : (await Sql("SELECT id FROM nope.main.parity_sales"), await Sql("SELECT id FROM parity_nope"));
 
         // SEC-R100-13: no existence oracle between an unknown source and an unknown table.
-        unknownSource.Code.ShouldBe(unknownTable.Code, $"existence oracle: unknown source '{unknownSource.Code}' vs unknown table '{unknownTable.Code}'");
-        unknownSource.Status.ShouldBe(unknownTable.Status);
         foreach (var r in new[] { unknownSource, unknownTable })
         {
             r.Rejected("SQL_POLICY_DENIED").Status.ShouldBe(403);
@@ -651,8 +649,15 @@ public sealed partial class RobinScenarios
                 break;
         }
 
-        table.Rejected();
-        schema.Rejected();
+        // Designed codes: WebSQL 403 SQL_POLICY_DENIED (no existence oracle), REST 404 RESOURCE_NOT_FOUND, GraphQL GRAPHQL_VALIDATION_FAILED.
+        var (expectedCode, expectedStatus) = channel switch
+        {
+            "WebSql" => ("SQL_POLICY_DENIED", 403),
+            "Rest" => ("RESOURCE_NOT_FOUND", 404),
+            _ => ("GRAPHQL_VALIDATION_FAILED", 400),
+        };
+        table.Rejected(expectedCode).Status.ShouldBe(expectedStatus);
+        schema.Rejected(expectedCode).Status.ShouldBe(expectedStatus);
         schema.Status.ShouldBe(table.Status);
         schema.Code.ShouldBe(table.Code);
     });

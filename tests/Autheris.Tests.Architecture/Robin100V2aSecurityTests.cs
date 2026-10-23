@@ -29,18 +29,16 @@ public sealed partial class Robin100V2aSecurityTests
         "Robin_79_AnalyzeInvalidSqlStableCode", "Robin_Proactive_MultiStatementRejected", "Robin_Proactive_NegativeLimitRejected",
         "Robin_Proactive_AggregateErrorsStableCode", "Robin_Proactive_SetOperations", "Robin_Proactive_TypeMismatchStableCode",
         "Robin_302_OffsetBoundaryAndFirstZero", "Robin_Proactive_MalformedFilterStableCode", "Robin_128_InListOverCapStableCode",
+        "Robin_39_PageAboveCapIsRejectedOrSignalled",
     ];
 
-    /// <summary>Non-security cells where a functional deviation (rows, order, shape) may be a gap (plan 5.4 candidates).</summary>
-    private static readonly string[] FunctionalGapMethods =
-    [
-        "Robin_Proactive_NotInWithNullIsEmpty", "Robin_318_IntVariablesFirstOffset", "Robin_319_EmptyLogicalMembers", "Robin_Proactive_RowNumberOverPartition",
-        "Robin_Proactive_NullSafeEquality", "Robin_Proactive_NotLikeAndNoMatchLike", "Robin_39_PageAboveCapIsRejectedOrSignalled",
-        "Robin_130_MonthBucketBerlinYearEndAndDstHour", "Robin_Proactive_ArithmeticAndCast", "Robin_Proactive_StringFunctions", "Robin_112_CaseWhenBucketGroupBy",
-        "Robin_Proactive_GroupByDatePartGraphQl", "Robin_Proactive_GroupByYearAndMonthWebSql",
-        "Robin_Proactive_ODataFilterMatchesRest", "Robin_Proactive_OrderByNullPlacement", "Robin_Proactive_GraphQlVariablesAndDirectives",
-        "Robin_Proactive_ScalarAndCorrelatedSubquery", "Robin_277_CteAndRecursiveGate", "Robin_116_UnmaskedColumnsOnMaskedTable", "Robin_163_GraphQlAliasesOnScopedTable",
-    ];
+    /// <summary>SEC-R100-19: the only functional outcome gaps, each bound to its gap id (public tables only; 054 only while the body has zero rows).</summary>
+    private static readonly Dictionary<string, string> FunctionalGapIds = new(StringComparer.Ordinal)
+    {
+        ["Robin_Proactive_NotInWithNullIsEmpty"] = "PARITY-GAP-051",
+        ["Robin_318_IntVariablesFirstOffset"] = "PARITY-GAP-052",
+        ["Robin_319_EmptyLogicalMembers"] = "PARITY-GAP-053",
+    };
 
     /// <summary>Security cells (denied, masked, scoped, gate, unauthenticated, no-mutation): never a gap, whatever the variant (SEC-R100-02/-11).</summary>
     private static readonly string[] SecurityMethods =
@@ -67,7 +65,7 @@ public sealed partial class Robin100V2aSecurityTests
 
     internal static IReadOnlyList<string> Violations(string knownGapsSource)
     {
-        var allowed = PreExistingGapMethods.Concat(ClosedCodeGapMethods).Concat(FunctionalGapMethods).ToHashSet(StringComparer.Ordinal);
+        var allowed = PreExistingGapMethods.Concat(ClosedCodeGapMethods).Concat(FunctionalGapIds.Keys).ToHashSet(StringComparer.Ordinal);
         var problems = new List<string>();
         foreach (var (method, channel, variant, id) in ReadKeys(knownGapsSource))
         {
@@ -83,6 +81,14 @@ public sealed partial class Robin100V2aSecurityTests
             else if (SecurityVariants.Any(s => s.Method == method && variant.Contains(s.Variant, StringComparison.Ordinal)))
             {
                 problems.Add($"{method}|{channel}|{variant}: security variant with a gap (SEC-R100-11).");
+            }
+            else if (FunctionalGapIds.TryGetValue(method, out var expectedId) && id != expectedId)
+            {
+                problems.Add($"{method}|{channel}|{variant}: functional gap must be {expectedId} (SEC-R100-19).");
+            }
+            else if (method == "Robin_302_OffsetBoundaryAndFirstZero" && (channel != "Rest" || variant != "offset_over" || id != "PARITY-GAP-054"))
+            {
+                problems.Add($"{method}|{channel}|{variant}: only Rest offset_over may be PARITY-GAP-054 (SEC-R100-19).");
             }
             else if (!allowed.Contains(method))
             {
@@ -119,6 +125,9 @@ public sealed partial class Robin100V2aSecurityTests
         Violations("[\"Robin_Unknown_Method|WebSql|\"] = \"PARITY-GAP-070\",").Count.ShouldBe(1);
         Violations("[\"Robin_Proactive_SetOperations|WebSql|mismatch\"] = \"PARITY-GAP-057\",").ShouldBeEmpty();
         Violations("[\"Robin_Proactive_SetOperations|WebSql|mismatch\"] = \"GAP-57\",").Count.ShouldBe(1);
+        Violations("[\"Robin_Proactive_StringFunctions|WebSql|\"] = \"PARITY-GAP-058\",").Count.ShouldBe(1);
+        Violations("[\"Robin_302_OffsetBoundaryAndFirstZero|GraphQl|offset_over\"] = \"PARITY-GAP-054\",").Count.ShouldBe(1);
+        Violations("[\"Robin_318_IntVariablesFirstOffset|GraphQl|zero\"] = \"PARITY-GAP-052\",").ShouldBeEmpty();
     }
 
     [Fact]

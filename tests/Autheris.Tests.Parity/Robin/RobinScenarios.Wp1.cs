@@ -592,6 +592,12 @@ public sealed partial class RobinScenarios
             // An offset above the cap is not a security cell: a 200 is a functional deviation (gap 054), a 5xx stays a hard failure in RobinClient.
             if (!ParityAssert.IsError(r))
             {
+                // SEC-R100-19: gap 054 holds only while the body has zero rows; any row beyond the cap is a hard failure.
+                if (r.Rows.Count > 0)
+                {
+                    throw new DeniedRequestSucceededException($"offset above the cap returned {r.Rows.Count} rows.");
+                }
+
                 throw new XunitException($"offset above the cap: expected 400 INVALID_QUERY, got HTTP {r.Status} with {r.Rows.Count} rows.");
             }
 
