@@ -67,6 +67,11 @@ internal static class TreeFilterRenderer
         var column = target.Column(comparison.Column);
         var value = comparison.Value;
 
+        if (comparison.BindNullOperand && value is null && TryRenderNullOperand(comparison.Operator, column, target) is { } nullComparison)
+        {
+            return nullComparison;
+        }
+
         switch (comparison.Operator)
         {
             case TreeFilterOperator.IsNull:
@@ -103,6 +108,30 @@ internal static class TreeFilterRenderer
             default:
                 throw new GatewayInvalidQueryException("Unsupported filter operator.");
         }
+    }
+
+    // SEC-PG-06: the NULL operand is a bound parameter (never `= NULL` text, never a FALSE constant), so NOT/OR keep three-valued logic.
+    private static string? TryRenderNullOperand(TreeFilterOperator op, string column, ITreeFilterTarget target)
+    {
+        var symbol = op switch
+        {
+            TreeFilterOperator.Eq => "=",
+            TreeFilterOperator.Neq => "<>",
+            TreeFilterOperator.Gt => ">",
+            TreeFilterOperator.Gte => ">=",
+            TreeFilterOperator.Lt => "<",
+            TreeFilterOperator.Lte => "<=",
+            TreeFilterOperator.Contains or TreeFilterOperator.StartsWith or TreeFilterOperator.EndsWith => "LIKE",
+            _ => null
+        };
+        if (symbol is null)
+        {
+            return null;
+        }
+
+        // The NULL parameter is intentionally untyped: the column it is compared with types it.
+        var clause = $"{column} {symbol} {target.AddParameter(null)}";
+        return symbol == "LIKE" && target.AlwaysEmitLikeEscape ? clause + $" ESCAPE '{target.LikeEscape}'" : clause;
     }
 
     private static string Like(string column, string text, string prefix, string suffix, ITreeFilterTarget target)

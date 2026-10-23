@@ -165,9 +165,50 @@ public sealed class GovernedTableReadPlannerTests
     }
 
     [Fact]
-    public void Plan_NonPositiveLimit_Throws()
+    public void Plan_NegativeLimit_Throws()
     {
-        Should.Throw<ArgumentException>(() => _planner.Plan(Intent(limit: 0), Metadata(), Decision()));
+        Should.Throw<ArgumentException>(() => _planner.Plan(Intent(limit: -1), Metadata(), Decision()));
+    }
+
+    [Fact]
+    public void LimitZero_EmitsUnsatisfiablePredicateWithLimitOne()
+    {
+        var planned = _planner.Plan(Intent(limit: 0), Metadata(), Decision());
+
+        planned.Sql.ShouldContain("WHERE 1 = 0");
+        planned.Sql.ShouldEndWith("LIMIT 1");
+        planned.Sql.ShouldNotContain("LIMIT 0");
+    }
+
+    [Fact]
+    public void LimitZero_KeepsTheClientFilter()
+    {
+        var filter = TableFilterClause.FromTrinoText("\"name\" = 'x'", ["name"]);
+        var planned = _planner.Plan(Intent(filter: filter, limit: 0), Metadata(), Decision());
+
+        planned.Sql.ShouldContain("WHERE (\"name\" = 'x') AND 1 = 0");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void LimitZero_RunsAuthorization()
+    {
+        // SEC-PG-07: a zero page is planned like any other: denied columns and denied tables are rejected exactly as for any N.
+        Should.Throw<Exception>(() => _planner.Plan(Intent(select: ["secret"], limit: 0), Metadata(), Decision()));
+        Should.Throw<Exception>(() => _planner.Plan(Intent(limit: 0), Metadata(), TableAccessDecision.Denied(Customers, "no")));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void LimitZero_SqlServer_NoFetchZero()
+    {
+        // SEC-PG-07: the Trino text never carries LIMIT 0, so no dialect can emit FETCH NEXT 0 ROWS.
+        var planned = _planner.Plan(Intent(limit: 0, offset: 10), Metadata(), Decision());
+
+        planned.Sql.ShouldNotContain("LIMIT 0");
+        planned.Sql.ShouldNotContain("FETCH NEXT 0");
+        planned.Sql.ShouldEndWith("OFFSET 10 ROWS LIMIT 1");
+        Should.NotThrow(() => new FastSqlEngine().Parse(planned.Sql.AsMemory()));
     }
 
     [Fact]

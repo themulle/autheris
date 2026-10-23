@@ -65,7 +65,8 @@ public sealed class GraphQlEnumerationShieldTests
         deniedTable.ShouldBe(unknown);
         deniedColumn.ShouldBe(unknown);
         deniedNextToAllowed.ShouldBe(unknown);
-        unknown.ShouldContain(GraphQlEnumerationShieldMiddleware.Message);
+        unknown.ShouldContain(ErrorSanitizingFilter.ValidationMessage);
+        unknown.ShouldContain("GRAPHQL_VALIDATION_FAILED");
         unknown.ShouldNotContain("salaries");
         unknown.ShouldNotContain("\"data\"");
     }
@@ -90,11 +91,14 @@ public sealed class GraphQlEnumerationShieldTests
     }
 
     [Fact]
-    public async Task Development_KeepsDetailedMessages()
+    public async Task Development_ValidationErrorsAreSanitized()
     {
         var executor = await CreateExecutorAsync("Development");
 
-        (await RunAsync(executor, "{ salaries }")).ShouldContain("salaries");
+        // SEC-PG-12 (#294): validation texts never name fields, not even in Development; they carry a stable code.
+        var unknown = await RunAsync(executor, "{ salaries }");
+        unknown.ShouldContain("GRAPHQL_VALIDATION_FAILED");
+        unknown.ShouldNotContain("salaries");
         (await RunAsync(executor, "{ employees }")).ShouldContain("ssn");
     }
 

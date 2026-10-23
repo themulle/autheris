@@ -26,7 +26,6 @@ using Autheris.Domain.Security;
 /// </summary>
 public sealed class GovernedDataQueryService : IGovernedDataQueryService
 {
-    private const int DefaultLimit = 50;
     private const int MaxLimit = 1000;
 
     /// <summary>
@@ -113,7 +112,13 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             ct).ConfigureAwait(false);
 
         // 5. AST & SQL Formulation
-        var limit = request.Limit > 0 ? Math.Min(request.Limit, MaxLimit) : DefaultLimit;
+        // #301/#302: 0 is a valid page size (zero rows, hasMore still reported); it never becomes the default. Callers pass the default explicitly.
+        if (request.Limit < 0)
+        {
+            throw new ArgumentException("The limit must not be negative.", nameof(request));
+        }
+
+        var limit = Math.Min(request.Limit, MaxLimit);
         var offset = request.Offset >= 0 ? request.Offset : 0;
 
         // Single-source SQL tables push the page down as Trino-form pagination (OFFSET n ROWS LIMIT m): the governed compile
@@ -235,7 +240,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         int skip = isCrossSource ? offset : 0;
         int available = Math.Max(0, sourceRows.Count - skip);
         bool hasMore = available > limit;
-        if (unordered && hasMore)
+        if (unordered && hasMore && limit > 0)
         {
             // Refuse rather than return a first page that the next page may duplicate or skip.
             throw new UnorderedPagingException(nameof(request));

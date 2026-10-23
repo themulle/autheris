@@ -34,13 +34,7 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
 
         if (PairwiseModel.IsInvalidCombination(c.Aggregate, c.Type))
         {
-            result.Rejected(web ? null : Invalid);
-            return;
-        }
-
-        if (web && c.Filter == "in_empty")
-        {
-            result.Rejected("SQL_SYNTAX_ERROR");
+            result.Rejected(Invalid);
             return;
         }
 

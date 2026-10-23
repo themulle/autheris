@@ -16,7 +16,7 @@ public static class FilterValueCoercion
     public const string InvalidValueMessage = "The filter value is not valid for the column type.";
     public const string InvalidIsNullMessage = "The 'isNull' filter value must be a boolean (true or false).";
 
-    public static object? Coerce(object? rawVal, ColumnValueKind kind, TreeFilterOperator op)
+    public static object? Coerce(object? rawVal, ColumnValueKind kind, TreeFilterOperator op, bool dateOnly = false)
     {
         if (rawVal == null)
         {
@@ -40,19 +40,25 @@ public static class FilterValueCoercion
         {
             if (rawVal is IEnumerable<object?> list)
             {
-                return list.Select(item => CoerceSingle(item, kind)).ToList();
+                return list.Select(item => CoerceSingle(item, kind, dateOnly)).ToList();
             }
-            return new List<object?> { CoerceSingle(rawVal, kind) };
+            return new List<object?> { CoerceSingle(rawVal, kind, dateOnly) };
         }
 
-        return CoerceSingle(rawVal, kind);
+        return CoerceSingle(rawVal, kind, dateOnly);
     }
 
-    public static object? CoerceSingle(object? val, ColumnValueKind kind)
+    public static object? CoerceSingle(object? val, ColumnValueKind kind, bool dateOnly = false)
     {
         if (val == null)
         {
             return null;
+        }
+
+        // #299/#303: a catalog `date` column compares as a calendar date (yyyy-MM-dd); timestamp columns keep R-GQL-10 (UTC instant).
+        if (dateOnly && kind == ColumnValueKind.DateTime)
+        {
+            return CoerceDateOnly(val);
         }
 
         switch (kind)
@@ -138,5 +144,32 @@ public static class FilterValueCoercion
                 : throw new GatewayInvalidQueryException(InvalidValueMessage),
             _ => str
         };
+    }
+
+    private static DateOnly CoerceDateOnly(object val)
+    {
+        switch (val)
+        {
+            case DateOnly d:
+                return d;
+            case DateTimeOffset dto:
+                return DateOnly.FromDateTime(dto.UtcDateTime);
+            case DateTime dt:
+                return DateOnly.FromDateTime(dt.Kind == DateTimeKind.Local ? dt.ToUniversalTime() : dt);
+            case string str:
+                if (DateOnly.TryParseExact(str, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+                {
+                    return day;
+                }
+
+                if (DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
+                {
+                    return DateOnly.FromDateTime(parsed.UtcDateTime);
+                }
+
+                break;
+        }
+
+        throw new GatewayInvalidQueryException(InvalidValueMessage);
     }
 }

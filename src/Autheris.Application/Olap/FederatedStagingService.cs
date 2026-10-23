@@ -101,7 +101,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 // MISC-04: shared whole-identifier rule.
                 bool IsSatisfied(string reqCol) =>
                     Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
-                        reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ReferencedColumns, tenantColumnCounts: true);
+                        reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ConstrainedColumns, tenantColumnCounts: true);
 
                 if (req.Metadata.RequiredFilterColumnGroups.Length > 0)
                 {
@@ -118,9 +118,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
                     if (!anyGroupSatisfied)
                     {
-                        throw new GatewaySecurityException(
-                            GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
-                            GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                        throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException();
                     }
                 }
 
@@ -130,9 +128,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     {
                         if (!IsSatisfied(reqCol))
                         {
-                            throw new GatewaySecurityException(
-                                GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
-                                GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException();
                         }
                     }
                 }

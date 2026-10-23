@@ -61,22 +61,12 @@ public class TypedRejectionTests
     public void Oracle_ArraysAndSubscripts(string sql) =>
         Assert.Equal(nameof(SqlCompileNotSupportedException), Conformance.ConformanceRunner.Run(sql, "operator", TargetSqlDialect.Oracle).ExceptionType);
 
+    // WP-A (GAP-006, GAP-013): DATE/TIME/TIMESTAMP literals, EXTRACT and the date translation have a bound form on SQLite now
+    // (see SqliteDatePartParityTests); only LOCALTIME/LOCALTIMESTAMP and a bare OFFSET stay without one.
     [Theory]
-    [InlineData("SELECT DATE '2024-01-15' AS r FROM orders")]
-    [InlineData("SELECT TIMESTAMP '2024-01-15 10:30:00' AS r FROM orders")]
-    [InlineData("SELECT TIME '10:30:00' AS r FROM orders")]
-    [InlineData("SELECT id FROM orders WHERE d = DATE '2024-01-15'")]
-    [InlineData("SELECT EXTRACT(year FROM d) AS r FROM orders")]
-    [InlineData("SELECT EXTRACT(dow FROM d) AS r FROM orders")]
     [InlineData("SELECT localtime AS r FROM orders")]
     [InlineData("SELECT localtimestamp AS r FROM orders")]
     [InlineData("SELECT id FROM orders ORDER BY id OFFSET 5")]
     [InlineData("SELECT id FROM orders OFFSET 0 ROWS")]
     public void Sqlite_ConstructsWithoutABoundForm(string sql) => AssertTypedRejection(sql, TargetSqlDialect.Sqlite);
-
-    [Theory]
-    [InlineData("SELECT date_trunc('day', ts) AS r FROM orders")]
-    [InlineData("SELECT date_add('day', 1, d) AS r FROM orders")]
-    [InlineData("SELECT d + INTERVAL '1' DAY AS r FROM orders")]
-    public void Sqlite_DateTranslation(string sql) => AssertTypedRejection(sql, TargetSqlDialect.Sqlite, translateDates: true);
 }

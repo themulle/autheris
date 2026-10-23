@@ -366,6 +366,17 @@ internal sealed class GovernedSqlCompiler
         return names;
     }
 
+    private static string? ColumnDataTypeOf(TableCatalogEntry? entry, string column)
+    {
+        if (entry is null) return null;
+        foreach (var candidate in entry.Columns)
+        {
+            if (candidate.Name.Equals(column, StringComparison.OrdinalIgnoreCase)) return candidate.DataType;
+        }
+
+        return null;
+    }
+
     private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
     {
         var guards = typed.Dml;
@@ -373,6 +384,7 @@ internal sealed class GovernedSqlCompiler
         {
             MaskedColumns = new CatalogMaskLookup(typed.Catalog, typed.Masks),
             TableColumns = name => ColumnNames(typed.Catalog.Resolve(ParseName(name))),
+            ColumnDataType = (table, column) => ColumnDataTypeOf(typed.Catalog.Resolve(ParseName(table)), column),
             TablesWithMaskedColumns = CaseInsensitive(request.Policy.TablesWithMaskedColumns),
             EnforcedMaxRows = request.EnforcedMaxRows,
             AllowRecursiveCte = request.AllowRecursiveCte,

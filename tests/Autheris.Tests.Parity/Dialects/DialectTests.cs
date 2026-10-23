@@ -20,7 +20,7 @@ public sealed class DialectMatrixTests(ParityPostgresHostFixture host) : ParityT
     /// <summary>Capabilities whose WebSQL request text is written with the SQLite function <c>strftime</c>; the text has no PostgreSQL spelling, so the cell cannot be stated here.</summary>
     private static readonly HashSet<string> SqliteOnlyText = ["group_date_year", "group_date_month", "group_date_day"];
 
-    /// <summary>Pending reason of those cells; validated by the <c>PendingReasons</c> rule in <c>DialectStructureTests</c>. This is not a product gap (PARITY-GAP-013 concerns SQLite).</summary>
+    /// <summary>Pending reason of those cells; validated by the <c>PendingReasons</c> rule in <c>DialectStructureTests</c>. This is not a product gap (PARITY-GAP-013 is resolved).</summary>
     public const string SqliteOnlyReason = "inexpressible: the request text uses SQLite strftime and has no PostgreSQL spelling";
 
     public static IEnumerable<object[]> Cells() =>

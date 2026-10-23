@@ -528,8 +528,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             // SQ-01: Backslash escapes in string literals
             if (options.RejectBackslashInStrings && type == SqlBaseLexer.STRING && text != null && text.Contains('\\'))
             {
-                throw new ParseCanceledException(
-                    $"line {token.Line}:{token.Column}: Backslash escapes in string literals are not permitted due to dialect lexer differentials.");
+                throw LiteralTokenRejectedException.Reject(token.Line, token.Column,
+                    "Backslash escapes in string literals are not permitted due to dialect lexer differentials.");
             }
 
             // SQ-01: E'...' / e'...' string type constructor
@@ -565,8 +565,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                     (text.Contains('[') || text.Contains(']') ||
                      text.Contains("--", StringComparison.Ordinal) || text.Contains("/*", StringComparison.Ordinal)))
                 {
-                    throw new ParseCanceledException(
-                        $"line {token.Line}:{token.Column}: Literals containing '[', ']', '--' or '/*' are not permitted for this SQL dialect due to dialect lexer differentials.");
+                    throw LiteralTokenRejectedException.Reject(token.Line, token.Column,
+                        "Literals containing '[', ']', '--' or '/*' are not permitted for this SQL dialect due to dialect lexer differentials.");
                 }
             }
 

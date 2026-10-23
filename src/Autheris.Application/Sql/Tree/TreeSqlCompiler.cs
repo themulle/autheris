@@ -315,9 +315,9 @@ public static partial class TreeSqlCompiler
         }
 
         var effectiveLimit = node.ExecutionLimit ?? node.Limit;
-        if (effectiveLimit < 1 || effectiveLimit > MaxLimit)
+        if (effectiveLimit < 0 || effectiveLimit > MaxLimit)
         {
-            throw new GatewayInvalidQueryException($"The page size must be between 1 and {MaxLimit}.");
+            throw new GatewayInvalidQueryException($"The page size must be between 0 and {MaxLimit}.");
         }
         if (node.Offset < 0)
         {
@@ -746,12 +746,20 @@ public static partial class TreeSqlCompiler
             where.Add(BuildFilter(node.Where, metadata, context, target));
         }
 
+        // SEC-PG-07: SQL Server rejects FETCH NEXT 0 ROWS (provider error). A zero page there fetches one row behind a constant-false predicate.
+        if (limit == 0 && isRoot && dialect == DatabaseDialect.SqlServer)
+        {
+            where.Add("1 = 0");
+            limit = 1;
+        }
+
         if (where.Count > 0)
         {
             sb.Append(" WHERE ").Append(string.Join(" AND ", where));
         }
 
         var orderBy = string.Join(", ", plan.Order.Select(o => $"{target}.{Q(context, o.Column)}{(o.Descending ? " DESC" : string.Empty)}"));
+
         var limitText = limit.ToString(CultureInfo.InvariantCulture);
         var offsetText = node.Offset.ToString(CultureInfo.InvariantCulture);
 

@@ -353,8 +353,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 {
                     d.Field(op).Type(new NamedTypeNode(scalar));
                 }
-                d.Field("in").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(scalar))));
-                d.Field("nin").Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(scalar))));
+                d.Field("in").Type(new ListTypeNode(new NamedTypeNode(scalar)));
+                d.Field("nin").Type(new ListTypeNode(new NamedTypeNode(scalar)));
                 d.Field("isNull").Type(new NamedTypeNode("Boolean"));
                 if (includeStringOps)
                 {

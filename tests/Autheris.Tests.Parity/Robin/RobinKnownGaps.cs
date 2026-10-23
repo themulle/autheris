@@ -8,22 +8,6 @@ public static class RobinKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["Robin_Proactive_GroupByYearWebSql|WebSql|extract"] = "PARITY-GAP-013",
-        ["Robin_Proactive_GroupByYearWebSql|WebSql|year_function"] = "PARITY-GAP-013",
-        ["Robin_Proactive_GroupByYearWebSql|WebSql|date_trunc"] = "PARITY-GAP-013",
-        ["Robin_Proactive_GroupByYearAndMonthWebSql|WebSql|extract"] = "PARITY-GAP-013",
-        ["Robin_112_DashboardRevenuePerRegionAndMonth|WebSql|extract"] = "PARITY-GAP-013",
-        ["Robin_Proactive_DateRangeBoundsAndLeapDay|GraphQl|half_open"] = "PARITY-GAP-012",
-        ["Robin_Proactive_DateRangeBoundsAndLeapDay|GraphQl|between"] = "PARITY-GAP-012",
-        ["Robin_Proactive_DateRangeBoundsAndLeapDay|GraphQl|leap_day"] = "PARITY-GAP-008",
-        ["Robin_163_RequiredFilterMissingGivesStableCode|Export|arrow"] = "PARITY-GAP-014",
-        ["Robin_163_RequiredFilterMissingGivesStableCode|GraphQl|aggregate"] = "PARITY-GAP-015",
-        ["Robin_163_RequiredFilterMissingGivesStableCode|WebSql|federated"] = "PARITY-GAP-016",
-        ["Robin_163_RequiredFilterSatisfied|WebSql|federated"] = "PARITY-GAP-017",
-        ["Robin_131_FederatedQueryWithBoundParameter|WebSql|"] = "PARITY-GAP-017",
-        ["Robin_131_FederatedAggregationGroupBy|WebSql|"] = "PARITY-GAP-018",
-        ["Robin_130_TimeZoneConversionGroupByLocalDay|WebSql|"] = "PARITY-GAP-019",
-        ["Robin_280_NullParameterComparison|GraphQl|"] = "PARITY-GAP-009",
     };
 
     public static string? For(string caseMethod, string channel, string? variant) =>

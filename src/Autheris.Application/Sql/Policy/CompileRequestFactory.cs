@@ -25,6 +25,7 @@ public static class CompileRequestFactory
     /// <param name="clientLists">The value-free shapes of the client lists the statement references (REQ-SQL-128); part of the template cache key.</param>
     /// <param name="timeZoneConversionAvailable">REQ-SQL-130: the node proved the conversion for <paramref name="dialect"/>; the default is false (fail closed).</param>
     /// <param name="isDml">The statement is DML: the DML statement classes are permitted (the dialect capability entry still decides).</param>
+    /// <param name="translateDateFunctions">SEC-PG-03: governed WebSQL only; date_trunc, date_add, now and the date part functions become dialect-neutral date nodes (the caller widens <paramref name="allowedFunctions"/> with <c>SqlFunctionAllowlists.WithDateTranslation</c>).</param>
     /// <exception cref="SecurityException">The row policies of <paramref name="policy"/> were assembled for another dialect.</exception>
     /// <exception cref="SqlCompileConfigurationException">The policy carries DML guards other than <see cref="DmlGuardOptions.Strict"/>.</exception>
     public static CompileRequest Create(
@@ -35,7 +36,8 @@ public static class CompileRequestFactory
         long enforcedMaxRows,
         IReadOnlySet<string> allowedFunctions,
         TrinoSqlEngine.Ast.Emit.ClientListShapes? clientLists = null,
-        bool timeZoneConversionAvailable = false)
+        bool timeZoneConversionAvailable = false,
+        bool translateDateFunctions = false)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(options);
@@ -76,6 +78,7 @@ public static class CompileRequestFactory
             EnforcedMaxRows = enforcedMaxRows,
             EnforceCatalogProjection = true,
             MaxExpansionFactor = DefaultMaxExpansionFactor,
+            TranslateTrinoDateFunctions = translateDateFunctions,
             AllowedFunctions = allowedFunctions.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ClientLists = clientLists ?? TrinoSqlEngine.Ast.Emit.ClientListShapes.Empty,
             TimeZoneConversionAvailable = timeZoneConversionAvailable,

@@ -400,7 +400,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         ColumnRef? Resolve(string name)
         {
             var column = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase));
-            return column is null ? null : new ColumnRef(column.ColumnName, ColumnValueKinds.FromDataType(column.DataType));
+            return column is null ? null : new ColumnRef(column.ColumnName, ColumnValueKinds.FromDataType(column.DataType), ColumnValueKinds.IsDateOnly(column.DataType));
         }
 
         EnsureDeclaredKindsMatch(typed, Resolve);

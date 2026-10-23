@@ -52,11 +52,11 @@ public static class ParityMatrix
         Cap("agg_max", Scalar("MAX(amount)", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.Max, "amount")), ScalarGql("MAX", "amount", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.Max, "amount")), noAgg);
         Cap("agg_count_distinct", Scalar("COUNT(DISTINCT product)", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.CountDistinct, "product")), ScalarGql("COUNT_DISTINCT", "product", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.CountDistinct, "product")), noAgg);
 
-        // Aggregates that are invalid for the column type: a stable 4xx (GraphQL) is the contract; WebSQL on SQLite accepts them (PARITY-GAP-021).
+        // Aggregates that are invalid for the column type: a stable 4xx (GraphQL) is the contract; WebSQL answers the same code (fixed #310).
         MatrixCell RejectedGql(string fn, string column) => new Unsupported(Agg($"aggregates: [{{ fn: {fn}, column: {column}, alias: \"v\" }}]"), InvalidForType, "aggregate");
-        Cap("agg_sum_text", new Unsupported(new SqlRequest($"SELECT SUM(product) AS v FROM {Sales}"), null, "SUM"), RejectedGql("SUM", "product"), noAgg);
-        Cap("agg_avg_date", new Unsupported(new SqlRequest($"SELECT AVG(sale_date) AS v FROM {Sales}"), null, "AVG"), RejectedGql("AVG", "sale_date"), noAgg);
-        Cap("agg_sum_bool", new Unsupported(new SqlRequest($"SELECT SUM(is_return) AS v FROM {Sales}"), null, "SUM"), RejectedGql("SUM", "is_return"), noAgg);
+        Cap("agg_sum_text", new Unsupported(new SqlRequest($"SELECT SUM(product) AS v FROM {Sales}"), InvalidForType, null), RejectedGql("SUM", "product"), noAgg);
+        Cap("agg_avg_date", new Unsupported(new SqlRequest($"SELECT AVG(sale_date) AS v FROM {Sales}"), InvalidForType, null), RejectedGql("AVG", "sale_date"), noAgg);
+        Cap("agg_sum_bool", new Unsupported(new SqlRequest($"SELECT SUM(is_return) AS v FROM {Sales}"), InvalidForType, null), RejectedGql("SUM", "is_return"), noAgg);
 
         // ---- group by ----
         var byRegion = new ExpectedSpec(["region", "n"], ParityOracle.Grouped(ParityOracle.Rows, r => r.Region, (ParityFn.Count, null)));
@@ -142,14 +142,14 @@ public static class ParityMatrix
         Filter("filter_in_list", r => r.Region is "North" or "Empty", " WHERE region IN ('North', 'Empty')", "region: { in: [\"North\", \"Empty\"] }", "region in ('North','Empty')");
         Cap(
             "filter_in_empty",
-            new Unsupported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IN () ORDER BY id"), "SQL_SYNTAX_ERROR", @"\bIN\b"),
+            new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IN () ORDER BY id"), Ids(_ => false)),
             new Supported(ListGql("where: { region: { in: [] } }, "), Ids(_ => false)),
-            new Unsupported(RestList("region in ()"), "SQL_SYNTAX_ERROR"));
+            new Supported(RestList("region in ()"), Ids(_ => false)));
         Cap(
             "filter_is_null",
             new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IS NULL ORDER BY id"), Ids(r => r.Region is null)),
             new Supported(ListGql("where: { region: { isNull: true } }, "), Ids(r => r.Region is null)),
-            new Pending("inexpressible: the REST filter grammar has no IS NULL operator; `region eq null` is SQL equality and returns no rows (see PARITY-GAP-009)"));
+            new Pending("inexpressible: the REST filter grammar has no IS NULL operator; `region eq null` is SQL equality and returns no rows (PARITY-GAP-009 is resolved: `eq: null` is three-valued logic)"));
 
         // ---- order and paging ----
         var newest = new ExpectedSpec(["id"], ParityOracle.Rows.OrderByDescending(r => r.SaleDate, StringComparer.Ordinal).ThenBy(r => r.Id).Take(5).Select(r => new object?[] { r.Id }).ToArray(), true);

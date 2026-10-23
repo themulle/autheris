@@ -150,7 +150,7 @@ public sealed partial class GovernedTableReadPlanner
                 {
                     if (!IsSatisfied(req))
                     {
-                        throw new RequiredFilterColumnMissingException($"REQUIRED_FILTER_COLUMN_MISSING: Table requires filter on column '{req}'.");
+                        throw new RequiredFilterColumnMissingException("REQUIRED_FILTER_COLUMN_MISSING: Table requires a filter on a required column.");
                     }
                 }
             }

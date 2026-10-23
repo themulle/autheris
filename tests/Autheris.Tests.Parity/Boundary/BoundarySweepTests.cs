@@ -96,6 +96,11 @@ public sealed class BoundarySweepTests(ParityHostFixture host) : ParityTestBase
 
                 break;
             case Expectation.Rejected:
+                if (e.Code is not null && (r.Status != 400 || r.Code != e.Code))
+                {
+                    throw new XunitException($"Expected HTTP 400 code '{e.Code}', got HTTP {r.Status} code '{r.Code}': {Snippet(r.RawBody)}");
+                }
+
                 if (!failed)
                 {
                     if (c.Slot == BoundarySlot.Raw && c.RawId!.StartsWith("dml_", StringComparison.Ordinal))

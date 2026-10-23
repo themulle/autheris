@@ -39,6 +39,13 @@ public sealed record TreeComparison(string Column, TreeFilterOperator Operator, 
     /// checks it against the resolved column kind (#112 A-8, METRIC_FILTER_INVALID); it never changes the rendered predicate.
     /// </summary>
     public Autheris.Application.Analytics.ColumnValueKind? DeclaredKind { get; init; }
+
+    /// <summary>
+    /// #300: an explicit <c>null</c> operand of a comparison operator (<c>eq: null</c>, <c>gt: null</c>, ...) is bound as a NULL parameter, so
+    /// the comparison is unknown (3VL) and matches no row, also under <c>not</c>/<c>or</c>. Without the flag <c>Eq</c>/<c>Neq</c> with a null
+    /// value keep their IS NULL / IS NOT NULL meaning for the other callers.
+    /// </summary>
+    public bool BindNullOperand { get; init; }
 }
 
 public sealed record TreeOrder(string Column, bool Descending = false);

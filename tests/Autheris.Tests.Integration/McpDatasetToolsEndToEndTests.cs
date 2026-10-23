@@ -162,9 +162,9 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
         var field = graphQl.GetProperty("queryField").GetString()!;
         await RefreshGraphQlSchemaAsync();
 
-        // HotChocolate swaps the rebuilt schema in asynchronously.
+        // HotChocolate swaps the rebuilt schema in asynchronously; until then the field is unknown (fixed GRAPHQL_VALIDATION_FAILED, no engine text).
         var (exampleError, example) = await CallAsync(client, "query_graphql", new { query = graphQl.GetProperty("exampleQuery").GetString() });
-        for (var attempt = 0; exampleError && example.ToString().Contains("does not exist", StringComparison.Ordinal) && attempt < 50; attempt++)
+        for (var attempt = 0; exampleError && example.ToString().Contains("GRAPHQL_VALIDATION_FAILED", StringComparison.Ordinal) && attempt < 50; attempt++)
         {
             await Task.Delay(200);
             (exampleError, example) = await CallAsync(client, "query_graphql", new { query = graphQl.GetProperty("exampleQuery").GetString() });

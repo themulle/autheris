@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Ast.Generators;
 using System;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 
@@ -73,15 +74,26 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context) =>
         FormatInstr(ref builder, position, context);
 
-    /// <summary>Wunsch 4: SQLite has no EXTRACT; strftime on ISO text, with the ISO day of week (%w counts Sunday = 0).</summary>
-    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    /// <summary>
+    /// Appends a generator-owned text token as an argument. SEC-PG-01/-02: on the governed path the token (strftime format,
+    /// datetime modifier) is a bound string parameter, so the emitted SQL contains no string literal; it never comes from client text.
+    /// </summary>
+    private static void AppendToken(ref ValueStringBuilder builder, string token, SqlEmitterContext context)
     {
         if (context.IsBound)
         {
-            // strftime needs a format literal, which the bind-everything rule does not allow inline.
-            throw NoBoundForm("EXTRACT", TargetDialect);
+            builder.Append(context.BindValue(token, SqlParameterType.String, ParameterOrigin.QueryLiteral));
+            return;
         }
 
+        builder.Append('\'');
+        builder.Append(token);
+        builder.Append('\'');
+    }
+
+    /// <summary>Wunsch 4: SQLite has no EXTRACT; strftime on ISO text, with the ISO day of week (%w counts Sunday = 0).</summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
         (string format, string prefix, string suffix) = field switch
         {
             "YEAR" => ("%Y", "", ""),
@@ -95,13 +107,48 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
             "QUARTER" => ("%m", "((", " + 2) / 3)"),
             _ => throw UnsupportedExtract(field, TargetDialect)
         };
-        builder.Append(prefix);
-        builder.Append("CAST(strftime('");
-        builder.Append(format);
-        builder.Append("', ");
+        AppendStructural(ref builder, context, prefix);
+        builder.Append("CAST(strftime(");
+        AppendToken(ref builder, format, context);
+        builder.Append(", ");
         GenerateExpression(source, ref builder, context);
         builder.Append(") AS INTEGER)");
-        builder.Append(suffix);
+        AppendStructural(ref builder, context, suffix);
+    }
+
+    /// <summary>
+    /// GAP-007: SQLite stores dates as ISO text; <c>CAST(x AS date)</c> would give the numeric affinity (<c>'2024-02-29'</c> becomes 2024),
+    /// so DATE, TIMESTAMP and TIME map to <c>date(x)</c>, <c>datetime(x)</c> and <c>time(x)</c> (function names are generator tokens).
+    /// </summary>
+    protected override bool TryFormatCast(ref ValueStringBuilder builder, CastExpression cast, SqlEmitterContext context)
+    {
+        if (cast.IsTryCast || cast.IsNativeType)
+        {
+            return false;
+        }
+
+        var type = ParseTypeName(cast.TargetType);
+        if (type.WithTimeZone)
+        {
+            return false;
+        }
+
+        string? function = type.Name switch
+        {
+            "date" => "date(",
+            "timestamp" => "datetime(",
+            "time" => "time(",
+            _ => null
+        };
+        if (function is null)
+        {
+            return false;
+        }
+
+        builder.Append(function);
+        GenerateExpression(cast.Operand, ref builder, context);
+        builder.Append(')');
+        return true;
     }
 
     /// <summary>Wunsch 4: SQLite stores dates as ISO text and has no typed literals; the ISO string compares correctly.</summary>
@@ -109,8 +156,17 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     {
         if (context.IsBound)
         {
-            // The value would be an inline string literal; SQLite has no typed literal that could carry it as a bind.
-            throw NoBoundForm("DATE, TIME and TIMESTAMP literals", TargetDialect);
+            // SEC-PG-04: the validated value is bound in its canonical ISO text form (the stored form of SQLite dates).
+            var (value, _) = ParseTypedLiteralValue(literal);
+            string text = value switch
+            {
+                DateTime moment when literal.Kind == TypedLiteralKind.Date => moment.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                DateTime moment => moment.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture),
+                TimeSpan time => time.ToString(time.Ticks % TimeSpan.TicksPerSecond == 0 ? @"hh\:mm\:ss" : @"hh\:mm\:ss\.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture),
+                _ => throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"The {literal.Kind} literal value is not a valid {literal.Kind} value.")
+            };
+            builder.Append(context.BindValue(text, SqlParameterType.String, ParameterOrigin.QueryLiteral));
+            return;
         }
 
         FormatStringLiteral(ref builder, literal.Value, context);
@@ -123,13 +179,20 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     /// <summary>Virtual filters (phase 7b): <c>datetime(x, '±n units')</c>; a week is seven days.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {
+        (long value, string name) = unit == DateUnit.Week ? (checked(amount * 7), "day") : (amount, DateUnitName(unit));
         if (context.IsBound)
         {
-            // The datetime modifier ('+1 day') is an inline string literal.
-            throw NoBoundForm("date_add and INTERVAL arithmetic", TargetDialect);
+            // SEC-PG-01: the amount is a bound number, the unit a bound generator token; the modifier is their concatenation ('5' || ' days').
+            builder.Append("datetime(");
+            GenerateExpression(source, ref builder, context);
+            builder.Append(", ");
+            builder.Append(BindInteger(value, context));
+            builder.Append(" || ");
+            builder.Append(context.BindValue(" " + name + "s", SqlParameterType.String, ParameterOrigin.QueryLiteral));
+            builder.Append(')');
+            return;
         }
 
-        (long value, string name) = unit == DateUnit.Week ? (amount * 7, "day") : (amount, DateUnitName(unit));
         builder.Append("datetime(");
         GenerateExpression(source, ref builder, context);
         builder.Append(", '");
@@ -147,12 +210,6 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     /// </summary>
     protected override void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
     {
-        if (context.IsBound)
-        {
-            // The start-of-unit modifier and the strftime format are inline string literals.
-            throw NoBoundForm("date_trunc", TargetDialect);
-        }
-
         string? start = unit switch
         {
             DateUnit.Day => "start of day",
@@ -164,9 +221,9 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
         {
             builder.Append("datetime(");
             GenerateExpression(source, ref builder, context);
-            builder.Append(", '");
-            builder.Append(start);
-            builder.Append("')");
+            builder.Append(", ");
+            AppendToken(ref builder, start, context);
+            builder.Append(')');
             return;
         }
 
@@ -177,9 +234,9 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
             DateUnit.Second => "%Y-%m-%d %H:%M:%S",
             _ => throw UnsupportedDateFunction("date_trunc", unit, TargetDialect)
         };
-        builder.Append("strftime('");
-        builder.Append(format);
-        builder.Append("', ");
+        builder.Append("strftime(");
+        AppendToken(ref builder, format, context);
+        builder.Append(", ");
         GenerateExpression(source, ref builder, context);
         builder.Append(')');
     }

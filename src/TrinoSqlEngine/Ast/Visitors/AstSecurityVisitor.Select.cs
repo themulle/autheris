@@ -165,6 +165,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         // The sources are not read after this call: base.VisitQuerySpecification re-enters this method for nested specifications.
         bool maskedScope = EnsureProjectionMaskGuards(node);
+
+        // SEC-PG-09: after the mask guards, so a masked or unknown column keeps its own answer and no type is disclosed.
+        EnsureAggregateTypesValid(node);
         if (!maskedScope)
             return base.VisitQuerySpecification(node);
 

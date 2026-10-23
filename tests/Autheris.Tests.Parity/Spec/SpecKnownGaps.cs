@@ -9,10 +9,6 @@ public static class SpecKnownGaps
     /// <summary>Function name (lower case) => gap id.</summary>
     public static readonly IReadOnlyDictionary<string, string> Functions = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["convert_timezone"] = "PARITY-GAP-019",
-        ["left"] = "PARITY-GAP-022",
-        ["right"] = "PARITY-GAP-022",
-        ["extract"] = "PARITY-GAP-022",
     };
 
     /// <summary>
@@ -22,10 +18,17 @@ public static class SpecKnownGaps
     /// </summary>
     public static readonly IReadOnlySet<string> UnsupportedFunctions = new HashSet<string>(StringComparer.Ordinal)
     {
-        "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp", "greatest", "least", "lpad", "rpad", "reverse", "char_length", "character_length",
+        "convert_timezone", "left", "right", "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp", "greatest", "least", "lpad", "rpad", "reverse", "char_length", "character_length",
     };
 
     public const int UnsupportedFunctionStatus = 403;
+
+    /// <summary>LEFT and RIGHT are SQL keywords (join kinds): the grammar rejects the function call form as a syntax error (documented, PARITY-GAP-022 resolved by removal).</summary>
+    public static readonly IReadOnlyDictionary<string, (int Status, string Code)> UnsupportedFunctionOverrides = new Dictionary<string, (int, string)>(StringComparer.Ordinal)
+    {
+        ["left"] = (400, "SQL_SYNTAX_ERROR"),
+        ["right"] = (400, "SQL_SYNTAX_ERROR"),
+    };
 
     public const string UnsupportedFunctionCode = "SQL_POLICY_VIOLATION";
 

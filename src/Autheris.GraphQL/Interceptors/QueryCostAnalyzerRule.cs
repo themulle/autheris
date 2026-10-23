@@ -416,6 +416,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                 {
                     int requestedLimit = -1;
                     bool limitIsVariable = false;
+                    bool zeroLimit = false;
                     foreach (var arg in field.Arguments)
                     {
                         if (IsRowLimitArgument(arg.Name.Value))
@@ -423,6 +424,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                             if (arg.Value is IntValueNode intVal && int.TryParse(intVal.Value, out var parsed))
                             {
                                 requestedLimit = parsed;
+                                zeroLimit = parsed == 0;
                                 break;
                             }
 
@@ -432,6 +434,13 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                 if (variableValues != null && variableValues.TryGetValue(varNode.Name.Value, out var val) && TryExtractPositiveInt(val, out var runtimeLimit))
                                 {
                                     requestedLimit = runtimeLimit;
+                                    break;
+                                }
+
+                                // SEC-PG-07: a runtime value of 0 is a bounded query, never the worst case and never free.
+                                if (variableValues != null && variableValues.TryGetValue(varNode.Name.Value, out var zeroVal) && IsZeroLimit(zeroVal))
+                                {
+                                    zeroLimit = true;
                                     break;
                                 }
 
@@ -449,7 +458,12 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     }
 
                     int effectiveRows;
-                    if (requestedLimit > 0)
+                    if (zeroLimit)
+                    {
+                        // SEC-PG-07 (#302): first: 0 is priced as the minimum bounded query (one row), never as zero cost or unbounded.
+                        effectiveRows = 1;
+                    }
+                    else if (requestedLimit > 0)
                     {
                         effectiveRows = Math.Min(requestedLimit, _maxResponseRows);
                     }
@@ -801,6 +815,19 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
     /// <summary>Only the exact names of the cheap functions are cheap; anything else (including a missing name) is priced as COUNT_DISTINCT.</summary>
     private static bool IsDistinctName(string? name) =>
         name is not ("COUNT" or "SUM" or "AVG" or "MIN" or "MAX");
+
+    private static bool IsZeroLimit(object? val) => val switch
+    {
+        int i => i == 0,
+        long l => l == 0,
+        short s => s == 0,
+        byte b => b == 0,
+        System.Text.Json.JsonElement je => je.ValueKind == System.Text.Json.JsonValueKind.Number
+            ? je.TryGetInt32(out var ji) && ji == 0
+            : je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out var js) && js == 0,
+        IntValueNode ivn => int.TryParse(ivn.Value, out var iv) && iv == 0,
+        _ => false
+    };
 
     private static bool TryExtractPositiveInt(object? val, out int result)
     {
