@@ -175,6 +175,9 @@ public static class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
             sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
+        // Issue #281: runtime-managed, app-scoped trusted GraphQL documents (registry polls the generation row; the admin service invalidates it).
+        services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.ITrustedDocumentAppRegistry, Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAppRegistry>();
+        services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAdministrationService>();
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());

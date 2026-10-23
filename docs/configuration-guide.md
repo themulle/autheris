@@ -492,6 +492,13 @@ Steuert Hot Chocolate 16 Parameter, Komplexitätsgrenzen und Anti-CSRF-Prüfunge
 | `MaxResponseBytes` | `long` | `1 MB .. 100 MB` | `10485760` (10 MB) | Maximales Byte-Budget für GraphQL-Antworten. |
 | `MaxInClauseBatchSize` | `int` | `10 .. 10000` | `500` | Maximale Batch-Größe für DataLoader `IN`-Prädikate. |
 | `TrustedOrigins` | `List<string>` | URLs / `"*"` | `[]` | CORS- und Anti-CSRF-Erlaubnisliste für `Origin`/`Referer`-Header. |
+| `TrustedDocumentsDirectory` | `string` | Directory path | `""` | Global allowlist of `*.graphql` / `*.gql` documents (hashed over the normalized document). Required and must exist when `PersistedQueriesOnly=true`, unless `AppScopedTrustedDocuments.Enabled=true` (then it may be empty). |
+| `AppScopedTrustedDocuments.Enabled` | `bool` | `true \| false` | `false` | Runtime-managed, app-scoped trusted documents (see below). Requires `PersistedQueriesOnly=true`; startup fails otherwise. |
+| `AppScopedTrustedDocuments.HeaderName` | `string` | HTTP token | `"X-Autheris-App"` | Request header that carries the app identity `<appId>/<version>`. |
+| `AppScopedTrustedDocuments.MaxHashesPerVersion` | `int` | `1 .. 5000` | `500` | Maximum document hashes of one app version. |
+| `AppScopedTrustedDocuments.MaxActiveVersionsPerApp` | `int` | `1 .. 200` | `20` | Maximum active versions of one app. |
+| `AppScopedTrustedDocuments.MaxAllowedOriginsPerApp` | `int` | `1 .. 50` | `10` | Maximum allowed origins of one app. |
+| `AppScopedTrustedDocuments.CacheRefreshSeconds` | `int` | `1 .. 60` | `5` | Interval in which each instance checks the store for changes made by other instances. |
 
 ```json
 "GraphQL": {
@@ -510,6 +517,25 @@ Steuert Hot Chocolate 16 Parameter, Komplexitätsgrenzen und Anti-CSRF-Prüfunge
   ]
 }
 ```
+
+#### App-scoped trusted documents
+
+With `GraphQL:AppScopedTrustedDocuments:Enabled=true` an operator registers, per app version, the exact documents that app may run, without restarting the gateway. A request that carries the header `X-Autheris-App: <appId>/<version>` (`appId` `[a-z0-9][a-z0-9._-]{0,63}`, version `[A-Za-z0-9][A-Za-z0-9._+-]{0,63}`) is checked only against that app version:
+
+- The document is identified by the SHA-256 of its exact source text (UTF-8 bytes, no normalization): any whitespace change is a different document. Requests with only a document id, an APQ `persistedQuery` extension, a client-supplied document hash or no source text are rejected.
+- The request must carry exactly one `Origin` header that equals one of the origins registered for the app (scheme and host lower-cased, default port elided). A missing, `null` or duplicated `Origin` is rejected, also for server-to-server clients and for the WebSocket upgrade request.
+- A request with the header never falls back to the global directory. Requests without the header use the global `TrustedDocumentsDirectory` as before. With the feature disabled the header is ignored.
+- Every rejection returns the same `TRUSTED_DOCUMENT_REQUIRED` error; the reason is only logged at Debug level (reason code, app id and version, never document text).
+- Multi-instance coherence: a write is effective on the instance that handled it before the call returns; other instances pick it up within `CacheRefreshSeconds` (default 5 s), so a retired version can stay usable on other instances for up to that interval. If the store cannot be read, requests with the app header are rejected.
+- Apps are gateway-wide (not tenant-scoped).
+
+The admin API is mapped only while the feature is enabled and is meant to be reached from inside the cluster (the Helm chart has no dedicated `/api/admin` rule, but its default catch-all `/` path forwards it, so block `/api/admin` at your public ingress). It requires the `ClusterAdmin` role plus a delegated scope; every change is audited (`TRUSTED_DOCUMENTS_REPLACED`, `TRUSTED_DOCUMENTS_RETIRED`):
+
+| Method and path | Scope | Result |
+| :--- | :--- | :--- |
+| `PUT /api/admin/trusted-documents/{appId}/{version}` body `{"hashes":[...],"allowedOrigins":[...]}` | `trusted-documents:write` | `200 {added, removed, unchanged}`; replaces the hash set and origins of the version; `400` invalid input, `409` retired version or version limit, `413` body over 1 MiB |
+| `DELETE /api/admin/trusted-documents/{appId}/{version}` | `trusted-documents:write` | `204` (also when already retired), `404` unknown version; retired versions are never reactivated |
+| `GET /api/admin/trusted-documents/{appId}` | `trusted-documents:read` or `write` | `200` origins and versions with status and hash count, `404` unknown app |
 
 > [!IMPORTANT]
 > **Anti-CSRF Preflight Schutz**: Jede eingehende POST- oder GET-Abfrage an `/graphql` erfordert zwingend den Header `GraphQL-Preflight: 1` oder `X-Requested-With`. Browser-Anfragen ohne diesen Header werden mit `HTTP 400 Bad Request` abgewiesen.
