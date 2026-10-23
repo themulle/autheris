@@ -9,6 +9,4 @@ internal static class BoundaryKnownGapData
         // Intentionally empty: every earlier gap and observed server error is fixed (2026-10-23, fix/parity-gaps). A new gap or
         // observed 5xx is added here with exact case ids.
     ];
-
-    private static string[] Split(string raw) => raw.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

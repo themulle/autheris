@@ -156,7 +156,7 @@ Fixed 2026-10-23 on fix/parity-gaps (#304): EXTRACT, year/month/day..., date_par
 ### PARITY-GAP-014
 Capability: required filter column (#163), bulk export. Channel: `POST /api/v1/export/arrow?table=default.main.parity_scoped` without the required filter. Observed: HTTP 400 ProblemDetails (`title` "A required filter column was not constrained ...") without a `code` member. Expected: stable `code` `REQUIRED_FILTER_COLUMN_MISSING` as on WebSQL, GraphQL list and REST. Issue draft: "Arrow export required-filter 400 has no stable code". 1 cell.
 
-Fixed 2026-10-23 on fix/parity-gaps (#305): the Arrow export answers the required-filter-column problem with the stable code and the same status as the JSON path.
+Fixed 2026-10-23 on fix/parity-gaps (#305): the Arrow export answers a missing required filter column with HTTP 400 `REQUIRED_FILTER_COLUMN_MISSING`, the same status and code as the JSON path.
 
 
 ### PARITY-GAP-015

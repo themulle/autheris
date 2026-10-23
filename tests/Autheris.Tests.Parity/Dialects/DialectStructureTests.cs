@@ -50,4 +50,17 @@ public sealed class DialectStructureTests : ParityTestBase
     {
         PendingReasons.IsValid(DialectMatrixTests.SqliteOnlyReason, PendingReasons.FollowUpIds(PendingReasons.ReadPlan())).ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData("postgres")]
+    [InlineData("sqlserver")]
+    [InlineData("duckdb")]
+    public void Dialect_MatrixGapsAreSqliteOnly(string dialect)
+    {
+        var gaps = new Dictionary<string, string> { ["agg_sum_text|WebSql"] = "PARITY-GAP-021" };
+
+        MatrixKnownGaps.For(gaps, "agg_sum_text", MatrixChannel.WebSql, "sqlite").ShouldBe("PARITY-GAP-021");
+        MatrixKnownGaps.For(gaps, "agg_sum_text", MatrixChannel.WebSql, dialect).ShouldBeNull();
+        MatrixKnownGaps.For("agg_sum_text", MatrixChannel.WebSql, dialect).ShouldBeNull();
+    }
 }
