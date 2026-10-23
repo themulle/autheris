@@ -1501,14 +1501,15 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         var list = new List<Expression>();
-        if (context.expression() != null)
+        // The two alternatives share this label: the accessors return empty arrays (never null) for the other one.
+        if (context.expression().Length > 0)
         {
             foreach (var e in context.expression())
             {
                 list.Add((Expression)Visit(e));
             }
         }
-        else if (context.fieldConstructor() != null)
+        else if (context.fieldConstructor().Length > 0)
         {
             foreach (var f in context.fieldConstructor())
             {

@@ -319,7 +319,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             return true;
 
         if (expr is BinaryExpression b &&
-            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 &&
+            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 && !IsEmptyString(l1) && !IsEmptyString(l2) &&
             LiteralComparison.TryFold(b.Operator, l1, l2, out bool isTrue) && isTrue)
             return true;
 
@@ -335,7 +335,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             return true;
 
         if (expr is BinaryExpression b &&
-            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 &&
+            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 && !IsEmptyString(l1) && !IsEmptyString(l2) &&
             LiteralComparison.TryFold(b.Operator, l1, l2, out bool isTrue) && !isTrue)
             return true;
 

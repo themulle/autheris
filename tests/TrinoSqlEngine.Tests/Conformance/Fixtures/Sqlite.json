@@ -1519,8 +1519,23 @@
       "Group": "operator",
       "Sql": "SELECT ROW(1, 'a') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT () AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Expected": "SELECT (?1, ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "a"
+        }
+      ]
     },
     {
       "Id": "operator-043",

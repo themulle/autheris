@@ -1530,8 +1530,23 @@
       "Group": "operator",
       "Sql": "SELECT ROW(1, 'a') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT () AS \"R\" FROM \"T\"",
-      "Parameters": []
+      "Expected": "SELECT (:p1, :p2) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        },
+        {
+          "Marker": ":p2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "a"
+        }
+      ]
     },
     {
       "Id": "operator-043",

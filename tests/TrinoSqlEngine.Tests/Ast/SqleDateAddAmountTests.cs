@@ -14,7 +14,7 @@ public sealed class SqleDateAddAmountTests
     private void Build(string sql)
     {
         var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        new SqlAstBuilder().BuildStatement(tree);
+        new SqlAstBuilder(new AstBuilderOptions { TranslateTrinoDateFunctions = true }).BuildStatement(tree);
     }
 
     [Theory]
