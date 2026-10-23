@@ -175,6 +175,9 @@ public static class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
             sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
+        // Issue #281: runtime-managed, app-scoped trusted GraphQL documents (registry polls the generation row; the admin service invalidates it).
+        services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.ITrustedDocumentAppRegistry, Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAppRegistry>();
+        services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAdministrationService>();
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
@@ -353,6 +356,7 @@ public static class GatewayGovernanceServiceExtensions
             IWebhookOutbox,
             IVirtualFilterRepository,
             ICallerAttributeRepository,
+            ITrustedDocumentRepository,
             IAuditChainExportSource,
             IAuditPurgeKeyProvider,
             ICdcWatermarkRepository,
@@ -393,6 +397,7 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICallerAttributeRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<ITrustedDocumentRepository>(sp => sp.GetRequiredService<TRepository>());
         // WP-SC-03: every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());

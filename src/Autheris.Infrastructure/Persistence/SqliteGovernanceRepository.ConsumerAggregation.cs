@@ -28,7 +28,7 @@ public partial class SqliteGovernanceRepository : IConsumerAggregationRepository
         WriteAsync(async conn =>
         {
             await ConsumerAggregationStore.RecordDailyUsageAsync(
-                conn, null, tableId, tenantId, day, application, clientId, version,
+                conn, ConsumerAggregationDialect.Sqlite, null, tableId, tenantId, day, application, clientId, version,
                 calls, rowsReturned, rowsMeasuredCalls, rejAccess, rejRateLimit, rejCost, rejOther, ct).ConfigureAwait(false);
             return true;
         }, ct);
@@ -43,7 +43,7 @@ public partial class SqliteGovernanceRepository : IConsumerAggregationRepository
         WriteAsync(async conn =>
         {
             await ConsumerAggregationStore.RecordActorSampleAsync(
-                conn, null, tableId, tenantId, day, application, actorHash, ct).ConfigureAwait(false);
+                conn, ConsumerAggregationDialect.Sqlite, null, tableId, tenantId, day, application, actorHash, ct).ConfigureAwait(false);
             return true;
         }, ct);
 
@@ -58,7 +58,7 @@ public partial class SqliteGovernanceRepository : IConsumerAggregationRepository
         WriteAsync(async conn =>
         {
             await ConsumerAggregationStore.RecordQueryNameAsync(
-                conn, null, tableId, tenantId, day, application, queryName, calls, ct).ConfigureAwait(false);
+                conn, ConsumerAggregationDialect.Sqlite, null, tableId, tenantId, day, application, queryName, calls, ct).ConfigureAwait(false);
             return true;
         }, ct);
 

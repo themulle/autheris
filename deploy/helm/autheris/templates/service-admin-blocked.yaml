@@ -1,0 +1,15 @@
+{{- if and .Values.ingress.enabled .Values.ingress.blockAdminPath }}
+# Intentionally without a pod match: no endpoints, so requests routed here by the ingress deny rule reach no pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "autheris.fullname" . }}-admin-blocked
+  labels:
+    {{- include "autheris.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.service.port }}
+      protocol: TCP
+      name: http
+{{- end }}

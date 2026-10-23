@@ -1456,17 +1456,17 @@
       "Id": "operator-038",
       "Group": "operator",
       "Sql": "SELECT GREATEST(a, b) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT GREATEST(\"a\", \"b\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "operator-039",
       "Group": "operator",
       "Sql": "SELECT LEAST(a, b, c) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT LEAST(\"a\", \"b\", \"c\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "operator-040",
@@ -1917,9 +1917,9 @@
       "Id": "fn-string-007",
       "Group": "fn-string",
       "Sql": "SELECT reverse(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT REVERSE(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "fn-string-008",
@@ -2082,47 +2082,17 @@
       "Id": "fn-string-018",
       "Group": "fn-string",
       "Sql": "SELECT lpad(a, 5, '0') AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT LPAD(\"a\", ?1, ?2) AS \"r\" FROM \"t\"",
-      "Parameters": [
-        {
-          "Marker": "?1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "5"
-        },
-        {
-          "Marker": "?2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "0"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "fn-string-019",
       "Group": "fn-string",
       "Sql": "SELECT rpad(a, 5, '0') AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT RPAD(\"a\", ?1, ?2) AS \"r\" FROM \"t\"",
-      "Parameters": [
-        {
-          "Marker": "?1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "5"
-        },
-        {
-          "Marker": "?2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "0"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "fn-string-020",
@@ -2408,17 +2378,17 @@
       "Id": "fn-string-052",
       "Group": "fn-string",
       "Sql": "SELECT char_length(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT CHAR_LENGTH(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "fn-string-053",
       "Group": "fn-string",
       "Sql": "SELECT character_length(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT CHARACTER_LENGTH(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "fn-string-054",
@@ -3816,49 +3786,49 @@
       "Id": "agg-009",
       "Group": "agg",
       "Sql": "SELECT stddev(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT STDDEV(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "agg-010",
       "Group": "agg",
       "Sql": "SELECT stddev_pop(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT STDDEV_POP(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "agg-011",
       "Group": "agg",
       "Sql": "SELECT stddev_samp(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT STDDEV_SAMP(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "agg-012",
       "Group": "agg",
       "Sql": "SELECT variance(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT VARIANCE(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "agg-013",
       "Group": "agg",
       "Sql": "SELECT var_pop(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT VAR_POP(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "agg-014",
       "Group": "agg",
       "Sql": "SELECT var_samp(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT VAR_SAMP(\"a\") AS \"r\" FROM \"t\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "agg-015",

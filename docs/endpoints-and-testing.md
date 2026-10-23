@@ -35,6 +35,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **CDC Streaming** | `/api/v1/cdc/{events,subscriptions}` | Role-gated | Always active | `RealtimeStreamingSubscription` |
 | **Human-in-the-Loop (HITL)** | `/api/governance/hitl/{pending,approve,reject}` | Approver roles | `HitLStepUp.Enabled` | Unit tests |
 | **Token Revocation** | `POST /api/admin/tokens/revoke` | `GovernanceAdmin` | Always active | Unit tests |
+| **Trusted GraphQL Documents (app-scoped)** | `PUT/DELETE /api/admin/trusted-documents/{appId}/{version}`, `GET /api/admin/trusted-documents/{appId}` | `ClusterAdmin` + scope `trusted-documents:write` (GET: `read` or `write`) | `GraphQL.AppScopedTrustedDocuments.Enabled` | `TrustedDocumentAdminEndpointsTests`, `TrustedDocumentsOnlyMiddlewareAppScopeTests` |
 | **FOCUS FinOps Accounting** | `/api/v1/finops/{focus,budget/{tenant}}` | `FinOpsAdmin` | `FinOps.Enabled` | `FinOpsIntegration`, `FinOpsEndToEndSqlite` |
 | **ReBAC (Zanzibar / OpenFGA)** | `/api/v1/rebac/{tuples,check,batch-check}` | Authenticated | Always active | `ZanzibarRebacTests` |
 | **Arrow Flight SQL & Export** | `/api/v1/export/arrow`, `/api/v1/flight/sql/{info,tables,stream}` | Authenticated | Always active | Unit tests |
