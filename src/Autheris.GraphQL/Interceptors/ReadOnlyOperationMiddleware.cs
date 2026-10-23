@@ -27,6 +27,14 @@ public sealed class ReadOnlyOperationMiddleware
     public async ValueTask InvokeAsync(RequestContext context)
     {
         var document = context.OperationDocumentInfo?.Document;
+        if (document != null && IsSubscription(document, context.Request.OperationName)
+            && ResolvePrincipal(context).IsReadOnly())
+        {
+            // Issue #279: read-only tokens never open subscriptions; no self-service branch, no options lookup.
+            context.Result = Reject("This token only permits read access; subscriptions are rejected.");
+            return;
+        }
+
         if (document != null && IsMutation(document, context.Request.OperationName))
         {
             var principal = ResolvePrincipal(context);
@@ -39,10 +47,7 @@ public sealed class ReadOnlyOperationMiddleware
 
                 if (!selfServiceEnabled || configuredScopes is { Count: 0 })
                 {
-                    context.Result = OperationResult.FromError(ErrorBuilder.New()
-                        .SetMessage("This token only permits read access; mutations are rejected.")
-                        .SetCode("READ_ONLY_TOKEN")
-                        .Build());
+                    context.Result = Reject(MutationRejected);
                     return;
                 }
 
@@ -51,10 +56,7 @@ public sealed class ReadOnlyOperationMiddleware
 
                 if (!hasSelfServiceScope || !SelfServiceMutationClassifier.IsExclusivelySelfServiceMutation(document, context.Request.OperationName))
                 {
-                    context.Result = OperationResult.FromError(ErrorBuilder.New()
-                        .SetMessage("This token only permits read access; mutations are rejected.")
-                        .SetCode("READ_ONLY_TOKEN")
-                        .Build());
+                    context.Result = Reject(MutationRejected);
                     return;
                 }
             }
@@ -63,12 +65,23 @@ public sealed class ReadOnlyOperationMiddleware
         await _next(context).ConfigureAwait(false);
     }
 
-    // Without an operation name every mutation in the document counts (fail-closed).
+    private const string MutationRejected = "This token only permits read access; mutations are rejected.";
+
+    private static OperationResult Reject(string message) =>
+        OperationResult.FromError(ErrorBuilder.New().SetMessage(message).SetCode("READ_ONLY_TOKEN").Build());
+
     internal static bool IsMutation(DocumentNode document, string? operationName) =>
+        SelectsOperation(document, operationName, OperationType.Mutation);
+
+    internal static bool IsSubscription(DocumentNode document, string? operationName) =>
+        SelectsOperation(document, operationName, OperationType.Subscription);
+
+    // Without an operation name every operation of the type in the document counts (fail-closed).
+    internal static bool SelectsOperation(DocumentNode document, string? operationName, OperationType type) =>
         document.Definitions
             .OfType<OperationDefinitionNode>()
             .Where(o => string.IsNullOrEmpty(operationName) || string.Equals(o.Name?.Value, operationName, StringComparison.Ordinal))
-            .Any(o => o.Operation == OperationType.Mutation);
+            .Any(o => o.Operation == type);
 
     private static ClaimsPrincipal? ResolvePrincipal(RequestContext context)
     {

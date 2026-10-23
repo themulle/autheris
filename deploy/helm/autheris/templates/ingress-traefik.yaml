@@ -28,6 +28,17 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
+          {{- if $.Values.ingress.blockAdminPath }}
+          # Deny rule: the admin API is cluster-internal only. The longer prefix wins over "/" and lands on a
+          # selector-less Service without endpoints, so the controller answers 503 instead of forwarding.
+          - path: /api/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "autheris.fullname" $ }}-admin-blocked
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
           {{- range .paths }}
           - path: {{ .path }}
             pathType: {{ .pathType }}

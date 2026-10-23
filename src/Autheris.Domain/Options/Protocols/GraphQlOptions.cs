@@ -46,13 +46,26 @@ public sealed class GraphQLOptions
     /// <summary>#112: typed aggregate fields (<c>Gateway:GraphQL:Aggregation</c>).</summary>
     public GraphQLAggregationOptions Aggregation { get; init; } = new();
 
+    /// <summary>Issue #279: GraphQL subscription switch (<c>Gateway:GraphQL:Subscriptions</c>).</summary>
+    public GraphQLSubscriptionOptions Subscriptions { get; init; } = new();
+
     /// <summary>Issue #240: GraphQL metrics options (<c>Gateway:GraphQL:Metrics</c>).</summary>
     public GraphQLMetricsOptions Metrics { get; init; } = new();
+
+    /// <summary>Issue #281: runtime-managed, app-scoped trusted documents (<c>Gateway:GraphQL:AppScopedTrustedDocuments</c>).</summary>
+    public AppScopedTrustedDocumentsOptions AppScopedTrustedDocuments { get; init; } = new();
 
     /// <summary>Issue #254: ERP table GraphQL schema partitioning mode.</summary>
     public GraphQlSchemaPartitioningMode SchemaPartitioning { get; init; } = GraphQlSchemaPartitioningMode.None;
     public List<string> PartitionAllowedDomains { get; init; } = [];
     public List<string> PartitionAllowedConsentScopes { get; init; } = [];
+}
+
+/// <summary>Issue #279: switch for the GraphQL subscription root type and its in-memory provider.</summary>
+public sealed class GraphQLSubscriptionOptions
+{
+    /// <summary>When false the schema exposes no Subscription type (read once at startup).</summary>
+    public bool Enabled { get; init; } = true;
 }
 
 public enum GraphQlSchemaPartitioningMode

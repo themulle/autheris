@@ -604,7 +604,10 @@ public static class GatewayServiceCollectionExtensions
         // We enforce an allowlist of trusted documents (normalized SHA-256) directly after the document cache.
         if (gatewayOptions.GraphQL.PersistedQueriesOnly)
         {
-            var trustedDocuments = TrustedDocumentStore.LoadFromDirectory(gatewayOptions.GraphQL.TrustedDocumentsDirectory);
+            // Issue #281: an empty global directory is valid when app-scoped trusted documents carry the allowlist.
+            var trustedDocuments = gatewayOptions.GraphQL.AppScopedTrustedDocuments.Enabled && string.IsNullOrWhiteSpace(gatewayOptions.GraphQL.TrustedDocumentsDirectory)
+                ? new TrustedDocumentStore([])
+                : TrustedDocumentStore.LoadFromDirectory(gatewayOptions.GraphQL.TrustedDocumentsDirectory, allowEmpty: gatewayOptions.GraphQL.AppScopedTrustedDocuments.Enabled);
             services.AddSingleton(trustedDocuments);
             gqlBuilder.UseRequest<TrustedDocumentsOnlyMiddleware>();
         }
@@ -644,9 +647,7 @@ public static class GatewayServiceCollectionExtensions
             .AddErrorFilter(sp => sp.GetRequiredService<ErrorSanitizingFilter>())
             .AddQueryType<Query>()
             .AddMutationType<Mutation>()
-            .AddSubscriptionType<Subscription>()
-            .AddInMemorySubscriptions()
-            .AddSocketSessionInterceptor(sp => sp.GetRequiredService<WebSocketAuthInterceptor>())
+            .AddGatewaySubscriptions(gatewayOptions.GraphQL)
             .AddDirectiveType<Autheris.GraphQL.Directives.McpToolDirectiveType>()
             .AddDirectiveType<Autheris.GraphQL.Directives.RebacDirectiveType>()
             .AddMaxExecutionDepthRule(maxDepth)

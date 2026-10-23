@@ -38,6 +38,64 @@ public sealed class GovernanceSchemaShapeVerifierTests
         await Should.ThrowAsync<InvalidOperationException>(() => verifier.VerifyAsync(connection, CancellationToken.None));
     }
 
+    private static async Task<SchemaShapeResult> VerifyAfterAsync(params string[] statements)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        new Autheris.Infrastructure.Persistence.Migrations.SqliteBaselineSchema(connection, null).Apply();
+        foreach (var statement in statements)
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = statement;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var verifier = new GovernanceSchemaShapeVerifier("sqlite", new SqliteSchemaCatalogReader());
+        return await verifier.VerifyAsync(connection, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Verify_WhenConsumerAppTableMissing_FailsClosed()
+    {
+        // SEC-286-2 / AC-3: a missing CONSUMER_APP_* table is a not-ready deviation that names the table.
+        var result = await VerifyAfterAsync("DROP TABLE CONSUMER_APP_ACTOR_DAILY");
+
+        var deviation = result.Deviations.ShouldHaveSingleItem();
+        deviation.Kind.ShouldBe(SchemaDeviationKind.MissingTable);
+        deviation.Table.ShouldBe("CONSUMER_APP_ACTOR_DAILY");
+        GovernanceSchemaShapeComparer.FormatMessage("SQLite", "db", [1], [], result.Deviations).ShouldContain("CONSUMER_APP_ACTOR_DAILY");
+    }
+
+    [Fact]
+    public async Task Verify_WhenConsumerAppColumnMissing_FailsClosed()
+    {
+        var result = await VerifyAfterAsync("ALTER TABLE CONSUMER_APP_DAILY DROP COLUMN rej_other");
+
+        var deviation = result.Deviations.ShouldHaveSingleItem();
+        deviation.Kind.ShouldBe(SchemaDeviationKind.MissingColumn);
+        deviation.Table.ShouldBe("CONSUMER_APP_DAILY");
+        deviation.Name.ShouldBe("rej_other");
+    }
+
+    [Fact]
+    public async Task Verify_OnExistingBaselineWithoutConsumerTables_IsNotReady()
+    {
+        var result = await VerifyAfterAsync(
+            "DROP TABLE CONSUMER_APP_DAILY", "DROP TABLE CONSUMER_APP_ACTOR_DAILY", "DROP TABLE CONSUMER_APP_QUERYNAME_DAILY");
+
+        result.Deviations.Select(d => d.Table).ShouldBe(
+            ["CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_DAILY", "CONSUMER_APP_QUERYNAME_DAILY"], ignoreOrder: true);
+        result.Deviations.ShouldAllBe(d => d.Kind == SchemaDeviationKind.MissingTable);
+    }
+
+    [Fact]
+    public async Task Verify_AfterBaselineOnly_HasNoConsumerAppDeviation()
+    {
+        var result = await VerifyAfterAsync();
+
+        result.Deviations.ShouldBeEmpty();
+    }
+
     [Fact]
     public void EmbeddedSnapshots_AreNotEmpty_ForEveryEngine()
     {

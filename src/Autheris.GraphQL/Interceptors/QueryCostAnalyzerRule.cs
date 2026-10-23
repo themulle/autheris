@@ -278,6 +278,13 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     _ => schema.QueryType
                 };
 
+                // Issue #279 (SEC-279-6): no root type (e.g. subscriptions disabled) -> skip costing; the standard
+                // unknown-root validation error rejects the document.
+                if (rootType is null)
+                {
+                    continue;
+                }
+
                 foreach (var selection in operation.SelectionSet.Selections)
                 {
                     string key;

@@ -182,10 +182,20 @@ public static class GatewayStartupValidator
         }
 
         // SEC H-08: PersistedQueriesOnly needs a trusted document store; otherwise the switch would be ineffective.
+        // Issue #281: with app-scoped trusted documents the global directory may be empty (header-less requests are then rejected).
+        var appScoped = options.GraphQL.AppScopedTrustedDocuments;
+        if (appScoped.Enabled && !options.GraphQL.PersistedQueriesOnly)
+        {
+            throw new ValidationException(
+                "Security violation: GraphQL.AppScopedTrustedDocuments.Enabled=true requires GraphQL.PersistedQueriesOnly=true; " +
+                "otherwise ad-hoc documents would be accepted next to the app-scoped allowlist.");
+        }
+
         if (options.GraphQL.PersistedQueriesOnly)
         {
             var dir = options.GraphQL.TrustedDocumentsDirectory;
-            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(Path.GetFullPath(dir)))
+            var directoryOptional = appScoped.Enabled && string.IsNullOrWhiteSpace(dir);
+            if (!directoryOptional && (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(Path.GetFullPath(dir))))
             {
                 throw new ValidationException(
                     "Security violation: GraphQL.PersistedQueriesOnly=true requires an existing GraphQL.TrustedDocumentsDirectory " +
