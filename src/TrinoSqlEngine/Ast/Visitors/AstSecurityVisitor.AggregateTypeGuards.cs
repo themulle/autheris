@@ -140,7 +140,18 @@ public sealed partial class AstSecurityVisitor
         foreach (var (table, alias) in _specTables)
         {
             if (qualified && !IsWholeRowName(qualifier!, table, alias)) continue;
-            var columns = ColumnsOf(table);
+            IReadOnlyList<string>? columns;
+            try
+            {
+                columns = CachedColumns(table);
+            }
+            catch (Exception)
+            {
+                // A failing lookup is uncertainty: fail toward the guard. A null list is a source the catalog does not list
+                // (a CTE name, an unknown table): there is no type to check, the executor answers an unknown table.
+                throw new AggregateTypeInvalidException();
+            }
+
             if (columns is null || !ContainsIgnoreCase(columns, columnName)) continue;
 
             // The column is listed: its type is the catalog's. A missing type is unknown, which fails closed.

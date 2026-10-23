@@ -89,6 +89,27 @@ public class AggregateTypeGuardTests
     public void ComputedExpression_Passes(string sql) => Run(sql);
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void FailedColumnLookup_FailsTowardTheGuard()
+    {
+        var options = new AstSecurityVisitorOptions
+        {
+            MaskedColumns = new Lookup(),
+            TableColumns = _ => throw new InvalidOperationException("lookup failed"),
+            ColumnDataType = (_, _) => "varchar"
+        };
+        var typed = new TypedPolicyContext(Catalog(), new DictPolicyProvider(), new DictMaskProvider(),
+            new TenantBinding("t", "a", SqlParameterType.String), DialectCapabilityTable.Default.Get(TargetSqlDialect.SqlServer));
+        // Earlier guards meet the same failing lookup first and fail closed; the aggregate guard itself never lets the statement through.
+        Assert.ThrowsAny<Exception>(() =>
+            new AstSecurityVisitor(options, typed).Visit(CompilerTestHelpers.Build("SELECT SUM(email) FROM orders")));
+    }
+
+    [Fact]
+    public void WithCte_AggregateOverCteColumn_Passes() =>
+        Run("WITH c AS (SELECT amount FROM orders) SELECT SUM(amount) FROM c");
+
+    [Fact]
     public void WithoutTypeLookup_TheGuardDoesNotApply()
     {
         Run("SELECT SUM(email) FROM orders", withTypes: false);

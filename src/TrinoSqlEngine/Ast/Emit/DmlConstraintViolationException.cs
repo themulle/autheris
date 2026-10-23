@@ -99,8 +99,8 @@ public static class DmlErrorSanitizer
         TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") == 1 &&
                                    error.Message.Contains("no such column", StringComparison.OrdinalIgnoreCase),
         TargetSqlDialect.DuckDb => error.Message.Contains("Binder Error", StringComparison.Ordinal) &&
-                                   error.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
-                                   error.Message.Contains("column", StringComparison.OrdinalIgnoreCase),
+                                   (error.Message.Contains("Referenced column", StringComparison.Ordinal) ||
+                                    error.Message.Contains("does not have a column named", StringComparison.Ordinal)),
         TargetSqlDialect.Databricks => error.Message.Contains("UNRESOLVED_COLUMN", StringComparison.Ordinal),
         _ => false
     };

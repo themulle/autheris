@@ -118,4 +118,28 @@ public class DmlErrorSanitizerUnknownColumnTests
         Assert.Equal(denied.Code, unknown.Code);
         Assert.Equal(denied.Message, unknown.Message);
     }
+
+    [Theory]
+    [InlineData("Catalog Error: Table with name VICTIM does not exist! Did you mean \"x\"? column not found")]
+    [InlineData("Binder Error: No function matches the given name and argument types; column not found")]
+    [InlineData("Parser Error: syntax error; column not found")]
+    [Trait("Category", "Security")]
+    public void SEC_PG_10_DuckDbOtherErrors_StayProviderError(string message)
+    {
+        Assert.Equal(GovernedSqlErrorCodes.ProviderError, DmlErrorSanitizer.Map(TargetSqlDialect.DuckDb, new PlainException(message)).Code);
+    }
+
+    [Fact]
+    public void DuckDbTableDoesNotHaveColumn_IsPolicyDenied() =>
+        AssertDenied(DmlErrorSanitizer.Map(TargetSqlDialect.DuckDb, new PlainException("Binder Error: Table \"t\" does not have a column named \"x\"")), TargetSqlDialect.DuckDb);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_PG_10_DatabricksOtherErrors_StayProviderError() =>
+        Assert.Equal(GovernedSqlErrorCodes.ProviderError,
+            DmlErrorSanitizer.Map(TargetSqlDialect.Databricks, new PlainException("TABLE_OR_VIEW_NOT_FOUND: x")).Code);
+
+    [Fact]
+    public void DatabricksUnresolvedColumn_IsPolicyDenied() =>
+        AssertDenied(DmlErrorSanitizer.Map(TargetSqlDialect.Databricks, new PlainException("[UNRESOLVED_COLUMN.WITH_SUGGESTION] x")), TargetSqlDialect.Databricks);
 }
