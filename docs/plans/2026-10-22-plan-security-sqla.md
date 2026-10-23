@@ -88,6 +88,9 @@ Mandatory security tests (`[Trait("Category","Security")]`):
 - The engine wraps the secured source in `SELECT cols FROM (...) AS "<table>"`; the tree's derived table `AS autheris_target` sits around it. The inner `autheris_target` alias stays in its own scope.
 - `GovernedTreeQueryService` takes the builder (`TreeSecuredSourceBuilder?`, registered as a singleton next to the service) instead of `GovernancePolicyFactory?` and `FastSqlEngine?`; a missing builder leaves the table without a secured source, so `TREE_ROW_POLICY_UNSUPPORTED` stays (C8).
 - The tree-vs-compile Sqlite parity tests live in the new class `TreeVsCompileSubqueryPolicyParityTests` (the existing `TreeVsCompilePolicyParityTests` is unchanged).
+- The mandated test `SQLA06F_InactiveDependent_ZeroRows_NotMoreThanWebSql` is realised as `SubqueryPolicy_InactiveDependent_YieldsNoRowsOnBothPaths`; it asserts that both paths deny (see F5 above).
+- Known limit (fail-closed): the marker remap denies every bare `?`, so a PostgreSQL JSONB `?` operator inside a typed subquery policy denies the tree request.
+- Status 2026-10-23: WP-SQLA-1b implemented (Phase 5 APPROVED, two Low findings recorded above). The SQLA-06 deny-by-default for untyped text stays; typed subquery policies now run through the engine policy pipeline on the tree path. The gate accepted-differences entries for #277 (WITH RECURSIVE off, self-referencing CTE without RECURSIVE) on PostgreSql and SqlServer were added in the same batch.
 
 ### SQLA-01: tree row budget overflow
 1. **Fix.** Replace `EstimateRows` with `static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList, long cap)`. It uses saturating arithmetic (`Math.BigMul`, or a `checked` multiply in a try block that returns `long.MaxValue`) and stops recursing as soon as the running total exceeds `cap` (`maxBudget`). `ValidateTreeBudget` compares the saturated total.
