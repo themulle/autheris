@@ -197,5 +197,8 @@ internal enum SecurityControl
     ClientListExpandsBeforeGuards,
 
     /// <summary>The per-statement cap of expanded list items is not enforced (SEC-128-02).</summary>
-    ClientListMaxExpanded
+    ClientListMaxExpanded,
+
+    /// <summary>A cache hit binds the raw value of an escaped LIKE pattern slot (SQLE-10).</summary>
+    CacheRebindLikeEscape
 }

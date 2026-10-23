@@ -90,6 +90,18 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
             return false;
         }
 
+        // INF-12: raw exception messages, client IPs, principal names and cache/idempotency keys are PII or value-bearing.
+        if (key.EndsWith("Message", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("Ip", StringComparison.OrdinalIgnoreCase) ||
+            key.EndsWith("IpAddress", StringComparison.OrdinalIgnoreCase) ||
+            key.EndsWith("Ip", StringComparison.Ordinal) ||
+            key.Contains("principal", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("Key", StringComparison.OrdinalIgnoreCase) ||
+            key.EndsWith("Key", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         return key.Contains("sql", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("query", StringComparison.OrdinalIgnoreCase) ||
                key.Contains("filter", StringComparison.OrdinalIgnoreCase) ||

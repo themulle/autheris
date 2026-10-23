@@ -19,12 +19,21 @@ using Microsoft.AspNetCore.Routing;
 /// </summary>
 public static class GovernanceApiEndpoints
 {
+    internal static void ApplyNoStore(HttpResponse response)
+    {
+        response.Headers.CacheControl = "no-store";
+        response.Headers.Pragma = "no-cache";
+    }
+
     public static IEndpointRouteBuilder MapGovernanceApiEndpoints(this IEndpointRouteBuilder app)
     {
         // 2FA Enrollment: generates a shared Base32 secret server-side and keeps it as a pending, user-bound seed.
         // Re-enrollment of an already enrolled user is only completed with a valid code from the current secret (SR-M-01).
         async Task<IResult> BeginEnrollment(HttpContext context, ITotpEnrollmentService enrollmentService)
         {
+            // EP-12: the response carries the TOTP seed; it must never be cached (POST only, no GET alias).
+            ApplyNoStore(context.Response);
+
             var userSid = ResolveUserSid(context);
             if (string.IsNullOrWhiteSpace(userSid))
             {
@@ -49,10 +58,6 @@ public static class GovernanceApiEndpoints
         }
 
         app.MapPost("/api/v1/governance/2fa/enroll", BeginEnrollment)
-            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
-
-        // GET convenience alias for enrollment
-        app.MapGet("/api/v1/governance/2fa/enroll", BeginEnrollment)
             .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         // 2FA Activation: verifies the initial code against the server-side pending seed and activates it

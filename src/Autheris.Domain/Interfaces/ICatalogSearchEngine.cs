@@ -48,4 +48,14 @@ public interface ICatalogSearchEngine
     IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query, 
         Func<TableIdentifier, bool> isVisiblePredicate);
+
+    /// <summary>
+    /// Asynchronous variant of <see cref="Search"/> (MCP-07): the query embedding is computed without blocking a thread and honours
+    /// <paramref name="ct"/>. When the embedding provider fails or times out the search degrades to keyword-only and caches nothing.
+    /// Callers on an async path use this member.
+    /// </summary>
+    Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(
+        CatalogSearchQuery query,
+        Func<TableIdentifier, bool> isVisiblePredicate,
+        CancellationToken ct = default);
 }

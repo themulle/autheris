@@ -122,34 +122,72 @@ public sealed partial class GovernedChangeDetectionService
         return payload;
     }
 
+    /// <summary>VF-11: a table is scoped when rows differ per caller: a tenant column or any row-level filter (row policy or virtual filter).</summary>
+    private static bool IsScopedTable(TableMetadata metadata, TableAccessDecision decision) =>
+        metadata.TenantColumnName != null ||
+        !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
+        !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql) ||
+        decision.RowPolicy != null;
+
+    /// <summary>
+    /// VF-11: <c>knownKeys</c> only narrow the removed list (when sent, a removal is reported only for a listed key); they never authorize. A scoped
+    /// table discloses a removal only with a pre-image that the caller could see (<c>AllDeletedKeys</c> is ignored there); an unscoped table keeps the
+    /// <see cref="DeletedKeyPolicy"/> behaviour.
+    /// </summary>
     private static bool ShouldDiscloseRemovedKey(
         CompositeKey pk,
         IReadOnlyDictionary<string, object?>? preImage,
         HashSet<CompositeKey> knownKeySet,
         TableMetadata metadata,
         TableAccessDecision decision,
-        TenantId tenantId,
-        bool isRlsExit)
+        TenantId tenantId)
     {
-        bool hasRowLevelFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
-                                 !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql);
-
-        if (metadata.DeletedKeyPolicy == DeletedKeyPolicy.AllDeletedKeys)
+        if (knownKeySet.Count > 0 && !knownKeySet.Contains(pk))
         {
-            return true;
+            return false;
         }
 
-        if (knownKeySet.Contains(pk))
+        if (IsScopedTable(metadata, decision))
         {
-            return true;
+            return preImage != null && PassesCallerGovernance(preImage, metadata, decision, tenantId);
         }
 
-        if (preImage != null && PassesCallerGovernance(preImage, metadata, decision, tenantId))
+        return metadata.DeletedKeyPolicy == DeletedKeyPolicy.AllDeletedKeys
+               || knownKeySet.Contains(pk)
+               || (preImage != null && PassesCallerGovernance(preImage, metadata, decision, tenantId));
+    }
+
+    /// <summary>
+    /// VF-13: cuts an overflowing, version-ordered change list at the last complete version that fits the cap. A single version larger than the cap
+    /// cannot be delivered without splitting it and is refused (never an unbounded read, never a skipped version).
+    /// </summary>
+    private static (IReadOnlyList<SourceChangeRecord> Changes, long Version) CutAtLastCompleteVersion(
+        IReadOnlyList<SourceChangeRecord> fetched,
+        int cap,
+        TableIdentifier table)
+    {
+        var accepted = new List<SourceChangeRecord>();
+        long lastVersion = 0;
+        foreach (var group in fetched.GroupBy(c => c.ChangeVersion).OrderBy(g => g.Key))
         {
-            return true;
+            var records = group.ToList();
+            if (accepted.Count + records.Count > cap)
+            {
+                break;
+            }
+
+            accepted.AddRange(records);
+            lastVersion = group.Key;
         }
 
-        return !hasRowLevelFilter && isRlsExit;
+        if (accepted.Count == 0)
+        {
+            throw new GatewaySecurityException(
+                $"Table '{table}' reports a single change version larger than the maximum per call (change_batch_too_large).",
+                ChangeDetectionErrorCodes.ChangeTrackingNotSupported);
+        }
+
+        return (accepted, lastVersion);
     }
 
     private string ComputeChangeToken(TenantId tenantId, TableIdentifier table, long version)
@@ -286,13 +324,10 @@ public sealed partial class GovernedChangeDetectionService
         TableAccessDecision decision,
         TenantId tenantId)
     {
-        var tenantCol = metadata.TenantColumnName;
-        if (tenantCol != null && row.TryGetValue(tenantCol, out var rowTenant) && rowTenant != null)
+        // VF-03: a row of a tenanted table without a tenant value, or with another tenant, never passes (ordinal comparison).
+        if (!TenantRowGuard.Matches(row, metadata.TenantColumnName, tenantId))
         {
-            if (!string.Equals(rowTenant.ToString(), tenantId.Value, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
+            return false;
         }
 
         // REQ-GOV-129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
@@ -354,7 +389,7 @@ public sealed partial class GovernedChangeDetectionService
             if (access == ColumnAccessLevel.Mask)
             {
                 var rule = metadata.ColumnMaskingRules.TryGetValue(colName, out var r) ? r : DefaultRedactRule;
-                var scopedRule = GatewayExecutionService.ScopeRuleForTenant(rule, tenantId.Value, null);
+                var scopedRule = GatewayExecutionService.ScopeRuleForTenant(rule, tenantId.Value, _maskingProvider.DefaultHmacKeyId);
                 projected[colName] = _maskingProvider.MaskValue(colName, val, scopedRule);
             }
             else

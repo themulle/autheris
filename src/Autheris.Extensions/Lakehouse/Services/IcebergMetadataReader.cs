@@ -473,7 +473,7 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
 
         var lastSlash = path.LastIndexOf('/');
         var lastSegment = lastSlash >= 0 ? path[(lastSlash + 1)..] : path;
-        if (lastSegment.Contains('.', StringComparison.Ordinal))
+        if (IsMetadataFileName(lastSegment))
         {
             path = lastSlash >= 0 ? path[..lastSlash] : string.Empty;
             lastSlash = path.LastIndexOf('/');
@@ -488,10 +488,22 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         return path;
     }
 
+    /// <summary>
+    /// EXT-04: only well-known metadata file names are stripped from a configured location; a directory name that merely
+    /// contains a dot ("sales.orders") is a table root and must not widen the trust anchor to its parent.
+    /// </summary>
+    internal static bool IsMetadataFileName(string segment) =>
+        segment.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase)
+        || segment.EndsWith(".metadata.json.gz", StringComparison.OrdinalIgnoreCase)
+        || segment.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+        || segment.EndsWith(".avro", StringComparison.OrdinalIgnoreCase)
+        || segment.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(segment, "version-hint.text", StringComparison.OrdinalIgnoreCase);
+
     private static string GetTableDirectory(string path)
     {
         var fullPath = Path.GetFullPath(path);
-        if (Path.HasExtension(fullPath) || File.Exists(fullPath))
+        if (IsMetadataFileName(Path.GetFileName(fullPath)) || File.Exists(fullPath))
         {
             fullPath = Path.GetDirectoryName(fullPath) ?? fullPath;
         }

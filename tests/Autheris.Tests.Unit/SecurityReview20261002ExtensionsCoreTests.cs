@@ -88,7 +88,8 @@ public sealed class SecurityReview20261002ExtensionsCoreTests : IDisposable
         def.ShouldNotBeNull();
         def.DataSource.ShouldBe("analytics_db");
         def.HttpMethod.ShouldBe("GET");
-        def.TimeoutSeconds.ShouldBe(30);
+        // SQLA-05: no (injected) @timeout header -> no per-endpoint override; the global WebSQL timeout applies.
+        def.TimeoutSeconds.ShouldBeNull();
 
         // A data source value carrying header syntax is rejected outright
         Should.Throw<ArgumentException>(() => loader.SyncDbtModelDefinitionToFile(

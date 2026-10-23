@@ -276,9 +276,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var permittedById = permitted.ToDictionary(t => t.Identifier);
             var allById = all.ToDictionary(t => t.Identifier);
             var terms = QueryTerms(q);
-            var hits = _searchEngine.Search(
+            var hits = await _searchEngine.SearchAsync(
                 new CatalogSearchQuery(q, domain, Limit: 25, Mode: CatalogSearchMode.Hybrid),
-                tableId => permittedById.ContainsKey(tableId));
+                tableId => permittedById.ContainsKey(tableId),
+                ct).ConfigureAwait(false);
 
             // Result hygiene: rebuilt from the caller's filtered metadata; hits that exist only because of a hidden column are dropped.
             var tableHits = hits
@@ -344,7 +345,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         {
             var allById = all.ToDictionary(t => t.Identifier);
             var terms = QueryTerms(query.QueryText);
-            var tableHits = _searchEngine.Search(query, tableId => permittedById.ContainsKey(tableId))
+            var rawHits = await _searchEngine.SearchAsync(query, tableId => permittedById.ContainsKey(tableId), ct).ConfigureAwait(false);
+            var tableHits = rawHits
                 .Select(h => ShapeHit(h, permittedById, allById, terms))
                 .Where(h => h != null)
                 .Select(h => h!)

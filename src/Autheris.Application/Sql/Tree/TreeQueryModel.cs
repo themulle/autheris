@@ -73,7 +73,8 @@ public sealed record TreeTableAccess(
     TableMetadata Metadata,
     TableAccessDecision Decision,
     string? TenantColumn = null,
-    string? TenantValue = null);
+    string? TenantValue = null,
+    TreeSecuredSource? SecuredSource = null);
 
 /// <summary>An HMAC-masked column that the gateway pseudonymizes after reading (SEC H-13: no key in SQL).</summary>
 public sealed record TreeHmacColumn(IReadOnlyList<string> Path, string Column, MaskingRule Rule);

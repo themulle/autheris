@@ -104,7 +104,11 @@ public static class ParityCases
             var ir = builder.BuildCombinedRowFilterParameterized(allow, deny, ctx.Database);
             return new ProducedPair(
                 legacy is null ? FilterText.Plain(string.Empty) : FilterText.Plain(legacy),
-                ir.Sql is null ? FilterText.Plain(string.Empty) : new FilterText(ir.Sql, ir.Parameters ?? FilterText.NoParameters));
+                ir.Sql is null ? FilterText.Plain(string.Empty) : new FilterText(ir.Sql, ir.Parameters ?? FilterText.NoParameters)
+                {
+                    Typed = new TypedRowFilterBuilder().BuildCombined(allow, deny, new TrinoSqlEngine.Governance.TableIdentity(ctx.Schema, "orders"),
+                        PolicyParameterNamer.ToTargetDialect(ctx.Database))
+                });
         }, row => ReferenceCombined(allow, deny, row));
 
     private static IEnumerable<ParityCase> ConsentCases()
@@ -243,7 +247,7 @@ public static class ParityCases
             var legacy = SqlFilterCompiler.Compile(filter, ctx.Database, tenant);
             var typed = SqlFilterCompiler.CompileTyped(filter, ctx.Database, new FastSqlEngine(), tenant: tenant);
             var rendered = new PolicyPredicateRenderer().Render(typed, PolicyParameterNamer.ToTargetDialect(ctx.Database), RowFilterAliases.Target);
-            return new ProducedPair(FilterText.Plain(legacy), new FilterText(rendered.Sql, rendered.Parameters));
+            return new ProducedPair(FilterText.Plain(legacy), new FilterText(rendered.Sql, rendered.Parameters) { Typed = typed });
         }, reference);
 
     private static ParityCase StructuredVirtualFilter(string id, string description, Func<ParityContext, StructuredFilterDefinition> definition,
@@ -261,7 +265,7 @@ public static class ParityCases
             var typed = builder.BuildTyped(filter, binding, target, ctx.Database, "__gql_vf_")
                 ?? throw new InvalidOperationException("The structured filter has no typed form.");
             var rendered = new PolicyPredicateRenderer().Render(typed, PolicyParameterNamer.ToTargetDialect(ctx.Database), RowFilterAliases.Target);
-            return new ProducedPair(FilterText.Plain(legacy), new FilterText(rendered.Sql, rendered.Parameters));
+            return new ProducedPair(FilterText.Plain(legacy), new FilterText(rendered.Sql, rendered.Parameters) { Typed = typed });
         }, reference);
 
     private static StructuredFilterDefinition Structured(ParityContext ctx, params FilterCondition[] where) => new()

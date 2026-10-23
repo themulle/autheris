@@ -24,12 +24,20 @@ public interface IChangeVersionProvider
     ValueTask<long?> GetMinValidVersionAsync(TableIdentifier table, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns raw change records on <paramref name="table"/> strictly after <paramref name="sinceVersion"/> up to <paramref name="upToVersion"/>.
+    /// VF-11: true when the provider reports the pre-image of deleted and updated rows (<see cref="SourceChangeRecord.PreImage"/>). A scoped table
+    /// (tenant column or row-level filter) can only disclose a removal with such a pre-image; without it changesSince is not supported there.
+    /// </summary>
+    bool ProvidesPreImages { get; }
+
+    /// <summary>
+    /// Returns raw change records on <paramref name="table"/> strictly after <paramref name="sinceVersion"/> up to <paramref name="upToVersion"/>,
+    /// ordered by version, at most <paramref name="maxRecords"/> (VF-13). The service asks for the cap plus one to detect an overflow.
     /// </summary>
     Task<IReadOnlyList<SourceChangeRecord>> GetChangesBetweenAsync(
         TableIdentifier table,
         long sinceVersion,
         long upToVersion,
+        int maxRecords,
         CancellationToken ct = default);
 
     /// <summary>

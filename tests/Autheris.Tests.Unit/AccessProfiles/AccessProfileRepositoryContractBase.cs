@@ -94,6 +94,52 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Assign_DifferentCasing_UpdatesSingleRow()
+    {
+        // PERS-06: assignments are keyed by the normalised subject.
+        if (!Available) return;
+        var p = await NewProfileAsync(MaskingPolicyMode.Strict);
+        var group = Id("Grp");
+        await Repo.AssignProfileAsync(TenantA, p.ProfileId, Group(group));
+        await Repo.AssignProfileAsync(TenantA, p.ProfileId, Group(group.ToUpperInvariant()));
+
+        var read = await Repo.GetProfileAsync(TenantA, p.ProfileId);
+
+        read!.Assignments.Count(a => a.SubjectType == AccessProfileSubjectType.Group).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Remove_DifferentCasing_RemovesEffectiveAccess()
+    {
+        if (!Available) return;
+        var p = await NewProfileAsync(MaskingPolicyMode.Strict);
+        var group = Id("Grp");
+        await Repo.AssignProfileAsync(TenantA, p.ProfileId, Group(group));
+        Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, [], [group], [])).ShouldContain(p.ProfileId);
+
+        var removed = await Repo.RemoveAssignmentAsync(TenantA, p.ProfileId, AccessProfileSubjectType.Group, group.ToUpperInvariant());
+
+        removed.ShouldBeTrue();
+        Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, [], [group], [])).ShouldNotContain(p.ProfileId);
+    }
+
+    [Fact]
+    public async Task UpsertProfile_DifferentCasing_NoDuplicate()
+    {
+        if (!Available) return;
+        var p = await NewProfileAsync(MaskingPolicyMode.Default, legacyUsers: ["Alice-Case"]);
+
+        await Repo.UpsertProfileAsync(new AccessProfile
+        {
+            ProfileId = p.ProfileId, Name = p.Name, TenantId = TenantA, MaskingMode = p.MaskingMode, TargetTables = ["*.*"],
+            CreatedAt = p.CreatedAt, CreatedBy = "admin1", AssignedSubjects = ["ALICE-CASE"]
+        });
+
+        var read = await Repo.GetProfileAsync(TenantA, p.ProfileId);
+        read!.AssignedSubjects.Count.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task GroupAndRoleAssignments_AreFoundThroughGroupsAndRoles_NotThroughUsers()
     {
         if (!Available) return;

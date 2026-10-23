@@ -14,7 +14,6 @@ using Autheris.Application.Connectors;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Sql;
-using Autheris.Application.Sql.Federation.CoLocation;
 using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.Sql.Security;
 using Autheris.Application.Sql.Services;
@@ -152,23 +151,6 @@ public sealed class WebSqlCoLocatedDataSourcesSecurityTests
         var ex = Should.Throw<SecurityException>(() =>
             PostCompileTableTargetAssertionVisitor.AssertValid(statement, authorizedTargets));
         ex.Message.ShouldContain("SEC-ADG-02");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task T_SEC_DATA132_05_ConnectTimeServerMismatch_FallbackToDuckDb()
-    {
-        var service = new CoLocationVerificationService();
-
-        // Server returns secondary replica name instead of primary expected host
-        var mismatchConn = new FakeDbConnection("SECONDARY_REPLICA_HOST");
-        var isMatch = await service.VerifyCoLocationServerAsync(mismatchConn, "PRIMARY_HOST", "pool-mismatch");
-        isMatch.ShouldBeFalse();
-
-        // Server matches expected host
-        var matchConn = new FakeDbConnection("PRIMARY_HOST\\INSTANCE_1,1433");
-        var isMatch2 = await service.VerifyCoLocationServerAsync(matchConn, "PRIMARY_HOST", "pool-match");
-        isMatch2.ShouldBeTrue();
     }
 
     [Fact]
@@ -341,43 +323,4 @@ public sealed class WebSqlCoLocatedDataSourcesSecurityTests
         subtreeEntry.DetailsJson.ShouldContain("\"colocated\":true");
         subtreeEntry.DetailsJson.ShouldContain("\"coLocationGroup\":\"finance\"");
     }
-
-#nullable disable
-    private sealed class FakeDbConnection : DbConnection
-    {
-        private readonly string _returnedServerName;
-        public FakeDbConnection(string returnedServerName) => _returnedServerName = returnedServerName;
-        public override string ConnectionString { get; set; } = string.Empty;
-        public override string Database => "master";
-        public override ConnectionState State => ConnectionState.Open;
-        public override string DataSource => "localhost";
-        public override string ServerVersion => "15.0";
-        public override void ChangeDatabase(string databaseName) { }
-        public override void Close() { }
-        public override void Open() { }
-        protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new NotImplementedException();
-        protected override DbCommand CreateDbCommand() => new FakeDbCommand(_returnedServerName);
-    }
-
-    private sealed class FakeDbCommand : DbCommand
-    {
-        private readonly object _scalarResult;
-        public FakeDbCommand(object scalarResult) => _scalarResult = scalarResult;
-        public override string CommandText { get; set; } = string.Empty;
-        public override int CommandTimeout { get; set; }
-        public override CommandType CommandType { get; set; }
-        public override bool DesignTimeVisible { get; set; }
-        public override UpdateRowSource UpdatedRowSource { get; set; }
-        protected override DbConnection DbConnection { get; set; }
-        protected override DbParameterCollection DbParameterCollection => throw new NotImplementedException();
-        protected override DbTransaction DbTransaction { get; set; }
-        public override void Cancel() { }
-        public override int ExecuteNonQuery() => 0;
-        public override object ExecuteScalar() => _scalarResult;
-        public override Task<object> ExecuteScalarAsync(CancellationToken cancellationToken) => Task.FromResult(_scalarResult);
-        public override void Prepare() { }
-        protected override DbParameter CreateDbParameter() => throw new NotImplementedException();
-        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => throw new NotImplementedException();
-    }
-#nullable restore
 }

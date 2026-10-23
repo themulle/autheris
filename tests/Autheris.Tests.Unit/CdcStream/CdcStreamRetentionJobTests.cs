@@ -76,6 +76,17 @@ public sealed class CdcStreamRetentionJobTests
         _store.Descriptor.HeadOffset.ShouldBe(5);
     }
 
+    // INF-14: a missing tail of offsets must not be read as "expired".
+    [Fact]
+    public async Task OffsetGapAtTheHead_DoesNotPurgeRecentEvents()
+    {
+        Fill(50, TimeSpan.FromMinutes(1));
+        _store.Descriptor = _store.Descriptor with { HeadOffset = 100 };
+        await Job().ExecuteAsync(Ctx(), default);
+        _store.Events.Count.ShouldBe(50);
+        _store.PurgeTokens.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task NothingExpired_PurgesNothing()
     {

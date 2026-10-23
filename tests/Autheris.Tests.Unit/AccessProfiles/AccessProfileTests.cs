@@ -826,6 +826,30 @@ public sealed class AccessProfileTests
     }
 
     [Theory]
+    [InlineData("7")]
+    [InlineData("-1")]
+    [InlineData("99")]
+    public async Task BulkConsent_NumericUndefinedMode_Returns400(string maskingMode)
+    {
+        var repo = new InMemoryAccessProfileRepository();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = new BulkConsentRequest
+        {
+            Subject = "david",
+            MaskingMode = maskingMode,
+            Tables = ["tem.*"],
+            Justification = "Enterprise PoC Telemetry Head undefined mode attempt",
+            ValidDays = 30
+        };
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, _) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        (await repo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).Count.ShouldBe(0);
+    }
+
+    [Theory]
     [InlineData("ADMIN@AUTHERIS.INTERNAL")]
     [InlineData("admin")]
     [InlineData("AUTHERIS\\Admin")]

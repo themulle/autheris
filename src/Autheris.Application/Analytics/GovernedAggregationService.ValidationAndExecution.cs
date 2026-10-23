@@ -30,9 +30,10 @@ public sealed partial class GovernedAggregationService
         AggregationQuery query,
         CancellationToken ct)
     {
-        if (query.PreEvaluatedDecision != null)
+        // MISC-06: a pre-evaluated decision is trusted only when the unified PDP produced it; anything else is evaluated normally.
+        if (query.PreEvaluatedDecision is { EvaluatedByPdp: true } preEvaluated)
         {
-            return query.PreEvaluatedDecision;
+            return preEvaluated;
         }
 
         TableAccessDecision? decision = null;
@@ -75,67 +76,13 @@ public sealed partial class GovernedAggregationService
                 scopes.Count > 0 ? scopes : null);
         }
 
+        // MISC-06: no consent bypass and no reason-text matching here; metric consents are resolved inside the PDP pipeline upstream.
         if (decision == null)
         {
-            if (query.BypassTableConsent)
-            {
-                return BuildMetricScopedFallbackDecision(metadata);
-            }
-
             return TableAccessDecision.Denied(query.Table, "No policy decision point or consent resolver is configured (fail-closed).");
         }
 
-        if (!decision.IsAllowed && query.BypassTableConsent)
-        {
-            bool hasExplicitDeny = decision.DeniedReasons.Any(r =>
-                r.Contains("Explicit Deny", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Casbin", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("ReBAC", StringComparison.OrdinalIgnoreCase) ||
-                r.Contains("Contract", StringComparison.OrdinalIgnoreCase));
-
-            if (!hasExplicitDeny)
-            {
-                return BuildMetricScopedFallbackDecision(metadata, decision);
-            }
-        }
-
         return decision;
-    }
-
-    private static TableAccessDecision BuildMetricScopedFallbackDecision(TableMetadata metadata, TableAccessDecision? existing = null)
-    {
-        var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-        foreach (var col in metadata.Columns)
-        {
-            if (existing != null && existing.ColumnAccess.TryGetValue(col.ColumnName, out var existingLevel))
-            {
-                colAccess[col.ColumnName] = existingLevel;
-            }
-            else if (col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
-            {
-                colAccess[col.ColumnName] = ColumnAccessLevel.Mask;
-            }
-            else
-            {
-                colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
-            }
-        }
-
-        return TableAccessDecision.Allowed(
-            metadata.Identifier,
-            colAccess,
-            rowFilterSql: existing?.CombinedRowFilterSql,
-            hasUnconstrainedColumnAllow: true,
-            rowFilterParameters: existing?.RowFilterParameters) with
-        {
-            RowPolicy = existing?.RowPolicy,
-            MandatoryRowPredicateSql = existing?.MandatoryRowPredicateSql,
-            MandatoryRowPolicy = existing?.MandatoryRowPolicy,
-            AppliedVirtualFilters = existing?.AppliedVirtualFilters,
-            // REQ-GOV-143 (SEC-GOV143-07): the rebuilt decision keeps the restriction of the original; without an original every
-            // catalog-sensitive column is Mask above, so there is nothing to carry.
-            ScopeClearance = existing?.ScopeClearance
-        };
     }
 
     private static List<string> ValidateAndResolveGroupBy(

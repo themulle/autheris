@@ -229,9 +229,12 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
         return new UnaryExpression(UnaryOperator.Not, operand);
     }
 
+    /// <summary>SQLE-07: the empty string IS NULL on Oracle, so a predicate on it is never folded here (the simplifier is dialect neutral).</summary>
+    private static bool IsEmptyString(LiteralExpression literal) => literal is { Type: LiteralType.String, Value: string { Length: 0 } };
+
     private static Expression SimplifyIsNull(Expression operand)
     {
-        if (operand is LiteralExpression lit)
+        if (operand is LiteralExpression lit && !IsEmptyString(lit))
         {
             return lit.Type == LiteralType.Null ? CanonicalTrue : CanonicalFalse;
         }
@@ -240,7 +243,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
     private static Expression SimplifyIsNotNull(Expression operand)
     {
-        if (operand is LiteralExpression lit)
+        if (operand is LiteralExpression lit && !IsEmptyString(lit))
         {
             return lit.Type != LiteralType.Null ? CanonicalTrue : CanonicalFalse;
         }
@@ -257,6 +260,11 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             {
                 // Retain as-is to preserve SQL semantics
                 return new BinaryExpression(left, op, right);
+            }
+
+            if (IsEmptyString(lLit) || IsEmptyString(rLit))
+            {
+                return new BinaryExpression(left, op, right);   // SQLE-07: Oracle compares '' as NULL
             }
 
             if (LiteralComparison.TryFold(op, lLit, rLit, out bool folded))
@@ -311,7 +319,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             return true;
 
         if (expr is BinaryExpression b &&
-            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 &&
+            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 && !IsEmptyString(l1) && !IsEmptyString(l2) &&
             LiteralComparison.TryFold(b.Operator, l1, l2, out bool isTrue) && isTrue)
             return true;
 
@@ -327,7 +335,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             return true;
 
         if (expr is BinaryExpression b &&
-            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 &&
+            b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2 && !IsEmptyString(l1) && !IsEmptyString(l2) &&
             LiteralComparison.TryFold(b.Operator, l1, l2, out bool isTrue) && !isTrue)
             return true;
 
@@ -335,6 +343,26 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             return IsFalse(p.Expression);
 
         return false;
+    }
+
+    /// <summary>SQLE-07: a delimited identifier is case-sensitive ("Status" and "status" are different columns on PostgreSQL).</summary>
+    private static bool SameColumnName(SqlQualifiedName a, SqlQualifiedName b)
+    {
+        if (a.Parts.Count != b.Parts.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < a.Parts.Count; i++)
+        {
+            var comparison = a.Parts[i].IsQuoted || b.Parts[i].IsQuoted ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            if (!string.Equals(a.Parts[i].Value, b.Parts[i].Value, comparison))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool StructuralEquals(Expression a, Expression b)
@@ -348,7 +376,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
                 StructuralEquals(p1.Expression, p2.Expression),
 
             (ColumnReference c1, ColumnReference c2) =>
-                c1.Name.NormalizedName.Equals(c2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase),
+                SameColumnName(c1.Name, c2.Name),
 
             (ParameterReference p1, ParameterReference p2) =>
                 string.Equals(p1.Name, p2.Name, StringComparison.OrdinalIgnoreCase)

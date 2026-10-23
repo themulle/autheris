@@ -174,3 +174,7 @@ WP-EP-4 and WP-EP-5 both edit `GovernanceEndpoints.Access.cs` (different methods
    (grep-based architecture test `NoRawTenantIdClaimInEndpointsTests`).
 8. Individual Unmasked approval denies on zero matches, wildcard patterns and uncatalogued concrete patterns.
 9. All denials return the existing error shapes without exception text (NoRawExceptionMessageInEndpointResponsesTests stays green).
+
+## Changelog
+
+- 2026-10-22 (G-PLAN-REBASE, implementation on `fix/sec-impl-b-gov`): EP-01 to EP-09 and EP-11 were verified as fixed by `b1ae7a42` (route removal, tenant-typed plan apply, `RebacSubject`, WebSQL owner, DP budget self-reset, lineage tenant, Unmasked approval guard). The D-0 remainder was still present and is removed: policy methods of `RightsAndPoliciesStore` and the `AccessPolicy` domain model. `ACCESS_POLICIES*` tables stay in the schema (no migrations).

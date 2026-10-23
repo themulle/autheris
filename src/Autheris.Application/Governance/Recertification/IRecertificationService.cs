@@ -48,4 +48,7 @@ public interface IRecertificationService
         CancellationToken ct = default);
 
     Task<int> ExecuteAutoRevocationCycleAsync(DateTimeOffset asOf, CancellationToken ct = default);
+
+    /// <summary>GOV-03: auto-revocation restricted to the items of one tenant (used by the tenant-scoped endpoint).</summary>
+    Task<int> ExecuteAutoRevocationCycleAsync(TenantId tenantId, DateTimeOffset asOf, CancellationToken ct = default);
 }

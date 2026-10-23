@@ -74,11 +74,19 @@ public sealed class RoleResolver : IRoleResolver
                                string.Equals(realm.Id, "workforce-entra", StringComparison.OrdinalIgnoreCase) ||
                                string.Equals(realm.Id, "workforce-entra-legacy", StringComparison.OrdinalIgnoreCase);
 
+        // GOV-08: a provider that failed (or threw) makes the whole resolution degraded: the groups are unknown, not empty.
+        var degraded = false;
+
         foreach (var provider in activeProviders)
         {
             try
             {
                 var result = await provider.GetRolesAsync(identity, realm, cancellationToken).ConfigureAwait(false);
+                if (result is { Failed: true })
+                {
+                    degraded = true;
+                }
+
                 if (result != null)
                 {
                     foreach (var g in result.Groups)
@@ -114,9 +122,14 @@ public sealed class RoleResolver : IRoleResolver
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception)
             {
-                // SEC-SC-12: Provider failure yields empty sets (fail closed, never bypass)
+                // SEC-SC-12 / GOV-08: a provider failure marks the resolution degraded (never cached, the PDP denies on it).
+                degraded = true;
             }
         }
 
@@ -130,10 +143,18 @@ public sealed class RoleResolver : IRoleResolver
             mergedAttributes,
             now,
             expiresAt,
-            "resolved"
-        );
+            degraded ? "degraded" : "resolved"
+        )
+        {
+            Status = degraded ? RoleResolutionStatus.Degraded : RoleResolutionStatus.Resolved
+        };
 
-        await _cache.SetAsync(realm.Id, identity.UserKey, resolution, cancellationToken).ConfigureAwait(false);
+        // GOV-08: an incomplete answer is never cached: the next request asks the providers again instead of serving "no groups".
+        if (!degraded)
+        {
+            await _cache.SetAsync(realm.Id, identity.UserKey, resolution, cancellationToken).ConfigureAwait(false);
+        }
+
         return resolution;
     }
 }

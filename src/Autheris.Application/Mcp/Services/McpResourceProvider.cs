@@ -131,8 +131,8 @@ public sealed class McpResourceProvider : IMcpResourceProvider
                 sb.AppendLine("|---|---|---|");
                 foreach (var g in domains)
                 {
-                    var sample = string.Join(", ", g.Take(3).Select(d => $"`{d.Table}`"));
-                    sb.AppendLine($"| **{g.Key}** | {g.Count()} | {sample} |");
+                    var sample = string.Join(", ", g.Take(3).Select(d => $"`{McpMarkdown.EscapeCell(d.Table)}`"));
+                    sb.AppendLine($"| **{McpMarkdown.EscapeCell(g.Key)}** | {g.Count()} | {sample} |");
                 }
                 sb.AppendLine("\n> **Tip:** Use `find_relevant_tables` or `search_catalog` to discover tables for a specific use case, or use `get_table_schema` / `describe_dataset(brief: true)` for token-efficient schema retrieval.");
             }
@@ -142,7 +142,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
                 sb.AppendLine("|---|---|---|---|---|---|---|");
                 foreach (var d in datasets)
                 {
-                    sb.AppendLine($"| `{d.DatasetId}` | {d.Domain} | {d.Schema} | {d.Table} | {d.SourceType} | {d.Sensitivity} | {d.Description ?? "-"} |");
+                    sb.AppendLine($"| `{McpMarkdown.EscapeCell(d.DatasetId)}` | {McpMarkdown.EscapeCell(d.Domain)} | {McpMarkdown.EscapeCell(d.Schema)} | {McpMarkdown.EscapeCell(d.Table)} | {McpMarkdown.EscapeCell(d.SourceType)} | {McpMarkdown.EscapeCell(d.Sensitivity)} | {McpMarkdown.EscapeCell(d.Description)} |");
                 }
             }
             return new McpResourceContent(uri, Markdown, sb.ToString());
@@ -166,7 +166,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
                     sb.AppendLine("|---|---|---|---|---|---|");
                     foreach (var c in detail.Columns)
                     {
-                        sb.AppendLine($"| `{c.Name}` | {c.Type} | {c.Sensitivity} | {c.MaskingState} | {(c.IsPrimaryKey ? "✓" : "-")} | {(c.IsPiiIndicator ? "✓" : "-")} |");
+                        sb.AppendLine($"| `{McpMarkdown.EscapeCell(c.Name)}` | {McpMarkdown.EscapeCell(c.Type)} | {McpMarkdown.EscapeCell(c.Sensitivity)} | {McpMarkdown.EscapeCell(c.MaskingState)} | {(c.IsPrimaryKey ? "✓" : "-")} | {(c.IsPiiIndicator ? "✓" : "-")} |");
                     }
                     return new McpResourceContent(uri, Markdown, sb.ToString());
                 }
@@ -183,7 +183,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
             sb.AppendLine("|---|---|---|---|---|---|");
             foreach (var ds in datasources)
             {
-                sb.AppendLine($"| `{ds.Id}` | {ds.Name} | {ds.Domain} | {ds.Type} | {ds.Status} | {(ds.IsConfigured ? "✓" : "-")} |");
+                sb.AppendLine($"| `{McpMarkdown.EscapeCell(ds.Id)}` | {McpMarkdown.EscapeCell(ds.Name)} | {McpMarkdown.EscapeCell(ds.Domain)} | {McpMarkdown.EscapeCell(ds.Type)} | {McpMarkdown.EscapeCell(ds.Status)} | {(ds.IsConfigured ? "✓" : "-")} |");
             }
             return new McpResourceContent(uri, Markdown, sb.ToString());
         }

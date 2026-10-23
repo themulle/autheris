@@ -61,7 +61,7 @@ public sealed class CrossSourcePlannerTests
         };
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.StagingNames.ShouldBe(["s0", "s1"]);
         plan.StagingRequests.Count.ShouldBe(2);
@@ -96,7 +96,7 @@ public sealed class CrossSourcePlannerTests
             [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
-        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true });
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.Compiled.Dialect.ShouldBe(TrinoSqlEngine.TargetSqlDialect.DuckDb);
         plan.Compiled.Parameters.Length.ShouldBe(2);
@@ -136,7 +136,7 @@ public sealed class CrossSourcePlannerTests
         var planner = new CrossSourcePlanner(Engine);
 
         var ex = Should.Throw<WebSqlPolicyException>(() =>
-            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }));
+            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.Message.ShouldContain("Security Policy Violation: Column 'secret_note'");
     }
@@ -169,7 +169,7 @@ public sealed class CrossSourcePlannerTests
         var planner = new CrossSourcePlanner(Engine);
 
         var ex = Should.Throw<WebSqlPolicyException>(() =>
-            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }));
+            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.Message.ShouldContain("relational JOIN predicate");
     }
@@ -195,7 +195,7 @@ public sealed class CrossSourcePlannerTests
         var planner = new CrossSourcePlanner(Engine);
 
         var ex = Should.Throw<WebSqlPolicyException>(() =>
-            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true, AllowNonEquiJoins = false }));
+            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true, AllowNonEquiJoins = false }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.Message.ShouldContain("CROSS JOIN");
     }
@@ -221,7 +221,7 @@ public sealed class CrossSourcePlannerTests
         var planner = new CrossSourcePlanner(Engine);
 
         var ex = Should.Throw<WebSqlPolicyException>(() =>
-            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }));
+            planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.Message.ShouldContain("read_csv");
     }
@@ -247,7 +247,7 @@ public sealed class CrossSourcePlannerTests
         CrossSourcePlan? plan = null;
 
         var ex = Should.Throw<GatewaySecurityException>(() =>
-            plan = planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }));
+            plan = planner.Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
 
         ex.ErrorCode.ShouldBe("VF_ENFORCEMENT_INCOMPLETE");
         plan.ShouldBeNull();
@@ -284,7 +284,7 @@ public sealed class CrossSourcePlannerTests
                     new ResolvedSourceTable(metadata.ReferencedTables[1], erpMeta.Identifier, erpMeta, "erp")
                 ],
                 decisions,
-                new CrossSourceOptions { Enabled = true });
+                new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
             var crmRequest = plan.StagingRequests.Single(r => r.Metadata.Identifier == crmMeta.Identifier);
             crmRequest.Decision.ShouldBeSameAs(crmDecision);

@@ -30,6 +30,11 @@ public static class ScimGroupsEndpoints
             IScimService scimService,
             CancellationToken ct) =>
         {
+            if (ScimFilterGuard.RejectUnsupportedFilter(filter) is { } rejected)
+            {
+                return rejected;
+            }
+
             var tenantId = httpContext.User.GetTenantId();
             var result = await scimService.ListGroupsAsync(
                 tenantId, realmId, startIndex ?? 1, count ?? 100, filter, ct).ConfigureAwait(false);

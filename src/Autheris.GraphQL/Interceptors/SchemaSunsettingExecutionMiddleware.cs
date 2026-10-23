@@ -67,6 +67,7 @@ public sealed class SchemaSunsettingExecutionMiddleware
 
         var referencedFields = ExtractReferencedFields(doc);
         var activeNotices = new List<SunsettingEvaluationResult>();
+        var maxLatencyMs = 0;
 
         foreach (var (table, field) in referencedFields)
         {
@@ -105,9 +106,9 @@ public sealed class SchemaSunsettingExecutionMiddleware
                 return;
             }
 
-            if (eval.ShouldInjectSyntheticLatency && eval.SyntheticLatencyMs > 0)
+            if (eval.ShouldInjectSyntheticLatency && eval.SyntheticLatencyMs > maxLatencyMs)
             {
-                await Task.Delay(eval.SyntheticLatencyMs, context.RequestAborted).ConfigureAwait(false);
+                maxLatencyMs = eval.SyntheticLatencyMs;
             }
 
             if (httpContext != null && !string.IsNullOrWhiteSpace(eval.HttpSunsetHeader))
@@ -117,6 +118,12 @@ public sealed class SchemaSunsettingExecutionMiddleware
             }
 
             activeNotices.Add(eval);
+        }
+
+        // GQL-13: the synthetic latency is applied once per request (the maximum), not summed per referenced field.
+        if (maxLatencyMs > 0)
+        {
+            await Task.Delay(maxLatencyMs, context.RequestAborted).ConfigureAwait(false);
         }
 
         await _next(context).ConfigureAwait(false);
@@ -133,15 +140,17 @@ public sealed class SchemaSunsettingExecutionMiddleware
         }
     }
 
-    private static HashSet<(string Table, string Field)> ExtractReferencedFields(DocumentNode document)
+    internal static HashSet<(string Table, string Field)> ExtractReferencedFields(DocumentNode document)
     {
         var fields = new HashSet<(string Table, string Field)>();
+        var fragments = document.Definitions.OfType<FragmentDefinitionNode>().ToDictionary(f => f.Name.Value, StringComparer.Ordinal);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var definition in document.Definitions)
         {
             if (definition is OperationDefinitionNode opDef)
             {
-                TraverseSelectionSet(opDef.SelectionSet, parentType: string.Empty, fields);
+                TraverseSelectionSet(opDef.SelectionSet, parentType: string.Empty, fields, fragments, visited);
             }
         }
 
@@ -151,7 +160,9 @@ public sealed class SchemaSunsettingExecutionMiddleware
     private static void TraverseSelectionSet(
         SelectionSetNode selectionSet,
         string parentType,
-        HashSet<(string Table, string Field)> fields)
+        HashSet<(string Table, string Field)> fields,
+        IReadOnlyDictionary<string, FragmentDefinitionNode> fragments,
+        HashSet<string> visited)
     {
         foreach (var selection in selectionSet.Selections)
         {
@@ -167,14 +178,21 @@ public sealed class SchemaSunsettingExecutionMiddleware
 
                     if (fieldNode.SelectionSet != null)
                     {
-                        TraverseSelectionSet(fieldNode.SelectionSet, parentType: fieldName, fields);
+                        TraverseSelectionSet(fieldNode.SelectionSet, parentType: fieldName, fields, fragments, visited);
                     }
                 }
             }
             else if (selection is InlineFragmentNode inlineFrag)
             {
                 var targetType = inlineFrag.TypeCondition?.Name.Value ?? parentType;
-                TraverseSelectionSet(inlineFrag.SelectionSet, targetType, fields);
+                TraverseSelectionSet(inlineFrag.SelectionSet, targetType, fields, fragments, visited);
+            }
+            else if (selection is FragmentSpreadNode spread &&
+                     fragments.TryGetValue(spread.Name.Value, out var fragment) &&
+                     visited.Add(spread.Name.Value + "|" + parentType))
+            {
+                // GQL-13: named fragments are followed (once per name and parent, which also stops cycles).
+                TraverseSelectionSet(fragment.SelectionSet, fragment.TypeCondition.Name.Value, fields, fragments, visited);
             }
         }
     }

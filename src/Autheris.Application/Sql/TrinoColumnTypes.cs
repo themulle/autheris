@@ -71,9 +71,20 @@ public static class TrinoColumnTypes
             {
                 maxScale = Math.Max(maxScale, d.Scale);
             }
+
+            // SQLA-18: a duration outside [0, 24h) (a PostgreSQL interval) is not a time of day; the whole column is sent as text.
+            if (value is TimeSpan span && (span < TimeSpan.Zero || span >= TimeSpan.FromHours(24)))
+            {
+                return TrinoColumnType.Varchar;
+            }
         }
 
         string dataTypeName = column.DataTypeName ?? string.Empty;
+        if (clrType == typeof(TimeSpan) && dataTypeName.Contains("interval", StringComparison.OrdinalIgnoreCase))
+        {
+            return TrinoColumnType.Varchar;
+        }
+
         return clrType switch
         {
             _ when clrType == typeof(bool) => Boolean,
@@ -114,6 +125,7 @@ public static class TrinoColumnTypes
             DateTime dt => dt.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture),
             DateTimeOffset dto => FormatWithZone(dto),
             DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            TimeSpan ts when type.RawType == "varchar" => ts.ToString("c", CultureInfo.InvariantCulture),
             TimeSpan ts => ts.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture),
             TimeOnly t => t.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
             Guid g => g.ToString("D"),

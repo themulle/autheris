@@ -42,7 +42,7 @@ public sealed class FederatedStagingRowFilterRegressionTests
         var resolved = new ResolvedSourceTable(metadata.ReferencedTables[0], Tickets.Identifier, Tickets, "crm_api");
         var decisions = new Dictionary<TableIdentifier, TableAccessDecision> { [Tickets.Identifier] = decision };
 
-        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [resolved], decisions, new CrossSourceOptions { Enabled = true });
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [resolved], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         return await Staging(StubRegistry.For((Tickets, stub))).StageAsync(plan.StagingRequests, User(), Tenant, Budget());
     }
@@ -109,7 +109,7 @@ public sealed class FederatedStagingRowFilterRegressionTests
                 new ResolvedSourceTable(metadata.ReferencedTables[1], orders.Identifier, orders, "erp")
             ],
             decisions,
-            new CrossSourceOptions { Enabled = true });
+            new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.StagingRequests.Count.ShouldBe(2);
         foreach (var request in plan.StagingRequests)

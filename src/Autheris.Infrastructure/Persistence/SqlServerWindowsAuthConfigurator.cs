@@ -320,6 +320,12 @@ public static class SqlServerWindowsAuthConfigurator
         ArgumentException.ThrowIfNullOrWhiteSpace(username);
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
 
+        // PERS-15: a newline in the password would inject additional credential lines into the file.
+        if (password.AsSpan().IndexOfAny('\r', '\n') >= 0)
+        {
+            throw new ArgumentException("Password must not contain newline characters.", nameof(password));
+        }
+
         if (domain.AsSpan().IndexOfAny(':', '\r', '\n') >= 0)
         {
             throw new ArgumentException("Domain name must not contain ':' or newline characters.", nameof(domain));
@@ -744,6 +750,10 @@ public static class SqlServerWindowsAuthConfigurator
     public static bool IsLinuxGssNtlmMechanismPresent() =>
         File.Exists(GssMechConfigPath) || File.Exists(LegacyGssMechPath);
 
+    private static readonly Lazy<string> PrivateFallbackDirectory = new(
+        static () => Directory.CreateTempSubdirectory("autheris-gss-").FullName,
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
     private static string ResolveWritableGssDirectory(string? configuredDirectory)
     {
         if (!string.IsNullOrWhiteSpace(configuredDirectory))
@@ -763,7 +773,9 @@ public static class SqlServerWindowsAuthConfigurator
             // Fall back to temp directory
         }
 
-        return Path.Combine(Path.GetTempPath(), $"autheris-gss-{Environment.ProcessId}");
+        // PERS-15: never a predictable path below the shared temp directory (pre-creation / symlink attacks). The fallback is a
+        // freshly created directory with a random name that .NET creates exclusively with mode 0700 on Unix (one per process).
+        return PrivateFallbackDirectory.Value;
     }
 
     private static void EnsureFileExists(string path, string description)

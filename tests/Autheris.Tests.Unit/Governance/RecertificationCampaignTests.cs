@@ -27,6 +27,11 @@ public sealed class RecertificationCampaignTests
     public RecertificationCampaignTests()
     {
         _sut = new RecertificationService(_repository, _functionalRightRepo, _epochService, _auditWriter);
+        _repository.GetCampaignByIdAsync(Arg.Any<TenantId>(), "camp-1", Arg.Any<CancellationToken>())
+            .Returns(new RecertificationCampaign("tenant-1", "camp-1", "c", RecertClass.Standard,
+                RecertCampaignStatus.Active, DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow));
+        _repository.TryUpdateItemDecisionAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RecertDecision>(), Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(true);
     }
 
     [Fact]
@@ -100,8 +105,8 @@ public sealed class RecertificationCampaignTests
         revokedCount.ShouldBe(1);
 
         // Verify item was updated to Revoked with SYSTEM_AUTO_REVOKE
-        await _repository.Received(1).UpdateItemDecisionAsync(
-            tenantId, campaignId, itemId, RecertDecision.Revoked, "SYSTEM_AUTO_REVOKE",
+        await _repository.Received(1).TryUpdateItemDecisionAsync(
+            tenantId, campaignId, itemId, RecertDecision.Pending, RecertDecision.Revoked, "SYSTEM_AUTO_REVOKE",
             Arg.Any<string>(), Arg.Any<CancellationToken>());
 
         // Verify underlying asset mapping was removed
@@ -129,7 +134,7 @@ public sealed class RecertificationCampaignTests
 
         await Should.ThrowAsync<InvalidOperationException>(() => _sut.RevokeItemAsync(tenantId, "camp-1", "item-1", "user-bob"));
 
-        await _repository.DidNotReceiveWithAnyArgs().UpdateItemDecisionAsync(default, default!, default!, default, default!, default, default);
+        await _repository.DidNotReceiveWithAnyArgs().TryUpdateItemDecisionAsync(default, default!, default!, default, default, default!, default, default);
     }
 
     [Fact]
@@ -141,8 +146,8 @@ public sealed class RecertificationCampaignTests
         var order = new List<string>();
         _functionalRightRepo.DeleteMappingAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<FunctionalRight>(), Arg.Any<CancellationToken>())
             .Returns(_ => { order.Add("deactivate"); return Task.CompletedTask; });
-        _repository.UpdateItemDecisionAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(_ => { order.Add("decision"); return Task.CompletedTask; });
+        _repository.TryUpdateItemDecisionAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RecertDecision>(), Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(_ => { order.Add("decision"); return true; });
 
         await _sut.RevokeItemAsync(tenantId, "camp-1", "item-1", "user-bob");
 
@@ -158,7 +163,7 @@ public sealed class RecertificationCampaignTests
 
         await Should.ThrowAsync<InvalidOperationException>(() => _sut.RevokeItemAsync(tenantId, "camp-1", "item-1", "user-bob"));
 
-        await _repository.DidNotReceiveWithAnyArgs().UpdateItemDecisionAsync(default, default!, default!, default, default!, default, default);
+        await _repository.DidNotReceiveWithAnyArgs().TryUpdateItemDecisionAsync(default, default!, default!, default, default, default!, default, default);
     }
 
     [Fact]
@@ -170,7 +175,7 @@ public sealed class RecertificationCampaignTests
 
         await Should.ThrowAsync<NotSupportedException>(() => _sut.RevokeItemAsync(tenantId, "camp-1", "item-1", "user-bob"));
 
-        await _repository.DidNotReceiveWithAnyArgs().UpdateItemDecisionAsync(default, default!, default!, default, default!, default, default);
+        await _repository.DidNotReceiveWithAnyArgs().TryUpdateItemDecisionAsync(default, default!, default!, default, default, default!, default, default);
     }
 
     [Fact]
@@ -187,12 +192,12 @@ public sealed class RecertificationCampaignTests
         var revokedCount = await _sut.ExecuteAutoRevocationCycleAsync(asOf);
 
         revokedCount.ShouldBe(1);
-        await _repository.Received(1).UpdateItemDecisionAsync(
-            Arg.Any<TenantId>(), "camp-1", "item-ok", RecertDecision.Revoked, "SYSTEM_AUTO_REVOKE", Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await _repository.DidNotReceive().UpdateItemDecisionAsync(
-            Arg.Any<TenantId>(), Arg.Any<string>(), "item-fail", Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
-        await _repository.DidNotReceive().UpdateItemDecisionAsync(
-            Arg.Any<TenantId>(), Arg.Any<string>(), "item-unknown", Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        await _repository.Received(1).TryUpdateItemDecisionAsync(
+            Arg.Any<TenantId>(), "camp-1", "item-ok", RecertDecision.Pending, RecertDecision.Revoked, "SYSTEM_AUTO_REVOKE", Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _repository.DidNotReceive().TryUpdateItemDecisionAsync(
+            Arg.Any<TenantId>(), Arg.Any<string>(), "item-fail", Arg.Any<RecertDecision>(), Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        await _repository.DidNotReceive().TryUpdateItemDecisionAsync(
+            Arg.Any<TenantId>(), Arg.Any<string>(), "item-unknown", Arg.Any<RecertDecision>(), Arg.Any<RecertDecision>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
         await _auditWriter.Received(1).RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
 }

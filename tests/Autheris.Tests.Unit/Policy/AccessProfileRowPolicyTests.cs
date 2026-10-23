@@ -38,23 +38,32 @@ public sealed class AccessProfileRowPolicyTests
         ]
     };
 
-    private static async Task<TableAccessPolicy> CreatePolicyAsync(string predicate, IPolicyExpressionParser? parser)
+    private static AccessProfile Profile(string id, MaskingPolicyMode mode, string? predicate) => new()
+    {
+        ProfileId = id,
+        Name = "profile",
+        TenantId = Tenant,
+        MaskingMode = mode,
+        TargetTables = ["tem.*"],
+        RowFilterPredicate = predicate,
+        AssignedSubjects = ["S-1-5-21-DAVID"],
+        CreatedAt = DateTimeOffset.UtcNow,
+        ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+        Justification = "test",
+        CreatedBy = "admin"
+    };
+
+    private static Task<TableAccessPolicy> CreatePolicyAsync(string predicate, IPolicyExpressionParser? parser) =>
+        CreatePolicyAsync(parser, Profile("p1", MaskingPolicyMode.Unmasked, predicate));
+
+    private static async Task<TableAccessPolicy> CreatePolicyAsync(IPolicyExpressionParser? parser, params AccessProfile[] profiles)
     {
         var repo = new InMemoryAccessProfileRepository();
-        await repo.UpsertProfileAsync(new AccessProfile
+        foreach (var profile in profiles)
         {
-            ProfileId = "p1",
-            Name = "profile",
-            TenantId = Tenant,
-            MaskingMode = MaskingPolicyMode.Unmasked,
-            TargetTables = ["tem.*"],
-            RowFilterPredicate = predicate,
-            AssignedSubjects = ["S-1-5-21-DAVID"],
-            CreatedAt = DateTimeOffset.UtcNow,
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            Justification = "test",
-            CreatedBy = "admin"
-        });
+            await repo.UpsertProfileAsync(profile);
+        }
+
         // SR-M-07: an access profile never creates an allow; the underlying consent decision allows the table here.
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
@@ -147,5 +156,34 @@ public sealed class AccessProfileRowPolicyTests
         decision.RowPolicy.ShouldBeNull();
         decision.CombinedRowFilterSql.ShouldBe("status <> 'DELIVERED'");
         decision.RequireTypedRowPolicy().IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GOV06_MostRestrictiveProfileDoesNotDropTheRowFilterOfAnotherProfile()
+    {
+        // The Strict profile sorts first and has no row filter; the Default profile carries the data owner's row restriction.
+        var policy = await CreatePolicyAsync(
+            new PolicyExpressionParser(new FastSqlEngine()),
+            Profile("a-strict", MaskingPolicyMode.Strict, predicate: null),
+            Profile("b-default", MaskingPolicyMode.Default, "status <> 'DELIVERED'"));
+
+        var decision = await policy.DecideAsync(Query(), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.CombinedRowFilterSql.ShouldNotBeNullOrWhiteSpace();
+        decision.CombinedRowFilterSql.ShouldContain("status");
+    }
+
+    [Fact]
+    public async Task GOV06_UnparsableRowFilterOfAnyMatchedProfile_DeniesTheTable()
+    {
+        var policy = await CreatePolicyAsync(
+            new PolicyExpressionParser(new FastSqlEngine()),
+            Profile("a-strict", MaskingPolicyMode.Strict, "status <> 'X'"),
+            Profile("b-default", MaskingPolicyMode.Default, "no_such_column = 1"));
+
+        var decision = await policy.DecideAsync(Query(), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeFalse();
     }
 }

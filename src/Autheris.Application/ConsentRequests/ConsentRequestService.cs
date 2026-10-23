@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -37,6 +38,7 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
     private readonly IGrantPolicy _grantPolicy;
     private readonly IIdentitySubjectResolver? _subjectResolver;
+    private readonly IConsentMaterializationGuard? _materializationGuard;
 
     public ConsentRequestService(
         ITableMetadataRepository metadataRepository,
@@ -45,8 +47,10 @@ public sealed class ConsentRequestService : IConsentRequestService
         IConsentRequestDispatcher? dispatcher = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
         IGrantPolicy? grantPolicy = null,
-        IIdentitySubjectResolver? subjectResolver = null)
+        IIdentitySubjectResolver? subjectResolver = null,
+        IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
@@ -112,6 +116,19 @@ public sealed class ConsentRequestService : IConsentRequestService
 
         // R-GQL-9: same ClusterAdmin exception as approve, reject and revoke.
         var tenantId = ResolveTenantId(principal, command.ContextTenant, isCrossTenantAdmin);
+
+        // GOV-12: refuse early (no request stored) for a table that cannot carry consents (caller attribute source, A-10).
+        if (_materializationGuard != null)
+        {
+            try
+            {
+                await _materializationGuard.EnsureMayMaterializeAsync(tenantId, tableId, Array.Empty<ConsentRowFilter>(), ct).ConfigureAwait(false);
+            }
+            catch (ConsentOnAttributeSourceException ex)
+            {
+                throw new ConsentRequestException(ex.Code, ex.Message);
+            }
+        }
 
         // WP-SC-16: a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
         var now = DateTimeOffset.UtcNow;

@@ -200,11 +200,20 @@ public sealed partial class GovernedAggregationService
             var avgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             var mins = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             var maxs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, long>? avgCounts = null;
 
             foreach (var agg in aggregates)
             {
                 var val = GetRowValue(row, agg.EffectiveAlias);
                 aggValues[agg.EffectiveAlias] = val;
+                if (agg.Function == AggregateFunction.Avg && agg.Column != null &&
+                    GetRowValue(row, GovernedTableReadPlanner.AvgCountAliasPrefix + agg.EffectiveAlias) is { } rawCount and not DBNull)
+                {
+                    // MISC-08: the hidden COUNT(col) of the planner (rows with a non-null value) weights this AVG when buckets are merged.
+                    (avgCounts ??= new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase))[agg.EffectiveAlias] =
+                        Convert.ToInt64(rawCount, CultureInfo.InvariantCulture);
+                }
+
                 if (agg.Column != null)
                 {
                     switch (agg.Function)
@@ -225,7 +234,7 @@ public sealed partial class GovernedAggregationService
                 }
             }
 
-            buckets.Add(new ComputedBucket(groupKey, count, aggValues, sums, avgs, mins, maxs, [], IsMergedOther: false));
+            buckets.Add(new ComputedBucket(groupKey, count, aggValues, sums, avgs, mins, maxs, [], IsMergedOther: false, avgCounts));
         }
 
         return buckets;
@@ -262,8 +271,13 @@ public sealed partial class GovernedAggregationService
             switch (agg.Function)
             {
                 case AggregateFunction.Count:
-                case AggregateFunction.CountDistinct:
                     aggValues[alias] = nonNullVals.Sum(v => Convert.ToInt64(v, CultureInfo.InvariantCulture));
+                    break;
+
+                case AggregateFunction.CountDistinct:
+                    // MISC-08: distinct counts of disjoint-looking groups are not additive (a value can occur in several groups), so a
+                    // merged total is not computable from the per-group results.
+                    aggValues[alias] = null;
                     break;
 
                 case AggregateFunction.Sum:
@@ -280,17 +294,29 @@ public sealed partial class GovernedAggregationService
                     }
                     else
                     {
+                        // MISC-08: weight each bucket average by its non-null value count (hidden COUNT(col)), not by the row count; a bucket
+                        // with a value but without that count makes the merged average unknown (null) instead of a wrong number.
                         decimal weightedSum = 0m;
                         long weightCount = 0;
+                        var countsKnown = true;
                         foreach (var b in buckets)
                         {
-                            if (b.Aggregates.TryGetValue(alias, out var v) && v is not null and not DBNull && b.Count > 0)
+                            if (!b.Aggregates.TryGetValue(alias, out var v) || v is null or DBNull)
                             {
-                                weightedSum += ToDecimal(v) * b.Count;
-                                weightCount += b.Count;
+                                continue;
                             }
+
+                            if (b.AvgCounts == null || !b.AvgCounts.TryGetValue(alias, out var nonNullCount))
+                            {
+                                countsKnown = false;
+                                break;
+                            }
+
+                            weightedSum += ToDecimal(v) * nonNullCount;
+                            weightCount += nonNullCount;
                         }
-                        decimal avg = weightCount > 0 ? weightedSum / weightCount : 0m;
+
+                        decimal? avg = countsKnown && weightCount > 0 ? weightedSum / weightCount : null;
                         aggValues[alias] = avg;
                         avgs[col] = avg;
                     }
@@ -673,7 +699,8 @@ public sealed partial class GovernedAggregationService
         IReadOnlyDictionary<string, object?> Min,
         IReadOnlyDictionary<string, object?> Max,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
-        bool IsMergedOther)
+        bool IsMergedOther,
+        IReadOnlyDictionary<string, long>? AvgCounts = null)
     {
         public AggregationGroupRow ToGroupRow() =>
             new(GroupKey, Count, Aggregates, IsMergedOther)
