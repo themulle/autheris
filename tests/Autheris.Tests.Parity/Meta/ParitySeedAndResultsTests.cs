@@ -42,6 +42,12 @@ public sealed class ParitySeedAndResultsTests : ParityTestBase
         rows.Select(r => r.SaleDate).Distinct().Count().ShouldBe(ParityExpected.DistinctSaleDates);
         rows.Where(r => r.Region is not null).Select(r => r.Region).Distinct().Count().ShouldBe(ParityExpected.DistinctRegionsNonNull);
         rows.Where(r => r.Qty is not null).Average(r => (decimal)r.Qty!.Value).ShouldBe(ParityExpected.AvgQty);
+
+        // --- WP-R2 ---
+        rows.Where(r => r.Product is "Widget" or "Gizmo").Sum(r => r.Amount ?? 0m).ShouldBe(ParityExpected.SumAmountWidgetAndGizmo);
+        rows.Where(r => r.Region is "North" or "South").Sum(r => r.Amount ?? 0m).ShouldBe(ParityExpected.SumAmountNorthAndSouth);
+        rows.Count(r => r.Note is not null).ShouldBe(ParityExpected.RowsWithNote);
+        // --- end WP-R2 ---
     }
 
     [Fact]
