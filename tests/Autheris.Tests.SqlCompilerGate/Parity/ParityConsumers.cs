@@ -76,6 +76,17 @@ internal static class ParityData
             filter.Parameters.Count == 0 ? null : filter.Parameters);
     }
 
+    /// <summary>The decision of the tree consumer: a typed row policy when the filter has one (SQLA-06), else the text-only decision the tree compiler denies.</summary>
+    public static TableAccessDecision TreeDecision(ParityContext ctx, FilterText filter)
+    {
+        if (filter.Typed is not { } typed) return Decision(ctx, filter);
+        var access = GateModel.Table("orders").Columns.ToDictionary(c => c.Name, _ => ColumnAccessLevel.Clear, StringComparer.OrdinalIgnoreCase);
+        var policy = new Autheris.Application.Policy.PolicyPredicateRowPolicy(
+            typed, Autheris.Application.Sql.Policy.PolicyParameterNamer.ToTargetDialect(ctx.Database), new Autheris.Application.Sql.Policy.PolicyPredicateRenderer());
+        return TableAccessDecision.Allowed(new TableIdentifier(Source, ctx.Schema, "orders"), access, hasUnconstrainedColumnAllow: true)
+            .WithAdditionalRowPolicy(policy);
+    }
+
     public static ClaimsPrincipal Principal() => new(new ClaimsIdentity(
         [new Claim("tenant_id", GateModel.TenantA), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-GATE")], "Gate"));
 
@@ -116,7 +127,7 @@ public sealed class TreeSqlCompilerConsumer : IParityConsumer
         var metadata = ParityData.OrdersMetadata(env.Context);
         var access = new Dictionary<TableIdentifier, TreeTableAccess>
         {
-            [metadata.Identifier] = new(metadata, ParityData.Decision(env.Context, filter), GateModel.TenantColumn, GateModel.TenantA)
+            [metadata.Identifier] = new(metadata, ParityData.TreeDecision(env.Context, filter), GateModel.TenantColumn, GateModel.TenantA)
         };
         var root = new TreeQueryNode(metadata.Identifier, ["id"]) { OrderBy = [new TreeOrder("id")], Limit = 5000 };
         CompiledTreeQuery compiled;
@@ -124,7 +135,8 @@ public sealed class TreeSqlCompilerConsumer : IParityConsumer
         {
             compiled = TreeSqlCompiler.Compile(root, access, env.Context.Database);
         }
-        catch (Exception ex) when (ex is SecurityException or InvalidOperationException or ArgumentException or Autheris.Domain.Exceptions.GatewayInvalidQueryException)
+        catch (Exception ex) when (ex is SecurityException or InvalidOperationException or ArgumentException or Autheris.Domain.Exceptions.GatewayInvalidQueryException
+            or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return ParityData.Refused(ex);
         }
