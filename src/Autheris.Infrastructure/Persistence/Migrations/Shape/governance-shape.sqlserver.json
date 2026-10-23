@@ -3081,30 +3081,6 @@
       "indexes": []
     },
     {
-      "name": "TRUSTED_DOCUMENT_APPS",
-      "columns": [
-        {
-          "name": "app_id",
-          "type": "NVARCHAR",
-          "family": "string"
-        },
-        {
-          "name": "created_at",
-          "type": "NVARCHAR",
-          "family": "string"
-        },
-        {
-          "name": "updated_at",
-          "type": "NVARCHAR",
-          "family": "string"
-        }
-      ],
-      "primaryKey": [
-        "app_id"
-      ],
-      "indexes": []
-    },
-    {
       "name": "TRUSTED_DOCUMENT_APP_ORIGINS",
       "columns": [
         {
@@ -3165,6 +3141,49 @@
       "indexes": []
     },
     {
+      "name": "TRUSTED_DOCUMENT_APPS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_GENERATION",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "TRUSTED_DOCUMENT_HASHES",
       "columns": [
         {
@@ -3187,25 +3206,6 @@
         "app_id",
         "version",
         "hash"
-      ],
-      "indexes": []
-    },
-    {
-      "name": "TRUSTED_DOCUMENT_GENERATION",
-      "columns": [
-        {
-          "name": "id",
-          "type": "INT",
-          "family": "integer"
-        },
-        {
-          "name": "generation",
-          "type": "BIGINT",
-          "family": "integer"
-        }
-      ],
-      "primaryKey": [
-        "id"
       ],
       "indexes": []
     },
