@@ -52,6 +52,12 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual string FormatTypeName(TrinoType type) => StandardTypeName(type);
 
     /// <summary>
+    /// Dialect hook for a CAST that has no <c>CAST(x AS type)</c> form of the same meaning (SQLite DATE/TIMESTAMP/TIME). Returns false
+    /// to emit the standard form. The emitted text must consist of generator tokens only (no client text).
+    /// </summary>
+    protected virtual bool TryFormatCast(ref ValueStringBuilder builder, CastExpression cast, SqlEmitterContext context) => false;
+
+    /// <summary>
     /// CR-ADG-42: the native catalog type of a check-option cast. It must resolve through the closed per-dialect map and be
     /// spelled exactly as the map spells it, so the emitted text is never request text; anything else fails closed.
     /// </summary>

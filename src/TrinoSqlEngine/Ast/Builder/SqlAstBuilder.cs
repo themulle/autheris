@@ -884,6 +884,17 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 {
                     var items = inList.expression().Select(e => (Expression)Visit(e)).ToList();
                     bool isNot = inList.NOT() != null;
+                    if (items.Count == 0)
+                    {
+                        // SEC-PG-05: x IN () is FALSE and x NOT IN () is TRUE. The operand stays in the tree, so the security visitor still checks it:
+                        // "x IS NULL AND x IS NOT NULL" is exactly FALSE and "x IS NULL OR x IS NOT NULL" exactly TRUE (never unknown). A constant
+                        // such as "x IS NULL AND FALSE" would be folded by the simplifier before the visitor ran and drop the operand.
+                        return new BinaryExpression(
+                            new UnaryExpression(UnaryOperator.IsNull, left),
+                            isNot ? BinaryOperator.Or : BinaryOperator.And,
+                            new UnaryExpression(UnaryOperator.IsNotNull, left));
+                    }
+
                     return new InListExpression(left, items, isNot);
                 }
             case SqlBaseParser.InSubqueryContext inSub:
@@ -1032,7 +1043,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     private Expression? TryBuildDateFunction(string name, SqlBaseParser.FunctionCallContext context, IReadOnlyList<Expression> args)
     {
         string function = name.ToLowerInvariant();
-        if (function is not ("date_add" or "date_trunc" or "now" or "date_diff"))
+        if (function is not ("date_add" or "date_trunc" or "now" or "date_diff" or "date_part"
+            or "year" or "quarter" or "month" or "day" or "hour" or "minute" or "second"))
         {
             return null;
         }
@@ -1045,6 +1057,18 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         switch (function)
         {
+            case "year" or "quarter" or "month" or "day" or "hour" or "minute" or "second":
+                // GAP-013: the part function is EXTRACT(<function> FROM x); the field is the closed function name, never client text.
+                if (args.Count != 1) throw Unsupported($"{function} without exactly one argument");
+                return new ExtractExpression(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(function), args[0]);
+            case "date_part":
+                if (args.Count != 2) throw Unsupported("date_part without exactly (field, value)");
+                if (args[0] is not LiteralExpression { Type: LiteralType.String, Value: string field })
+                {
+                    throw Unsupported("date_part field that is not a string literal");
+                }
+
+                return new ExtractExpression(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(field), args[1]);
             case "date_diff":
                 throw Unsupported("date_diff (its meaning differs between Trino and SQL Server)");
             case "now":
@@ -1283,7 +1307,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         if (!pattern.IsMatch(value))
         {
-            throw Unsupported($"{type} literal '{value}' (expected ISO format without time zone)");
+            // SEC-PG-04: the submitted text is not echoed.
+            throw Unsupported($"{type} literal (expected ISO format without time zone)");
         }
 
         return new TypedLiteralExpression(kind, value);

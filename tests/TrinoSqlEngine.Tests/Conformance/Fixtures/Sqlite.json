@@ -867,33 +867,65 @@
       "Id": "literal-025",
       "Group": "literal",
       "Sql": "SELECT DATE '2024-01-15' FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT ?1 FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "2024-01-15"
+        }
+      ]
     },
     {
       "Id": "literal-026",
       "Group": "literal",
       "Sql": "SELECT TIMESTAMP '2024-01-15 10:30:00' FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT ?1 FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "2024-01-15 10:30:00"
+        }
+      ]
     },
     {
       "Id": "literal-027",
       "Group": "literal",
       "Sql": "SELECT TIMESTAMP '2024-01-15 10:30:00.123' FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT ?1 FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "2024-01-15 10:30:00.123"
+        }
+      ]
     },
     {
       "Id": "literal-028",
       "Group": "literal",
       "Sql": "SELECT TIME '10:30:00' FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT ?1 FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "10:30:00"
+        }
+      ]
     },
     {
       "Id": "literal-029",
@@ -995,17 +1027,33 @@
       "Id": "literal-038",
       "Group": "literal",
       "Sql": "SELECT a FROM t WHERE d = DATE '2024-01-15'",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT \"a\" FROM \"t\" WHERE \"d\" = ?1",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "2024-01-15"
+        }
+      ]
     },
     {
       "Id": "literal-039",
       "Group": "literal",
       "Sql": "SELECT a FROM t WHERE ts > TIMESTAMP '2024-01-15 10:30:00'",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT \"a\" FROM \"t\" WHERE \"ts\" > ?1",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "2024-01-15 10:30:00"
+        }
+      ]
     },
     {
       "Id": "operator-001",
@@ -1686,7 +1734,7 @@
       "Group": "cast",
       "Sql": "SELECT CAST(a AS date) AS c FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CAST(\"a\" AS date) AS \"c\" FROM \"t\"",
+      "Expected": "SELECT date(\"a\") AS \"c\" FROM \"t\"",
       "Parameters": []
     },
     {
@@ -1694,7 +1742,7 @@
       "Group": "cast",
       "Sql": "SELECT CAST(a AS time) AS c FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CAST(\"a\" AS time) AS \"c\" FROM \"t\"",
+      "Expected": "SELECT time(\"a\") AS \"c\" FROM \"t\"",
       "Parameters": []
     },
     {
@@ -1702,7 +1750,7 @@
       "Group": "cast",
       "Sql": "SELECT CAST(a AS timestamp) AS c FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CAST(\"a\" AS timestamp) AS \"c\" FROM \"t\"",
+      "Expected": "SELECT datetime(\"a\") AS \"c\" FROM \"t\"",
       "Parameters": []
     },
     {
@@ -1710,7 +1758,7 @@
       "Group": "cast",
       "Sql": "SELECT CAST(a AS timestamp(3)) AS c FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CAST(\"a\" AS timestamp(3)) AS \"c\" FROM \"t\"",
+      "Expected": "SELECT datetime(\"a\") AS \"c\" FROM \"t\"",
       "Parameters": []
     },
     {
@@ -1830,7 +1878,7 @@
       "Group": "cast",
       "Sql": "SELECT CAST('2024-01-15' AS date) FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CAST(?1 AS date) FROM \"t\"",
+      "Expected": "SELECT date(?1) FROM \"t\"",
       "Parameters": [
         {
           "Marker": "?1",
@@ -3082,73 +3130,145 @@
       "Id": "fn-date-032",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(year FROM d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"d\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%Y"
+        }
+      ]
     },
     {
       "Id": "fn-date-033",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(month FROM d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"d\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%m"
+        }
+      ]
     },
     {
       "Id": "fn-date-034",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(day FROM d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"d\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%d"
+        }
+      ]
     },
     {
       "Id": "fn-date-035",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(hour FROM ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"ts\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%H"
+        }
+      ]
     },
     {
       "Id": "fn-date-036",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(minute FROM ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"ts\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%M"
+        }
+      ]
     },
     {
       "Id": "fn-date-037",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(second FROM ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"ts\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%S"
+        }
+      ]
     },
     {
       "Id": "fn-date-038",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(dow FROM d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT ((CAST(strftime(?1, \"d\") AS INTEGER) + 6) % 7 + 1) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%w"
+        }
+      ]
     },
     {
       "Id": "fn-date-039",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(doy FROM d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(strftime(?1, \"d\") AS INTEGER) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%j"
+        }
+      ]
     },
     {
       "Id": "fn-date-040",
       "Group": "fn-date",
       "Sql": "SELECT EXTRACT(quarter FROM d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT ((CAST(strftime(?1, \"d\") AS INTEGER) + 2) / 3) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%m"
+        }
+      ]
     },
     {
       "Id": "fn-date-041",
@@ -3156,7 +3276,7 @@
       "Sql": "SELECT EXTRACT(week FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "fn-date-042",
@@ -3164,7 +3284,7 @@
       "Sql": "SELECT EXTRACT(epoch FROM ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "fn-date-043",
@@ -3218,33 +3338,65 @@
       "Id": "date-translated-001",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('day', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "start of day"
+        }
+      ]
     },
     {
       "Id": "date-translated-002",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('month', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "start of month"
+        }
+      ]
     },
     {
       "Id": "date-translated-003",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('year', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "start of year"
+        }
+      ]
     },
     {
       "Id": "date-translated-004",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('hour', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT strftime(?1, \"ts\") AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%Y-%m-%d %H:00:00"
+        }
+      ]
     },
     {
       "Id": "date-translated-005",
@@ -3252,127 +3404,338 @@
       "Sql": "SELECT date_trunc('week', d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-006",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('minute', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT strftime(?1, \"ts\") AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%Y-%m-%d %H:%M:00"
+        }
+      ]
     },
     {
       "Id": "date-translated-007",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('second', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT strftime(?1, \"ts\") AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "%Y-%m-%d %H:%M:%S"
+        }
+      ]
     },
     {
       "Id": "date-translated-008",
       "Group": "date-translated",
       "Sql": "SELECT date_add('day', 1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " days"
+        }
+      ]
     },
     {
       "Id": "date-translated-009",
       "Group": "date-translated",
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " months"
+        }
+      ]
     },
     {
       "Id": "date-translated-010",
       "Group": "date-translated",
       "Sql": "SELECT date_add('hour', 3, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "3"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " hours"
+        }
+      ]
     },
     {
       "Id": "date-translated-011",
       "Group": "date-translated",
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "-1"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " years"
+        }
+      ]
     },
     {
       "Id": "date-translated-012",
       "Group": "date-translated",
       "Sql": "SELECT date_add('week', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "14"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " days"
+        }
+      ]
     },
     {
       "Id": "date-translated-013",
       "Group": "date-translated",
       "Sql": "SELECT date_add('minute', 5, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "5"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " minutes"
+        }
+      ]
     },
     {
       "Id": "date-translated-014",
       "Group": "date-translated",
       "Sql": "SELECT date_add('second', 30, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "30"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " seconds"
+        }
+      ]
     },
     {
       "Id": "date-translated-015",
       "Group": "date-translated",
       "Sql": "SELECT d + INTERVAL '1' DAY AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " days"
+        }
+      ]
     },
     {
       "Id": "date-translated-016",
       "Group": "date-translated",
       "Sql": "SELECT d - INTERVAL '1' MONTH AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "-1"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " months"
+        }
+      ]
     },
     {
       "Id": "date-translated-017",
       "Group": "date-translated",
       "Sql": "SELECT ts + INTERVAL '2' HOUR AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " hours"
+        }
+      ]
     },
     {
       "Id": "date-translated-018",
       "Group": "date-translated",
       "Sql": "SELECT INTERVAL '3' DAY + d AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "3"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " days"
+        }
+      ]
     },
     {
       "Id": "date-translated-019",
       "Group": "date-translated",
       "Sql": "SELECT ts - INTERVAL '15' MINUTE AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"ts\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "-15"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " minutes"
+        }
+      ]
     },
     {
       "Id": "date-translated-020",
       "Group": "date-translated",
       "Sql": "SELECT d + INTERVAL '2' YEAR AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "Outcome": "ok",
+      "Expected": "SELECT datetime(\"d\", ?1 || ?2) AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        },
+        {
+          "Marker": "?2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": " years"
+        }
+      ]
     },
     {
       "Id": "date-translated-021",

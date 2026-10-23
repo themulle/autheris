@@ -639,7 +639,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
 
-        IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions);
+        // GAP-013 / SEC-PG-03: governed WebSQL translates the Trino date functions (date_trunc, date_add, now, year(x) .. second(x), date_part).
+        IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.WithDateTranslation(
+            SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions));
         if (metadata.FunctionCalls is { Count: > 0 })
         {
             // G-9: the three-argument overload; no RlsOptions bag.
@@ -756,7 +758,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
 
         return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
-            timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false);
+            timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false,
+            translateDateFunctions: true);
     }
 
     private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)

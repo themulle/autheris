@@ -196,6 +196,11 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                     throw UnsupportedConstruct("TRY_CAST", TargetDialect);
                 }
 
+                if (TryFormatCast(ref builder, cast, context))
+                {
+                    break;
+                }
+
                 builder.Append(cast.IsTryCast ? "TRY_CAST(" : "CAST(");
                 GenerateExpression(cast.Operand, ref builder, context);
                 builder.Append(" AS ");
