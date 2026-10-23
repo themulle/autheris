@@ -92,3 +92,7 @@ Mandatory tests (all `[Trait("Category","Security")]`, in `Issue279ReadOnlySubsc
 - `Subscriptions_Disabled_WebSocketAuthInterceptor_StillRegistered` (item 5)
 - `Subscriptions_Disabled_ReadOnlyMutation_StillRejected` (SEC-279-5)
 - `GraphQLSubscriptionOptions_InvalidBool_FailsStartup` (SEC-279-5)
+
+## Changelog
+
+- 2026-10-23 (Phase 4, G-PLAN-REBASE drift): the registration file sits in `src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs` (not `.../DependencyInjection/`); the helper `GatewayGraphQlSubscriptionRegistration.cs` is in `Extensions/DependencyInjection/`. Multi-operation documents without `operationName` are already rejected by Hot Chocolate validation before the middleware runs; the middleware check remains as defence in depth. Optional integration tests (AC-4/AC-5) were not added. Test fixture subscription type is named `S`.

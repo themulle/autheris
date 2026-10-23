@@ -19,7 +19,7 @@ ID prefix: `REQ-279`. Phase 1 (product-manager). Type: security hardening / conf
 2. REQ-279-2: Operation selection is fail-closed: with no `operationName`, any subscription operation in the document counts (as for mutations);
    with `operationName`, the named operation is checked. No self-service exception applies to subscriptions.
 3. REQ-279-3: New option `Gateway:GraphQL:Subscriptions:Enabled` (bool). When `false`, the subscription root type, in-memory subscription
-   provider and WebSocket subscription transport/session interceptor are not registered; subscription documents fail validation (unknown
+   provider are not registered (the `WebSocketAuthInterceptor` stays registered for query traffic; Phase 3 decision 2026-10-23); subscription documents fail validation (unknown
    root type) for all principals; the schema SDL/introspection exposes no `Subscription` type. When `true`, current behavior plus REQ-279-1.
 4. REQ-279-4: Default taken: `Enabled = true` (feature exists and is documented; not a data-exposure change). The read-only rejection
    (REQ-279-1) is not configurable and always on. Deployments wanting strict request/response set `Enabled=false`.
