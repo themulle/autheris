@@ -21,7 +21,9 @@ internal static class ParityRunner
             throw new InvalidOperationException($"Invalid gap id '{gap.GapId}'; expected PARITY-GAP-NNN.");
         }
 
+        // Traits on the method and on the declaring class both count (SEC-PAR-05d).
         var security = method.Method.GetCustomAttributes(typeof(TraitAttribute))
+            .Concat(method.TestClass.Class.GetCustomAttributes(typeof(TraitAttribute)))
             .Select(a => a.GetConstructorArguments().ToArray())
             .Any(a => a.Length == 2 && (string)a[0] == "Category" && (string)a[1] == "Security");
         if (security)
@@ -36,9 +38,22 @@ internal static class ParityRunner
     {
         using var bus = new KnownGapMessageBus(messageBus, FindMethodGap(method));
         var summary = await run(bus);
-        summary.Failed += bus.PassedToFailed - bus.FailedToSkipped;
-        summary.Skipped += bus.FailedToSkipped;
+        Reconcile(summary, bus.PassedToFailed, bus.FailedToSkipped);
         return summary;
+    }
+
+    /// <summary>
+    /// Aligns the summary with the rewritten messages: a pass flipped to failed raises Failed (passed = Total - Failed - Skipped drops),
+    /// a failure rewritten to a skip moves from Failed to Skipped. Counts stay within [0, Total].
+    /// </summary>
+    internal static void Reconcile(RunSummary summary, int passedToFailed, int failedToSkipped)
+    {
+        summary.Failed = Math.Max(0, summary.Failed + passedToFailed - failedToSkipped);
+        summary.Skipped += failedToSkipped;
+        if (summary.Failed + summary.Skipped > summary.Total)
+        {
+            summary.Failed = Math.Max(0, summary.Total - summary.Skipped);
+        }
     }
 }
 

@@ -111,6 +111,58 @@ public sealed class ParityMachineryTests : ParityTestBase
         return new XunitTest(testCase, "t");
     }
 
+    [Trait("Category", "Sec" + "urity")] // split so the architecture scanner does not flag this sample
+    private sealed class ClassLevelSecuritySample : ParityTestBase
+    {
+        [KnownGap("PARITY-GAP-001", "sample")]
+        public void Gapped() { }
+    }
+
+    private sealed class PlainSample : ParityTestBase
+    {
+        [KnownGap("PARITY-GAP-001", "sample")]
+        public void Gapped() { }
+    }
+
+    private static ITestMethod SampleMethod(Type type)
+    {
+        var assembly = new TestAssembly(Reflector.Wrap(typeof(ParityMachineryTests).Assembly));
+        var collection = new TestCollection(assembly, null, "parity-meta-sample");
+        var testClass = new TestClass(collection, Reflector.Wrap(type));
+        return new TestMethod(testClass, Reflector.Wrap(type.GetMethod("Gapped")!));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KnownGap_RejectedOnClassLevelSecurityTrait()
+    {
+        // SEC-PAR-05d: a Security trait on the class counts as well as one on the method.
+        Should.Throw<InvalidOperationException>(() => ParityRunner.FindMethodGap(SampleMethod(typeof(ClassLevelSecuritySample))))
+            .Message.ShouldContain("Security");
+        ParityRunner.FindMethodGap(SampleMethod(typeof(PlainSample)))!.GapId.ShouldBe("PARITY-GAP-001");
+    }
+
+    [Fact]
+    public void KnownGap_RunSummaryIsReconciledWhenAPassIsFlippedToFailed()
+    {
+        // 3 tests: 2 passed, 1 failed. One pass is flipped to failed: passed (= total - failed - skipped) drops by one.
+        var summary = new RunSummary { Total = 3, Failed = 1, Skipped = 0 };
+        ParityRunner.Reconcile(summary, passedToFailed: 1, failedToSkipped: 0);
+        (summary.Total, summary.Failed, summary.Skipped).ShouldBe((3, 2, 0));
+        (summary.Total - summary.Failed - summary.Skipped).ShouldBe(1);
+
+        // A failure rewritten to a skip moves from Failed to Skipped, Total is unchanged.
+        var other = new RunSummary { Total = 2, Failed = 2, Skipped = 0 };
+        ParityRunner.Reconcile(other, passedToFailed: 0, failedToSkipped: 1);
+        (other.Total, other.Failed, other.Skipped).ShouldBe((2, 1, 1));
+
+        // Never negative, never more outcomes than tests.
+        var broken = new RunSummary { Total = 1, Failed = 0, Skipped = 0 };
+        ParityRunner.Reconcile(broken, passedToFailed: 0, failedToSkipped: 1);
+        broken.Failed.ShouldBe(0);
+        (broken.Failed + broken.Skipped).ShouldBeLessThanOrEqualTo(broken.Total);
+    }
+
     private sealed class CaptureBus : IMessageBus
     {
         public List<IMessageSinkMessage> Messages { get; } = [];

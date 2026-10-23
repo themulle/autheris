@@ -81,6 +81,14 @@ public sealed class ParityHostFixture : IAsyncLifetime
     {
         b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
         b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
+        // The sweeps send hundreds of GraphQL queries from one subject; lift the per-subject cost budget so it cannot mask results.
+        b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:MaxCostPerMinute", "1000000");
+        b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
+        b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
+        b.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "5000");
+        b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
+        b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "100000000");
+        b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "1000000");
         b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_govPath}");
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");

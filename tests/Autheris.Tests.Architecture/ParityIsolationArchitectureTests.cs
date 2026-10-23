@@ -141,11 +141,33 @@ public sealed partial class ParityIsolationArchitectureTests
         return bad;
     }
 
-    internal static IReadOnlyList<string> SecurityTestsWithKnownGap(string source) =>
-        Regex.Matches(source, @"(?<stack>(?:\s*\[[^\]\r\n]*\])+)\s*(?:public|internal|private|protected)\b")
+    internal static IReadOnlyList<string> SecurityTestsWithKnownGap(string source)
+    {
+        // member level: one attribute stack carries both the Security trait and a KnownGap
+        var violations = Regex.Matches(source, @"(?<stack>(?:\s*\[[^\]\r\n]*\])+)\s*(?:public|internal|private|protected)\b")
             .Select(m => m.Groups["stack"].Value)
             .Where(s => s.Contains("KnownGap", StringComparison.Ordinal) && s.Contains("\"Security\"", StringComparison.Ordinal))
             .ToList();
+
+        // class level: a Security trait on the class forbids a KnownGap on any member declared before the next class
+        var classes = Regex.Matches(source, @"(?<stack>(?:\s*\[[^\]\r\n]*\])+)\s*(?:\w+\s+)*?(?:class|record|struct)\s+\w+").ToList();
+        for (var i = 0; i < classes.Count; i++)
+        {
+            if (!classes[i].Groups["stack"].Value.Contains("\"Security\"", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var end = i + 1 < classes.Count ? classes[i + 1].Index : source.Length;
+            var body = source[(classes[i].Index + classes[i].Length)..end];
+            if (body.Contains("[KnownGap(", StringComparison.Ordinal))
+            {
+                violations.Add(classes[i].Value.Trim());
+            }
+        }
+
+        return violations;
+    }
 
     private static IEnumerable<string> ParitySourceFiles(string root)
     {
@@ -306,6 +328,9 @@ public sealed partial class ParityIsolationArchitectureTests
         // negative self-checks
         SecurityTestsWithKnownGap("[Fact]\n[Trait(\"Category\", \"Security\")]\n[KnownGap(\"PARITY-GAP-001\", \"r\")]\npublic void T() { }").Count.ShouldBe(1);
         SecurityTestsWithKnownGap("[Fact]\n[Trait(\"Category\", \"Security\")]\npublic void T() { }").ShouldBeEmpty();
+        // class-level Security trait with a KnownGap on any method of that class
+        SecurityTestsWithKnownGap("[Trait(\"Category\", \"Security\")]\npublic sealed class C\n{\n    [ParityFact]\n    [KnownGap(\"PARITY-GAP-001\", \"r\")]\n    public void T() { }\n}").Count.ShouldBe(1);
+        SecurityTestsWithKnownGap("[Trait(\"Category\", \"Security\")]\npublic sealed class C\n{\n    [ParityFact]\n    public void T() { }\n}\n[Trait(\"Category\", \"Parity\")]\npublic sealed class D\n{\n    [KnownGap(\"PARITY-GAP-001\", \"r\")]\n    public void U() { }\n}").ShouldBeEmpty();
         GapIdPattern().IsMatch("PARITY-GAP-0001").ShouldBeFalse();
     }
 

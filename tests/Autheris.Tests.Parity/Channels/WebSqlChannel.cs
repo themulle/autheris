@@ -54,7 +54,12 @@ public sealed class WebSqlChannel(ParityHostFixture host) : IParityChannel
         using var client = host.CreateClient();
         using var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql = Render(query) }, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
-        var status = (int)response.StatusCode;
+        return Parse((int)response.StatusCode, body);
+    }
+
+    /// <summary>Parses a WebSQL response body (200 rows or an error envelope; code = <c>code ?? error</c>).</summary>
+    public static ChannelResult Parse(int status, string body)
+    {
         try
         {
             using var doc = JsonDocument.Parse(body);
