@@ -33,7 +33,8 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
     {
         private AuditChainAnchor? _last;
         public bool FailSave { get; set; }
-        public AuditChainAnchor? Load() => _last;
+        public bool ReturnInvalid { get; set; }
+        public AuditChainAnchor? Load() => ReturnInvalid ? new AuditChainAnchor(-1, string.Empty, DateTimeOffset.MinValue, string.Empty) : _last;
 
         public void Save(AuditChainAnchor anchor)
         {
@@ -83,6 +84,18 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
         _anchors.FailSave = false;
         await _repo.RecordAuditEventAsync(new AuditLogEntry { TenantId = Tenant, EventType = AuditEventTypes.AuditConfigChanged, ActorSid = Admin, TargetTable = "x", Decision = "ALLOW", TraceId = "t" });
         (await _repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task TierAWrite_InvalidStoredAnchor_ThrowsAuditUnavailable()
+    {
+        // PERS-18: an invalid stored anchor is no longer skipped silently: the Tier-A change is not acknowledged and the chain is latched.
+        await EnsureTableAsync();
+        await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
+
+        _anchors.ReturnInvalid = true;
+
+        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob")));
     }
 
     [Fact]

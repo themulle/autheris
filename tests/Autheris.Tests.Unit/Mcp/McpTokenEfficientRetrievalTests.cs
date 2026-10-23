@@ -204,9 +204,8 @@ public sealed class McpTokenEfficientRetrievalTests
         orders.PrimaryKeys.ShouldBe(["id"]);
         orders.Columns.Count.ShouldBe(3);
         orders.Columns.First(c => c.Name == "id").PrimaryKey.ShouldBeTrue();
-        orders.Relations.ShouldHaveSingleItem().TargetTable.ShouldBe("sales.customers");
-        orders.Relations[0].FromColumn.ShouldBe("customer_id");
-        orders.Relations[0].ToColumn.ShouldBe("id");
+        // MCP-05: relations are never guessed from column names (customer_id must not fabricate sales.customers).
+        orders.Relations.ShouldBeEmpty();
     }
 
     [Fact]

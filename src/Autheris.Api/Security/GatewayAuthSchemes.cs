@@ -9,6 +9,10 @@ public static class GatewayAuthSchemes
     public const string RejectScheme = "RejectScheme";
     public const string Scim = "Scim";
 
+    /// <summary>API-07: SCIM provisioning routes (<c>/scim/...</c>) authenticate with the SCIM secret, not with a JWT.</summary>
+    public static bool IsScimPath(Microsoft.AspNetCore.Http.PathString path) =>
+        path.StartsWithSegments("/scim", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>API-14: separate scheme for AD FS when Entra ID is enabled as well.</summary>
     public const string JwtBearerAdfs = "BearerAdfs";
 

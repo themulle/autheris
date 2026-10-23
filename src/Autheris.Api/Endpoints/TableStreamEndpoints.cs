@@ -422,7 +422,7 @@ public static class TableStreamEndpoints
                             if (val != null && maskedCols.Contains(name))
                             {
                                 var rule = metadata.ColumnMaskingRules.TryGetValue(name, out var r) ? r : new MaskingRule { RuleType = "REDACT" };
-                                var scoped = ScopeRuleForTenant(rule, tenant.Value, null);
+                                var scoped = ScopeRuleForTenant(rule, tenant.Value, maskingProvider.DefaultHmacKeyId);
                                 val = maskingProvider.MaskValue(name, val, scoped);
                             }
                             rowDict[name] = val;
@@ -544,7 +544,7 @@ public static class TableStreamEndpoints
                             if (val != null && maskedCols.Contains(name))
                             {
                                 var rule = metadata.ColumnMaskingRules.TryGetValue(name, out var r) ? r : new MaskingRule { RuleType = "REDACT" };
-                                var scoped = ScopeRuleForTenant(rule, tenant.Value, null);
+                                var scoped = ScopeRuleForTenant(rule, tenant.Value, maskingProvider.DefaultHmacKeyId);
                                 val = maskingProvider.MaskValue(name, val, scoped);
                             }
 

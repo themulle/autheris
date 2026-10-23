@@ -123,6 +123,12 @@ public sealed class OlapStagingService(
                     rejected.Message,
                     isDev ? rejected.Message : null,
                     ErrorCode: rejected.Code);
+            case TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException:
+                logger.LogWarning("OLAP request rejected: required filter column missing.");
+                return new OlapStagingOutcome(
+                    400,
+                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing),
+                    ErrorCode: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing);
             case GatewayForbiddenException:
                 logger.Warning(ex, "OLAP read denied by the governed pipeline. ({Code})", "OLAP_ACCESS_DENIED");
                 return new OlapStagingOutcome(403, "Access denied.", ErrorCode: "OLAP_ACCESS_DENIED");
@@ -642,6 +648,17 @@ public sealed class OlapStagingService(
             return (null, new Denial(new OlapStagingOutcome(
                 403,
                 isDev ? $"Access denied to table '{meta.Identifier}': {string.Join("; ", decision.DeniedReasons)}" : $"Access denied to table '{rawTableName}'.")));
+        }
+
+        // MISC-03: the rule that GraphQL/WebSQL/streams enforce also holds for OLAP staging. The client SQL runs after staging, so it never
+        // counts; only the tenant column, the typed row policy and whole identifiers of the decision's row filter do.
+        try
+        {
+            Autheris.Application.Data.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientFilterColumns: null, tenantColumnCounts: true);
+        }
+        catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException ex)
+        {
+            return (null, new Denial(MapException(ex, isDev)));
         }
 
         bool canUseConnector = connectorRegistry.TryGetConnectorForTable(meta.Identifier, out var connector) &&

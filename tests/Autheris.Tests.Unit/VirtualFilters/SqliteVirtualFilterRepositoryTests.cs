@@ -133,4 +133,64 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
         await Repository.ApplyAsync(new VirtualFilterChangeSet());
         (await Repository.GetGenerationAsync()).ShouldBe(start);
     }
+
+    [Fact]
+    public async Task Apply_StaleGeneration_ThrowsConflict()
+    {
+        // PERS-13: a change computed from an older snapshot is refused and nothing is written.
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        var stale = (await Repository.LoadSnapshotAsync()).Generation;
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter() with { Id = Guid.NewGuid(), ValidToColumn = "crane.date_of_delivery" }] });
+        var before = await Repository.LoadSnapshotAsync();
+
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => Repository.ApplyAsync(new VirtualFilterChangeSet
+        {
+            ExpectedGeneration = stale,
+            DeleteFilters = [(Tenant, VirtualFilterModelTests.DavidFilter().Name)]
+        }));
+
+        var after = await Repository.LoadSnapshotAsync();
+        after.Generation.ShouldBe(before.Generation);
+        after.Filters.Count.ShouldBe(before.Filters.Count);
+    }
+
+    [Fact]
+    public async Task Apply_CurrentGeneration_SucceedsAndIncrementsOnce()
+    {
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        var current = await Repository.LoadSnapshotAsync();
+
+        await Repository.ApplyAsync(new VirtualFilterChangeSet
+        {
+            ExpectedGeneration = current.Generation,
+            DeleteFilters = [(Tenant, VirtualFilterModelTests.DavidFilter().Name)]
+        });
+
+        var after = await Repository.LoadSnapshotAsync();
+        after.Generation.ShouldBe(current.Generation + 1);
+        after.Filters.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ConcurrentApproveAndSave_SecondFails_ApprovedDefinitionKept()
+    {
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        var read = await Repository.LoadSnapshotAsync();
+        var original = read.Filters.Single();
+
+        // Reviewer A saves a changed definition first; reviewer B still holds the older snapshot.
+        await Repository.ApplyAsync(new VirtualFilterChangeSet
+        {
+            ExpectedGeneration = read.Generation,
+            SaveFilters = [original with { ValidToColumn = "crane.date_of_delivery" }]
+        });
+
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => Repository.ApplyAsync(new VirtualFilterChangeSet
+        {
+            ExpectedGeneration = read.Generation,
+            SaveFilters = [original with { ValidToColumn = null }]
+        }));
+
+        (await Repository.LoadSnapshotAsync()).Filters.Single().ValidToColumn.ShouldBe("crane.date_of_delivery");
+    }
 }

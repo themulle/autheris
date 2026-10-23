@@ -61,6 +61,19 @@ public sealed class TrinoColumnTypeTests
     }
 
     [Fact]
+    public void Map_TimeSpanOutsideTimeOfDay_IsSentAsFullDurationText()
+    {
+        var interval = TrinoColumnTypes.Map(new SqlResultColumn("c", typeof(TimeSpan)), [new TimeSpan(3, 4, 0, 0), TimeSpan.FromMinutes(-30)]);
+        interval.Name.ShouldBe("varchar");
+        TrinoColumnTypes.Encode(new TimeSpan(3, 4, 0, 0), interval).ShouldBe("3.04:00:00");
+        TrinoColumnTypes.Encode(TimeSpan.FromMinutes(-30), interval).ShouldBe("-00:30:00");
+
+        var timeOfDay = TrinoColumnTypes.Map(new SqlResultColumn("c", typeof(TimeSpan)), [new TimeSpan(4, 0, 0)]);
+        timeOfDay.Name.ShouldBe("time(3)");
+        TrinoColumnTypes.Encode(new TimeSpan(4, 0, 0), timeOfDay).ShouldBe("04:00:00.000");
+    }
+
+    [Fact]
     public void Encode_FollowsTrinoWireFormat()
     {
         var ts = TrinoColumnTypes.Map(new SqlResultColumn("c", typeof(DateTime)), []);

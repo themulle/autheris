@@ -7,6 +7,7 @@ using Autheris.Domain.Model;
 using Microsoft.Data.Sqlite;
 using Shouldly;
 using Xunit;
+using BinaryOperator = TrinoSqlEngine.Ast.Nodes.BinaryOperator;
 
 namespace Autheris.Tests.Unit.GraphQL;
 
@@ -72,18 +73,16 @@ public sealed class TreeSqlCompilerTests : IDisposable
     };
 
     private static Dictionary<TableIdentifier, TreeTableAccess> Access(
-        string? articlesRowFilter = null,
-        IReadOnlyDictionary<string, object?>? articlesRowFilterParameters = null,
-        string? authorsRowFilter = null,
-        IReadOnlyDictionary<string, object?>? authorsRowFilterParameters = null,
+        IRowPolicy? articlesRowFilter = null,
+        IRowPolicy? authorsRowFilter = null,
         string? tenant = null)
     {
-        var authorsDecision = TableAccessDecision.Allowed(Authors,
+        var authorsDecision = TypedTreeRowPolicy.Allowed(Authors,
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["tenant_id"] = ColumnAccessLevel.Deny },
-            authorsRowFilter, hasUnconstrainedColumnAllow: true, authorsRowFilterParameters);
-        var articlesDecision = TableAccessDecision.Allowed(Articles,
+            authorsRowFilter);
+        var articlesDecision = TypedTreeRowPolicy.Allowed(Articles,
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["secret"] = ColumnAccessLevel.Deny },
-            articlesRowFilter, hasUnconstrainedColumnAllow: true, articlesRowFilterParameters);
+            articlesRowFilter);
         return new Dictionary<TableIdentifier, TreeTableAccess>
         {
             [Authors] = new(AuthorsMeta(), authorsDecision, tenant == null ? null : "tenant_id", tenant),
@@ -116,7 +115,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             Limit = 2
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, Access(articlesRowFilter: "\"published\" = 1"), DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, Access(articlesRowFilter: TypedTreeRowPolicy.Int("published", BinaryOperator.Equal, 1)), DatabaseDialect.Sqlite);
         var result = Execute(compiled);
 
         result.GetArrayLength().ShouldBe(2);
@@ -247,7 +246,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         };
 
         var withAuthor = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite));
-        var hiddenAuthor = Execute(TreeSqlCompiler.Compile(root, Access(authorsRowFilter: "\"id\" <> 1"), DatabaseDialect.Sqlite));
+        var hiddenAuthor = Execute(TreeSqlCompiler.Compile(root, Access(authorsRowFilter: TypedTreeRowPolicy.Int("id", BinaryOperator.NotEqual, 1)), DatabaseDialect.Sqlite));
 
         withAuthor[0].GetProperty("author").GetProperty("name").GetString().ShouldBe("Ann");
         hiddenAuthor[0].GetProperty("author").ValueKind.ShouldBe(JsonValueKind.Null);
@@ -271,7 +270,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         var root = new TreeQueryNode(Authors, ["id"]) { OrderBy = [new TreeOrder("id")] };
 
         var result = Execute(TreeSqlCompiler.Compile(root,
-            Access(authorsRowFilter: "\"rating\" = @rf_min", authorsRowFilterParameters: new Dictionary<string, object?> { ["@rf_min"] = 5L }),
+            Access(authorsRowFilter: TypedTreeRowPolicy.Int("rating", BinaryOperator.Equal, 5)),
             DatabaseDialect.Sqlite));
 
         result.EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe(new[] { 1, 4 }, ignoreOrder: false);
@@ -288,8 +287,8 @@ public sealed class TreeSqlCompilerTests : IDisposable
             Relations = [ArticlesOf(new TreeQueryNode(Articles, ["id"]) { OrderBy = [new TreeOrder("id")] })]
         };
         var access = Access(
-            authorsRowFilter: "\"rating\" = @rf", authorsRowFilterParameters: new Dictionary<string, object?> { ["@rf"] = 5L },
-            articlesRowFilter: "\"published\" = @rf", articlesRowFilterParameters: new Dictionary<string, object?> { ["@rf"] = 1L });
+            authorsRowFilter: TypedTreeRowPolicy.Int("rating", BinaryOperator.Equal, 5),
+            articlesRowFilter: TypedTreeRowPolicy.Int("published", BinaryOperator.Equal, 1));
 
         var result = Execute(TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
 

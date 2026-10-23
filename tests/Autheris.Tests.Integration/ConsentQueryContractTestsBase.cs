@@ -361,6 +361,35 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Expiring_ExcludesAlreadyExpired()
+    {
+        // PERS-04: an expired consent is never returned (and never re-ticketed), on every provider.
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var expired = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-ExpA", null, TenantA, ConsentEffect.Allow, -200, -1));
+        var expiring = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-ExpB", null, TenantA, ConsentEffect.Allow, -20, 5));
+
+        var result = await Repo.GetExpiringConsentsAsync(seed.Now.AddDays(30));
+
+        result.ShouldNotContain(c => c.Id == expired.Id);
+        result.ShouldContain(c => c.Id == expiring.Id);
+    }
+
+    [Fact]
+    public async Task Expiring_RespectsMaxResults()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim1", null, TenantA, ConsentEffect.Allow, -20, 3));
+        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim2", null, TenantA, ConsentEffect.Allow, -20, 4));
+        await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-Lim3", null, TenantA, ConsentEffect.Allow, -20, 5));
+
+        var result = await Repo.GetExpiringConsentsAsync(seed.Now.AddDays(30), maxResults: 2);
+
+        result.Count.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task SEC_SC_16_ConsentPage_WalksTheTenantOnce_FiltersAndFailsClosedWithoutTenant()
     {
         if (!Available) return;

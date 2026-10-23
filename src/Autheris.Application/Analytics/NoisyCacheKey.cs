@@ -65,15 +65,16 @@ internal static class NoisyCacheKey
         TenantId tenantId, Sid userSid, AggregationQuery query, string decisionFingerprint,
         int limit = 100, int minGroupSize = 5, SmallGroupStrategy strategy = SmallGroupStrategy.Suppress, string? utcDay = null) =>
         Build(tenantId, userSid, query.Table, query.GroupBy ?? [], query.Aggregates ?? [], query.Where, query.OrderBy,
-            limit, minGroupSize, strategy, utcDay ?? "2026-10-18", decisionFingerprint);
+            limit, minGroupSize, strategy, utcDay ?? "2026-10-18", decisionFingerprint, query.TimeBuckets);
 
     public static string Build(
         TenantId tenantId, Sid userSid, TableIdentifier table, IReadOnlyList<string> groupBy,
         IReadOnlyList<AggregateSelection> aggregates, TableFilterClause? where, IReadOnlyList<TableOrderBy>? orderBy,
-        int limit, int minGroupSize, SmallGroupStrategy strategy, string utcDay, string decisionFingerprint)
+        int limit, int minGroupSize, SmallGroupStrategy strategy, string utcDay, string decisionFingerprint,
+        IReadOnlyList<TimeBucketSpecification>? timeBuckets = null)
     {
         var w = new CanonicalWriter();
-        w.Add("noisy-key-v1");
+        w.Add("noisy-key-v2");
         w.Add(tenantId.Value);
         w.Add(userSid.Value);
         w.Add(table.Domain);
@@ -101,6 +102,22 @@ internal static class NoisyCacheKey
         {
             w.Add(o.Column);
             w.Add(o.Descending ? "D" : "A");
+        }
+
+        // MISC-07: time buckets change the grouping; a null list is distinct from an empty one and from any non-empty one.
+        if (timeBuckets is null)
+        {
+            w.Add((string?)null);
+        }
+        else
+        {
+            w.Add(timeBuckets.Count);
+            foreach (var bucket in timeBuckets)
+            {
+                w.Add(bucket.Column);
+                w.Add(bucket.Interval.ToString());
+                w.Add(bucket.TimeZone);
+            }
         }
 
         w.Add(limit);

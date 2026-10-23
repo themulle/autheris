@@ -674,7 +674,17 @@ public sealed class Query
                 .Build());
         }
 
-        return await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays, callerContext, ct);
+        try
+        {
+            return await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays, callerContext, ct);
+        }
+        catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode(Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode)
+                .SetMessage(ex.Message)
+                .Build());
+        }
     }
 
     public async Task<string> ExportGdprDataDisclosureReportPdfBase64Async(
@@ -783,19 +793,28 @@ public sealed class FinanceQuery
         var (rows, decision) = await executionService.ExecuteTableQueryAsync(principal, parentTableId, first, 0, ct);
         Query.PropagateCdnCacheFlags(httpContextAccessor?.HttpContext, decision);
 
-        List<InvoiceRecord> invoices = [];
-        foreach (var r in rows)
-        {
-            invoices.Add(new InvoiceRecord
-            {
-                Id = r.TryGetValue("id", out var id) && id != null ? id.ToString()! : Guid.NewGuid().ToString(),
-                Amount = r.TryGetValue("amount", out var amt) && amt is decimal d ? d : 1500.00m,
-                Vendor = r.TryGetValue("name", out var n) && n != null ? n.ToString()! : "Vendor Alpha",
-                Email = r.TryGetValue("email", out var em) ? em?.ToString() : null
-            });
-        }
-        return invoices;
+        return rows.Select(MapInvoice).ToList();
     }
+
+    /// <summary>
+    /// GQL-02: maps a result row without inventing data. Masked, denied or unparsable values become <c>null</c>;
+    /// ids are never synthesized.
+    /// </summary>
+    public static InvoiceRecord MapInvoice(IReadOnlyDictionary<string, object?> r) => new()
+    {
+        Id = r.TryGetValue("id", out var id) && id != null ? id.ToString() : null,
+        Amount = r.TryGetValue("amount", out var amt) ? ToDecimalOrNull(amt) : null,
+        Vendor = r.TryGetValue("name", out var n) && n != null ? n.ToString() : null,
+        Email = r.TryGetValue("email", out var em) ? em?.ToString() : null
+    };
+
+    private static decimal? ToDecimalOrNull(object? value) => value switch
+    {
+        decimal d => d,
+        double or float or long or int or short or byte => Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture),
+        string s when decimal.TryParse(s, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+        _ => null
+    };
 }
 
 public sealed class HrQuery

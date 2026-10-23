@@ -418,11 +418,10 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.CallerAttributeStore", "caller attribute registry tables of the governance store (REQ-GOV-129): fixed statements with bound values, no client text"),
         ("Autheris.Application.Identity.Attributes.AttributeTableProvider", "caller attribute lookup (REQ-GOV-129 A-5.2): the statement is built by AttributeTableQuery from validated identifiers (^[A-Za-z_][A-Za-z0-9_]{0,127}$, quoted per dialect) with the subject, tenant and issuer bound; no client text"),
         ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
-        ("Autheris.Application.Sql.Federation.CoLocation.CoLocationVerificationService", "co-location verification (Issue #132, SEC-DATA132-05): fixed 'SELECT @@SERVERNAME' verification statement on SQL Server connection, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
         ("Autheris.Extensions.Cdc.CustomQuery.CustomQueryPollerService", "CDC custom query poller service (Issue #101, Issue #210): reads watermark batches using configured poller queries, bound parameters, no client text"),
-        ("Autheris.Application.Data.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched lookup statements with bound parameters over child data sources, no client text"),
+        ("Autheris.Application.Data.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched key lookups over child data sources (VF-02): quoted catalog identifiers, explicit projection, bound key values and bound tenant predicate, session initialized per read, no client text"),
         ("Autheris.Application.Caching.TableCache.Governance.GovernedTableCacheExecutionService", "Governed table cache execution service (BL-04, REQ-DATA-BL04): executes governed SELECT queries with AST tenant pushdown and bound parameters over embedded cache store; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.DuckDbPersistentTableCacheStore", "DuckDB persistent table cache store (BL-04, REQ-DATA-BL04): executes internal staging, swapping, insertion and drop statements on embedded cache database with bound parameters; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.InMemoryTableCacheStore", "In-memory table cache store (BL-04, REQ-DATA-BL04): executes internal memory-table DDL and mutation statements with bound parameters; no client text"),
@@ -704,7 +703,7 @@ public sealed class CutoverArchitectureTests
     {
         var graph = BuildCallGraph(ProductionAssemblies);
         graph.Targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
-            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler" }, ignoreOrder: true);
+            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler", "Autheris.Application.Sql.Tree.TreeSecuredSourceBuilder" }, ignoreOrder: true);
         graph.Targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
             .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor", "Autheris.Application.Olap.DuckDbOlapEngine" }, ignoreOrder: true);
     }

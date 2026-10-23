@@ -93,7 +93,8 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
             Parameters: validatedParams,
             DataSourceName: endpoint.DataSource,
             RowLimit: SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions(), _options.Value.RowLimits?.SqlEndpoints),
-            Transport: SqlTransports.SqlEndpoints);
+            Transport: SqlTransports.SqlEndpoints,
+            TimeoutSeconds: endpoint.TimeoutSeconds);
 
         _logger?.LogDebug("Executing declarative SQL endpoint '{EndpointName}' with {ParamCount} parameters.", endpointName, endpoint.Parameters.Count);
 

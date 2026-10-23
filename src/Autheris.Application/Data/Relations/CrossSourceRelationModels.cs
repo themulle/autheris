@@ -17,7 +17,6 @@ public static class CrossSourceRelationErrorCodes
     public const string CrossSourceRelationKeyNotClear = "CROSS_SOURCE_RELATION_KEY_NOT_CLEAR";
     public const string RelationKeyMasked = "RELATION_KEY_MASKED";
     public const string CrossSourceKeyMasked = "CROSS_SOURCE_KEY_MASKED";
-    public const string CrossSourceFilterKeySetExceeded = "CROSS_SOURCE_FILTER_KEY_SET_EXCEEDED";
     public const string CrossSourceSortNotSupported = "CROSS_SOURCE_SORT_NOT_SUPPORTED";
 }
 
@@ -40,9 +39,6 @@ public sealed record CrossSourceRelationOptions
     /// <summary>Maximum number of distinct join keys per <c>WHERE key IN (...)</c> batch query on the target source.</summary>
     public int MaxBatchSize { get; init; } = 500;
 
-    /// <summary>Maximum number of distinct join keys returned by a cross-source filter pre-query before failing closed.</summary>
-    public int MaxCrossSourceFilterKeys { get; init; } = 1000;
-
     /// <summary>Maximum total nested rows materialized across all batches in a single relation resolution.</summary>
     public int MaxNestedRows { get; init; } = 5000;
 
@@ -62,7 +58,6 @@ public sealed record CrossSourceRelationRequest(
     ClaimsPrincipal User,
     TenantId TenantId,
     IReadOnlyList<string>? SelectColumns = null,
-    string? TargetFilterSql = null,
     IReadOnlyList<string>? SortByTargetColumns = null,
     int? PerParentLimit = null,
     string? ClientIp = null,
@@ -80,22 +75,13 @@ public sealed record CrossSourceRelationResult(
     double QueryCost);
 
 /// <summary>
-/// Request to resolve matching join keys on a target data source for bounded filter pushdown into the parent source (#75).
+/// VF-02: one governed key read of a cross-source relation. Every column name is checked against <see cref="Target"/> by the reader;
+/// <see cref="Tenant"/> and <see cref="UserSid"/> initialize the database session and the tenant predicate of a tenanted target.
 /// </summary>
-public sealed record CrossSourceFilterPushdownRequest(
-    TableRelation Relation,
-    string TargetFilterSql,
-    IReadOnlyList<string> ReferencedTargetColumns,
-    ClaimsPrincipal User,
-    TenantId TenantId,
-    string? ClientIp = null,
-    TableAccessDecision? ParentDecision = null);
-
-/// <summary>
-/// Result of a bounded cross-source filter key resolution (#75).
-/// </summary>
-public sealed record CrossSourceFilterKeySetResult(
-    IReadOnlyList<CompositeKey> MatchingKeys,
-    string? ParentWherePredicateSql,
-    IReadOnlyDictionary<string, object?> Parameters,
-    double QueryCost);
+public sealed record CrossSourceKeyReadRequest(
+    TableMetadata Target,
+    IReadOnlyList<string> JoinKeyColumns,
+    IReadOnlyList<string> ProjectedColumns,
+    IReadOnlyList<CompositeKey> Keys,
+    TenantId Tenant,
+    string? UserSid);

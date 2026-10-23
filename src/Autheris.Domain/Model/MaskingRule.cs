@@ -81,7 +81,7 @@ public sealed record MaskingRule
             }
         }
 
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
+        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (!string.IsNullOrWhiteSpace(defaultKeyId) ? defaultKeyId : "default");
         return rule with
         {
             RuleType = "HMAC_SHA256",

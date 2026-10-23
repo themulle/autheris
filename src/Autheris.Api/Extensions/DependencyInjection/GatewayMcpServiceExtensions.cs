@@ -26,7 +26,7 @@ public static class GatewayMcpServiceExtensions
             sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocIngestor>(),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Docs.Services.FileSystemUniversalDocStore>>()));
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
-        services.AddSingleton<ISemanticMcpCompiler, SemanticMcpCompiler>();
+        services.AddScoped<ISemanticMcpCompiler, SemanticMcpCompiler>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
         services.AddSingleton<IGraphQlCatalogMap, CatalogGraphQlMap>();
         services.AddTransient<IPreFlightQuerySimulator, PreFlightQuerySimulator>();

@@ -28,7 +28,8 @@ public readonly record struct BoundParameter(
     string? ColumnType = null,
     int? ListIndex = null,
     int? ListCount = null,
-    bool ZoneArgument = false)
+    bool ZoneArgument = false,
+    bool EscapeLikePattern = false)
 {
     // INV-16: bound values never appear in logs, spans or exception text.
     public override string ToString() => $"BoundParameter {{ Marker = {Marker}, Type = {Type}, Origin = {Origin} }}";

@@ -54,6 +54,13 @@ public static class PushabilityMatrix
     }
 
     /// <summary>
+    /// SQLA-10: a string range comparison (<c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c>, <c>&gt;=</c>, BETWEEN) on SQL Server uses the column collation, which
+    /// can differ from DuckDB; it needs the <c>exact_compare</c> hint like a negative filter. Same rule, own name for the call sites.
+    /// </summary>
+    public static bool IsRangeFilterSafeForDialect(DatabaseDialect dialect, TableColumn? column) =>
+        IsNegativeFilterSafeForDialect(dialect, column);
+
+    /// <summary>
     /// SEC-DATA122-04: ANSI Three-Valued Logic safety check.
     /// NOT IN (...) containing any NULL literal or parameter evaluates to UNKNOWN (falsy) in SQL.
     /// </summary>

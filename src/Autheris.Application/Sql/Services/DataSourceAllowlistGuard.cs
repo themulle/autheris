@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Services;
 
 using System;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
@@ -38,6 +39,29 @@ public static class DataSourceAllowlistGuard
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// SQLA-07: the data source a read of <paramref name="metadata"/> really uses: the catalog <c>SourceName</c> (else the identifier domain), mapped through
+    /// <c>DataSourceMappings</c>. Single source of truth for every allowlist check that has table metadata; may be empty (the guard then denies).
+    /// </summary>
+    public static string EffectiveDataSource(WebSqlOptions webSqlOptions, TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(webSqlOptions);
+        ArgumentNullException.ThrowIfNull(metadata);
+        string source = !string.IsNullOrWhiteSpace(metadata.Table?.SourceName) ? metadata.Table!.SourceName! : metadata.Identifier.Domain;
+        return MapDataSource(webSqlOptions, source);
+    }
+
+    /// <summary>Maps a data source name through <c>DataSourceMappings</c> (an unmapped or empty mapping keeps the name).</summary>
+    public static string MapDataSource(WebSqlOptions webSqlOptions, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        return webSqlOptions.DataSourceMappings != null &&
+               webSqlOptions.DataSourceMappings.TryGetValue(name, out var mapped) &&
+               !string.IsNullOrWhiteSpace(mapped)
+            ? mapped
+            : name;
     }
 
     /// <summary>

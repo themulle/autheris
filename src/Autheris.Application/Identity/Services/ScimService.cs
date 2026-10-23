@@ -157,6 +157,7 @@ public sealed class ScimService : IScimService
             tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_DELETE", ct).ConfigureAwait(false);
 
         await _repository.DeleteUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        _roleCache?.Invalidate(realmId, userKey);
         return true;
     }
 
@@ -321,7 +322,13 @@ public sealed class ScimService : IScimService
             return false;
         }
 
-        await _repository.DeleteGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
+        // PERS-07: the memberships are deleted with the group; every former member's cached role resolution is invalidated.
+        var formerMembers = await _repository.DeleteGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
+        foreach (var memberKey in formerMembers)
+        {
+            _roleCache?.Invalidate(realmId, memberKey);
+        }
+
         return true;
     }
 

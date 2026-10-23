@@ -338,7 +338,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
                 BasicAuth = new BasicAuthOptions
                 {
                     Enabled = true,
-                    Users = [new BasicAuthUserConfig { Username = "admin", Password = "$argon2id$v=19$m=65536,t=3,p=1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNo" }]
+                    Users = [new BasicAuthUserConfig { Username = "admin", Password = "$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }]
                 }
             }
         };

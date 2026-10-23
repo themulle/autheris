@@ -189,4 +189,15 @@ public sealed class SqlLoginCircuitBreakerTests
             }
         }
     }
+
+    [Theory]
+    [InlineData("pw\nOTHER:admin:secret")]
+    [InlineData("pw\rx")]
+    public void MaterializeNtlmUserFile_PasswordWithNewline_IsRejected_PERS15(string password)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "autheris-ntlm-" + Guid.NewGuid().ToString("N"));
+
+        Should.Throw<ArgumentException>(() => SqlServerWindowsAuthConfigurator.MaterializeNtlmUserFile("DOM", "svc", password, dir));
+        Directory.Exists(dir).ShouldBeFalse();
+    }
 }

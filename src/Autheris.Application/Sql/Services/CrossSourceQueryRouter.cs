@@ -122,6 +122,20 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
                 throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
             }
 
+            // SQLA-07: the read uses the catalog SourceName, so the allowlists are checked on that effective source too (the domain check above
+            // stays); an empty effective source is denied. A "default" fallback is only valid when the catalog SourceName names the requested domain
+            // (same rule as the single-catalog rewriter).
+            string effectiveSource = DataSourceAllowlistGuard.EffectiveDataSource(_webSqlOptions, meta);
+            if (string.Equals(tableId.Domain, "default", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(domain, "default", StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(meta.Table.SourceName) ||
+                 !string.Equals(effectiveSource, DataSourceAllowlistGuard.MapDataSource(_webSqlOptions, domain), StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
+            }
+
+            DataSourceAllowlistGuard.EnsureAllowed(_webSqlOptions, tenantId, effectiveSource);
+
             // Check unsupported types (Phase 0 / 2)
             if (meta.Table.DataSourceType is DataSourceType.HttpPlugin or DataSourceType.LakehouseIceberg or DataSourceType.LakehouseDelta)
             {

@@ -252,13 +252,13 @@ public sealed class GovernedAggregationAndMetricsTests
                 OrdersTableId,
                 GroupBy: ["discount_secret"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Count)],
-                PreEvaluatedDecision: decision),
+                PreEvaluatedDecision: decision.AsPdpEvaluated()),
             "where" => new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["category"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Count)],
                 Where: TableFilterClause.FromTrinoText("discount_secret > 10", ["discount_secret"]),
-                PreEvaluatedDecision: decision),
+                PreEvaluatedDecision: decision.AsPdpEvaluated()),
             _ => new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["category"],
@@ -268,7 +268,7 @@ public sealed class GovernedAggregationAndMetricsTests
                         Enum.Parse<AggregateFunction>(clauseKind, ignoreCase: true),
                         "discount_secret")
                 ],
-                PreEvaluatedDecision: decision)
+                PreEvaluatedDecision: decision.AsPdpEvaluated())
         };
 
         // Act & Assert
@@ -305,13 +305,13 @@ public sealed class GovernedAggregationAndMetricsTests
                 OrdersTableId,
                 GroupBy: ["partner.name"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Count)],
-                PreEvaluatedDecision: decision)
+                PreEvaluatedDecision: decision.AsPdpEvaluated())
             : new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["category"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Count)],
                 Where: TableFilterClause.FromTrinoText("partner.name = 'x'", Array.Empty<string>()),
-                PreEvaluatedDecision: decision);
+                PreEvaluatedDecision: decision.AsPdpEvaluated());
 
         // WP-0 (F-4): an unknown column and a denied column are one indistinguishable error.
         await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(principal, query));
@@ -387,7 +387,7 @@ public sealed class GovernedAggregationAndMetricsTests
             OrdersTableId,
             GroupBy: ["department"],
             Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount")],
-            PreEvaluatedDecision: decision);
+            PreEvaluatedDecision: decision.AsPdpEvaluated());
 
         var result = await service.ExecuteAggregationAsync(principal, unfilteredQuery);
 
@@ -410,7 +410,7 @@ public sealed class GovernedAggregationAndMetricsTests
             GroupBy: ["department"],
             Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount")],
             Where: TableFilterClause.FromTrinoText("status = 'VIP'", ["status"]),
-            PreEvaluatedDecision: decision);
+            PreEvaluatedDecision: decision.AsPdpEvaluated());
 
         var narrowedResult = await service.ExecuteAggregationAsync(principal, narrowedQuery);
         narrowedResult.Suppressed.ShouldBeTrue();
@@ -471,7 +471,7 @@ public sealed class GovernedAggregationAndMetricsTests
                 GroupBy: ["department"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount")],
                 SmallGroupStrategyOverride: SmallGroupStrategy.MergeIntoOther,
-                PreEvaluatedDecision: decision));
+                PreEvaluatedDecision: decision.AsPdpEvaluated()));
 
         mergedResult.MergedIntoOther.ShouldBeTrue();
         mergedResult.Suppressed.ShouldBeFalse();
@@ -493,7 +493,7 @@ public sealed class GovernedAggregationAndMetricsTests
                 Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount")],
                 Where: TableFilterClause.FromTrinoText("department <> 'HR'", ["department"]),
                 SmallGroupStrategyOverride: SmallGroupStrategy.MergeIntoOther,
-                PreEvaluatedDecision: decision));
+                PreEvaluatedDecision: decision.AsPdpEvaluated()));
 
         suppressedOtherResult.MergedIntoOther.ShouldBeFalse();
         suppressedOtherResult.Suppressed.ShouldBeTrue();
@@ -688,8 +688,18 @@ public sealed class GovernedAggregationAndMetricsTests
         var resolutionService = new ConsentResolutionService(new RowFilterSqlBuilder());
         var auditRepo = new CapturingAuditLogRepository();
 
+        // MISC-06: metric consents are only evaluated inside the PDP pipeline (the metric-consent branch needs a PDP).
+        var pdp = new Autheris.Application.Policy.UnifiedPolicyDecisionPoint(
+            consentRepo,
+            resolutionService,
+            new Autheris.Application.Policy.Services.NullConsentCacheService(),
+            Options.Create(new GatewayOptions()),
+            NullLogger<Autheris.Application.Policy.UnifiedPolicyDecisionPoint>.Instance,
+            Substitute.For<IPolicyEnforcementService>());
+
         var aggService = new GovernedAggregationService(
             metadataRepository: metaRepo,
+            pdp: pdp,
             consentRepository: consentRepo,
             resolutionService: resolutionService,
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
@@ -702,6 +712,7 @@ public sealed class GovernedAggregationAndMetricsTests
             metadataRepository: metaRepo,
             consentRepository: consentRepo,
             resolutionService: resolutionService,
+            pdp: pdp,
             auditLogRepository: auditRepo);
 
         // 1. Execute governed metric query with metric-scoped consent, RLS (region = 'EU'), and MinGroupSize = 5

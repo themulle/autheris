@@ -475,6 +475,9 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         return base.GetBinaryOperatorString(op);
     }
 
+    // SQLE-05: Concat is emitted as '+', so it has the precedence of Add (the base ranks '||' below it).
+    protected override int GetPrecedence(BinaryOperator op) => op == BinaryOperator.Concat ? 5 : base.GetPrecedence(op);
+
     public override void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         // T-SQL has no array type: ARRAY[...] and x[i] would be emitted as bracketed identifiers.

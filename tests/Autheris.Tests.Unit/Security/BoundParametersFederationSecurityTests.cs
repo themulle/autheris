@@ -133,6 +133,7 @@ public sealed class BoundParametersFederationSecurityTests
             ordersMeta,
             Unrestricted(ordersMeta),
             contract,
+            Array.Empty<Autheris.Application.Sql.Services.ResolvedSourceTable>(),
             out var paramAudit);
 
         pushed.ShouldNotBeNull();
@@ -171,6 +172,7 @@ public sealed class BoundParametersFederationSecurityTests
             ordersMeta,
             Unrestricted(ordersMeta),
             contract,
+            Array.Empty<Autheris.Application.Sql.Services.ResolvedSourceTable>(),
             out _);
 
         pushed.ShouldBeNull();
@@ -333,6 +335,7 @@ public sealed class BoundParametersFederationSecurityTests
             ordersMeta,
             decision,
             contract,
+            Array.Empty<Autheris.Application.Sql.Services.ResolvedSourceTable>(),
             out _);
 
         // SEC-FED-19: Parameterized predicates on masked/HMAC/denied columns MUST NEVER be pushed

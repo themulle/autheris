@@ -56,7 +56,7 @@ public sealed class ConvertTimeZoneFederationTests
         };
 
         return (sql, (_, state, statement) => new CrossSourcePlanner(Engine, state).Plan(
-            sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, null, statement));
+            sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant, null, statement));
     }
 
     private static SqlStatement Parse(string sql)

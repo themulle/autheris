@@ -446,7 +446,12 @@ public sealed partial class GovernedSqlExecutor
                 requireTransaction: true,
                 ct: ct).ConfigureAwait(false);
 
+            // SQLA-05: a per-request timeout (declarative endpoint header) can only tighten the global WebSQL timeout.
             int commandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
+            if (request.TimeoutSeconds is > 0)
+            {
+                commandTimeout = Math.Min(commandTimeout, request.TimeoutSeconds.Value);
+            }
 
             if (dmlContext.IsDml)
             {

@@ -6,6 +6,12 @@ using Autheris.Tests.SqlCompilerGate.Model;
 /// <summary>The text of a producer plus the values it binds (marker keyed, for example <c>@__gql_rls_0</c>). Legacy text binds nothing.</summary>
 public sealed record FilterText(string Sql, IReadOnlyDictionary<string, object?> Parameters)
 {
+    /// <summary>
+    /// The typed predicate the text was rendered from (SQLA-06). The tree compiler only splices a typed, subquery-free row policy and denies
+    /// text-only filters, so the tree consumer builds its policy from this and refuses (fail closed) when it is absent.
+    /// </summary>
+    public TrinoSqlEngine.Governance.PolicyPredicate? Typed { get; init; }
+
     public static readonly IReadOnlyDictionary<string, object?> NoParameters = new Dictionary<string, object?>();
 
     public static FilterText Plain(string sql) => new(sql, NoParameters);

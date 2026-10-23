@@ -14,6 +14,8 @@ namespace Autheris.Application.Services;
 
 public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
 {
+    public string? DefaultHmacKeyId => _options.HmacKeyId;
+
     private readonly DataMaskingOptions _options;
     private readonly byte[] _hmacKey;
 

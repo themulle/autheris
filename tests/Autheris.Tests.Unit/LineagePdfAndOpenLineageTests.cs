@@ -30,11 +30,20 @@ public class LineagePdfAndOpenLineageTests
         }
     }
 
+    // NSubstitute cannot proxy the ReadOnlySpan parameters of IAuditAnchorSigner (invalid program), so a plain stub is used.
+    private sealed class FixedSigner(string signature) : IAuditAnchorSigner
+    {
+        public string Sign(ReadOnlySpan<byte> data) => signature;
+
+        public bool Verify(ReadOnlySpan<byte> data, string sig) => sig == signature;
+    }
+
     [Fact]
     public void GdprAuditReportPdfExporter_ShouldGenerateValidPdfDocumentAndAuditSeal()
     {
         // Arrange
-        var exporter = new GdprAuditReportPdfExporter();
+        var signer = new FixedSigner("abc123sig");
+        var exporter = new GdprAuditReportPdfExporter(signer);
         var report = new GdprDisclosureReport(
             TargetTable: "finance.dbo.salary",
             SubjectSid: "S-1-5-21-employee-42",
@@ -63,14 +72,14 @@ public class LineagePdfAndOpenLineageTests
         result.ContentType.ShouldBe("application/pdf");
         result.FileName.ShouldStartWith("GDPR_Art15_Disclosure_");
         result.FileName.ShouldEndWith(".pdf");
-        result.Sha256AuditSeal.ShouldNotBeNullOrWhiteSpace();
+        result.AuditSeal.ShouldBe("hmac-sha256:abc123sig");
         result.DocumentBytes.Length.ShouldBeGreaterThan(100);
 
         // Validate PDF 1.4 header and trailer
         var pdfAscii = Encoding.ASCII.GetString(result.DocumentBytes);
         pdfAscii.ShouldStartWith("%PDF-1.4");
         pdfAscii.ShouldContain("%%EOF");
-        pdfAscii.ShouldContain(result.Sha256AuditSeal);
+        pdfAscii.ShouldContain(result.AuditSeal!);
     }
 
     [Fact]

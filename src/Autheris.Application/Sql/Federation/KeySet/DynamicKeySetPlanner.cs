@@ -53,11 +53,25 @@ public static class DynamicKeySetPlanner
             return Array.Empty<KeySetJoinPlan>();
         }
 
+        // SQLA-11: the preserved side of an outer join must never be the driven (restricted) table. Fail closed when the sides cannot be computed.
+        if (statement is not SelectStatement { Body: QuerySpecification querySpec })
+        {
+            return Array.Empty<KeySetJoinPlan>();
+        }
+
+        var sides = OuterJoinSides.Compute(querySpec);
+
         // Find candidate cross-source equi-join pairs
         var candidateJoins = new List<(ResolvedSourceTable Table1, string Column1, ResolvedSourceTable Table2, string Column2)>();
 
         foreach (var conjunct in conjuncts)
         {
+            // SQLA-11: an equality of an outer-join ON clause is not an inner equi-join: restricting either side by it changes the result.
+            if (conjunct.Origin is ConjunctOrigin.LeftOuterJoinOn or ConjunctOrigin.RightOuterJoinOn)
+            {
+                continue;
+            }
+
             var expr = conjunct.Expression;
             while (expr is ParenthesizedExpression paren)
             {
@@ -160,6 +174,13 @@ public static class DynamicKeySetPlanner
             {
                 // Driven table must be a SQL data source
                 if (driven.Metadata.Table.DataSourceType != DataSourceType.Sql)
+                {
+                    continue;
+                }
+
+                // SQLA-11: a table that an outer join preserves needs all of its rows; an unidentifiable table is treated as preserved.
+                var drivenLeaf = sides.FindLeaf(driven.Target);
+                if (drivenLeaf is null || sides.IsPreserved(drivenLeaf))
                 {
                     continue;
                 }

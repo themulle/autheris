@@ -449,6 +449,18 @@ public sealed partial class CasbinEnforcementService
                     }
                     else
                     {
+                        // GOV-05: the tenant-less short format is only valid in tenant files. In the global file it would be read
+                        // positionally (tenant = obj, obj = act, act = eft) and a DENY would silently turn into a rule matching nothing.
+                        if (specifiedTenant != null && (specifiedTenant.Contains('.') || specifiedTenant.Contains(':')))
+                        {
+                            throw new FormatException($"Casbin policy line {lineNumber}: tenant field '{specifiedTenant}' looks like an object; the short format 'p, sub, obj, act, eft' is not allowed in the global policy file.");
+                        }
+
+                        if (parts.Count > 4 && (string.Equals(parts[4], "allow", StringComparison.OrdinalIgnoreCase) || string.Equals(parts[4], "deny", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            throw new FormatException($"Casbin policy line {lineNumber}: action field must not be an effect keyword; check the field order 'p, sub, tenant, obj, act, subRule, eft'.");
+                        }
+
                         ruleTenant = specifiedTenant ?? "*";
                     }
 
