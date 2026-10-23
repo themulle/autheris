@@ -10,10 +10,14 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Issue #80: Generates deterministic, profile-conforming synthetic sample rows without reading real data from the source.
-/// Never draws from real values of sensitive or masked columns.
+/// Never draws from real values of sensitive or masked columns. Fail-closed: without a column access level map (or for a
+/// column missing from it) no column is emitted; predefined values are emitted only for <c>Clear</c> columns.
 /// </summary>
 public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? profileService = null) : ISyntheticSampleRowGenerator
 {
+    /// <summary>Maximum number of predefined synthetic sample rows accepted from any source (dbt meta, curation PUT).</summary>
+    public const int MaxPredefinedSampleRows = 100;
+
     private readonly IColumnValueProfileService _profileService = profileService ?? new ColumnValueProfileService();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<IReadOnlyDictionary<string, object?>>> _registeredSamples = new(StringComparer.OrdinalIgnoreCase);
 
@@ -57,19 +61,19 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
 
                 foreach (var column in table.Columns)
                 {
-                    var level = ColumnAccessLevel.Clear;
-                    if (columnAccessLevels != null && columnAccessLevels.TryGetValue(column.ColumnName, out var explicitLevel))
-                    {
-                        level = explicitLevel;
-                    }
-
+                    var level = ResolveLevel(table, column, columnAccessLevels);
                     if (level == ColumnAccessLevel.Deny)
                     {
                         continue;
                     }
 
-                    // Requirement: Sample data should not be masked.
-                    // Kept in plain text for non-denied columns.
+                    if (level == ColumnAccessLevel.Mask)
+                    {
+                        // MCP-03: predefined values are emitted only for Clear columns.
+                        row[column.ColumnName] = GenerateSafeSensitivePlaceholder(column, rows.Count);
+                        continue;
+                    }
+
                     object? val = null;
                     if (preRow.TryGetValue(column.ColumnName, out var exactVal))
                     {
@@ -116,16 +120,7 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
 
             foreach (var column in table.Columns)
             {
-                var level = ColumnAccessLevel.Clear;
-                if (columnAccessLevels != null && columnAccessLevels.TryGetValue(column.ColumnName, out var explicitLevel))
-                {
-                    level = explicitLevel;
-                }
-                else if (column.IsSensitive || (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(column.ColumnName)))
-                {
-                    level = ColumnAccessLevel.Mask;
-                }
-
+                var level = ResolveLevel(table, column, columnAccessLevels);
                 if (level == ColumnAccessLevel.Deny)
                 {
                     continue;
@@ -148,6 +143,30 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Fail-closed level resolution shared by predefined and generated rows (MCP-03). A null map means every column
+    /// is denied, a missing entry is denied, and an explicit <see cref="ColumnAccessLevel.Clear"/> on a sensitive or
+    /// masked column is downgraded to <see cref="ColumnAccessLevel.Mask"/>.
+    /// </summary>
+    private static ColumnAccessLevel ResolveLevel(
+        TableMetadata table,
+        TableColumn column,
+        IReadOnlyDictionary<string, ColumnAccessLevel>? columnAccessLevels)
+    {
+        if (columnAccessLevels is null || !columnAccessLevels.TryGetValue(column.ColumnName, out var level))
+        {
+            return ColumnAccessLevel.Deny;
+        }
+
+        if (level == ColumnAccessLevel.Clear &&
+            (column.IsSensitive || (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(column.ColumnName))))
+        {
+            return ColumnAccessLevel.Mask;
+        }
+
+        return level;
     }
 
     private static object? GenerateColumnValue(

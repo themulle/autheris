@@ -231,6 +231,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5050
+      # MISC-05: this service has no memory limit, so the OLAP memory budget is set explicitly (fail-closed validator).
+      Gateway__DuckDbOlap__MemoryBudgetBytes: "2147483648"
       # SR-L-02: required outside Development; the benchmark clients reach the gateway by service name or loopback.
       Gateway__Hosting__AllowedHosts__0: gqlgateway-api
       Gateway__Hosting__AllowedHosts__1: localhost

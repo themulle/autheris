@@ -94,4 +94,27 @@ public sealed class CursorPaginationHelperTests
         var items = new List<string> { "A", "B" };
         Should.Throw<ArgumentOutOfRangeException>(() => CursorPaginationHelper.ApplyPagination(items, first: -5, after: null));
     }
+
+    [Fact]
+    public void ApplyPagination_AfterIntMaxValue_ReturnsEmptyPageInsteadOfThrowing_MISC15()
+    {
+        var cursor = CursorPaginationHelper.EncodeCursor(int.MaxValue);
+
+        var result = CursorPaginationHelper.ApplyPagination(Enumerable.Range(0, 5).ToList(), first: 10, after: cursor);
+
+        result.Nodes.ShouldBeEmpty();
+        result.TotalCount.ShouldBe(5);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("+1")]
+    [InlineData("1 ")]
+    [InlineData("2147483648")]
+    public void DecodeCursor_NonCanonicalOffset_IsRejected_MISC15(string offset)
+    {
+        var cursor = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("cursor:offset:" + offset));
+
+        Should.Throw<ArgumentException>(() => CursorPaginationHelper.DecodeCursor(cursor));
+    }
 }

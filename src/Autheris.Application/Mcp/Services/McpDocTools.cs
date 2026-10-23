@@ -138,7 +138,7 @@ public static class McpDocTools
               "properties": {
                 "query": { "type": "string", "description": "Search terms (keywords, topics, error codes or concepts)." },
                 "category": { "type": "string", "enum": ["Runbook", "Architecture", "Adr", "ApiEndpoint", "ErrorCode", "Configuration", "Guide"], "description": "Optional category filter." },
-                "limit": { "type": "integer", "description": "Maximum number of matching sections to return (default 5)." }
+                "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Maximum number of matching sections to return (default 5, at most 20)." }
               }
             }
             """,
@@ -220,6 +220,9 @@ public static class McpDocTools
             TargetGraphQLOperation: DepositDocumentation);
     }
 
+    /// <summary>Upper bound of the <c>limit</c> argument of <c>search_docs</c> (MCP-08).</summary>
+    public const int MaxSearchLimit = 20;
+
     public static async Task<string> ExecuteSearchDocsAsync(
         IDocSearchService searchService,
         string? argumentsJson,
@@ -247,9 +250,15 @@ public static class McpDocTools
                 {
                     category = parsedCat;
                 }
-                if (root.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number && l.TryGetInt32(out var parsedLimit))
+                if (root.TryGetProperty("limit", out var l) && l.ValueKind != JsonValueKind.Null)
                 {
-                    limit = parsedLimit;
+                    // MCP-08: only an integer is accepted, and it is clamped to 1..MaxSearchLimit.
+                    if (l.ValueKind != JsonValueKind.Number || !l.TryGetInt32(out var parsedLimit))
+                    {
+                        return JsonSerializer.Serialize(new { error = "Argument 'limit' must be an integer." });
+                    }
+
+                    limit = Math.Clamp(parsedLimit, 1, MaxSearchLimit);
                 }
             }
             catch (JsonException)

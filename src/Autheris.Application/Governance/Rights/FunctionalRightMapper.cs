@@ -75,11 +75,17 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         var resultSet = new HashSet<FunctionalRight>(rights);
 
         // Map legacy GatewayRole claims to equivalent FunctionalRights for backward compatibility
-        foreach (var role in principal.GetUserRoles())
+        // GOV-13: only exact global role names (no "tenant:Role" prefix stripping) and never in a customer realm, where the customer ceiling applies.
+        var callerRealm = _realmRegistry.GetRealm(realmId);
+        var callerInCustomerRealm = callerRealm != null && (callerRealm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer);
+        if (!callerInCustomerRealm)
         {
-            if (GatewayRoleExtensions.TryParseRole(role, out var gatewayRole))
+            foreach (var role in principal.GetUserRoles())
             {
-                resultSet.Add(new FunctionalRight(gatewayRole.ToString()));
+                if (GatewayRoleExtensions.TryParseGlobalRole(role, out var gatewayRole))
+                {
+                    resultSet.Add(new FunctionalRight(gatewayRole.ToString()));
+                }
             }
         }
 

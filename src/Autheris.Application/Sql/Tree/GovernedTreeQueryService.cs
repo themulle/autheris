@@ -92,6 +92,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ICrossSourceRelationResolver? _crossSourceResolver;
     private readonly ITableRelationRepository? _relationRepository;
     private readonly IConsumerUsageRecorder? _usageRecorder;
+    private readonly TreeSecuredSourceBuilder? _securedSourceBuilder;
 
     // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId, tenant, and user to isolate operations and prevent cross-tenant/cross-principal leak.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OperationMemo> _memos = new();
@@ -110,8 +111,10 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         ICrossSourceRelationResolver? crossSourceResolver = null,
         ITableRelationRepository? relationRepository = null,
-        IConsumerUsageRecorder? usageRecorder = null)
+        IConsumerUsageRecorder? usageRecorder = null,
+        TreeSecuredSourceBuilder? securedSourceBuilder = null)
     {
+        _securedSourceBuilder = securedSourceBuilder;
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
@@ -451,6 +454,28 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             treeAccess[tableId] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value);
         }
 
+        // Policy-independent client errors (required filter columns, invalid filters) are reported with their stable code before any
+        // row-policy support check, and without touching the policy (SQLA-06 follow-up ordering).
+        TreeSqlCompiler.Validate(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
+
+        foreach (var tableId in sameSourceTables)
+        {
+            var access = resolved[tableId];
+            if (TreeSqlCompiler.RowPolicyRequiresEnginePipeline(access.Decision)
+                && access.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy
+                && _securedSourceBuilder is not null)
+            {
+                // SQLA-06 follow-up: built per request from this table's own decision and tenant (C2, C9). F6: the tenant is the root's tenant.
+                if (access.Tenant != rootAccess.Tenant)
+                {
+                    throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
+                }
+
+                var securedSource = await _securedSourceBuilder.BuildAsync(access, sourceName, dialect, ct).ConfigureAwait(false);
+                treeAccess[tableId] = treeAccess[tableId] with { SecuredSource = securedSource };
+            }
+        }
+
         var compiled = TreeSqlCompiler.Compile(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
 
         // 4. Bounded concurrency per user and root table, then one round trip.
@@ -524,11 +549,14 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     if (_relationRepository != null)
                     {
                         var parentRels = await _relationRepository.GetRelationsForTableAsync(root.Table, ct).ConfigureAwait(false);
+                        // TREE-01: a forward match is used as stored; a relation stored in the reverse direction is inverted so that the
+                        // resolver always reads the child table of the navigation.
                         relModel = parentRels.FirstOrDefault(r =>
-                            (r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
-                             r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns)) ||
-                            (r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
-                             r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns)));
+                            r.ParentTableIdentifier.Equals(root.Table) && r.ChildTableIdentifier.Equals(cr.Child.Table) &&
+                            r.JoinKeysParent.SequenceEqual(cr.ParentColumns) && r.JoinKeysChild.SequenceEqual(cr.ChildColumns));
+                        relModel ??= parentRels.FirstOrDefault(r =>
+                            r.ParentTableIdentifier.Equals(cr.Child.Table) && r.ChildTableIdentifier.Equals(root.Table) &&
+                            r.JoinKeysParent.SequenceEqual(cr.ChildColumns) && r.JoinKeysChild.SequenceEqual(cr.ParentColumns))?.Inverted();
                     }
 
                     relModel ??= new TableRelation
@@ -541,6 +569,11 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                         Cardinality = cr.IsList ? RelationCardinality.OneToMany : RelationCardinality.ManyToOne,
                         AllowCrossDataSource = true
                     };
+
+                    if (!relModel.ParentTableIdentifier.Equals(root.Table) || !relModel.ChildTableIdentifier.Equals(cr.Child.Table))
+                    {
+                        throw new InvalidOperationException("The cross-source relation does not connect the parent table with the requested child table.");
+                    }
 
                     var crossRequest = new CrossSourceRelationRequest(
                         Relation: relModel,
@@ -836,23 +869,39 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
     private static void ValidateTreeBudget(TreeQueryNode root, int maxBudget)
     {
-        long estimatedRows = EstimateRows(root, 1, isList: true);
+        long estimatedRows = EstimateRows(root, 1, isList: true, maxBudget);
         if (estimatedRows > maxBudget)
         {
             throw new GatewayInvalidQueryException($"The query exceeds the aggregate row budget of {maxBudget} across nested relations (estimated worst-case rows: {estimatedRows}).");
         }
     }
 
-    private static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList = true)
+    /// <summary>
+    /// SQLA-01: worst-case row estimate with saturating arithmetic (an overflow yields <see cref="long.MaxValue"/>, which is always over budget)
+    /// that stops descending as soon as the running total exceeds <paramref name="cap"/>. A non-positive limit counts as the maximum page size.
+    /// </summary>
+    internal static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList, long cap)
     {
-        long currentRows = isList ? parentMultiplier * Math.Max(1, node.Limit) : parentMultiplier;
+        long limit = node.Limit < 1 ? TreeSqlCompiler.MaxLimit : node.Limit;
+        long currentRows = isList ? SaturatingMultiply(parentMultiplier, limit) : parentMultiplier;
         long total = currentRows;
         foreach (var rel in node.Relations)
         {
-            total += EstimateRows(rel.Child, currentRows, rel.IsList);
+            if (total > cap)
+            {
+                break;
+            }
+
+            total = SaturatingAdd(total, EstimateRows(rel.Child, currentRows, rel.IsList, cap));
         }
+
         return total;
     }
+
+    private static long SaturatingMultiply(long a, long b) =>
+        a <= 0 || b <= 0 ? 0 : a > long.MaxValue / b ? long.MaxValue : a * b;
+
+    private static long SaturatingAdd(long a, long b) => a > long.MaxValue - b ? long.MaxValue : a + b;
 
     /// <summary>
     /// R-GQL-10: Microsoft.Data.Sqlite binds DateTimeOffset as "yyyy-MM-dd HH:mm:ss+00:00" (space). ISO-8601 text values

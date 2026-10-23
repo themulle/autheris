@@ -38,6 +38,15 @@ public record TableAccessDecision(
     /// </summary>
     public Autheris.Domain.Model.RestrictedScopeClearance? ScopeClearance { get; init; }
 
+    /// <summary>MISC-06: why a denied decision was denied. <see cref="TableAccessDenialKind.None"/> on an allowed decision.</summary>
+    public TableAccessDenialKind DenialKind { get; init; }
+
+    /// <summary>
+    /// MISC-06: set only by the unified policy decision point after the full pipeline ran (ReBAC, contract, Casbin, hooks, virtual filters,
+    /// profiles). A pre-evaluated decision without this marker is never trusted by the aggregation service.
+    /// </summary>
+    internal bool EvaluatedByPdp { get; init; }
+
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
     public IRowPolicy? MandatoryRowPolicy { get; init; }
 
@@ -462,7 +471,7 @@ public record TableAccessDecision(
         && !clearance.Permits(columnName);
 
     public static TableAccessDecision Denied(TableIdentifier table, params string[] reasons) =>
-        new(table, false, new Dictionary<string, ColumnAccessLevel>(), null, reasons, false);
+        new(table, false, new Dictionary<string, ColumnAccessLevel>(), null, reasons, false) { DenialKind = TableAccessDenialKind.Policy };
 
     public static TableAccessDecision Allowed(
         TableIdentifier table,

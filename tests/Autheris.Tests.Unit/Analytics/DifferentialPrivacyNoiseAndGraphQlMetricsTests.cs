@@ -57,6 +57,10 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
         };
     }
 
+    /// <summary>MISC-06: the consent bypass is gone; these tests inject a PDP-evaluated decision that allows the table (catalog-sensitive columns stay masked).</summary>
+    private static TableAccessDecision AllowAll() =>
+        TableAccessDecision.Allowed(OrdersTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true).AsPdpEvaluated();
+
     private static ClaimsPrincipal CreatePrincipal(string sid, string tenant = "tenant-a", string role = "Analyst") =>
         new(new ClaimsIdentity(
         [
@@ -162,7 +166,7 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
                 new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount"),
                 new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount")
             ],
-            BypassTableConsent: true);
+            PreEvaluatedDecision: AllowAll());
 
         var result = await service.ExecuteAggregationAsync(principal, query);
 
@@ -218,7 +222,7 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
             Table: OrdersTableId,
             GroupBy: ["region"],
             Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount")],
-            BypassTableConsent: true);
+            PreEvaluatedDecision: AllowAll());
 
         var first = await service.ExecuteAggregationAsync(principal, query);
         var second = await service.ExecuteAggregationAsync(principal, query);
@@ -269,7 +273,7 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
             GroupBy: ["region"],
             Aggregates: [new AggregateSelection(AggregateFunction.Count)],
             Limit: 10,
-            BypassTableConsent: true));
+            PreEvaluatedDecision: AllowAll()));
 
         await Should.ThrowAsync<PrivacyBudgetExhaustedException>(() =>
             service.ExecuteAggregationAsync(principal, new AggregationQuery(
@@ -277,7 +281,7 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
                 GroupBy: ["region"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Count)],
                 Limit: 20,
-                BypassTableConsent: true)));
+                PreEvaluatedDecision: AllowAll())));
     }
 
     [Fact]
@@ -313,7 +317,7 @@ public sealed class DifferentialPrivacyNoiseAndGraphQlMetricsTests
             Table: OrdersTableId,
             GroupBy: ["region"],
             Aggregates: [new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount")],
-            BypassTableConsent: true);
+            PreEvaluatedDecision: AllowAll());
 
         await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
             service.ExecuteAggregationAsync(principal, query));

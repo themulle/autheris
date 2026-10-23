@@ -82,6 +82,20 @@ internal static class VirtualFilterStore
 
         var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection;
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        // PERS-13: compare-and-set of the generation first; it also takes the write lock before any definition is touched.
+        if (changes.ExpectedGeneration is { } expectedGeneration)
+        {
+            await using var cas = Command(connection, tx,
+                "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1 AND generation = @expected;",
+                [("@expected", expectedGeneration)]);
+            if (await cas.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw new VirtualFilterConflictException("The virtual filter configuration changed since it was read; reload it and repeat the change.");
+            }
+        }
+
         foreach (var filter in changes.SaveFilters)
         {
             await ExecuteAsync(connection, tx, sqlServer ? @"
@@ -153,7 +167,11 @@ internal static class VirtualFilterStore
                 [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
         }
 
-        await ExecuteAsync(connection, tx, "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1;", [], ct).ConfigureAwait(false);
+        if (changes.ExpectedGeneration is null)
+        {
+            await ExecuteAsync(connection, tx, "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1;", [], ct).ConfigureAwait(false);
+        }
+
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 

@@ -121,6 +121,33 @@ public class SupplyChainAndDeploymentSecurityTests
     }
 
     [Fact]
+    public void DockerPublish_DispatchRestrictedToMain_RejectsReleaseTags_AndUsesProtectedEnvironment()
+    {
+        var root = FindRepoRoot();
+        root.ShouldNotBeNull("Repo root not found");
+        var publish = File.ReadAllText(Path.Combine(root!, ".github", "workflows", "docker-publish.yml"));
+
+        // MISC-01: a manual dispatch only runs from main, never overwrites release tags or :latest, and runs in a protected environment.
+        publish.ShouldContain("github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'");
+        publish.ShouldContain("is reserved for tag-triggered releases");
+        publish.ShouldContain("environment: release");
+    }
+
+    [Fact]
+    public void Release_Workflow_PinsCheckoutToTag_FailsIfReleaseExists_AndUsesProtectedEnvironment()
+    {
+        var root = FindRepoRoot();
+        root.ShouldNotBeNull("Repo root not found");
+        var release = File.ReadAllText(Path.Combine(root!, ".github", "workflows", "release.yml"));
+
+        // MISC-02: build the tagged commit, never replace an existing release, publish in a protected environment.
+        release.ShouldContain("ref: refs/tags/${{ github.event.inputs.tag || github.ref_name }}");
+        release.ShouldContain("gh release view");
+        release.ShouldContain("overwrite_files: false");
+        release.ShouldContain("environment: release");
+    }
+
+    [Fact]
     public void Release_Workflow_SeparatesBuildAndRelease_AndAttestsProvenance()
     {
         var root = FindRepoRoot();

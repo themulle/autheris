@@ -28,6 +28,48 @@ public sealed partial class CasbinEnforcementService
         string.Equals(ruleSub, subject, StringComparison.OrdinalIgnoreCase) ||
         (roleClosure.TryGetValue(subject, out var roles) && roles.Contains(ruleSub));
 
+    /// <summary>
+    /// GOV-11: table-level allow/deny of a draft rule set with the production matcher (deny first, <see cref="MatchObjectPattern"/>,
+    /// role closure, fail-closed sub_rules), so what-if results equal what enforcement would decide for the same rules.
+    /// </summary>
+    internal static bool EvaluateDraftAccess(
+        IEnumerable<CasbinRuleMetadata> rules,
+        IEnumerable<GroupingRule> grouping,
+        SecurityEvaluationContext context,
+        string tableStr,
+        string requestedAction)
+    {
+        var closure = BuildRoleClosure(grouping);
+        var subjects = new List<string> { context.UserSid.Value };
+        if (context.GroupSids != null)
+        {
+            subjects.AddRange(context.GroupSids.Select(g => g.Value));
+        }
+
+        var ruleList = rules.ToList();
+        foreach (var rule in ruleList)
+        {
+            if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
+                (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
+                !MatchObjectPattern(rule.Obj, tableStr, failClosedMatch: true) ||
+                !IsActionMatch(rule.Act, requestedAction, isDeny: true))
+            {
+                continue;
+            }
+
+            foreach (var subject in subjects)
+            {
+                if (IsSubjectMatch(rule.Sub, subject, closure) &&
+                    EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) != false)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return ruleList.Any(rule => IsAllowRuleMatch(rule, context, subjects, tableStr, requestedAction, closure));
+    }
+
     private static bool IsAllowRuleMatch(
         CasbinRuleMetadata rule,
         SecurityEvaluationContext context,

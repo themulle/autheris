@@ -18,5 +18,9 @@ public interface IRecertificationRepository
     Task<IReadOnlyList<RecertificationItem>> GetItemsAsync(TenantId tenantId, string campaignId, CancellationToken ct = default);
     Task<RecertificationItem?> GetItemByIdAsync(TenantId tenantId, string campaignId, string itemId, CancellationToken ct = default);
     Task<IReadOnlyList<RecertificationItem>> GetPendingItemsPastDeadlineAsync(DateTimeOffset deadlineUtc, CancellationToken ct = default);
-    Task UpdateItemDecisionAsync(TenantId tenantId, string campaignId, string itemId, RecertDecision decision, string decisionBy, string? comments = null, CancellationToken ct = default);
+    /// <summary>
+    /// Compare-and-set: updates the decision only while the stored decision equals <paramref name="expected"/>.
+    /// Returns false (record unchanged) when the item is missing or was decided concurrently.
+    /// </summary>
+    Task<bool> TryUpdateItemDecisionAsync(TenantId tenantId, string campaignId, string itemId, RecertDecision expected, RecertDecision decision, string decisionBy, string? comments = null, CancellationToken ct = default);
 }

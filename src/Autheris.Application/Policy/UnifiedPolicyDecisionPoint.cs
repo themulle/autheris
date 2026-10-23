@@ -75,11 +75,20 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         _rebacEvaluator = rebacEvaluator;
     }
 
+    public Task<TableAccessDecision> EvaluateAccessAsync(
+        TableIdentifier table,
+        TableMetadata metadata,
+        SecurityPrincipalContext securityContext,
+        IReadOnlyList<string>? requestedColumns,
+        CancellationToken ct) =>
+        EvaluateAccessAsync(table, metadata, securityContext, requestedColumns, supplementalConsents: null, ct);
+
     public async Task<TableAccessDecision> EvaluateAccessAsync(
         TableIdentifier table,
         TableMetadata metadata,
         SecurityPrincipalContext securityContext,
         IReadOnlyList<string>? requestedColumns,
+        IReadOnlyList<Consent>? supplementalConsents,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -98,7 +107,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             RequestedColumns: requestedColumns,
             Rebac: RebacEnforcement.WhenEnabled,
             // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).
-            ClientIp: securityContext.ClientIp ?? IPAddress.None);
+            ClientIp: securityContext.ClientIp ?? IPAddress.None,
+            SupplementalConsents: supplementalConsents);
 
         var decision = await new TableAccessPolicy(
             _consentRepository,
@@ -122,6 +132,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             _logger.LogWarning("Access to table {Table} denied for subject {Subject}: {Reasons}", table, securityContext.UserSid.Value, string.Join("; ", decision.DeniedReasons));
         }
 
-        return decision;
+        // MISC-06: provenance marker; only a decision that went through this full pipeline may be handed on pre-evaluated.
+        return decision with { EvaluatedByPdp = true };
     }
 }

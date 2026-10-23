@@ -156,6 +156,37 @@
         "PostgreSql"
       ],
       "class": "ast-stricter",
+      "reason": "SqlCompileNotSupportedException",
+      "statements": [
+        "5730f78b10ab",
+        "582b869c9140",
+        "d119663e7737"
+      ],
+      "justification": "Intended tightening (SEC-277-03, #277): WITH RECURSIVE is rejected unless the opt-in WebSql:AllowRecursiveCte is enabled (default off, the gate compiles with it off). Legacy returned only the anchor rows of the recursion (see the legacy defect entry for the same statements); the AST compiler refuses the statement with the fixed 'WITH RECURSIVE' construct message instead of returning silently wrong rows.",
+      "issue": "#277",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
+      "reason": "SqlCompileNotSupportedException",
+      "statements": [
+        "0942d51d3edb",
+        "1d4b9bbee7e4"
+      ],
+      "justification": "Intended tightening (SEC-277-04, CR-ADG-32, #277): a CTE of a WITH without RECURSIVE that names itself in its own body (WITH orders AS (SELECT ... FROM orders)) is rejected with the fixed 'CTE self-reference without WITH RECURSIVE' message (typed SqlCompileNotSupportedException, identical for existing, forbidden and unknown names) instead of the former SecurityException shadowing rejection; legacy ran it against the physical table.",
+      "issue": "#277",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
       "reason": "UnfilteredDmlException",
       "statements": [
         "0e88eb7c54c9",
@@ -250,6 +281,20 @@
       ],
       "justification": "Intended tightening (SEC-ADG-16 item 2): rejects comparing an integer literal (tenant_id = 42) against the NVARCHAR catalog column tenant_id, preventing implicit text-to-int conversion and data-dependent conversion error side channels.",
       "issue": "#91",
+      "reviewer": "@themulle",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "SqlCompileNotSupportedException",
+      "statements": [
+        "648cbdff45d7"
+      ],
+      "justification": "Intended tightening (SEC-277-04, CR-ADG-32, #277): a self-referencing CTE without the RECURSIVE keyword (WITH chain AS (... FROM chain ...)) is rejected with the fixed 'CTE self-reference without WITH RECURSIVE' message; SQL Server would otherwise recurse silently while the gateway would treat the name as a secured physical scan. Previously reported as SecurityException (CTE case/quoting mismatch), now the typed SqlCompileNotSupportedException.",
+      "issue": "#277",
       "reviewer": "@themulle",
       "approval": "approved"
     },

@@ -54,7 +54,7 @@ public sealed class CrossSourcePlannerVirtualFilterTests
     private static CrossSourcePlan Plan(string sql, IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? plans)
     {
         var (metadata, tables, decisions) = Setup(sql);
-        return new CrossSourcePlanner(Engine).Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, plans);
+        return new CrossSourcePlanner(Engine).Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant, plans);
     }
 
     private const string Join = "SELECT c.id, o.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id";
@@ -103,7 +103,7 @@ public sealed class CrossSourcePlannerVirtualFilterTests
         var onlyCrm = new List<ResolvedSourceTable> { new(metadata.ReferencedTables[0], Crm.Identifier, Crm, "crm_api") };
 
         Should.Throw<System.Exception>(() =>
-            new CrossSourcePlanner(Engine).Plan(sql, metadata, onlyCrm, decisions, new CrossSourceOptions { Enabled = true }));
+            new CrossSourcePlanner(Engine).Plan(sql, metadata, onlyCrm, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant));
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class CrossSourcePlannerVirtualFilterTests
 
         // The raw SQL is deliberately different (and invalid for these tables); the supplied statement wins.
         var plan = new CrossSourcePlanner(Engine).Plan(
-            "SELECT 1", metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, null, statement);
+            "SELECT 1", metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant, null, statement);
 
         plan.GeneratedDuckDbSql.ShouldContain("s0");
         plan.GeneratedDuckDbSql.ShouldContain("s1");

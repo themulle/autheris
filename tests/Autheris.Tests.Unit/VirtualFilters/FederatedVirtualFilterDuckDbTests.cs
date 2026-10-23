@@ -61,7 +61,7 @@ public sealed class FederatedVirtualFilterDuckDbTests
             [webMeta.Identifier] = TableAccessDecision.Allowed(webMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
-        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [resolvedTable], decisions, new CrossSourceOptions { Enabled = true });
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [resolvedTable], decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.StagingRequests.Count.ShouldBe(1);
         plan.StagingNames.Count.ShouldBe(1);

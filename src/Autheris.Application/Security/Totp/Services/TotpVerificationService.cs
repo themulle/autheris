@@ -99,7 +99,9 @@ public sealed class TotpVerificationService : ITotpVerificationService
         // SR-M-05: per-user failed-attempt throttle; a locked-out user is rejected without evaluating the code.
         var normalizedSid = userSid.Trim().ToLowerInvariant();
         var failureKey = $"totp:fail:{normalizedSid}";
-        if (await GetFailureCountAsync(failureKey, ct).ConfigureAwait(false) >= _maxFailedAttempts)
+        // GOV-09: the attempt is reserved (incremented) before the code is evaluated, so parallel guesses cannot
+        // all pass the check before any failure is recorded. A reservation above the limit is rejected unevaluated.
+        if (!await TryReserveAttemptAsync(failureKey, ct).ConfigureAwait(false))
         {
             return false;
         }
@@ -107,9 +109,11 @@ public sealed class TotpVerificationService : ITotpVerificationService
         var now = DateTimeOffset.UtcNow;
         if (!TryMatchStep(secretBase32, totpCode, toleranceSteps: 1, now, out var matchedStep))
         {
-            await RegisterFailureAsync(failureKey, ct).ConfigureAwait(false);
             return false;
         }
+
+        // Successful verification clears the reserved attempts.
+        await ResetFailuresAsync(failureKey, ct).ConfigureAwait(false);
 
         // Replay key: totp:consumed:{userSid}:{epochStep}
         var replayKey = $"totp:consumed:{normalizedSid}:{matchedStep}";
@@ -117,8 +121,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
         // SR-M-04: atomic consume (a single winner per userSid/time step, in-process and cluster-wide)
         if (!await TryConsumeStepAsync(replayKey, now, ct).ConfigureAwait(false))
         {
-            await RegisterFailureAsync(failureKey, ct).ConfigureAwait(false);
-            return false; // Replay attempt rejected
+            return false; // Replay attempt rejected; the reserved attempt stays counted
         }
 
         await ResetFailuresAsync(failureKey, ct).ConfigureAwait(false);
@@ -160,60 +163,40 @@ public sealed class TotpVerificationService : ITotpVerificationService
         }
     }
 
-    private async Task<long> GetFailureCountAsync(string failureKey, CancellationToken ct)
+    private async Task<bool> TryReserveAttemptAsync(string failureKey, CancellationToken ct)
     {
-        long local;
-        lock (_failureLock)
-        {
-            local = _localFailures.TryGetValue(failureKey, out var entry) && entry.WindowEnd > DateTimeOffset.UtcNow
-                ? entry.Count
-                : 0;
-        }
-
         if (_clusterState == null)
         {
-            return local;
+            lock (_failureLock)
+            {
+                var now = DateTimeOffset.UtcNow;
+                int count;
+                if (_localFailures.TryGetValue(failureKey, out var entry) && entry.WindowEnd > now)
+                {
+                    count = entry.Count + 1;
+                    _localFailures[failureKey] = (count, entry.WindowEnd);
+                }
+                else
+                {
+                    count = 1;
+                    _localFailures[failureKey] = (1, now.Add(_lockoutWindow));
+                }
+
+                return count <= _maxFailedAttempts;
+            }
         }
 
         try
         {
-            // Delta 0 reads the shared counter atomically without changing it.
-            var remote = await _clusterState.IncrementAsync(failureKey, 0, _lockoutWindow, ct).ConfigureAwait(false);
-            return Math.Max(local, remote ?? 0);
+            var count = await _clusterState.IncrementAsync(failureKey, 1, _lockoutWindow, ct).ConfigureAwait(false);
+
+            // GOV-09: null means the shared store is unavailable; with a cluster store configured the throttle
+            // fails closed instead of degrading to per-node counters.
+            return count is { } value && value <= _maxFailedAttempts;
         }
         catch (ClusterStateUnavailableException)
         {
-            // Lockout throttling keeps the in-process counter active; the code itself is still protected by the
-            // fail-closed replay consumption above.
-            return local;
-        }
-    }
-
-    private async Task RegisterFailureAsync(string failureKey, CancellationToken ct)
-    {
-        lock (_failureLock)
-        {
-            var now = DateTimeOffset.UtcNow;
-            if (_localFailures.TryGetValue(failureKey, out var entry) && entry.WindowEnd > now)
-            {
-                _localFailures[failureKey] = (entry.Count + 1, entry.WindowEnd);
-            }
-            else
-            {
-                _localFailures[failureKey] = (1, now.Add(_lockoutWindow));
-            }
-        }
-
-        if (_clusterState != null)
-        {
-            try
-            {
-                await _clusterState.IncrementAsync(failureKey, 1, _lockoutWindow, ct).ConfigureAwait(false);
-            }
-            catch (ClusterStateUnavailableException)
-            {
-                // Local counter remains active.
-            }
+            return false;
         }
     }
 
@@ -285,14 +268,6 @@ public sealed class TotpVerificationService : ITotpVerificationService
             // RFC 6238 check SHA1 (standard default for authenticators)
             var sha1Candidate = ComputeTotp(key, step, HashAlgorithmName.SHA1, 6);
             if (FixedTimeEquals(cleanCode, sha1Candidate))
-            {
-                matchedStep = step;
-                return true;
-            }
-
-            // Also check SHA256 in case the authenticator is configured with SHA256
-            var sha256Candidate = ComputeTotp(key, step, HashAlgorithmName.SHA256, 6);
-            if (FixedTimeEquals(cleanCode, sha256Candidate))
             {
                 matchedStep = step;
                 return true;

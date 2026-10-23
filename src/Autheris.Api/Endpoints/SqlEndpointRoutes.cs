@@ -122,7 +122,7 @@ public static class SqlEndpointRoutes
                 request.Sql,
                 request.DataSource,
                 HttpMethod: request.HttpMethod ?? "GET",
-                TimeoutSeconds: request.TimeoutSeconds ?? 30);
+                TimeoutSeconds: request.TimeoutSeconds);
         }
 
         bool overwrite = string.Equals(context.Request.Query["overwrite"], "true", StringComparison.OrdinalIgnoreCase) ||

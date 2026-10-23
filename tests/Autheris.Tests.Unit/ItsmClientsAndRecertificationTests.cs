@@ -153,7 +153,7 @@ public class ItsmClientsAndRecertificationTests
             ValidTo = DateTimeOffset.UtcNow.AddDays(1) // Expires in 24 hours
         };
 
-        consentRepo.GetExpiringConsentsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        consentRepo.GetExpiringConsentsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([expiringConsent]));
 
         var workflow = new ConsentRecertificationWorkflowService(
@@ -244,7 +244,7 @@ public class ItsmClientsAndRecertificationTests
             }
         };
 
-        consentRepo.GetExpiringConsentsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        consentRepo.GetExpiringConsentsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(expiringList));
 
         outboxRepo.GetPendingMessagesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())

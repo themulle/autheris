@@ -676,21 +676,32 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             return true;
         }
 
+        // GOV-10: exact, case-insensitive matches only. A substring or generic "admin" match would honour tenant-prefixed or
+        // unrelated role values ("tenant-a:governance:admin", "admin"), which are not the simulation privilege.
         var roles = principal.GetUserRoles();
-        return roles.Contains("governance:simulate") ||
-               roles.Contains("governance:admin") ||
-               principal.IsInRole("governance:simulate") ||
-               principal.IsInRole("governance:admin") ||
-               principal.Claims.Any(c =>
-                   (string.Equals(c.Type, ClaimTypes.Role, StringComparison.OrdinalIgnoreCase) ||
+        if (roles.Any(IsSimulationPrivilegeValue) || principal.IsInRole("governance:simulate") || principal.IsInRole("governance:admin"))
+        {
+            return true;
+        }
+
+        return principal.Claims.Any(c =>
+        {
+            if (string.Equals(c.Type, "scope", StringComparison.OrdinalIgnoreCase))
+            {
+                return c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(IsSimulationPrivilegeValue);
+            }
+
+            return (string.Equals(c.Type, ClaimTypes.Role, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(c.Type, "role", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Type, "roles", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Type, "scope", StringComparison.OrdinalIgnoreCase)) &&
-                   (c.Value.Contains("governance:simulate", StringComparison.OrdinalIgnoreCase) ||
-                    c.Value.Contains("governance:admin", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Value, "GovernanceAdmin", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Value, "admin", StringComparison.OrdinalIgnoreCase)));
+                    string.Equals(c.Type, "roles", StringComparison.OrdinalIgnoreCase)) &&
+                   IsSimulationPrivilegeValue(c.Value);
+        });
     }
+
+    private static bool IsSimulationPrivilegeValue(string value) =>
+        string.Equals(value?.Trim(), "governance:simulate", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "governance:admin", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value?.Trim(), "GovernanceAdmin", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Authentication type of the identity built for a simulated target (never an identity-provider scheme).</summary>
     public const string SimulatedTargetAuthenticationType = "SimulatedTarget";
@@ -702,7 +713,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     /// <see cref="IsAdminPrincipal"/>, <see cref="Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin"/> or
     /// <see cref="HasSimulatePrivilege"/>; the service additionally never applies administrator semantics to a target.
     /// </summary>
-    public static ClaimsPrincipal CreateSimulatedTargetPrincipal(string subjectId, IEnumerable<string>? roles)
+    public static ClaimsPrincipal CreateSimulatedTargetPrincipal(string subjectId, IEnumerable<string>? roles, string? callerTenant = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
 
@@ -712,6 +723,13 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             new(ClaimTypes.NameIdentifier, trimmedSubject),
             new(ClaimTypes.Name, trimmedSubject)
         };
+
+        // GOV-10: the target is evaluated inside the caller's tenant only; without this claim it would resolve to the legacy
+        // tenant and load that tenant's consents.
+        if (!string.IsNullOrWhiteSpace(callerTenant))
+        {
+            claims.Add(new Claim("tenant_id", callerTenant.Trim()));
+        }
 
         foreach (var role in roles ?? Array.Empty<string>())
         {

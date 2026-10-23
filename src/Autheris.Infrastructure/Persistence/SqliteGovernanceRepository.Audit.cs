@@ -527,7 +527,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
                 {
                     var (entry, seq) = sequenced[offset + k];
                     cmd.Parameters.Add($"@id{k}", SqliteType.Text).Value = entry.Id.ToString();
-                    cmd.Parameters.Add($"@occ{k}", SqliteType.Text).Value = entry.OccurredAt.ToString("O");
+                    cmd.Parameters.Add($"@occ{k}", SqliteType.Text).Value = AuditTimestamp.ToStorage(entry.OccurredAt);
                     cmd.Parameters.Add($"@event{k}", SqliteType.Text).Value = entry.EventType;
                     cmd.Parameters.Add($"@actor{k}", SqliteType.Text).Value = entry.ActorSid.Value;
                     cmd.Parameters.Add($"@target{k}", SqliteType.Text).Value = entry.TargetTable;
@@ -714,7 +714,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             if (since.HasValue)
             {
                 sql.Append(" AND occurred_at >= @since");
-                cmd.Parameters.AddWithValue("@since", since.Value.ToString("O"));
+                cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since.Value));
             }
             if (tenantId.HasValue)
             {
@@ -782,7 +782,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         if (query.Since is { } since)
         {
             sql.Append(" AND occurred_at >= @since");
-            cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+            cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since));
         }
 
         if (query.BeforeSequence is { } before)
@@ -1123,8 +1123,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             {
                 cmd.CommandText = @"SELECT MIN(rowid), MAX(rowid) FROM AUDIT_LOG_ENTRIES
                                     WHERE occurred_at >= @from AND occurred_at <= @to";
-                cmd.Parameters.AddWithValue("@from", windowFrom.ToUniversalTime().ToString("O"));
-                cmd.Parameters.AddWithValue("@to", windowTo.ToUniversalTime().ToString("O"));
+                cmd.Parameters.AddWithValue("@from", AuditTimestamp.ToStorage(windowFrom));
+                cmd.Parameters.AddWithValue("@to", AuditTimestamp.ToStorage(windowTo));
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 if (!await reader.ReadAsync(ct) || reader.IsDBNull(0) || reader.IsDBNull(1))
                 {
@@ -1241,7 +1241,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             sequence,
             id,
             prevHash,
-            occurredAt,
+            occurredAt.ToUniversalTime(),
             eventType,
             actorSid,
             targetTable,
@@ -1285,8 +1285,10 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         var current = TryLoadVerifiedAnchor(out var anchorInvalid);
         if (anchorInvalid)
         {
-            // An invalid stored anchor is never overwritten by a write path; startup/verification flags it.
-            return;
+            // PERS-18: an invalid stored anchor is never overwritten, and the write path no longer succeeds silently: the chain is
+            // latched and the caller (which records the failure) refuses to acknowledge the Tier-A event.
+            FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+            throw new InvalidOperationException("The stored audit chain anchor is invalid.");
         }
 
         if (current == null || current.Sequence < anchor.Sequence)

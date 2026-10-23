@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Interfaces;
 
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
@@ -17,6 +18,7 @@ public interface IAccessPlanningService
         AdminPlanAccessRequest request,
         string adminSid,
         string? tenantId = null,
+        ClaimsPrincipal? caller = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -35,6 +37,7 @@ public interface IAccessPlanningService
         AdminApplyAccessRequest request,
         string adminSid,
         TenantId tenantId,
+        ClaimsPrincipal? caller = null,
         CancellationToken ct = default);
 
     /// <summary>

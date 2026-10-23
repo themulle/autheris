@@ -177,6 +177,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             groupByColumns = ValidateAndResolveGroupBy(query, metadata, decision);
             resolvedAggregates = ValidateAndResolveAggregates(query, metadata, decision);
             ValidateWhereClause(query.Where, metadata, decision);
+            AggregationNegationGuard.Enforce(query.Where, groupByColumns, metadata, effectiveMinGroupSize, _analyticsOptions.Privacy.RestrictNegatedFilters);
             ValidateOrderByClause(query.OrderBy, groupByColumns, resolvedAggregates, metadata, decision);
             if (_analyticsOptions.Privacy.Noise.Enabled)
             {
@@ -212,7 +213,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             var generation = await TryGetAttributeGenerationAsync(ct).ConfigureAwait(false);
             if (generation.HasValue)
             {
-                noiseCacheKey = NoisyCacheKey.Build(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay, NoisyCacheKey.Fingerprint(decision, metadata, generation.Value));
+                noiseCacheKey = NoisyCacheKey.Build(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay, NoisyCacheKey.Fingerprint(decision, metadata, generation.Value), query.TimeBuckets);
                 if (_noisyResultCache.TryGetValue(noiseCacheKey, out var cached) && string.Equals(cached.UtcDay, utcDay, StringComparison.Ordinal))
                 {
                     return cached.Result;

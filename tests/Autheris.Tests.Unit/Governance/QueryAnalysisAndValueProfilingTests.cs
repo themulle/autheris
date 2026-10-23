@@ -626,6 +626,25 @@ public sealed class QueryAnalysisAndValueProfilingTests
     // and row-filter publication policy
     // =========================================================================
 
+    // MCP-16: an unreleased high-cardinality free-text column publishes neither samples nor string min/max.
+    [Fact]
+    public async Task ColumnValueProfileService_UnreleasedHighCardinalityText_PublishesNoRealValues()
+    {
+        var profileService = new ColumnValueProfileService();
+        var column = new TableColumn { ColumnName = "last_name", DataType = "varchar" };
+        var table = CreateCatalogTable("crm", "public", "contacts", DatasetVisibility.Summary, new[] { column },
+            releaseProfileToCatalogViewers: true, estimatedRowCount: 5000);
+        await profileService.ComputeAndStoreProfileAsync(table, "last_name",
+            Enumerable.Range(1, 120).Select(i => (object?)$"Name-{i:D4}").ToList());
+
+        var profile = profileService.GetColumnProfile(table, column, ColumnAccessLevel.Clear, hasActiveRowFilters: false);
+
+        profile.Should().NotBeNull();
+        profile!.SampleValues.Should().BeNull();
+        profile.MinValue.Should().BeNull();
+        profile.MaxValue.Should().BeNull();
+    }
+
     [Fact]
     public async Task ColumnValueProfileService_EnforcesCardinalitySensitiveSmallTableAndRowFilterPolicies()
     {
@@ -638,7 +657,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 DataType = "varchar",
                 Meta = new Dictionary<string, string> { ["accepted_values"] = "[\"OPEN\",\"PAID\",\"CANCELLED\"]" }
             },
-            new TableColumn { ColumnName = "order_code", DataType = "varchar" },
+            new TableColumn { ColumnName = "order_code", DataType = "varchar", Meta = new Dictionary<string, string> { ["release_value_list"] = "true" } },
             new TableColumn { ColumnName = "amount", DataType = "decimal" },
             new TableColumn { ColumnName = "email", DataType = "varchar", IsSensitive = true }
         };

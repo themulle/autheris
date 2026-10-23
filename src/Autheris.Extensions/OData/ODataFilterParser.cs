@@ -513,6 +513,13 @@ public static class ODataFilterParser
                     {
                         return ParseFunctionCall(token.Text);
                     }
+                    if (token.Text.Contains('/'))
+                    {
+                        // EXT-19: navigation paths are not supported; never reduce them to a base-table column.
+                        throw new GatewayInvalidQueryException(
+                            $"Navigation properties are not supported in $filter ('{token.Text}').");
+                    }
+
                     return new ColumnNode(token.Text);
 
                 default:

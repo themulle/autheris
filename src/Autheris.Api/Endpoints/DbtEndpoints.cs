@@ -129,7 +129,13 @@ public static class DbtEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var user = context.User.Identity?.Name ?? context.User.GetUserSid()?.Value ?? "system_admin";
+            // EP-13: the decision is attributed to the canonical caller identity (SID), never to a display name or a placeholder.
+            var user = EndpointSecurity.GetCallerIdentity(context);
+            if (string.IsNullOrWhiteSpace(user))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             try
             {
                 var approved = await dbtService.ApproveProposalAsync(id, user, context.RequestAborted);
@@ -159,7 +165,13 @@ public static class DbtEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var user = context.User.Identity?.Name ?? context.User.GetUserSid()?.Value ?? "system_admin";
+            // EP-13: the decision is attributed to the canonical caller identity (SID), never to a display name or a placeholder.
+            var user = EndpointSecurity.GetCallerIdentity(context);
+            if (string.IsNullOrWhiteSpace(user))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             try
             {
                 var rejected = await dbtService.RejectProposalAsync(id, user, context.RequestAborted);

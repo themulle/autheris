@@ -84,7 +84,7 @@ internal sealed class AccessProfileStore(
             var first = true;
             foreach (var group in chunk.GroupBy(t => t.Type))
             {
-                sql.Append(first ? "" : " OR ").Append($"(a.subject_type = '{group.Key}' AND (a.subject_norm IS NULL OR a.subject_norm IN (");
+                sql.Append(first ? "" : " OR ").Append($"(a.subject_type = '{group.Key}' AND (a.subject_norm IN (");
                 sql.Append(string.Join(",", group.Select(t =>
                 {
                     var name = "@k" + index++;
@@ -235,7 +235,7 @@ internal sealed class AccessProfileStore(
             if (!desired.ContainsKey(key))
             {
                 var kept = existing.FirstOrDefault(e => e.SubjectType == AccessProfileSubjectType.User &&
-                                                        string.Equals(e.Subject, subject.Trim(), StringComparison.OrdinalIgnoreCase));
+                                                        ConsentSubjectFilter.Normalize(e.Subject.Trim()) == key.Item2);
                 desired[key] = kept is null
                     ? new AccessProfileAssignment
                     {
@@ -367,8 +367,9 @@ internal sealed class AccessProfileStore(
         DbConnection conn, DbTransaction tx, TenantId tenantId, string profileId, AccessProfileSubjectType type, string subject, CancellationToken ct)
     {
         var profile = (await LoadProfilesAsync(conn, tenantId, profileId, ct, tx).ConfigureAwait(false)).FirstOrDefault();
+        var normalized = ConsentSubjectFilter.Normalize(subject.Trim());
         var assignment = profile?.Assignments.FirstOrDefault(a => a.SubjectType == type &&
-                                                                   string.Equals(a.Subject, subject.Trim(), StringComparison.OrdinalIgnoreCase));
+                                                                   ConsentSubjectFilter.Normalize(a.Subject.Trim()) == normalized);
         return (profile, assignment);
     }
 
@@ -381,8 +382,9 @@ internal sealed class AccessProfileStore(
 
     private Task<int> DeleteAssignmentAsync(DbConnection conn, DbTransaction tx, TenantId tenantId, string profileId, AccessProfileSubjectType type, string subject, CancellationToken ct) =>
         ExecAsync(conn, tx,
-            "DELETE FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId AND profile_id = @profileId AND subject_type = @subjectType AND subject = @subject", ct,
-            ("@tenantId", tenantId.Value), ("@profileId", profileId), ("@subjectType", type.ToString()), ("@subject", subject.Trim()));
+            // PERS-06: assignments are keyed by the normalised subject, so a different spelling removes the same row.
+            "DELETE FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId AND profile_id = @profileId AND subject_type = @subjectType AND subject_norm = @subjectNorm", ct,
+            ("@tenantId", tenantId.Value), ("@profileId", profileId), ("@subjectType", type.ToString()), ("@subjectNorm", ConsentSubjectFilter.Normalize(subject.Trim())));
 
     // ------------------------------------------------------------- dialect
 
@@ -401,15 +403,15 @@ internal sealed class AccessProfileStore(
 
     private string AssignmentUpsertSql => dialect == AccessProfileDialect.SqlServer
         ? @"MERGE ACCESS_PROFILE_ASSIGNMENTS WITH (HOLDLOCK) AS t
-            USING (SELECT @tenantId AS tenant_id, @profileId AS profile_id, @subjectType AS subject_type, @subject AS subject) AS s
-              ON t.tenant_id = s.tenant_id AND t.profile_id = s.profile_id AND t.subject_type = s.subject_type AND t.subject = s.subject
-            WHEN MATCHED THEN UPDATE SET subject_norm = @subjectNorm, assigned_at = @assignedAt, expires_at = @expiresAt, created_by = @createdBy,
+            USING (SELECT @tenantId AS tenant_id, @profileId AS profile_id, @subjectType AS subject_type, @subjectNorm AS subject_norm) AS s
+              ON t.tenant_id = s.tenant_id AND t.profile_id = s.profile_id AND t.subject_type = s.subject_type AND t.subject_norm = s.subject_norm
+            WHEN MATCHED THEN UPDATE SET assigned_at = @assignedAt, expires_at = @expiresAt, created_by = @createdBy,
                 approved_by = @approvedBy, approved_at = @approvedAt, justification = @justification, kind = @kind, renewal_count = @renewalCount
             WHEN NOT MATCHED THEN INSERT (profile_id, tenant_id, subject, subject_type, subject_norm, assigned_at, expires_at, created_by, approved_by, approved_at, justification, kind, renewal_count)
                 VALUES (@profileId, @tenantId, @subject, @subjectType, @subjectNorm, @assignedAt, @expiresAt, @createdBy, @approvedBy, @approvedAt, @justification, @kind, @renewalCount);"
         : @"INSERT INTO ACCESS_PROFILE_ASSIGNMENTS (profile_id, tenant_id, subject, subject_type, subject_norm, assigned_at, expires_at, created_by, approved_by, approved_at, justification, kind, renewal_count)
             VALUES (@profileId, @tenantId, @subject, @subjectType, @subjectNorm, @assignedAt, @expiresAt, @createdBy, @approvedBy, @approvedAt, @justification, @kind, @renewalCount)
-            ON CONFLICT (tenant_id, profile_id, subject_type, subject) DO UPDATE SET subject_norm = excluded.subject_norm, assigned_at = excluded.assigned_at,
+            ON CONFLICT (tenant_id, profile_id, subject_type, subject_norm) DO UPDATE SET assigned_at = excluded.assigned_at,
                 expires_at = excluded.expires_at, created_by = excluded.created_by, approved_by = excluded.approved_by, approved_at = excluded.approved_at,
                 justification = excluded.justification, kind = excluded.kind, renewal_count = excluded.renewal_count";
 

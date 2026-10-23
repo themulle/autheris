@@ -56,7 +56,7 @@ public sealed partial class VirtualFilterAdministrationService
         {
             SaveFilters = changes.SaveFilters.Select(f => f with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList(),
             SaveProfiles = changes.SaveProfiles.Select(p => p with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList()
-        }, ct).ConfigureAwait(false);
+        }, snapshot.Generation, ct).ConfigureAwait(false);
 
         await AuditAsync(request.TenantId, actor, "VIRTUAL_FILTER_SYNC_APPLIED", "virtual_filter:*",
             new { path = request.ManagedBy.Path, commit = request.ManagedBy.Commit, force, plan }, ct).ConfigureAwait(false);
@@ -146,7 +146,9 @@ public sealed partial class VirtualFilterAdministrationService
             }
         }
 
-        int planRelaxations = removedBindings + uncoveredWeakened + scopeChanged + deleteProfiles.Count + deleteFilters.Count;
+        // VF-10: a changed definition of a managed filter (weaker conditions, removed join) can widen what grantees see as much as a
+        // removed binding, so every updated filter counts as a relaxation as well.
+        int planRelaxations = removedBindings + uncoveredWeakened + scopeChanged + deleteProfiles.Count + deleteFilters.Count + updateFilters.Count;
 
         var windowStart = DateTimeOffset.UtcNow.AddMinutes(-Math.Max(1, _options.MaxRemovalsWindowMinutes));
         int pastRelaxations = 0;
@@ -160,8 +162,11 @@ public sealed partial class VirtualFilterAdministrationService
         }
 
         int totalRelaxationsInWindow = pastRelaxations + planRelaxations;
+        // The "no bindings left at all" rule keeps its pre-VF-10 meaning: a pure filter-definition update (counted above for the
+        // window limit) must not demand force just because the desired state happens to carry no bindings.
+        bool removesAnything = planRelaxations - updateFilters.Count > 0;
         bool requiresForce = planRelaxations > 0 &&
-            ((_options.MaxRemovals > 0 && totalRelaxationsInWindow > _options.MaxRemovals) || desiredKeys.Count == 0);
+            ((_options.MaxRemovals > 0 && totalRelaxationsInWindow > _options.MaxRemovals) || (desiredKeys.Count == 0 && removesAnything));
 
         changes = new VirtualFilterChangeSet
         {

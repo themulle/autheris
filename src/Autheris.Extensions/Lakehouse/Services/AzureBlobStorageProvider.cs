@@ -87,13 +87,22 @@ public sealed class AzureBlobStorageProvider : ILakehouseStorageProvider
         ApplyAzureAuth(request, HttpMethod.Get, uri, account, container, blob);
 
         var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        try
         {
-            throw new FileNotFoundException($"Azure Blob not found: '{location}' (Resolved: '{uri}').", location);
-        }
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new FileNotFoundException($"Azure Blob not found: '{location}' (Resolved: '{uri}').", location);
+            }
 
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // EXT-03: release the connection when no stream is handed out (it leaked on 404 and error responses).
+            response.Dispose();
+            throw;
+        }
     }
 
     public async ValueTask<bool> ExistsAsync(string location, CancellationToken cancellationToken = default)

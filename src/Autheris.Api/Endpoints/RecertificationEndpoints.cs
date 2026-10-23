@@ -1,6 +1,7 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Generic;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,53 +66,110 @@ public static class RecertificationEndpoints
             return Results.Ok(items);
         }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapPost("/campaigns/{campaignId}/items/{itemId}/certify", async (
+        group.MapPost("/campaigns/{campaignId}/items/{itemId}/certify", (
             string tenantId,
             string campaignId,
             string itemId,
             ItemDecisionRequest request,
             HttpContext httpContext,
             IRecertificationService service,
-            CancellationToken ct) =>
-        {
-            var reviewerId = httpContext.User.GetUserSid()?.Value ?? "REVIEWER";
-            try
-            {
-                await service.CertifyItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
-                return Results.Ok(new { message = "Item successfully certified." });
-            }
-            catch (SecurityException)
-            {
-                return Results.Problem(
-                    detail: "Self-review is strictly forbidden.",
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "Anti-self-review violation (SEC-SC-15)");
-            }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+            CancellationToken ct) => HandleCertifyAsync(tenantId, campaignId, itemId, request, httpContext, service, ct))
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
-        group.MapPost("/campaigns/{campaignId}/items/{itemId}/revoke", async (
+        group.MapPost("/campaigns/{campaignId}/items/{itemId}/revoke", (
             string tenantId,
             string campaignId,
             string itemId,
             ItemDecisionRequest request,
             HttpContext httpContext,
             IRecertificationService service,
-            CancellationToken ct) =>
-        {
-            var reviewerId = httpContext.User.GetUserSid()?.Value ?? "REVIEWER";
-            await service.RevokeItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
-            return Results.Ok(new { message = "Item successfully revoked." });
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
+            CancellationToken ct) => HandleRevokeAsync(tenantId, campaignId, itemId, request, httpContext, service, ct))
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
 
         group.MapPost("/cycle", async (
             string tenantId,
             IRecertificationService service,
             CancellationToken ct) =>
         {
-            var count = await service.ExecuteAutoRevocationCycleAsync(DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            var count = await service.ExecuteAutoRevocationCycleAsync(new TenantId(tenantId), DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
             return Results.Ok(new { revokedItemsCount = count });
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }
+
+    internal static async Task<IResult> HandleCertifyAsync(
+        string tenantId, string campaignId, string itemId, ItemDecisionRequest? request,
+        HttpContext httpContext, IRecertificationService service, CancellationToken ct)
+    {
+        // GOV-02: no SID means no reviewer identity; fail closed instead of falling back to a constant.
+        var reviewerId = httpContext.User.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(reviewerId))
+        {
+            return NoReviewerIdentity();
+        }
+
+        try
+        {
+            await service.CertifyItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
+            return Results.Ok(new { message = "Item successfully certified." });
+        }
+        catch (SecurityException)
+        {
+            return Results.Problem(
+                detail: "Only the designated reviewer may decide this item, and self-review is strictly forbidden.",
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Anti-self-review violation (SEC-SC-15)");
+        }
+        catch (RecertificationConflictException ex)
+        {
+            return Conflict(ex);
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+    }
+
+    internal static async Task<IResult> HandleRevokeAsync(
+        string tenantId, string campaignId, string itemId, ItemDecisionRequest? request,
+        HttpContext httpContext, IRecertificationService service, CancellationToken ct)
+    {
+        var reviewerId = httpContext.User.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(reviewerId))
+        {
+            return NoReviewerIdentity();
+        }
+
+        try
+        {
+            await service.RevokeItemAsync(new TenantId(tenantId), campaignId, itemId, reviewerId, request?.Comments, ct).ConfigureAwait(false);
+            return Results.Ok(new { message = "Item successfully revoked." });
+        }
+        catch (SecurityException)
+        {
+            return Results.Problem(
+                detail: "Only the designated reviewer may decide this item.",
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Reviewer not authorised");
+        }
+        catch (RecertificationConflictException ex)
+        {
+            return Conflict(ex);
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+    }
+
+    private static IResult NoReviewerIdentity() => Results.Problem(
+        detail: "The caller has no reviewer identity (SID).",
+        statusCode: StatusCodes.Status403Forbidden,
+        title: "Reviewer identity required");
+
+    private static IResult Conflict(RecertificationConflictException ex) => Results.Problem(
+        detail: "The request conflicts with the current state of the recertification item or campaign.",
+        statusCode: StatusCodes.Status409Conflict,
+        title: ex.Code);
 }

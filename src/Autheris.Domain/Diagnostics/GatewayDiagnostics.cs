@@ -51,6 +51,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> AuthzDependencyFailureCounter =
         Meter.CreateCounter<long>("authz_dependency_failure_total", description: "Authorization dependency failures that resulted in a fail-closed denial");
 
+    public static readonly Counter<long> RoleResolutionDegradedCounter =
+        Meter.CreateCounter<long>("autheris_role_resolution_degraded_total", description: "Requests whose group and role resolution was unavailable (data access is denied)");
+
     public static readonly Counter<long> AuditWriteFailedCounter =
         Meter.CreateCounter<long>("autheris_audit_write_failed_total", description: "Audit writes that failed, by tier (required or best_effort)");
 

@@ -142,4 +142,51 @@ public sealed class CatalogGraphQlMapTests
     {
         (await _map.ResolveDocumentTablesAsync(document)).ShouldBeNull();
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task FragmentBomb25Levels_CompletesUnder1s_ReturnsDistinctTables()
+    {
+        // MCP-11: every level spreads the next one twice; without memoisation this is 2^25 expansions. The chain stays below MaxSelectionDepth (32), which counts fragment nesting.
+        var customers = (await _map.GetTableAsync(Customers))!;
+        var relationField = customers.Relations.Single().Field;
+        var fragments = string.Join("\n", Enumerable.Range(0, 25).Select(i => $"fragment F{i} on crm_dbo_customers {{ ...F{i + 1} ...F{i + 1} }}"));
+        var document = $"query Q {{ crm_dbo_customers {{ ...F0 }} }}\n{fragments}\nfragment F25 on crm_dbo_customers {{ id {relationField} {{ amount }} }}";
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var tables = await _map.ResolveDocumentTablesAsync(document);
+        watch.Stop();
+
+        watch.Elapsed.ShouldBeLessThan(System.TimeSpan.FromSeconds(1));
+        tables.ShouldNotBeNull();
+        tables.ShouldBe([Customers, Orders], ignoreOrder: true);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CyclicFragments_ReturnsNull()
+    {
+        (await _map.ResolveDocumentTablesAsync(
+            "query Q { crm_dbo_customers { ...A } } fragment A on crm_dbo_customers { ...B } fragment B on crm_dbo_customers { ...A }"))
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task VisitedSelectionsCapExceeded_ReturnsNull_GuardrailDenies()
+    {
+        // MCP-11: more than 10,000 visited selections cannot be resolved, so the guardrail has no table list and denies.
+        var fields = string.Join(" ", Enumerable.Repeat("id", 12_000));
+
+        (await _map.ResolveDocumentTablesAsync($"{{ crm_dbo_customers {{ {fields} }} }}")).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DocumentLongerThan64KB_ReturnsNull()
+    {
+        var padding = new string(' ', 70 * 1024);
+
+        (await _map.ResolveDocumentTablesAsync($"{{ crm_dbo_customers {{ id }} }}{padding}")).ShouldBeNull();
+    }
 }

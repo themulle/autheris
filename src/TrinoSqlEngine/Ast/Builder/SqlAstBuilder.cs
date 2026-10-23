@@ -422,6 +422,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitSetOperation(SqlBaseParser.SetOperationContext context)
     {
         using var _ = EnterScope();
+        // SQLE-02: CORRESPONDING changes the column matching; it is rejected instead of silently dropped.
+        if (context.corresponding() != null) throw Unsupported("CORRESPONDING");
         var left = (QueryBody)Visit(context.left);
         var right = (QueryBody)Visit(context.right);
 
@@ -553,11 +555,10 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         SqlQualifiedName? qualifier = null;
         if (context.primaryExpression() != null)
         {
+            // SQLE-14: a base that is not a column reference, and an AS (aliases) list, would be dropped silently: rejected.
+            if (context.columnAliases() != null) throw Unsupported("expression.* AS (aliases)");
             var expr = (Expression)Visit(context.primaryExpression());
-            if (expr is ColumnReference colRef)
-            {
-                qualifier = colRef.Name;
-            }
+            qualifier = expr is ColumnReference colRef ? colRef.Name : throw Unsupported("expression.* with a base that is not a column reference");
         }
         return new WildcardSelectItem(qualifier);
     }
@@ -611,6 +612,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             colAliases = context.columnAliases().identifier().Select(ToSqlIdentifier).ToList();
         }
+
+        // SQLE-04: a column alias list on a plain table reference would rename columns; it is rejected instead of dropped.
+        if (source is NamedTableSource && colAliases is not null) throw Unsupported("column aliases on a table reference");
 
         if (alias != null)
         {
@@ -908,12 +912,17 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             case SqlBaseParser.BooleanTestContext bt:
                 {
+                    // SQLE-12: IS [NOT] TRUE|FALSE is a total (never NULL) test. CASE WHEN treats NULL as not matched, which gives the
+                    // three-valued semantics on every dialect without comparing a predicate with a boolean literal.
                     bool truth = bt.truthValue.Type == SqlBaseLexer.TRUE;
                     bool isNot = bt.NOT() != null;
+                    Expression condition = truth ? left : new UnaryExpression(UnaryOperator.Not, left);
+                    var whenTrue = new LiteralExpression(isNot ? 0L : 1L, LiteralType.Integer);
+                    var whenOther = new LiteralExpression(isNot ? 1L : 0L, LiteralType.Integer);
                     return new BinaryExpression(
-                        left,
-                        isNot ? BinaryOperator.NotEqual : BinaryOperator.Equal,
-                        new LiteralExpression(truth, LiteralType.Boolean));
+                        new CaseExpression(null, new[] { new WhenClause(condition, whenTrue) }, whenOther),
+                        BinaryOperator.Equal,
+                        new LiteralExpression(1L, LiteralType.Integer));
                 }
             default:
                 throw new AstBuildException($"Unsupported predicate type: {predicate.GetType().Name}");
@@ -940,8 +949,13 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         var operand = (Expression)Visit(context.valueExpression());
-        var op = context.@operator.Type == SqlBaseLexer.MINUS ? UnaryOperator.Negate : UnaryOperator.Not;
-        return new UnaryExpression(op, operand);
+        // SQLE-01: unary plus is the identity; an unknown operator never maps to another semantics (it used to become NOT).
+        return context.@operator.Type switch
+        {
+            SqlBaseLexer.MINUS => new UnaryExpression(UnaryOperator.Negate, operand),
+            SqlBaseLexer.PLUS => operand,
+            _ => throw Unsupported("arithmetic unary operator")
+        };
     }
 
     public override SqlNode VisitArithmeticBinary(SqlBaseParser.ArithmeticBinaryContext context)
@@ -985,7 +999,18 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     }
 
     private static long ParseIntervalAmount(IntervalLiteralExpression interval) =>
-        long.Parse(interval.Value, NumberStyles.None, CultureInfo.InvariantCulture);
+        BoundDateAmount(long.TryParse(interval.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ? parsed : long.MaxValue, "INTERVAL");
+
+    /// <summary>
+    /// SQLE-06: the amount of a date addition is later multiplied (year*12, week*7) by the generators; it is bounded here so that no
+    /// multiplication can wrap to a small, valid amount (Trino raises an overflow error instead).
+    /// </summary>
+    private const long MaxDateAmount = int.MaxValue;
+
+    private static long BoundDateAmount(long amount, string function) =>
+        amount is >= -MaxDateAmount and <= MaxDateAmount
+            ? amount
+            : throw Unsupported($"{function} amount outside +/-{MaxDateAmount}");
 
     private static DateUnit ParseDateUnit(string unit, string function) => unit.ToLowerInvariant() switch
     {
@@ -1041,8 +1066,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
     private static long IntegerArgument(Expression argument, string function) => argument switch
     {
-        LiteralExpression { Type: LiteralType.Integer, Value: long value } => value,
-        UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression { Type: LiteralType.Integer, Value: long value } } => -value,
+        LiteralExpression { Type: LiteralType.Integer, Value: long value } => BoundDateAmount(value, function),
+        UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression { Type: LiteralType.Integer, Value: long value } } => -BoundDateAmount(value, function),
         _ => throw Unsupported($"{function} amount that is not an integer literal")
     };
 
@@ -1314,17 +1339,17 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             foreach (var arg in context.argument())
             {
-                var exprCtx = arg is SqlBaseParser.PositionalArgumentContext pos
-                    ? pos.expression()
-                    : arg is SqlBaseParser.NamedArgumentContext named
-                        ? named.expression()
-                        : null;
+                // SQLE-14: a named argument would lose its name and be passed positionally: rejected.
+                if (arg is SqlBaseParser.NamedArgumentContext) throw Unsupported("named function arguments");
+                var exprCtx = arg is SqlBaseParser.PositionalArgumentContext pos ? pos.expression() : null;
                 if (exprCtx != null)
                 {
                     args.Add((Expression)Visit(exprCtx));
                 }
             }
         }
+
+        EnsureBoundedRepeatLength(name, args);
 
         WindowSpecification? window = null;
         var overCtx = context.over();
@@ -1357,6 +1382,23 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
         return new FunctionCallExpression(qName, args, distinct, window, isStar, filter, orderWithin);
+    }
+
+    /// <summary>SQLE-13: the length of lpad/rpad/replicate must be an integer literal up to <see cref="MaxRepeatLength"/> (database memory DoS).</summary>
+    private const long MaxRepeatLength = 4000;
+
+    private static void EnsureBoundedRepeatLength(string name, IReadOnlyList<Expression> args)
+    {
+        if (!name.Equals("lpad", StringComparison.OrdinalIgnoreCase) && !name.Equals("rpad", StringComparison.OrdinalIgnoreCase)
+            && !name.Equals("replicate", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (args.Count < 2 || args[1] is not LiteralExpression { Type: LiteralType.Integer, Value: long length } || length is < 0 or > MaxRepeatLength)
+        {
+            throw Unsupported($"{name.ToLowerInvariant()} with a length that is not an integer literal between 0 and {MaxRepeatLength}");
+        }
     }
 
     public override SqlNode VisitMethodCall(SqlBaseParser.MethodCallContext context)
@@ -1459,17 +1501,19 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         var list = new List<Expression>();
-        if (context.expression() != null)
+        // The two alternatives share this label: the accessors return empty arrays (never null) for the other one.
+        if (context.expression().Length > 0)
         {
             foreach (var e in context.expression())
             {
                 list.Add((Expression)Visit(e));
             }
         }
-        else if (context.fieldConstructor() != null)
+        else if (context.fieldConstructor().Length > 0)
         {
             foreach (var f in context.fieldConstructor())
             {
+                if (f.identifier() != null) throw Unsupported("ROW field names");   // SQLE-14: the names would be dropped
                 list.Add((Expression)Visit(f.expression()));
             }
         }

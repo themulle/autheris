@@ -61,7 +61,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "MSSQL-CAP",
         DmlStatements: AllDml,
-        SupportsTimeZoneConversion: true);   // REQ-SQL-130: convert_timezone has a generator rule
+        SupportsTimeZoneConversion: true,
+        IntersectBindsTighter: true);   // REQ-SQL-130: convert_timezone has a generator rule
 
     private static readonly DialectCapabilities DuckDb = new(
         Dialect: TargetSqlDialect.DuckDb,
@@ -91,7 +92,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DUCK-PREP",
         DmlStatements: AllDml,
-        SupportsTimeZoneConversion: true);   // REQ-SQL-130: convert_timezone has a generator rule
+        SupportsTimeZoneConversion: true,
+        IntersectBindsTighter: true);   // REQ-SQL-130: convert_timezone has a generator rule
 
     private static readonly DialectCapabilities PostgreSql = new(
         Dialect: TargetSqlDialect.PostgreSql,
@@ -121,7 +123,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "PG-PROTO",
         DmlStatements: AllDml,
-        SupportsTimeZoneConversion: true);   // REQ-SQL-130: convert_timezone has a generator rule
+        SupportsTimeZoneConversion: true,
+        IntersectBindsTighter: true);   // REQ-SQL-130: convert_timezone has a generator rule
 
     private static readonly DialectCapabilities Oracle = new(
         Dialect: TargetSqlDialect.Oracle,
@@ -182,7 +185,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "DBX-PARAM",
         DmlStatements: AllDml,
         SupportsSubqueryInDmlCondition: false,
-        ReportsInsertRowCount: false);                              // Delta INSERT returns an empty result: no check-option row count (CR-ADG-35)                    // Delta: DELTA_UNSUPPORTED_SUBQUERY at analysis (CR-ADG-39)
+        ReportsInsertRowCount: false,
+        IntersectBindsTighter: true);                               // Delta INSERT returns an empty result: no check-option row count (CR-ADG-35)                    // Delta: DELTA_UNSUPPORTED_SUBQUERY at analysis (CR-ADG-39)
 
     private static readonly IReadOnlyDictionary<string, string> SqliteRewrites = new Dictionary<string, string> { ["strpos"] = "INSTR" };
 

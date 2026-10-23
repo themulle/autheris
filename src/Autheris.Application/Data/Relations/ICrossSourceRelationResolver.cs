@@ -7,32 +7,20 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Abstraction for fetching raw rows from a target data source by join key batch or filter (#75).
-/// Governance (RLS, mandatory virtual filters, and column masking) is enforced by <see cref="ICrossSourceRelationResolver"/>.
+/// Abstraction for fetching raw rows from a target data source by join key batch (#75).
+/// Governance (RLS, column masking) is enforced by <see cref="ICrossSourceRelationResolver"/>; the reader itself never takes client text
+/// (VF-04): it receives catalog-checked column names and key values only.
 /// </summary>
 public interface ICrossSourceRowReader
 {
-    /// <summary>
-    /// Reads rows from <paramref name="targetTable"/> where <paramref name="joinKeyColumns"/> match any key in <paramref name="batchKeys"/>.
-    /// </summary>
+    /// <summary>Reads the rows of <see cref="CrossSourceKeyReadRequest.Target"/> whose join key matches any requested key.</summary>
     Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadRowsByKeysAsync(
-        TableMetadata targetTable,
-        IReadOnlyList<string> joinKeyColumns,
-        IReadOnlyList<CompositeKey> batchKeys,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Reads candidate rows from <paramref name="targetTable"/> for a cross-source filter pre-query.
-    /// </summary>
-    Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadRowsForFilterAsync(
-        TableMetadata targetTable,
-        string filterSql,
-        int maxRows,
+        CrossSourceKeyReadRequest request,
         CancellationToken ct = default);
 }
 
 /// <summary>
-/// Issue #75: Resolves explicit cross-data-source <see cref="TableRelation"/> navigations and bounded filter pushdowns
+/// Issue #75: Resolves explicit cross-data-source <see cref="TableRelation"/> navigations
 /// with full per-source governance, key-clearance checks, parameter-bounded batching, and dedicated audit logging.
 /// </summary>
 public interface ICrossSourceRelationResolver
@@ -57,13 +45,5 @@ public interface ICrossSourceRelationResolver
     /// </summary>
     Task<CrossSourceRelationResult> ResolveRelationAsync(
         CrossSourceRelationRequest request,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Executes a filter on the target data source first and returns the bounded set of matching join keys to push into the parent query.
-    /// Fails closed with <see cref="CrossSourceRelationErrorCodes.CrossSourceFilterKeySetExceeded"/> when more than <c>MaxCrossSourceFilterKeys</c> match.
-    /// </summary>
-    Task<CrossSourceFilterKeySetResult> ResolveCrossSourceFilterKeysAsync(
-        CrossSourceFilterPushdownRequest request,
         CancellationToken ct = default);
 }

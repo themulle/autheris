@@ -16,9 +16,14 @@ public static class ConsumerFolding
     public const string DefaultOtherBucketName = "Other / Aggregated";
     public const string FallbackOtherBucketName = "other";
 
+    /// <summary>
+    /// MISC-17: k-anonymity is decided per published cell on that cell's own distinct actors (never on a window-wide per-application count).
+    /// Cells below <paramref name="minActors"/> fold into one "Other" bucket per day; the folded bucket counts the true union of the folded
+    /// cells' actors (<see cref="ConsumerAppDailySummary.ActorKeys"/>) and is checked against k independently. A folded cell without actor
+    /// identities suppresses its day's bucket (fail closed).
+    /// </summary>
     public static (IReadOnlyList<CallingApplicationUsage> Results, bool SuppressedSmallGroups) Fold(
         IEnumerable<ConsumerAppDailySummary> summaries,
-        IReadOnlyDictionary<string, int>? distinctActorsByApp = null,
         int minActors = DefaultMinActors,
         string otherBucketName = DefaultOtherBucketName)
     {
@@ -32,17 +37,10 @@ public static class ConsumerFolding
 
         var keptUsages = new List<CallingApplicationUsage>();
         var foldedSummaries = new List<ConsumerAppDailySummary>();
-        int foldedDistinctActorsTotal = 0;
 
         foreach (var s in list)
         {
-            int actorCount = s.DistinctActors;
-            if (distinctActorsByApp != null && distinctActorsByApp.TryGetValue(s.Application, out var count))
-            {
-                actorCount = Math.Max(actorCount, count);
-            }
-
-            if (actorCount >= minActors)
+            if (s.DistinctActors >= minActors)
             {
                 // In general view: ActorSids is null (personal SIDs strictly suppressed)
                 // Specific query names are omitted
@@ -55,64 +53,60 @@ public static class ConsumerFolding
                     Rejections: s.Rejections,
                     Versions: s.Versions,
                     QueryNames: Array.Empty<string>(),
-                    DistinctActors: actorCount,
+                    DistinctActors: s.DistinctActors,
                     ActorSids: null
                 ));
             }
             else
             {
                 foldedSummaries.Add(s);
-                foldedDistinctActorsTotal += actorCount;
             }
         }
 
         bool suppressedSmallGroups = false;
 
-        if (foldedSummaries.Count > 0)
+        // One "Other" bucket per day, each checked against k independently (a bucket is never published under another day).
+        foreach (var dayGroup in foldedSummaries.GroupBy(x => x.Day, StringComparer.Ordinal))
         {
-            long calls = foldedSummaries.Sum(x => x.Calls);
-            long rows = foldedSummaries.Sum(x => x.RowsReturned);
-            long measured = foldedSummaries.Sum(x => x.RowsMeasuredCalls);
-            long acc = foldedSummaries.Sum(x => x.Rejections.Access);
-            long rl = foldedSummaries.Sum(x => x.Rejections.RateLimit);
-            long cost = foldedSummaries.Sum(x => x.Rejections.Cost);
-            long oth = foldedSummaries.Sum(x => x.Rejections.Other);
-            var versions = foldedSummaries.SelectMany(x => x.Versions).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            string day = foldedSummaries[0].Day;
+            var cells = dayGroup.ToList();
+            var identified = cells.All(c => c.ActorKeys != null);
+            int unionActors = identified ? cells.SelectMany(c => c.ActorKeys!).Distinct(StringComparer.Ordinal).Count() : 0;
 
-            if (foldedDistinctActorsTotal < minActors)
+            if (!identified || unionActors < minActors)
             {
-                // SEC-AUD114-03 / Differencing Attack Defense:
-                // If total distinct actors across all folded groups is still < k, suppress metric counts completely.
+                // SEC-AUD114-03 / Differencing Attack Defense: the union of folded actors is still < k (or unknown): suppress the counts.
                 suppressedSmallGroups = true;
                 keptUsages.Add(new CallingApplicationUsage(
                     Application: otherBucketName,
-                    Day: day,
+                    Day: dayGroup.Key,
                     Calls: 0,
                     RowsReturned: 0,
                     RowsMeasuredCalls: 0,
                     Rejections: new RejectionBreakdown(0, 0, 0, 0),
                     Versions: Array.Empty<string>(),
                     QueryNames: Array.Empty<string>(),
-                    DistinctActors: foldedDistinctActorsTotal,
+                    DistinctActors: unionActors,
                     ActorSids: null
                 ));
+                continue;
             }
-            else
-            {
-                keptUsages.Add(new CallingApplicationUsage(
-                    Application: otherBucketName,
-                    Day: day,
-                    Calls: calls,
-                    RowsReturned: rows,
-                    RowsMeasuredCalls: measured,
-                    Rejections: new RejectionBreakdown(acc, rl, cost, oth),
-                    Versions: versions,
-                    QueryNames: Array.Empty<string>(),
-                    DistinctActors: foldedDistinctActorsTotal,
-                    ActorSids: null
-                ));
-            }
+
+            keptUsages.Add(new CallingApplicationUsage(
+                Application: otherBucketName,
+                Day: dayGroup.Key,
+                Calls: cells.Sum(x => x.Calls),
+                RowsReturned: cells.Sum(x => x.RowsReturned),
+                RowsMeasuredCalls: cells.Sum(x => x.RowsMeasuredCalls),
+                Rejections: new RejectionBreakdown(
+                    cells.Sum(x => x.Rejections.Access),
+                    cells.Sum(x => x.Rejections.RateLimit),
+                    cells.Sum(x => x.Rejections.Cost),
+                    cells.Sum(x => x.Rejections.Other)),
+                Versions: cells.SelectMany(x => x.Versions).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                QueryNames: Array.Empty<string>(),
+                DistinctActors: unionActors,
+                ActorSids: null
+            ));
         }
 
         return (keptUsages, suppressedSmallGroups);

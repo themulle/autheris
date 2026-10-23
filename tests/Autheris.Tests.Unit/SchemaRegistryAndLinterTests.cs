@@ -340,4 +340,95 @@ public class SchemaRegistryAndLinterTests
         var history = await service.GetSchemaHistoryAsync("users-subgraph");
         history.Count.ShouldBe(3); // 1.0.0, 1.1.0, 2.0.0
     }
+
+    // ---- MISC-16
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RemovingExtendTypeField_IsBreaking()
+    {
+        var baseline = "type Query { orders: [Order] } type Order { id: ID! } extend type Order { total: Int }";
+        var target = "type Query { orders: [Order] } type Order { id: ID! }";
+
+        var diff = _linter.Compare(baseline, target);
+
+        diff.Changes.ShouldContain(c => c.Code == "FIELD_REMOVED" && c.Path == "Order.total");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RemovingImplementedInterface_IsBreaking()
+    {
+        var baseline = "interface Node { id: ID! } type User implements Node { id: ID! }";
+        var target = "interface Node { id: ID! } type User { id: ID! }";
+
+        _linter.Compare(baseline, target).Changes.ShouldContain(c => c.Code == "INTERFACE_REMOVED" && c.IsBreaking);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RemovingDirectiveDefinition_IsBreaking()
+    {
+        var baseline = "directive @auth(role: String) on FIELD_DEFINITION | OBJECT type Query { a: Int }";
+        var target = "type Query { a: Int }";
+
+        _linter.Compare(baseline, target).Changes.ShouldContain(c => c.Code == "DIRECTIVE_REMOVED" && c.IsBreaking);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ChangingRootQueryType_IsBreaking()
+    {
+        var baseline = "schema { query: Query } type Query { a: Int } type Root { a: Int }";
+        var target = "schema { query: Root } type Query { a: Int } type Root { a: Int }";
+
+        _linter.Compare(baseline, target).Changes.ShouldContain(c => c.Code == "ROOT_OPERATION_TYPE_CHANGED" && c.IsBreaking);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DuplicateField_RejectedAtRegistration()
+    {
+        var validator = new SchemaRegistrationRequestValidator();
+
+        var result = await validator.ValidateAsync(new SchemaRegistrationRequest { ServiceName = "svc", Sdl = "type Query { a: Int a: String }" });
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.ErrorMessage.Contains("Duplicate field"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DuplicateType_RejectedAtRegistration()
+    {
+        var validator = new SchemaRegistrationRequestValidator();
+
+        var result = await validator.ValidateAsync(new SchemaRegistrationRequest { ServiceName = "svc", Sdl = "type Query { a: Int } type Query { b: Int }" });
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.ErrorMessage.Contains("Duplicate type"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task StoredBaselineWithDuplicates_CompareReturnsValidationFailureNot500()
+    {
+        var repo = new InMemorySchemaRegistryRepository();
+        await repo.SaveSchemaAsync(new RegisteredSchema
+        {
+            ServiceName = "svc",
+            Version = "v1",
+            Sdl = "type Query { a: Int a: Int }",
+            RegisteredAt = DateTimeOffset.UtcNow,
+            RegisteredBy = "test",
+            IsActive = true
+        });
+        var service = new SchemaRegistryService(repo, _linter, new SchemaRegistrationRequestValidator(), NullLogger<SchemaRegistryService>.Instance);
+
+        var response = await service.RegisterSchemaAsync(new SchemaRegistrationRequest { ServiceName = "svc", Sdl = "type Query { a: Int }" });
+
+        response.Success.ShouldBeFalse();
+        response.ErrorCode.ShouldBe("SCHEMA_COMPARE_FAILED");
+        (await service.CheckSchemaAsync("svc", "type Query { a: Int }")).Changes.ShouldContain(c => c.Code == "SCHEMA_COMPARE_FAILED");
+    }
 }

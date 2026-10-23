@@ -277,11 +277,11 @@ public static class CatalogApiEndpoints
         .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapGet("/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/catalog/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization()
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
@@ -621,9 +621,9 @@ public static class CatalogApiEndpoints
             ? System.Linq.Enumerable.ToList(request.Select(r => (System.Collections.Generic.IReadOnlyDictionary<string, object?>)r))
             : (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
 
-        if (samples.Count > 100)
+        if (samples.Count > Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator.MaxPredefinedSampleRows)
         {
-            return Results.BadRequest(new { error = "Maximum allowed synthetic sample rows is 100." });
+            return Results.BadRequest(new { error = $"Maximum allowed synthetic sample rows is {Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator.MaxPredefinedSampleRows}." });
         }
 
         generator.RegisterSyntheticSamples(tableId.Value, samples);
@@ -640,10 +640,17 @@ public static class CatalogApiEndpoints
         return Results.Ok(new { dataset = id, registeredRows = samples.Count });
     }
 
+    /// <summary>
+    /// MCP-01: curation counterpart of the PUT. Governance administrators only; the dataset is resolved through the
+    /// visibility service (tenant confinement, tier, ReBAC) and rows are projected onto the table's own columns.
+    /// Invisible, other-tenant and unknown datasets answer identically.
+    /// </summary>
     internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(
         string id,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
+        [Microsoft.AspNetCore.Mvc.FromServices] ICatalogVisibilityService visibility,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
@@ -652,12 +659,45 @@ public static class CatalogApiEndpoints
             return DatasetKeysNotFound();
         }
 
-        var existingMeta = await metadataRepository.GetTableMetadataAsync(tableId.Value, ct).ConfigureAwait(false);
-        var samples = existingMeta?.PredefinedSyntheticSamples is { Count: > 0 } p
+        var caller = new CatalogCaller(httpContext.User, EndpointSecurity.GetRequestTenant(httpContext), CatalogChannel.Rest);
+        var visible = await visibility.FindVisibleAsync(caller, tableId.Value, ct).ConfigureAwait(false);
+        if (visible is not { } row)
+        {
+            return DatasetKeysNotFound();
+        }
+
+        var table = row.Table;
+        var samples = table.PredefinedSyntheticSamples is { Count: > 0 } p
             ? p
             : generator.GetRegisteredSyntheticSamples(tableId.Value) ?? (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
 
-        return Results.Ok(new { dataset = id, count = samples.Count, rows = samples });
+        var projected = ProjectSamplesOntoColumns(samples, table);
+        return Results.Ok(new { dataset = id, count = projected.Count, rows = projected });
+    }
+
+    /// <summary>Keeps only keys that are columns of the table (case-insensitive), so a sample can never carry foreign fields.</summary>
+    private static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> ProjectSamplesOntoColumns(
+        System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> samples,
+        TableMetadata table)
+    {
+        var columns = new System.Collections.Generic.HashSet<string>(
+            table.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+        var result = new System.Collections.Generic.List<System.Collections.Generic.IReadOnlyDictionary<string, object?>>(samples.Count);
+        foreach (var sample in samples)
+        {
+            var projected = new System.Collections.Generic.Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in sample)
+            {
+                if (columns.Contains(kvp.Key))
+                {
+                    projected[kvp.Key] = kvp.Value;
+                }
+            }
+
+            result.Add(projected);
+        }
+
+        return result;
     }
 
     internal static async Task<IResult> SetDatasetStateHandler(

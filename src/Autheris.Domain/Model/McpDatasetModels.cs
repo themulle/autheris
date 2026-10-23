@@ -184,7 +184,7 @@ public sealed record McpTableBriefSchema(
     IReadOnlyList<string> PrimaryKeys,
     IReadOnlyList<McpTableBriefColumn> Columns,
     IReadOnlyList<McpTableRelation> Relations,
-    string? AccessStatus = "GRANTED");
+    string? AccessStatus = null);
 
 /// <summary>Result of get_table_schema.</summary>
 public sealed record McpTableSchemaResult(

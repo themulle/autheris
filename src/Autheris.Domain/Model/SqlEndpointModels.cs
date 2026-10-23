@@ -41,7 +41,7 @@ public sealed record SqlEndpointDefinition(
     IReadOnlyList<SqlEndpointProjection>? Projections = null,
     IReadOnlyList<string>? ReferencedTables = null,
     string? HttpMethod = "GET",
-    int TimeoutSeconds = 30)
+    int? TimeoutSeconds = null)
 {
     public IReadOnlyList<SqlEndpointParameter> Parameters { get; init; } = Parameters ?? [];
     public IReadOnlyList<SqlEndpointProjection> Projections { get; init; } = Projections ?? [];

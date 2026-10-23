@@ -20,7 +20,8 @@ public sealed partial class AiDataGuardrailService
         bool isMasked,
         bool truncated,
         int estimatedTokens,
-        CancellationToken ct)
+        CancellationToken ct,
+        string eventType = "MCP_TOOL_EXECUTION")
     {
         try
         {
@@ -31,7 +32,7 @@ public sealed partial class AiDataGuardrailService
             var entry = new AuditLogEntry
             {
                 TenantId = tenantId,
-                EventType = "MCP_TOOL_EXECUTION",
+                EventType = eventType,
                 ActorSid = actorSid,
                 TargetTable = toolName,
                 Decision = decision,
@@ -174,6 +175,65 @@ public sealed partial class AiDataGuardrailService
         }
         var single = ParseTableIdentifierFromTool(tool, argumentsJson);
         return single == null ? null : [single.Value];
+    }
+
+    /// <summary>
+    /// Output inspection (MCP-09): string values of a tool or resource result that carry a suspected prompt injection are replaced by a
+    /// fixed marker and audited as <c>MCP_OUTPUT_INJECTION_SUSPECTED</c>. The call is never denied, so a poisoned catalog text cannot be
+    /// used to block access.
+    /// </summary>
+    private async Task<string> InspectOutputAsync(
+        string toolName,
+        string json,
+        McpSessionContext sessionContext,
+        CancellationToken ct,
+        Action<bool>? markMasked = null)
+    {
+        var sanitized = _promptGuardrail.SanitizeToolOutput(toolName, json, out var withheld, out var attackType);
+        if (withheld == 0 || sanitized is null)
+        {
+            return json;
+        }
+
+        _logger.LogWarning("Suspected prompt injection withheld from the output of '{ToolName}' ({Count} value(s), {AttackType}).", toolName, withheld, attackType);
+        markMasked?.Invoke(true);
+        await RecordAuditEventAsync(
+            toolName, sessionContext, "ALLOW",
+            $"Output withheld: {withheld} value(s) with suspected prompt injection ({attackType ?? "unknown"}).",
+            true, false, Math.Max(1, sanitized.Length / 4), ct, Autheris.Domain.Audit.AuditEventTypes.McpOutputInjectionSuspected).ConfigureAwait(false);
+        return sanitized;
+    }
+
+    /// <summary>
+    /// Applies the per-call token budget (MCP-08): a result above <c>Mcp.MaxTokensPerCall</c> is replaced by a truncation notice.
+    /// Shared by dataset tools and doc tools so no tool skips the budget.
+    /// </summary>
+    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated)
+    {
+        int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
+        estimatedTokens = Math.Max(1, json.Length / 4);
+        truncated = false;
+
+        if (estimatedTokens > maxTokens)
+        {
+            _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
+            int maxChars = maxTokens * 4;
+            if (json.Length > maxChars)
+            {
+                json = JsonSerializer.Serialize(new
+                {
+                    _meta = new
+                    {
+                        truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
+                        maxTokens, note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                    }
+                });
+                estimatedTokens = Math.Max(1, json.Length / 4);
+                truncated = true;
+            }
+        }
+
+        return json;
     }
 
     private async Task<IReadOnlyList<TableIdentifier>?> ResolveGraphQlTablesAsync(string? argumentsJson, CancellationToken ct)
@@ -399,15 +459,58 @@ public sealed partial class AiDataGuardrailService
         return null;
     }
 
-    private static string ScrubPiiAndSensitiveData(string input, out bool wasModified)
+    internal static string ScrubPiiAndSensitiveData(string input, out bool wasModified)
     {
         wasModified = false;
         if (string.IsNullOrWhiteSpace(input)) return input;
         string result = input;
+        // MCP-10: the default JSON encoder escapes '+' as \u002B, which would split an e-mail local part; decode it first.
+        if (result.Contains("\\u002B", StringComparison.OrdinalIgnoreCase))
+        {
+            result = result.Replace("\\u002B", "+", StringComparison.OrdinalIgnoreCase);
+        }
+
         if (EmailRegex.IsMatch(result)) { result = EmailRegex.Replace(result, "$1***@$2"); wasModified = true; }
-        if (IbanRegex.IsMatch(result)) { result = IbanRegex.Replace(result, "**** **** **** 1234"); wasModified = true; }
+        var ibanScrubbed = IbanRegex.Replace(result, m => IsValidIban(m.Value) ? "**** **** **** 1234" : m.Value);
+        if (!ReferenceEquals(ibanScrubbed, result) && ibanScrubbed != result) { result = ibanScrubbed; wasModified = true; }
         if (GdprArt9Regex.IsMatch(result)) { result = GdprArt9Regex.Replace(result, @"""$1"":""[REDACTED-GDPR-ART9]"""); wasModified = true; }
         return result;
+    }
+
+    /// <summary>ISO 7064 mod-97-10 check of an IBAN candidate (spaces ignored, 15-34 characters).</summary>
+    internal static bool IsValidIban(string candidate)
+    {
+        Span<char> buffer = stackalloc char[40];
+        var n = 0;
+        foreach (var c in candidate)
+        {
+            if (c == ' ') continue;
+            if (n >= buffer.Length) return false;
+            buffer[n++] = char.ToUpperInvariant(c);
+        }
+
+        if (n is < 15 or > 34) return false;
+
+        // Move the first four characters to the end, then compute the remainder digit by digit.
+        var remainder = 0;
+        for (var i = 0; i < n; i++)
+        {
+            var c = buffer[(i + 4) % n];
+            if (c is >= '0' and <= '9')
+            {
+                remainder = ((remainder * 10) + (c - '0')) % 97;
+            }
+            else if (c is >= 'A' and <= 'Z')
+            {
+                remainder = ((remainder * 100) + (c - 'A' + 10)) % 97;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return remainder == 1;
     }
 
     private static string GenerateRawToolResponse(McpToolDefinition tool, string argumentsJson, string tenantId)

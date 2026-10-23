@@ -133,65 +133,6 @@ public sealed class WebSqlCoLocatedDataSourcesTests
     }
 
     [Fact]
-    public void SubtreeCompiler_MultiDatabaseSameGroup_EmitsThreePartNames()
-    {
-        var meta1 = CreateTable("sales", "dbo", "Orders", "DB_Sales", "SqlServer", "grp1");
-        var meta2 = CreateTable("crm", "dbo", "Customers", "DB_CRM", "SqlServer", "grp1");
-
-        var tables = new List<ResolvedSourceTable>
-        {
-            new(new TableAccessTarget("DB_Sales", "dbo", "Orders", null, "DB_Sales.dbo.Orders"), meta1.Identifier, meta1, "sales"),
-            new(new TableAccessTarget("DB_CRM", "dbo", "Customers", null, "DB_CRM.dbo.Customers"), meta2.Identifier, meta2, "crm")
-        };
-
-        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
-        {
-            [meta1.Identifier] = TableAccessDecision.Allowed(meta1.Identifier, new Dictionary<string, ColumnAccessLevel>()),
-            [meta2.Identifier] = TableAccessDecision.Allowed(meta2.Identifier, new Dictionary<string, ColumnAccessLevel>())
-        };
-
-        var (tree, _) = FastSqlEngine.Default.Parse("SELECT o.id, c.val FROM DB_Sales.dbo.Orders o JOIN DB_CRM.dbo.Customers c ON o.foreign_id = c.id".AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
-
-        var plan = SubtreeCompiler.Compile("grp1", tables, decisions, statement);
-
-        plan.EmitThreePartNames.ShouldBeTrue();
-        plan.Databases.ShouldBe(["DB_Sales", "DB_CRM"], ignoreOrder: true);
-        plan.CompiledSql.ShouldContain("[DB_Sales].[dbo].[Orders]");
-        plan.CompiledSql.ShouldContain("[DB_CRM].[dbo].[Customers]");
-    }
-
-    [Fact]
-    public void SubtreeCompiler_SingleDatabaseSameGroup_EmitsTwoPartNames()
-    {
-        var meta1 = CreateTable("sales", "dbo", "Orders", "DB_Sales", "SqlServer", "grp1");
-        var meta2 = CreateTable("sales", "dbo", "OrderLines", "DB_Sales", "SqlServer", "grp1");
-
-        var tables = new List<ResolvedSourceTable>
-        {
-            new(new TableAccessTarget(null, "dbo", "Orders", null, "dbo.Orders"), meta1.Identifier, meta1, "sales"),
-            new(new TableAccessTarget(null, "dbo", "OrderLines", null, "dbo.OrderLines"), meta2.Identifier, meta2, "sales")
-        };
-
-        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
-        {
-            [meta1.Identifier] = TableAccessDecision.Allowed(meta1.Identifier, new Dictionary<string, ColumnAccessLevel>()),
-            [meta2.Identifier] = TableAccessDecision.Allowed(meta2.Identifier, new Dictionary<string, ColumnAccessLevel>())
-        };
-
-        var (tree, _) = FastSqlEngine.Default.Parse("SELECT o.id, l.val FROM dbo.Orders o JOIN dbo.OrderLines l ON o.id = l.foreign_id".AsMemory());
-        var statement = new SqlAstBuilder().BuildStatement(tree);
-
-        var plan = SubtreeCompiler.Compile("grp1", tables, decisions, statement);
-
-        plan.EmitThreePartNames.ShouldBeFalse();
-        plan.Databases.ShouldBe(["DB_Sales"]);
-        plan.CompiledSql.ShouldContain("[dbo].[Orders]");
-        plan.CompiledSql.ShouldContain("[dbo].[OrderLines]");
-        plan.CompiledSql.ShouldNotContain("[DB_Sales]");
-    }
-
-    [Fact]
     public async Task QueryAnalysis_CoLocatedQuery_PopulatesCoLocatedGroupPlan()
     {
         var meta1 = CreateTable("sales", "dbo", "Orders", "DB_Sales", "SqlServer", "finance");

@@ -81,7 +81,7 @@ internal sealed class PathLookupConnector : IAutherisConnector
         {
             var lookup = owner._lookup;
             using var throttle = new SemaphoreSlim(owner._maxConcurrency, owner._maxConcurrency);
-            var perKey = new IReadOnlyDictionary<string, object?>?[lookup.Values.Count];
+            var perKey = new List<IReadOnlyDictionary<string, object?>>?[lookup.Values.Count];
 
             // The first failure cancels the sibling requests still in flight (CR-18).
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -93,13 +93,14 @@ internal sealed class PathLookupConnector : IAutherisConnector
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
 
-            // The values are distinct, so every requested key contributes at most one row.
+            // VF-07: the values are distinct, but one key may match several upstream rows (a full fetch returns all of them),
+            // so every matching row of every key is kept.
             var rows = new List<IReadOnlyDictionary<string, object?>>(perKey.Length);
-            foreach (var row in perKey)
+            foreach (var keyRows in perKey)
             {
-                if (row != null)
+                if (keyRows != null)
                 {
-                    rows.Add(row);
+                    rows.AddRange(keyRows);
                 }
             }
 
@@ -111,7 +112,7 @@ internal sealed class PathLookupConnector : IAutherisConnector
             ConnectorSplit split,
             ConnectorSessionContext session,
             SemaphoreSlim throttle,
-            IReadOnlyDictionary<string, object?>?[] results,
+            List<IReadOnlyDictionary<string, object?>>?[] results,
             CancellationTokenSource linked)
         {
             try
@@ -130,7 +131,7 @@ internal sealed class PathLookupConnector : IAutherisConnector
             ConnectorSplit split,
             ConnectorSessionContext session,
             SemaphoreSlim throttle,
-            IReadOnlyDictionary<string, object?>?[] results,
+            List<IReadOnlyDictionary<string, object?>>?[] results,
             CancellationToken ct)
         {
             var lookup = owner._lookup;
@@ -160,9 +161,14 @@ internal sealed class PathLookupConnector : IAutherisConnector
 
                 foreach (var row in batch)
                 {
-                    if (results[index] == null && HasKey(row, lookup, key))
+                    if (HasKey(row, lookup, key))
                     {
-                        results[index] = row;
+                        // Identical repeats of one upstream row collapse; different rows of the same key all stay (VF-07).
+                        var keyRows = results[index] ??= [];
+                        if (!keyRows.Exists(existing => SameRow(existing, row)))
+                        {
+                            keyRows.Add(row);
+                        }
                     }
                 }
             }
@@ -170,6 +176,29 @@ internal sealed class PathLookupConnector : IAutherisConnector
             {
                 throttle.Release();
             }
+        }
+
+        private static bool SameRow(IReadOnlyDictionary<string, object?> a, IReadOnlyDictionary<string, object?> b)
+        {
+            if (ReferenceEquals(a, b))
+            {
+                return true;
+            }
+
+            if (a.Count != b.Count)
+            {
+                return false;
+            }
+
+            foreach (var (column, value) in a)
+            {
+                if (!b.TryGetValue(column, out var other) || !Equals(value, other))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static bool HasKey(IReadOnlyDictionary<string, object?> row, VirtualFilterPathLookup lookup, string requested) =>

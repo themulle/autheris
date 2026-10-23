@@ -200,6 +200,8 @@ public abstract class ConsumerParityBase<TDatabase>(ParityFixture<TDatabase> fix
             {
                 // the evaluator that binds no values refuses marker text (fail closed), so only the marker-free control can make it looser
                 if (consumer is StreamingEvaluatorConsumer { Inlined: false } && ir.Parameters.Count > 0) continue;
+                // SQLA-06: the tree compiler denies every text-only filter (these controls are text), see DuplicateParameterTests.SQLA_06_TreeSqlCompiler_DeniesATextOnlyRowFilter
+                if (consumer is TreeSqlCompilerConsumer) continue;
                 var result = await ParityRunner.RunAsync(consumer, env, restrictive, new ProducedPair(good.Legacy, ir));
                 output.WriteLine($"{consumer.Name} / {name}: {result.Classification.Class.ToWireName()} exceeds-reference={result.IrExceedsReference}");
 

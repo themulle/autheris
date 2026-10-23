@@ -204,7 +204,7 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
     }
 
     [Fact]
-    public void PlanKeysetStream_WithActiveRlsPolicy_ConjoinsAllPredicates()
+    public void PlanKeysetStream_WithActiveRlsPolicy_DoesNotSplicePolicyText()
     {
         var planner = new GovernedTableReadPlanner();
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
@@ -217,7 +217,25 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
 
         var planned = planner.PlanKeysetStream(request, metadata, decision);
 
-        planned.Sql.ShouldContain("WHERE (\"status\" = @p0) AND (\"tenant_id\" = 'tenant_42')");
+        // VF-06: the governed rewriter applies the row policy once; the planner never splices policy text.
+        planned.Sql.ShouldContain("WHERE (\"status\" = @p0)");
+        planned.Sql.ShouldNotContain("tenant_42");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PlanKeysetStream_NotInWithEmptyList_DoesNotSatisfyARequiredFilterColumn()
+    {
+        var planner = new GovernedTableReadPlanner();
+        var metadata = CreateTableMetadata(requiredFilters: ["status"]);
+        var decision = CreateAllowedDecision(metadata.Identifier);
+
+        // {op: notin, value: []} renders "1 = 1" and constrains nothing.
+        using var empty = JsonDocument.Parse("[]");
+        var request = new BulkTableStreamRequest(
+            Filter: new TypedFilterNode(Field: "status", Op: "notin", Value: empty.RootElement));
+
+        Should.Throw<RequiredFilterColumnMissingException>(() => planner.PlanKeysetStream(request, metadata, decision));
     }
 
     [Fact]

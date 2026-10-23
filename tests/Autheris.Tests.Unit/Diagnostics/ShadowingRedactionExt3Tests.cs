@@ -36,7 +36,7 @@ public sealed class ShadowingRedactionExt3Tests
     [Fact]
     public void QueryStringLiterals_AreRedacted_PathIsKept()
     {
-        var redacted = PiiShadowingRedactor.RedactPathAndQuery("/odata/hr/employees?$filter=lastname%20eq%20%27M%C3%BCller%27&$top=5");
+        var redacted = PiiShadowingRedactor.RedactPathAndQuery("/odata/hr/employees?$filter=lastname%20eq%20%27M%C3%BCller%27&$top=5", ["odata", "hr", "employees"]);
 
         Uri.UnescapeDataString(redacted).ShouldNotContain("Müller");
         Uri.UnescapeDataString(redacted).ShouldContain("lastname eq '***'");

@@ -58,7 +58,17 @@ public sealed class LakehouseOptions
 public sealed class DuckDbOlapOptions
 {
     public bool Enabled { get; init; } = true;
-    public string MaxMemory { get; init; } = "1GB";
+    /// <summary>
+    /// DuckDB <c>max_memory</c> per query database (default 256MB). MISC-05: the start-up validator checks
+    /// <c>MaxConcurrentQueries x (MaxMemory + 3 x MaxTotalStagedBytes)</c> against the memory budget of the container.
+    /// </summary>
+    public string MaxMemory { get; init; } = "256MB";
+
+    /// <summary>
+    /// MISC-05: memory budget in bytes for OLAP (DuckDB plus staged .NET objects). 0 derives 50% of the container memory limit (cgroup);
+    /// without a cgroup limit and without a budget OLAP fails validation outside Development.
+    /// </summary>
+    public long MemoryBudgetBytes { get; init; }
     public int MaxStagedRowsPerTable { get; init; } = 250000;
 
     /// <summary>Maximum rows of an OLAP query result; a smaller requested limit is kept.</summary>
@@ -73,8 +83,8 @@ public sealed class DuckDbOlapOptions
     /// <summary>Maximum total staged rows across all tables in a single OLAP query (default 500,000) (SG-02).</summary>
     public int MaxTotalStagedRows { get; init; } = 500000;
 
-    /// <summary>Maximum concurrent OLAP query executions across all tenants (default 4) (SG-02).</summary>
-    public int MaxConcurrentQueries { get; init; } = 4;
+    /// <summary>Maximum concurrent OLAP query executions across all tenants (default 2) (SG-02).</summary>
+    public int MaxConcurrentQueries { get; init; } = 2;
 
     /// <summary>Maximum size of the session-isolated temporary spill directory (default 256MB) (SG-01).</summary>
     public string MaxTempDirectorySize { get; init; } = "256MB";
@@ -85,8 +95,8 @@ public sealed class DuckDbOlapOptions
     /// <summary>Maximum estimated bytes staged from one table (default 64MB). Applies to every OLAP request; cross-source requests use the smaller of this and the CrossSource value.</summary>
     public long MaxStagedBytesPerTable { get; init; } = 64L * 1024 * 1024;
 
-    /// <summary>Maximum estimated bytes staged across all tables of one request (default 256MB). Cross-source requests use the smaller of this and the CrossSource value.</summary>
-    public long MaxTotalStagedBytes { get; init; } = 256L * 1024 * 1024;
+    /// <summary>Maximum estimated bytes staged across all tables of one request (default 64MB). Cross-source requests use the smaller of this and the CrossSource value.</summary>
+    public long MaxTotalStagedBytes { get; init; } = 64L * 1024 * 1024;
 
     /// <summary>Maximum concurrent OLAP requests of one tenant (default 2); further requests are answered with 429.</summary>
     public int MaxConcurrentQueriesPerTenant { get; init; } = 2;

@@ -178,10 +178,54 @@ public static class PasswordHasher
             byte[] salt = Convert.FromBase64String(parts[4]);
             byte[] expectedHash = Convert.FromBase64String(parts[5]);
 
+            // API-05: a truncated hash or a short salt is never accepted (a 1-byte hash would match ~1 in 256 passwords).
+            if (!HasExpectedLengths(salt, expectedHash))
+            {
+                return false;
+            }
+
             byte[] computedHash = ComputeArgon2idHash(inputPassword, salt, memoryKb, iterations, parallelism, expectedHash.Length);
             return CryptographicOperations.FixedTimeEquals(expectedHash, computedHash);
         }
         catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasExpectedLengths(byte[] salt, byte[] hash) => salt.Length >= SaltLength && hash.Length == HashLength;
+
+    /// <summary>
+    /// API-05: true when the salt and hash segments of a stored <c>$argon2id$...</c> or <c>$pbkdf2$...</c> value decode to at least
+    /// <see cref="SaltLength"/> and exactly <see cref="HashLength"/> bytes (used by the startup validator and the verifier).
+    /// </summary>
+    public static bool HasWellFormedSaltAndHash(string storedHash)
+    {
+        if (string.IsNullOrEmpty(storedHash))
+        {
+            return false;
+        }
+
+        var parts = storedHash.Split('$');
+        string saltPart, hashPart;
+        if (storedHash.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase) && parts.Length == 6)
+        {
+            (saltPart, hashPart) = (parts[4], parts[5]);
+        }
+        else if (storedHash.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) && parts.Length == 5)
+        {
+            (saltPart, hashPart) = (parts[3], parts[4]);
+        }
+        else
+        {
+            return false;
+        }
+
+        try
+        {
+            return HasExpectedLengths(Convert.FromBase64String(saltPart), Convert.FromBase64String(hashPart));
+        }
+        catch (FormatException)
         {
             return false;
         }
@@ -211,6 +255,11 @@ public static class PasswordHasher
         {
             byte[] salt = Convert.FromBase64String(parts[3]);
             byte[] expectedHash = Convert.FromBase64String(parts[4]);
+
+            if (!HasExpectedLengths(salt, expectedHash))
+            {
+                return false;
+            }
 
             byte[] computedHash = Rfc2898DeriveBytes.Pbkdf2(
                 inputPassword,

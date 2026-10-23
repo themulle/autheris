@@ -253,7 +253,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminPlanAccessRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_plan_access.");
-                var result = await planningService.PlanAccessAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+                var result = await planningService.PlanAccessAsync(req, adminSid, sessionContext.TenantId, ct: ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 
@@ -261,7 +261,7 @@ public static class McpAdminTools
             {
                 var req = JsonSerializer.Deserialize<AdminApplyAccessRequest>(argumentsJson, JsonOptions)
                     ?? throw new ArgumentException("Invalid arguments for admin_apply_access.");
-                var result = await planningService.ApplyAccessAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+                var result = await planningService.ApplyAccessAsync(req, adminSid, sessionContext.TenantId, ct: ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 

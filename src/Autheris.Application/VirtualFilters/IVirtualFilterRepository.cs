@@ -18,6 +18,14 @@ public sealed record VirtualFilterChangeSet
     public IReadOnlyList<(TenantId Tenant, string Name)> DeleteProfiles { get; init; } = [];
     public IReadOnlyList<(TenantId Tenant, string Name)> DeleteFilters { get; init; } = [];
 
+    /// <summary>
+    /// PERS-13: the snapshot generation the change was computed from. The store applies the change only while the stored generation
+    /// still equals it (compare-and-set inside the transaction) and throws <see cref="VirtualFilterConflictException"/> otherwise, so a
+    /// concurrent approval, save or delete is never silently overwritten or resurrected. The administration service always sets it;
+    /// <c>null</c> (direct repository use in tests and seeding) applies unconditionally.
+    /// </summary>
+    public long? ExpectedGeneration { get; init; }
+
     public bool IsEmpty => SaveFilters.Count + SaveProfiles.Count + DeleteProfiles.Count + DeleteFilters.Count == 0;
 }
 

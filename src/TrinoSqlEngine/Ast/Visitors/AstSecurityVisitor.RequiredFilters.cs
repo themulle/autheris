@@ -14,18 +14,18 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (node.From == null)
             return;
 
-        var tables = new List<(NamedTableSource Source, string TableName, string? Alias)>();
-        CollectNamedTableSources(node.From, tables);
+        var scope = new List<FromScopeEntry>();
+        CollectFromScope(node.From, scope);
 
-        if (tables.Count == 0)
+        if (!scope.Exists(static e => e.Source is NamedTableSource))
             return;
 
         var onPredicates = new List<Expression>();
         CollectOnPredicates(node.From, onPredicates);
 
-        foreach (var (source, tbl, alias) in tables)
+        foreach (var target in scope.ToArray())
         {
-            if (IsCte(source.Name))
+            if (target.Source is not NamedTableSource source || IsCte(source.Name))
                 continue;
 
             var entry = _typed.Catalog.Resolve(source.Name);
@@ -41,7 +41,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     bool groupAllSatisfied = true;
                     foreach (var reqCol in group)
                     {
-                        if (!IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
+                        if (!IsRequiredFilterSatisfied(entry, reqCol, target, scope, node.Where, onPredicates))
                         {
                             groupAllSatisfied = false;
                             break;
@@ -62,7 +62,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             {
                 foreach (var reqCol in entry.RequiredFilterColumns)
                 {
-                    if (IsRequiredFilterSatisfied(entry, reqCol, tbl, alias, node.Where, onPredicates))
+                    if (IsRequiredFilterSatisfied(entry, reqCol, target, scope, node.Where, onPredicates))
                         continue;
 
                     throw new RequiredFilterColumnMissingException(_typed.Capabilities.Dialect);
@@ -71,24 +71,78 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    private static void CollectNamedTableSources(TableSource? from, List<(NamedTableSource Source, string TableName, string? Alias)> tables)
+    /// <summary>
+    /// SQLE-08: one source of a FROM scope. <paramref name="ExposedName"/> is the only name a column can be qualified with (the alias,
+    /// else the simple table name); <paramref name="OutputColumns"/> is null when the exposed columns cannot be known (fail closed).
+    /// </summary>
+    private readonly record struct FromScopeEntry(TableSource Source, string? TableName, string ExposedName, IReadOnlySet<string>? OutputColumns);
+
+    private void CollectFromScope(TableSource? from, List<FromScopeEntry> scope)
     {
         if (from == null) return;
         switch (from)
         {
             case NamedTableSource named:
-                tables.Add((named, named.Name.NormalizedName, named.Alias?.Value));
+            {
+                string tableName = named.Name.NormalizedName;
+                string exposed = named.Alias?.Value ?? SqlIdentifierHelper.GetSimpleName(tableName);
+                IReadOnlySet<string>? columns = null;
+                if (!IsCte(named.Name) && _typed.Catalog.Resolve(named.Name) is { } catalogEntry)
+                {
+                    columns = new HashSet<string>(catalogEntry.Columns.Select(static c => c.Name), StringComparer.OrdinalIgnoreCase);
+                }
+
+                scope.Add(new FromScopeEntry(named, tableName, exposed, columns));
                 break;
+            }
             case JoinedTableSource joined:
-                CollectNamedTableSources(joined.Left, tables);
-                CollectNamedTableSources(joined.Right, tables);
+                CollectFromScope(joined.Left, scope);
+                CollectFromScope(joined.Right, scope);
                 break;
-            case LateralTableSource:
-                // Subqueries are handled in their own QuerySpecification scope
+            case LateralTableSource lateral:
+                scope.Add(new FromScopeEntry(lateral, null, lateral.Alias.Value, DerivedOutputColumns(lateral.Subquery.Body, lateral.ColumnAliases)));
                 break;
-            case SubqueryTableSource:
-                // Subqueries are handled in their own QuerySpecification scope
+            case SubqueryTableSource subquery:
+                scope.Add(new FromScopeEntry(subquery, null, subquery.Alias.Value, DerivedOutputColumns(subquery.Subquery.Body, subquery.ColumnAliases)));
                 break;
+        }
+    }
+
+    private static IReadOnlySet<string>? DerivedOutputColumns(QueryBody body, IReadOnlyList<SqlIdentifier>? columnAliases)
+    {
+        if (columnAliases is { Count: > 0 })
+        {
+            return new HashSet<string>(columnAliases.Select(static a => a.Value), StringComparer.OrdinalIgnoreCase);
+        }
+
+        switch (body)
+        {
+            case QuerySpecification spec:
+            {
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in spec.Projections)
+                {
+                    if (item is not ColumnSelectItem column)
+                    {
+                        return null;   // a wildcard exposes columns that are not known here
+                    }
+
+                    if (column.Alias != null)
+                    {
+                        names.Add(column.Alias.Value);
+                    }
+                    else if (column.Expression is ColumnReference reference)
+                    {
+                        names.Add(reference.Name.Parts[^1].Value);
+                    }
+                }
+
+                return names;
+            }
+            case SetOperationQuery setOperation:
+                return DerivedOutputColumns(setOperation.Left, null);
+            default:
+                return null;
         }
     }
 
@@ -108,8 +162,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private bool IsRequiredFilterSatisfied(
         TableCatalogEntry entry,
         string reqCol,
-        string tbl,
-        string? alias,
+        FromScopeEntry target,
+        List<FromScopeEntry> scope,
         Expression? where,
         List<Expression> onPredicates)
     {
@@ -132,7 +186,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
 
         // 3. Check WHERE clause
-        if (where != null && IsColumnConstrained(where, tbl, alias, reqCol))
+        if (where != null && IsColumnConstrained(where, target, scope, reqCol))
         {
             return true;
         }
@@ -140,7 +194,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // 4. Check JOIN ON conditions
         foreach (var onPred in onPredicates)
         {
-            if (IsColumnConstrained(onPred, tbl, alias, reqCol))
+            if (IsColumnConstrained(onPred, target, scope, reqCol))
             {
                 return true;
             }
@@ -149,7 +203,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         return false;
     }
 
-    private static bool IsColumnConstrained(Expression expr, string tbl, string? alias, string col)
+    private static bool IsColumnConstrained(Expression expr, FromScopeEntry target, List<FromScopeEntry> scope, string col)
     {
         while (expr is ParenthesizedExpression p)
         {
@@ -159,24 +213,24 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         switch (expr)
         {
             case BinaryExpression b when b.Operator == BinaryOperator.And:
-                return IsColumnConstrained(b.Left, tbl, alias, col) || IsColumnConstrained(b.Right, tbl, alias, col);
+                return IsColumnConstrained(b.Left, target, scope, col) || IsColumnConstrained(b.Right, target, scope, col);
 
             case BinaryExpression b when b.Operator == BinaryOperator.Or:
-                return IsColumnConstrained(b.Left, tbl, alias, col) && IsColumnConstrained(b.Right, tbl, alias, col);
+                return IsColumnConstrained(b.Left, target, scope, col) && IsColumnConstrained(b.Right, target, scope, col);
 
             case BinaryExpression b when b.Operator is BinaryOperator.Equal
                                       or BinaryOperator.LessThan
                                       or BinaryOperator.LessThanOrEqual
                                       or BinaryOperator.GreaterThan
                                       or BinaryOperator.GreaterThanOrEqual:
-                if (MatchesTargetColumn(b.Left, tbl, alias, col) && !ContainsColumnReference(b.Right))
+                if (MatchesTargetColumn(b.Left, target, scope, col) && !ContainsColumnReference(b.Right))
                     return true;
-                if (MatchesTargetColumn(b.Right, tbl, alias, col) && !ContainsColumnReference(b.Left))
+                if (MatchesTargetColumn(b.Right, target, scope, col) && !ContainsColumnReference(b.Left))
                     return true;
                 return false;
 
             case BetweenExpression bt when !bt.IsNotBetween:
-                if (MatchesTargetColumn(bt.Operand, tbl, alias, col) &&
+                if (MatchesTargetColumn(bt.Operand, target, scope, col) &&
                     !ContainsColumnReference(bt.Lower) &&
                     !ContainsColumnReference(bt.Upper))
                 {
@@ -185,7 +239,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 return false;
 
             case InListExpression inList when !inList.IsNotIn && inList.Items.Count > 0:
-                if (MatchesTargetColumn(inList.Operand, tbl, alias, col) &&
+                if (MatchesTargetColumn(inList.Operand, target, scope, col) &&
                     !inList.Items.Any(ContainsColumnReference))
                 {
                     return true;
@@ -193,14 +247,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 return false;
 
             case InSubqueryExpression inSq when !inSq.IsNotIn:
-                if (MatchesTargetColumn(inSq.Operand, tbl, alias, col))
+                if (MatchesTargetColumn(inSq.Operand, target, scope, col))
                 {
                     return true;
                 }
                 return false;
 
             case LikeExpression lk when !lk.IsNotLike:
-                if (MatchesTargetColumn(lk.Operand, tbl, alias, col) &&
+                if (MatchesTargetColumn(lk.Operand, target, scope, col) &&
                     !ContainsColumnReference(lk.Pattern) &&
                     (lk.Escape == null || !ContainsColumnReference(lk.Escape)))
                 {
@@ -209,14 +263,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 return false;
 
             case UnaryExpression u when u.Operator == UnaryOperator.IsNull:
-                return MatchesTargetColumn(u.Operand, tbl, alias, col);
+                return MatchesTargetColumn(u.Operand, target, scope, col);
 
             default:
                 return false;
         }
     }
 
-    private static bool MatchesTargetColumn(Expression expr, string tbl, string? alias, string col)
+    private static bool MatchesTargetColumn(Expression expr, FromScopeEntry target, List<FromScopeEntry> scope, string col)
     {
         while (expr is ParenthesizedExpression p)
         {
@@ -225,18 +279,18 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         if (expr is CastExpression cast)
         {
-            return MatchesTargetColumn(cast.Operand, tbl, alias, col);
+            return MatchesTargetColumn(cast.Operand, target, scope, col);
         }
 
         if (expr is ColumnReference cr)
         {
-            return MatchesColumn(cr, tbl, alias, col);
+            return MatchesColumn(cr, target, scope, col);
         }
 
         return false;
     }
 
-    private static bool MatchesColumn(ColumnReference colRef, string tableName, string? alias, string columnName)
+    private static bool MatchesColumn(ColumnReference colRef, FromScopeEntry target, List<FromScopeEntry> scope, string columnName)
     {
         var parts = colRef.Name.Parts;
         if (parts.Count == 0) return false;
@@ -245,25 +299,38 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (!string.Equals(refCol, columnName, StringComparison.OrdinalIgnoreCase))
             return false;
 
+        // SQLE-08: every ambiguity counts as "not constrained" (fail closed).
         if (parts.Count == 1)
+        {
+            // Only when no other source of the scope may expose a column of that name.
+            foreach (var other in scope)
+            {
+                if (ReferenceEquals(other.Source, target.Source)) continue;
+                if (other.OutputColumns is null || other.OutputColumns.Contains(refCol)) return false;
+            }
+
             return true;
+        }
 
         if (parts.Count == 2)
         {
-            string qualifier = parts[0].Value;
-            if (!string.IsNullOrEmpty(alias) && string.Equals(qualifier, alias, StringComparison.OrdinalIgnoreCase))
-                return true;
+            // An aliased table is reachable only through its alias, and only when the exposed name is unique in the scope.
+            if (!string.Equals(parts[0].Value, target.ExposedName, StringComparison.OrdinalIgnoreCase)) return false;
+            foreach (var other in scope)
+            {
+                if (ReferenceEquals(other.Source, target.Source)) continue;
+                if (string.Equals(other.ExposedName, target.ExposedName, StringComparison.OrdinalIgnoreCase)) return false;
+            }
 
-            string simpleTable = SqlIdentifierHelper.GetSimpleName(tableName);
-            return string.Equals(qualifier, simpleTable, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(qualifier, tableName, StringComparison.OrdinalIgnoreCase);
+            return true;
         }
 
         if (parts.Count == 3)
         {
+            // schema.table.column reaches only an unaliased table.
+            if (target.Source is not NamedTableSource { Alias: null } || target.TableName is null) return false;
             string schemaTable = $"{parts[0].Value}.{parts[1].Value}";
-            return string.Equals(schemaTable, tableName, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(parts[1].Value, SqlIdentifierHelper.GetSimpleName(tableName), StringComparison.OrdinalIgnoreCase);
+            return string.Equals(schemaTable, target.TableName, StringComparison.OrdinalIgnoreCase);
         }
 
         return false;

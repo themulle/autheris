@@ -128,7 +128,7 @@ public class CustomQueryPollerService : ClusterPartitionedService
         var timeout = Math.Min(poller.QueryTimeoutSeconds > 0 ? poller.QueryTimeoutSeconds : 30, 60);
         cmd.CommandTimeout = timeout;
 
-        await EnforceReadOnlySemanticsAsync(conn, cmd, ct).ConfigureAwait(false);
+        await using var readOnlyTransaction = await EnforceReadOnlySemanticsAsync(conn, cmd, ct).ConfigureAwait(false);
 
         // 4. Strictly bind parameters (Zero dynamic SQL concatenation)
         QueryPollerParameterBinder.BindParameters(cmd, poller.Watermarks, vector, poller.BatchSize);
@@ -362,7 +362,13 @@ public class CustomQueryPollerService : ClusterPartitionedService
         throw new InvalidOperationException("No database connection factory is configured for CustomQueryPollerService.");
     }
 
-    private static async Task EnforceReadOnlySemanticsAsync(DbConnection conn, DbCommand cmd, CancellationToken ct)
+    /// <summary>
+    /// SEC-CDC101-03 / EXT-10: SQLite gets <c>query_only</c>; PostgreSQL runs the poll inside an explicit <c>READ ONLY</c> transaction
+    /// (a bare <c>SET TRANSACTION</c> outside a transaction block is a warning and changes nothing). Failing to establish read-only mode
+    /// is fatal. The statement shape itself (single SELECT) is enforced by <c>CustomQueryPollerValidator</c>. The returned transaction (if any)
+    /// is already attached to <paramref name="cmd"/> and must be disposed by the caller.
+    /// </summary>
+    internal static async Task<DbTransaction?> EnforceReadOnlySemanticsAsync(DbConnection conn, DbCommand cmd, CancellationToken ct)
     {
         var typeName = conn.GetType().Name.ToLowerInvariant();
         var connStr = conn.ConnectionString?.ToLowerInvariant() ?? string.Empty;
@@ -373,19 +379,28 @@ public class CustomQueryPollerService : ClusterPartitionedService
             using var pragma = conn.CreateCommand();
             pragma.CommandText = "PRAGMA query_only = ON;";
             await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            return null;
         }
-        else if (typeName.Contains("npgsql") || typeName.Contains("postgres") || connStr.Contains("postgres") || ds.Contains("postgres"))
+
+        if (typeName.Contains("npgsql") || typeName.Contains("postgres") || connStr.Contains("postgres") || ds.Contains("postgres"))
         {
-            using var setRo = conn.CreateCommand();
-            setRo.CommandText = "SET TRANSACTION READ ONLY;";
+            var transaction = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
-                await setRo.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                using var setReadOnly = conn.CreateCommand();
+                setReadOnly.Transaction = transaction;
+                setReadOnly.CommandText = "SET TRANSACTION READ ONLY;";
+                await setReadOnly.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                cmd.Transaction = transaction;
+                return transaction;
             }
             catch
             {
-                // Ignore if not in an active transaction block
+                await transaction.DisposeAsync().ConfigureAwait(false);
+                throw;
             }
         }
+
+        return null;
     }
 }

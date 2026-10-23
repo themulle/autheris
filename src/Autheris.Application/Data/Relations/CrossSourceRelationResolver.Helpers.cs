@@ -143,26 +143,6 @@ public sealed partial class CrossSourceRelationResolver
         }
     }
 
-    private static void ValidateFilterColumnsClear(
-        IReadOnlyList<string> referencedColumns,
-        TableMetadata childMetadata,
-        TableAccessDecision childDecision)
-    {
-        foreach (var colName in referencedColumns)
-        {
-            var col = childMetadata.GetColumn(colName);
-            if (col == null)
-            {
-                throw new GatewayInvalidQueryException($"Filter column '{colName}' does not exist on target table '{childMetadata.Identifier}'.");
-            }
-
-            if (childDecision.GetEffectiveColumnAccess(col.ColumnName, childMetadata) != ColumnAccessLevel.Clear)
-            {
-                throw new FilterOnMaskedColumnException(col.ColumnName);
-            }
-        }
-    }
-
     private static IReadOnlyList<string> BuildRequestedChildColumns(
         IReadOnlyList<string>? selectColumns,
         IReadOnlyList<string> joinKeysChild,
@@ -233,31 +213,49 @@ public sealed partial class CrossSourceRelationResolver
         IReadOnlyDictionary<string, object?> row,
         TableMetadata childMetadata,
         TableAccessDecision childDecision,
-        TenantId tenantId,
-        string? targetFilterSql)
+        TenantId tenantId)
     {
-        var tenantCol = childMetadata.TenantColumnName;
-        if (tenantCol != null && TryGetColumnValue(row, tenantCol, out var rowTenant) && rowTenant != null)
+        // VF-03: a row of a tenanted table without a tenant value, or with another tenant, never passes (ordinal comparison).
+        if (!TenantRowGuard.Matches(row, childMetadata.TenantColumnName, tenantId))
         {
-            if (!string.Equals(rowTenant.ToString(), tenantId.Value, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
+            return false;
         }
 
         // REQ-GOV-129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
-        if (!InMemoryRowFilterEvaluator.RowPassesDecision(row, childDecision, childMetadata))
+        return InMemoryRowFilterEvaluator.RowPassesDecision(row, childDecision, childMetadata);
+    }
+
+    private static string? UserSidOf(ClaimsPrincipal user) => user.GetUserSid()?.Value;
+
+    /// <summary>
+    /// VF-02: the explicit column list of the read (no <c>SELECT *</c>): the projection, the child join keys, and the columns the in-memory row
+    /// policy needs. A policy whose columns are not known (untyped text, foreign policy type) needs every catalog column.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveReadColumns(
+        IReadOnlyList<string> columnsToProject,
+        IReadOnlyList<string> joinKeysChild,
+        TableMetadata childMetadata,
+        TableAccessDecision childDecision)
+    {
+        var columns = new List<string>(columnsToProject);
+        columns.AddRange(joinKeysChild);
+
+        if (childDecision.RowPolicy is PolicyPredicateRowPolicy typed)
         {
-            return false;
+            foreach (var referenced in typed.Predicate.ReferencedColumns)
+            {
+                if (childMetadata.GetColumn(referenced) is { } column)
+                {
+                    columns.Add(column.ColumnName);
+                }
+            }
+        }
+        else if (childDecision.RowPolicy is not null || !string.IsNullOrWhiteSpace(childDecision.CombinedRowFilterSql))
+        {
+            columns.AddRange(childMetadata.Columns.Select(c => c.ColumnName));
         }
 
-        if (!string.IsNullOrWhiteSpace(targetFilterSql) &&
-            !StreamingRowFilterAstEvaluator.Matches(row, targetFilterSql))
-        {
-            return false;
-        }
-
-        return true;
+        return columns.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private IReadOnlyDictionary<string, object?> ProjectAndMaskRow(
@@ -286,7 +284,7 @@ public sealed partial class CrossSourceRelationResolver
             if (access == ColumnAccessLevel.Mask)
             {
                 var rule = childMetadata.ColumnMaskingRules.TryGetValue(colName, out var r) ? r : DefaultRedactRule;
-                var scopedRule = GatewayExecutionService.ScopeRuleForTenant(rule, tenantId.Value, null);
+                var scopedRule = GatewayExecutionService.ScopeRuleForTenant(rule, tenantId.Value, _maskingProvider.DefaultHmacKeyId);
                 projected[colName] = _maskingProvider.MaskValue(colName, val, scopedRule);
             }
             else
@@ -296,48 +294,6 @@ public sealed partial class CrossSourceRelationResolver
         }
 
         return projected;
-    }
-
-    private static (string PredicateSql, IReadOnlyDictionary<string, object?> Parameters) BuildParentInPredicate(
-        IReadOnlyList<string> parentJoinKeys,
-        IReadOnlyList<CompositeKey> matchingKeys)
-    {
-        if (matchingKeys.Count == 0)
-        {
-            return ("1 = 0", new Dictionary<string, object?>());
-        }
-
-        var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (parentJoinKeys.Count == 1)
-        {
-            var quotedCol = DataApiFilterTranslator.QuoteIdentifier(parentJoinKeys[0]);
-            var paramNames = new List<string>(matchingKeys.Count);
-            for (int i = 0; i < matchingKeys.Count; i++)
-            {
-                var pName = $"__cs_fk_{i.ToString(CultureInfo.InvariantCulture)}";
-                parameters[pName] = matchingKeys[i].Values[0];
-                paramNames.Add($"@{pName}");
-            }
-
-            return ($"{quotedCol} IN ({string.Join(", ", paramNames)})", parameters);
-        }
-
-        var disjuncts = new List<string>(matchingKeys.Count);
-        for (int i = 0; i < matchingKeys.Count; i++)
-        {
-            var conjuncts = new List<string>(parentJoinKeys.Count);
-            for (int k = 0; k < parentJoinKeys.Count; k++)
-            {
-                var quotedCol = DataApiFilterTranslator.QuoteIdentifier(parentJoinKeys[k]);
-                var pName = $"__cs_fk_{i.ToString(CultureInfo.InvariantCulture)}_{k.ToString(CultureInfo.InvariantCulture)}";
-                parameters[pName] = matchingKeys[i].Values[k];
-                conjuncts.Add($"{quotedCol} = @{pName}");
-            }
-
-            disjuncts.Add($"({string.Join(" AND ", conjuncts)})");
-        }
-
-        return ($"({string.Join(" OR ", disjuncts)})", parameters);
     }
 
     private Task RecordTargetAuditAsync(

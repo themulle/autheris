@@ -70,12 +70,12 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
         new MaskArguments(Constant: new PolicyParameterExpression("__mask_email", SqlParameterType.String, ParameterOrigin.Mask)),
         new Dictionary<string, PolicyValue> { ["__mask_email"] = new("***", SqlParameterType.String) }.ToFrozenDictionary());
 
-    private List<(long Id, string? Email)> ViaTree(string tenant, string? rowFilter, bool masked)
+    private List<(long Id, string? Email)> ViaTree(string tenant, IRowPolicy? rowFilter, bool masked)
     {
-        var decision = TableAccessDecision.Allowed(
+        var decision = TypedTreeRowPolicy.Allowed(
             Orders,
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["tenant_id"] = ColumnAccessLevel.Deny },
-            rowFilter, hasUnconstrainedColumnAllow: true, null);
+            rowFilter);
         var access = new Dictionary<TableIdentifier, TreeTableAccess>
         {
             [Orders] = new(OrdersMeta(masked), decision, "tenant_id", tenant)
@@ -144,7 +144,7 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
     [InlineData("t2", 40, true)]
     public void TenantRowFilterAndMask_TreeAndCompileExposeTheSameRows(string tenant, long minimum, bool masked)
     {
-        var tree = ViaTree(tenant, $"\"amount\" >= {minimum}", masked);
+        var tree = ViaTree(tenant, TypedTreeRowPolicy.Int("amount", BinaryOperator.GreaterThanOrEqual, minimum), masked);
         var compiled = ViaCompile(tenant, AmountAtLeast(minimum), masked);
 
         tree.ShouldNotBeEmpty();
@@ -165,7 +165,7 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
     [Fact]
     public void RowFilterThatMatchesNothing_YieldsNoRowsOnBothPaths()
     {
-        ViaTree("t1", "\"amount\" >= 1000", masked: false).ShouldBeEmpty();
+        ViaTree("t1", TypedTreeRowPolicy.Int("amount", BinaryOperator.GreaterThanOrEqual, 1000), masked: false).ShouldBeEmpty();
         ViaCompile("t1", AmountAtLeast(1000), masked: false).ShouldBeEmpty();
     }
 }

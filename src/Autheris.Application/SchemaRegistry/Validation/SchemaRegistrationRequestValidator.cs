@@ -21,7 +21,14 @@ public sealed class SchemaRegistrationRequestValidator : AbstractValidator<Schem
 
                 try
                 {
-                    Utf8GraphQLParser.Parse(sdl);
+                    var document = Utf8GraphQLParser.Parse(sdl);
+
+                    // MISC-16: duplicates and dangling extensions are rejected at registration (first version included).
+                    var (_, errors) = SchemaDocumentNormalizer.Normalize(document);
+                    foreach (var error in errors)
+                    {
+                        context.AddFailure(nameof(SchemaRegistrationRequest.Sdl), $"Invalid schema: {error}");
+                    }
                 }
                 catch (SyntaxException ex)
                 {

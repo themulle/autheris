@@ -99,3 +99,10 @@ A first (it validates unbuilt commits); B-E independent after A; F last (widest 
 5. TOTP attempts are reserved before evaluation; parallel test must show at most `MaxFailedAttempts` evaluations per window.
 6. Degraded role resolution is never cached for longer than the configured cap (default 0) and always denies data access.
 7. Simulation never yields admin semantics or cross-tenant consents; privilege role matching is exact.
+
+## Changelog
+
+- 2026-10-22 (G-PLAN-REBASE, implementation on `fix/sec-impl-b-gov`): GOV-04 tenant fallback was already removed by EP-04; the plan's `CreateConsentRequestAsync` is `ConsentRequestService.SubmitAsync` in code. `PlanAccessAsync`/`ApplyAccessAsync` take the caller as an optional trailing `ClaimsPrincipal? caller` (the MCP session has no claims; the administrator SID is always compared). Four-eyes rejection at apply skips a table that is not catalogued and has no clear-PII diff (nothing to gate yet).
+- 2026-10-22: GOV-12 guard runs before any write scope or connection (the registry is backed by the same repository; calling it inside the write gate deadlocks SQLite) and is injected as an optional trailing constructor parameter; the registry and table repository are resolved lazily because the repositories are their backing store (DI cycle). The architecture test checks the entry points (`ActivateConsentCoreAsync`, `ExecuteAtomicApprovalWithConsentAsync`), not the shared insert helper.
+- 2026-10-22: GOV-08 `Identity:DegradedRoleCacheSeconds` is not implemented; degraded resolutions are never cached (cap fixed at 0).
+- 2026-10-22: GOV-02 decision endpoints were extracted to `HandleCertifyAsync`/`HandleRevokeAsync` for testability; PERS-12 is covered here (`TryUpdateItemDecisionAsync`).
