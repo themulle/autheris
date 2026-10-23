@@ -105,3 +105,54 @@ Shared test and plan files (line-disjoint blocks):
 - `parity-baseline.json`: devs must not edit it; the lead regenerates it after both lanes merge.
 
 Exit per WP: unit tests green, the WP's Parity cells green with their keys removed, `Robin100_NoKnownGapForDeniedOrLeakCells` and the leak scans unchanged and green. Lead after merge: full Parity run with 0 red cells, baseline regenerated.
+
+## 5. Phase 3 security conditions
+
+Reviewer: csharp-security-expert, 2026-10-23. Verdict: **APPROVED WITH CONDITIONS**. Every test below carries `[Trait("Category", "Security")]`. No existing security test, gate, `KnownGap` guard or shield body may be weakened; keys are removed only for the cells the plan names.
+
+### Decisions
+
+1. P1 #320: a byte-identical 403 `SQL_POLICY_DENIED` (status, code, message, headers) for unknown source, source not enabled for WebSQL/tenant, and unknown table is sufficient. The skipped metadata lookup is an accepted timing residual (default taken: no dummy lookup; a dummy call would add load and a new failure mode for little gain). 503 `SQL_SOURCE_UNAVAILABLE` only after the allowlist decision passed.
+2. P2 #321: deferring `*` to PARITY-FU-003 is not accepted as is. A user-SQL-reachable 5xx is an owner-level defect, so a fail-closed fallback is required now (SEC-RG-03).
+3. P3 #322: `AGGREGATION_ON_MASKED_COLUMN` (403) is right; it is a denial of equal strength, and the request is denied before execution.
+4. #318: null/unresolved `first` is costed as the default page at the maximum (never lower than an explicit default page); the cost uses the coerced runtime value, and the declared default only when the variable is absent.
+5. G4/#330: the exemption is acceptable only as an exact-match, single-error, server-constant rule (SEC-RG-08/09).
+6. MaxOffset 100000 -> 10000: accepted (tightening, not a weakening).
+7. REST `eq null` -> `IS NULL`: the translated SQL goes through the same governed guards, so a masked/denied column in `IS NULL` is still a filter reference and denied; required-filter and row-policy predicates are added outside the user filter (SEC-RG-10).
+8. G6: accepted with SEC-RG-12; G2 null member -> `INVALID_QUERY` accepted (SEC-RG-11).
+
+### Binding conditions
+
+- SEC-RG-01 (S1): `IsAllowed` is evaluated before any metadata/repository call and uses the exact `EnsureAllowed` logic (shared private core, no second implementation). The denied path throws `WebSqlTableDeniedException` with the same message as the unknown-table path; no source name beyond what the caller sent is echoed differently between the cases.
+- SEC-RG-02 (S1): `EnsureAllowed` behaviour for OLAP/staging callers is unchanged. 503 is never produced for a source the tenant may not use.
+- SEC-RG-03 (S2): In addition to the AST degree check, the mapper (or the provider-error wrapper) maps a provider set-operation column-count error to 400 `SQL_SYNTAX_ERROR` with a fixed message (no provider text, no column names). Classification by provider error code/SQLSTATE, not by user text. Wildcard operands (`SELECT *` UNION ...) must therefore return 4xx, and PARITY-FU-003 is closed or reduced to "provider message variants". An unclassified provider error stays 502 with a sanitized body (unchanged).
+- SEC-RG-04 (S3): Window `PARTITION BY`/`ORDER BY` on a masked or denied column remains denied pre-execution in both guards (executor and rewriter); `WindowColumnReferences` is checked against the same masked/denied/HMAC rules as `FilterColumnReferences` (denied columns too, not only masked). Plain `ORDER BY/WHERE masked` stays `SQL_POLICY_VIOLATION`; JOIN-predicate rule unchanged. The 403 body carries no column value.
+- SEC-RG-05 (G1): The cost rule prices a variable `first` from the coerced runtime value; absent variable -> declared default; explicit null, unresolved or unparsable -> maximum default-page cost. The runtime pass must run before execution and fail closed (reject) if a variable value cannot be coerced. The validation-time pass relaxing never skips the runtime pass.
+- SEC-RG-06 (G1): Null `first` executes the default page (`min(100, MaxAllowedLimit)`) and is never unbounded; `first` and the response-row cap still apply after coercion.
+- SEC-RG-07 (G4/G0): `GatewayPageRangeException` is the only source of the exempt message; the range check covers literals and variable values alike, with `long` overflow handled (values above `int.MaxValue` -> `INVALID_QUERY`, not an exception 5xx).
+- SEC-RG-08 (G4): The shield exemption applies only when every error of the response is `INVALID_QUERY` with exactly `PageRangeMessage` (ordinal compare) and no other error, extension or path text beyond the fixed body. Any mixed response is shielded. The message must be identical for unknown and denied tables (the range check runs on the argument alone and reveals nothing about existence); the range check must not run before field/table authorization in a way that lets `first: 100000` on a denied table answer differently from `first: 10` on it.
+- SEC-RG-09 (G4): `ProductionShieldBodies_ByteIdentical` pins the five #294 bodies as literals captured from main before the change (not regenerated), in Production and Development.
+- SEC-RG-10 (S7): `eq null`/`ne null` rewrite only in non-literal segments; `IS NULL` on a masked or denied column is rejected exactly like `= 'x'` on it; the rewrite happens before the guards (guards see the final SQL). No rewrite of `null` inside a larger identifier (`\b`, case-insensitive handled).
+- SEC-RG-11 (G2): `or` with an empty member is neutral only for the tree filter; row policy, required filters and masking still apply. Null list member in `or` and in `and`/`not` -> `INVALID_QUERY`; nested `or` depth/size bounds unchanged.
+- SEC-RG-12 (G6): DST arms are generated only from allowlisted zones, formatted with invariant culture as fixed-shape literals; the per-zone table is bounded (zone count x years) and cached thread-safely. A zone absent from the allowlist still fails closed as today.
+- SEC-RG-13 (S5): `MaxOffset` default 10000 may be overridden by configuration but values `<= 0` or above `int.MaxValue` fail startup validation; check stays `offset > max`.
+- SEC-RG-14 (S6/S8): `startswith/endswith/contains` literal escapes `\`, `%`, `_`, `'` so a caller cannot widen the pattern; the `LIKE` target column goes through the same masked/denied guard. S8: the original `SQL_SYNTAX_ERROR` detail is logged without the filter text value beyond the existing redaction rules, and the REST body is the fixed `InvalidQueryMessage`. Policy codes (403) are never remapped to `INVALID_QUERY`.
+- SEC-RG-15 (S4): Qualified-identity matching must treat same-name tables of different source/schema as distinct and must not let a denied table pass via alias reuse; the allowlist/policy check runs per resolved table, including the re-added `b`.
+- SEC-RG-16 (G3): `NotIn` with a null renders `1 = 0` (fail closed, narrower, never wider).
+
+### Mandatory tests (all `[Trait("Category","Security")]`)
+
+- `SqlCompilerErrorMapperTests.UnknownSourceUnknownTableDisabledSource_ByteIdenticalBody` (SEC-RG-01/02)
+- `CrossSourceQueryRouterTests.DeniedSource_NoMetadataLookup`, `...AllowedDownSource_Returns503`
+- `SqlCompilerErrorMapperTests.SetOperationColumnCountProviderError_Maps400_NoProviderText`; Parity `Robin_Proactive_SetOperations|WebSql|wildcard_mismatch` returns 4xx (SEC-RG-03)
+- `GovernedSqlExecutionServiceMaskTests.WindowPartitionOnDeniedColumn_Denied`, `...WindowOverMasked_ThrowsMaskedAggregation`, `GovernedSqlRewriterMaskTests.WindowOverMasked_Denied` (SEC-RG-04)
+- `QueryCostAnalyzerRuleTests.ExplicitNullFirst_IgnoresDeclaredDefault_MaxCost`, `...UnparsableVariable_Rejected`, `...AbsentVariable_UsesDeclaredDefault`; `GraphQlTreeBuilderVariableTests.NullFirst_DefaultPageBounded` (SEC-RG-05/06)
+- `GraphQlTreeBuilderPagingTests.LongOverflowFirst_PageRange`, `...VariableFirstAboveMax_PageRange`
+- `GraphQlEnumerationShieldTests.ProductionShieldBodies_ByteIdentical`, `...PageRange_NotShielded_FixedBody`, `...PageRangeMixedWithUnknownField_Shielded`, `...PageRangeOnDeniedTable_SameBodyAsAllowedTable` (SEC-RG-07/08/09)
+- `DataApiFilterTranslatorTests.IsNullOnMaskedColumn_Denied` (via governed service), `...EqNullInsideLiteral_Untouched`, `...ContainsPatternMetacharacters_Escaped` (SEC-RG-10/14)
+- `GraphQlTreeBuilderFilterTests.OrEmptyMember_RowPolicyStillApplied`, `...OrNullMember_Rejected`, `...AndNullMember_Rejected` (SEC-RG-11)
+- `SqliteZoneOffsetTableTests.NonAllowlistedZone_FailsClosed`, `...LiteralsInvariantFormat` (SEC-RG-12)
+- `DatasetApiOptionsTests.MaxOffsetNonPositive_FailsValidation` (SEC-RG-13)
+- `DatasetDataEndpointsTests.PolicyViolation_NotRemappedToInvalidQuery` (SEC-RG-14)
+- `CrossSourcePlannerTests.JoinChainSameNameDifferentSource_DistinctAndPolicyChecked` (SEC-RG-15)
+- `TreeFilterRendererTests.NotInWithNull_RendersFalse` (SEC-RG-16)
