@@ -209,3 +209,16 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - `Robin100_ScopedAliasWithoutFilterRejectsWholeRequest`
 - `Robin100_MaskedFragmentsDirectivesAndAliasesNeverLeakClearValue`
 - `Robin100_InListOverCapIsRejected`
+
+<!-- WP-V2a begin -->
+## 7. WP-V2a drift and corrections (2026-10-23)
+
+- Code mapping re-checked in `src/`: WebSQL `SqlCompilerErrorMapper` rows confirmed. A SUM over a masked column in WebSQL is `TrinoSqlEngine.MaskedAggregationException` and therefore 403 `AGGREGATION_ON_MASKED_COLUMN` (section 5.3 item 2 said only "W 403"); asserted as such.
+- v2-02 pragma: a bare `FROM pragma_table_info('x')` is not Trino grammar (400 `SQL_SYNTAX_ERROR`); the 403 `SQL_POLICY_VIOLATION` of section 5.2 belongs to the `FROM TABLE(pragma_table_info('x'))` form (`SqlAstBuilder.VisitTableFunctionInvocation` throws `SecurityException`). Both forms are cells (`pragma_table_function`, `pragma_bare_call`); both are security cells without a gap.
+- v2-12 masked window: the generic masked-reference guard can answer 403 `SQL_POLICY_VIOLATION` before the aggregation guard answers `AGGREGATION_ON_MASKED_COLUMN`; the cell asserts 403 with either of the two stable codes (security cell, never a gap).
+- v2-10 R and `REST` filter errors: `SqlCompilerErrorMapper.TryMap` precedes the `ArgumentException` branch in `DatasetDataEndpoints`, so a filter that reaches the SQL parser answers `SQL_SYNTAX_ERROR`; kept as expected `INVALID_QUERY` with gap 056.
+- v2-14: the GraphQL cost analyzer prices a variable `first` as the worst case (`QueryCostAnalyzerRule`); all three variants answer `GRAPHQL_VALIDATION_FAILED` (gap 052). The same cost rule is the likely source of 057 (page size above the cap is a validation error before the resolver check).
+- v2-08 `mismatch` (`UNION` of 1 and 2 columns): HTTP 502 `SQL_PROVIDER_ERROR` instead of 400 `SQL_SYNTAX_ERROR`. A 5xx is a hard failure, never a gap (SEC-R100-11); the cell stays red until the product validates set-operation arity.
+- v2-17 `offset_over` REST answers 200 with zero rows (gap 054); WebSQL answers 200 with zero rows as expected; GraphQL answers 400 `INVALID_QUERY`. Note: a 200 for a request the plan expects rejected sits in section 5.3 item 9 only as "another stable code"; it is registered as a functional gap for the lead's decision.
+- New gap ids 051-057 (drafts in the nightly parity plan, section 5). Gap key `Robin_Proactive_NullBoolIsReturn|Rest|` removed (method deleted). Guard: `Robin100V2aSecurityTests` (closed list, security variants, masked-leak scan).
+<!-- WP-V2a end -->

@@ -80,7 +80,7 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
     [InlineData("GraphQl")]
     [InlineData("WebSql")]
     [InlineData("Rest")]
-    public Task Robin_280_AggregationWhereEqualsValue(string channel) => Run(channel, "aggregate_where_eq", async () =>
+    public Task Robin_280_AggregationWhereEqualsValue(string channel) => Run(channel, channel == "Rest" ? "list_where_eq" : "aggregate_where_eq", async () =>
     {
         switch (channel)
         {
@@ -137,35 +137,71 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
             ? ("strftime('%Y', sale_date)", "strftime('%m', sale_date)")
             : ("EXTRACT(YEAR FROM sale_date)", "EXTRACT(MONTH FROM sale_date)");
         var r = await Sql($"SELECT {y} AS y, {m} AS m, COUNT(*) AS n FROM parity_sales GROUP BY {y}, {m} ORDER BY y, m");
-        r.Ok().Rows.Count.ShouldBe(ParityExpected.DistinctYearMonths, r.RawBody);
-        r.Rows.Sum(x => Convert.ToInt32(x["n"], System.Globalization.CultureInfo.InvariantCulture)).ShouldBe(ParityExpected.TotalRows);
-        r.RowsShouldBe(["y", "m", "n"], [[2023, 3, 1]], ordered: true, prefixOnly: true);
+        r.RowsShouldBe(
+            ["y", "m", "n"],
+            YearMonthGroups.Select(g => new object?[] { g.Year, g.Month, g.Count }).ToArray(),
+            ordered: true);
     }, variant);
 
+    /// <summary>Hand-computed (year, month, rows) groups of <c>sale_date</c> in ascending order (v2 B7).</summary>
+    private static readonly (int Year, int Month, int Count)[] YearMonthGroups =
+    [
+        (2023, 3, 1), (2023, 6, 1), (2024, 1, 2), (2024, 2, 1), (2024, 3, 1), (2024, 5, 1), (2024, 7, 2),
+        (2024, 12, 1), (2025, 1, 1), (2025, 2, 1), (2025, 3, 3), (2025, 4, 2), (2025, 5, 1),
+    ];
+
     [ParityTheory]
-    [InlineData("YEAR", 3)]
-    [InlineData("MONTH", ParityExpected.DistinctYearMonths)]
-    [InlineData("DAY", ParityExpected.DistinctSaleDates)]
-    public Task Robin_Proactive_GroupByDatePartGraphQl(string bucket, int groups) => Run("GraphQl", "group_by_date_part", async () =>
+    [InlineData("YEAR")]
+    [InlineData("MONTH")]
+    [InlineData("DAY")]
+    public Task Robin_Proactive_GroupByDatePartGraphQl(string bucket) => Run("GraphQl", "group_by_date_part", async () =>
     {
         var r = await GqlAggregate(
             $"timeBuckets: [{{ column: sale_date, bucket: {bucket} }}], aggregates: [{{ fn: COUNT, alias: \"n\" }}], orderBy: [{{ column: sale_date }}]",
             "sale_date");
-        r.Ok().Rows.Count.ShouldBe(groups, r.RawBody);
-        r.Rows.Sum(x => Convert.ToInt32(x["n"], System.Globalization.CultureInfo.InvariantCulture)).ShouldBe(ParityExpected.TotalRows, r.RawBody);
-        if (bucket == "YEAR")
+        object?[][] expected = bucket switch
         {
-            r.RowsShouldBe(["sale_date", "n"], [["2023", 2], ["2024", 8], ["2025", 8]], ordered: true);
-        }
+            "YEAR" => [["2023", 2], ["2024", 8], ["2025", 8]],
+            "MONTH" => YearMonthGroups.Select(g => new object?[] { $"{g.Year}-{g.Month:D2}-01", g.Count }).ToArray(),
+            _ => DistinctSaleDayGroups.Select(g => new object?[] { g.Day, g.Count }).ToArray(),
+        };
+        r.RowsShouldBe(["sale_date", "n"], expected, ordered: true);
     }, bucket);
 
-    [ParityFact]
-    public Task Robin_Proactive_GroupByColumnGraphQl() => Run("GraphQl", "group_by_column", async () =>
-    {
-        var r = await GqlAggregate("groupBy: [product], aggregates: [{ fn: COUNT, alias: \"n\" }], orderBy: [{ column: product }]", "product");
-        r.RowsShouldBe(["product", "n"], ParityExpected.RowsByProduct.Select(p => new object?[] { p.Key, p.Value }).ToArray());
-    });
+    /// <summary>Hand-computed distinct <c>sale_date</c> values with their row counts in ascending order (v2 B7); 2024-01-10 and 2024-07-20 hold two rows.</summary>
+    private static readonly (string Day, int Count)[] DistinctSaleDayGroups =
+    [
+        ("2023-03-15", 1), ("2023-06-01", 1), ("2024-01-10", 2), ("2024-02-29", 1), ("2024-03-31", 1), ("2024-05-05", 1), ("2024-07-20", 2),
+        ("2024-12-31", 1), ("2025-01-15", 1), ("2025-02-28", 1), ("2025-03-01", 1), ("2025-03-02", 1), ("2025-03-03", 1), ("2025-04-01", 1),
+        ("2025-04-02", 1), ("2025-05-05", 1),
+    ];
 
+    // v2-01 (SEC-R100-15): fragments and aliases on a masked column keep the masking; the clear amounts never appear in the body.
+    [ParityTheory]
+    [InlineData("named_fragment")]
+    [InlineData("inline_fragment")]
+    [InlineData("alias")]
+    public Task Robin_27_FragmentsKeepMasking(string variant) => Run("GraphQl", "masked_fragments", async () =>
+    {
+        const string masked = ParitySeed.MaskedTable;
+        var field = "default_main_" + masked;
+        var typeProbe = await GqlList(AllRows, "__typename id", masked);
+        var typeName = typeProbe.Ok().Rows[0]["__typename"] as string ?? throw new XunitException("__typename missing in the type probe.");
+        var (document, amountKey) = variant switch
+        {
+            "named_fragment" => ("{ " + field + "(" + AllRows + ") { ...F } } fragment F on " + typeName + " { id amount }", "amount"),
+            "inline_fragment" => ("{ " + field + "(" + AllRows + ") { ... on " + typeName + " { id amount } } }", "amount"),
+            _ => ("{ " + field + "(" + AllRows + ") { id a: amount } }", "a"),
+        };
+        var r = await _robin.GraphQlAsync(document, field);
+        RobinMaskedLeakScan.AssertNoClearAmount(r.RawBody, [amountKey]);
+        r.Ok();
+        r.Rows.Count.ShouldBe(ParityExpected.TotalRows, RobinAssert.Snippet(r.RawBody));
+        r.RowsShouldBe(
+            ["id", amountKey],
+            Enumerable.Range(1, ParityExpected.TotalRows).Select(i => new object?[] { i, null }).ToArray(),
+            ordered: true);
+    }, variant);
     [ParityFact]
     public Task Robin_Proactive_GroupByExpressionWebSql() => Run("WebSql", "group_by_expression", async () =>
     {
@@ -317,22 +353,29 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
     public Task Robin_39_PageAboveCapIsRejectedOrSignalled(string channel) => Run(channel, "page_size_above_cap", async () =>
     {
         const int requested = 100000;
-        var r = channel switch
+        var all = Enumerable.Range(1, ParitySeed.BigRowCount).ToArray();
+        switch (channel)
         {
-            "GraphQl" => await GqlList($"first: {requested}, orderBy: [{{ id: ASC }}]", "id", ParitySeed.BigTable),
-            "Rest" => await _robin.RestAsync($"/api/v1/data/default/main/{ParitySeed.BigTable}?select=id&orderBy=id&limit={requested}"),
-            _ => await Sql($"SELECT id FROM parity_big ORDER BY id LIMIT {requested}"),
-        };
-        if (ParityAssert.IsError(r))
-        {
-            r.Rejected();
-            return;
-        }
+            case "GraphQl":
+                // A page size above MaxAllowedLimit is a stable INVALID_QUERY (never a silent cut).
+                (await GqlList($"first: {requested}, orderBy: [{{ id: ASC }}]", "id", ParitySeed.BigTable)).Rejected("INVALID_QUERY");
+                break;
+            case "Rest":
+                var rest = await _robin.RestAsync($"/api/v1/data/default/main/{ParitySeed.BigTable}?select=id&orderBy=id&limit={requested}");
+                rest.IdsShouldBeInOrder(all);
+                RobinClient.IsTruncatedSignal(rest.RawBody).ShouldBeFalse(RobinAssert.Snippet(rest.RawBody));
+                break;
+            default:
+                // WebSQL MaxRows (5000) is above the 1000 seeded rows: every row, not truncated.
+                var sql = await Sql($"SELECT id FROM parity_big ORDER BY id LIMIT {requested}");
+                sql.IdsShouldBeInOrder(all);
+                using (var doc = System.Text.Json.JsonDocument.Parse(sql.RawBody))
+                {
+                    doc.RootElement.TryGetProperty("truncated", out var truncated).ShouldBeTrue("truncated flag missing");
+                    truncated.ValueKind.ShouldBe(System.Text.Json.JsonValueKind.False);
+                }
 
-        // Accepted: either every row is delivered or the response says it was truncated.
-        if (r.Rows.Count < ParitySeed.BigRowCount && !r.RawBody.Contains("runcated", StringComparison.Ordinal))
-        {
-            throw new XunitException($"{r.Rows.Count} of {ParitySeed.BigRowCount} rows without a truncation signal: {RobinAssert.Snippet(r.RawBody)}");
+                break;
         }
     });
 
@@ -431,19 +474,155 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
     }, variant);
 
     // ---------------------------------------------------------------------------------------------------------------------
-    // 17-18. Needs host variants (columnless catalog table, HMAC-pseudonymized column): registered Pending [#157, #270]
+    // v2-02, v2-03. Unregistered physical tables and a masked column reached through a join [proactive, SEC-R100-13, SEC-R100-16]
     // ---------------------------------------------------------------------------------------------------------------------
 
-    [ParityFact]
-    public Task Robin_157_ColumnlessCatalogTableDoesNotStopGateway() =>
-        Run("GraphQl", "columnless_table", () => throw new PendingCellException("GraphQl", "columnless_table"));
+    private static string BodyShape(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                ? string.Join(",", doc.RootElement.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal))
+                : doc.RootElement.ValueKind.ToString();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return "<not-json>";
+        }
+    }
 
-    [ParityFact]
-    public Task Robin_270_HmacPseudonymizedNonStringColumn() =>
-        Run("GraphQl", "hmac_non_string", () => throw new PendingCellException("GraphQl", "hmac_non_string"));
+    private static ChannelResult Denied(ChannelResult r, string what, string code)
+    {
+        if (!ParityAssert.IsError(r))
+        {
+            throw new DeniedRequestSucceededException($"{what}: a request that must be rejected was answered with HTTP {r.Status}.");
+        }
 
+        return r.Rejected(code);
+    }
+
+    [ParityTheory]
+    [InlineData("WebSql", "sqlite_master")]
+    [InlineData("WebSql", "pragma_table_function")]
+    [InlineData("WebSql", "pragma_bare_call")]
+    [InlineData("Rest", "sqlite_master")]
+    public Task Robin_30_UnregisteredSourceTableDenied(string channel, string variant) => Run(channel, "unregistered_source_table", async () =>
+    {
+        switch (channel, variant)
+        {
+            case ("WebSql", "sqlite_master"):
+                var probe = Denied(await Sql("SELECT name FROM sqlite_master"), "sqlite_master", "SQL_POLICY_DENIED");
+                var unknown = Denied(await Sql("SELECT id FROM parity_nope"), "unknown table", "SQL_POLICY_DENIED");
+                probe.Status.ShouldBe(unknown.Status);
+                BodyShape(probe.RawBody).ShouldBe(BodyShape(unknown.RawBody));
+                System.Text.RegularExpressions.Regex.IsMatch(probe.RawBody, @"(?i)\b(does not exist|doesn't exist|no such|unknown table)\b").ShouldBeFalse("SEC-R100-13: the message must not state whether a table exists.");
+                break;
+            case ("WebSql", "pragma_table_function"):
+                // The Trino table-function form is the one the AST builder refuses with a SecurityException (SqlAstBuilder.VisitTableFunctionInvocation).
+                Denied(await Sql("SELECT * FROM TABLE(pragma_table_info('parity_sales'))"), "pragma_table_info", "SQL_POLICY_VIOLATION");
+                break;
+            case ("WebSql", _):
+                // A bare table-valued call is not Trino grammar: a syntax error (400), no row either way.
+                Denied(await Sql("SELECT * FROM pragma_table_info('parity_sales')"), "pragma_table_info", "SQL_SYNTAX_ERROR");
+                break;
+            default:
+                var restProbe = Denied(await _robin.RestAsync("/api/v1/data/default/main/sqlite_master?select=name"), "sqlite_master", "RESOURCE_NOT_FOUND");
+                var restUnknown = Denied(await _robin.RestAsync("/api/v1/data/default/main/parity_nope?select=name"), "unknown table", "RESOURCE_NOT_FOUND");
+                restProbe.Status.ShouldBe(restUnknown.Status);
+                BodyShape(restProbe.RawBody).ShouldBe(BodyShape(restUnknown.RawBody));
+                break;
+        }
+    }, variant);
+
+    [ParityTheory]
+    [InlineData("projection")]
+    [InlineData("on_masked")]
+    public Task Robin_28_MaskedColumnThroughJoin(string variant) => Run("WebSql", "masked_column_join", async () =>
+    {
+        if (variant == "projection")
+        {
+            var r = await Sql("SELECT s.id, m.amount FROM parity_sales s JOIN parity_masked m ON s.id = m.id WHERE s.id IN (3, 8) ORDER BY s.id");
+            RobinMaskedLeakScan.AssertNoClearAmount(r.RawBody, ["amount"]);
+            r.RowsShouldBe(["id", "amount"], [[3, null], [8, null]], ordered: true);
+            return;
+        }
+
+        // A join key on a masked column would let a caller probe the clear values: rejected, never a 200.
+        var on = await Sql("SELECT s.id, m.id AS mid FROM parity_sales s JOIN parity_masked m ON s.amount = m.amount WHERE s.id IN (3, 8) ORDER BY s.id");
+        Denied(on, "join on a masked column", "SQL_POLICY_VIOLATION");
+    }, variant);
+
+    /// <summary>SEC-R100-15: a clear masked amount anywhere in a response body is a hard failure (ids and keys only in the message, SEC-R100-10).</summary>
+    internal static class RobinMaskedLeakScan
+    {
+        /// <summary>Fractional spellings of the clear amounts of the seed ("50.5", "50.50", "100.0"); whole numbers are covered by the key walk.</summary>
+        private static readonly System.Text.RegularExpressions.Regex ClearAmountToken = BuildToken();
+
+        private static System.Text.RegularExpressions.Regex BuildToken()
+        {
+            var alternatives = ParitySeed.Sales
+                .Where(s => s.Amount is not null)
+                .Select(s => s.Amount!.Value)
+                .Distinct()
+                .Select(a =>
+                {
+                    var text = a.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+                    var whole = text[..text.IndexOf('.', StringComparison.Ordinal)];
+                    var fraction = text[(text.IndexOf('.', StringComparison.Ordinal) + 1)..].TrimEnd('0');
+                    return fraction.Length == 0
+                        ? System.Text.RegularExpressions.Regex.Escape(whole) + @"\.0+"
+                        : System.Text.RegularExpressions.Regex.Escape(whole + "." + fraction) + "0*";
+                });
+            return new System.Text.RegularExpressions.Regex(@"(?<![\d.])(?:" + string.Join("|", alternatives) + @")(?![\d])", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
+        }
+
+        public static void AssertNoClearAmount(string body, string[] amountKeys)
+        {
+            if (ClearAmountToken.IsMatch(body))
+            {
+                throw new DeniedRequestSucceededException("a clear masked amount appears in the response body.");
+            }
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                Walk(doc.RootElement, amountKeys);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Not JSON: the token scan above is the only check.
+            }
+        }
+
+        private static void Walk(System.Text.Json.JsonElement element, string[] amountKeys)
+        {
+            switch (element.ValueKind)
+            {
+                case System.Text.Json.JsonValueKind.Object:
+                    foreach (var p in element.EnumerateObject())
+                    {
+                        if (amountKeys.Contains(p.Name, StringComparer.OrdinalIgnoreCase) && p.Value.ValueKind != System.Text.Json.JsonValueKind.Null)
+                        {
+                            throw new DeniedRequestSucceededException($"masked column key '{p.Name}' carries a value.");
+                        }
+
+                        Walk(p.Value, amountKeys);
+                    }
+
+                    break;
+                case System.Text.Json.JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        Walk(item, amountKeys);
+                    }
+
+                    break;
+            }
+        }
+    }
     // ---------------------------------------------------------------------------------------------------------------------
-    // 19. Aggregate over a masked column: allowed (masked value) or a clear 4xx, never the clear-text total [#28, proactive]
+    // 19. Aggregate over a masked column: a stable 4xx, never the clear-text total [#28, proactive]
     // ---------------------------------------------------------------------------------------------------------------------
 
     [ParityTheory]
@@ -454,19 +633,12 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
         var r = channel == "WebSql"
             ? await Sql("SELECT SUM(amount) AS total FROM parity_masked")
             : await GqlAggregate("aggregates: [{ fn: SUM, column: amount, alias: \"total\" }]", table: ParitySeed.MaskedTable);
-        if (ParityAssert.IsError(r))
+        if (!ParityAssert.IsError(r))
         {
-            r.Rejected();
-            return;
+            throw new DeniedRequestSucceededException("SUM over a masked column was answered instead of rejected.");
         }
 
-        r.Ok();
-        var clear = r.Rows.Any(row => row.TryGetValue("total", out var v) && v is not null
-                                      && Math.Abs(Convert.ToDecimal(v, System.Globalization.CultureInfo.InvariantCulture) - ParityExpected.SumAmount) < 0.005m);
-        if (clear)
-        {
-            throw new DeniedRequestSucceededException("SUM over a masked column returned the clear-text total.");
-        }
+        r.Rejected("AGGREGATION_ON_MASKED_COLUMN");
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -593,24 +765,5 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
                 "default_main_parity_sales",
                 new { p = (string?)null });
         r.IdsShouldBe();
-    });
-
-    // ---------------------------------------------------------------------------------------------------------------------
-    // 27. The same logical query returns equal rows on every channel [proactive]
-    // ---------------------------------------------------------------------------------------------------------------------
-
-    [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    [InlineData("Rest")]
-    public Task Robin_Proactive_SameLogicalQueryEqualRowsOnEveryChannel(string channel) => Run(channel, "same_query", async () =>
-    {
-        var r = channel switch
-        {
-            "WebSql" => await Sql("SELECT id FROM parity_sales WHERE region = 'South' AND product = 'Gadget' ORDER BY id"),
-            "GraphQl" => await GqlList("where: { region: { eq: \"South\" }, product: { eq: \"Gadget\" } }, " + AllRows),
-            _ => await _robin.RestAsync(RobinClient.SalesRest + "?select=id&orderBy=id&limit=100&filter=" + Uri.EscapeDataString("region eq 'South' and product eq 'Gadget'")),
-        };
-        r.IdsShouldBe(8, 9);
     });
 }

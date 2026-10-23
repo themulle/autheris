@@ -221,6 +221,29 @@ Observed (Robin WP-R1, R44 `Robin_130_HourBucketBerlinWinterSummer`). Capability
 ### PARITY-GAP-050
 Observed (Robin-100 WP-R2, R78 and R79). Capability: federated join chain. Channel: WebSQL. Input: a join of a default-source table to a default-source dimension table followed by a join to the `second` source (`a JOIN default.main.parity_regions r ON ... JOIN second.main.parity_sales b ON ...`). Expected: 200 with the four overlapping rows. Actual: 400 `SQL_SYNTAX_ERROR`. The same chain with the `second` join first and the default-source dimension join last returns 200 with the four rows.
 
+<!-- WP-V2a begin -->
+### PARITY-GAP-051
+Observed (Robin-100 v2-11, `Robin_Proactive_NotInWithNullIsEmpty`). Capability: GraphQL `nin` filter with a null list member. Channel: GraphQL on a SQLite source. Input: `where: { region: { nin: ["North", null] } }`. Expected: 200 with zero rows (three-valued logic, as WebSQL `NOT IN ('North', NULL)`). Actual: 200 with rows.
+
+### PARITY-GAP-052
+Observed (Robin-100 v2-14, `Robin_318_IntVariablesFirstOffset`, issue #318). Capability: GraphQL `first` / `offset` supplied as `Int` variables. Channel: GraphQL on a SQLite source. Input: `query($f: Int, $o: Int)` with (5, 10), (null, null) and (0, null). Expected: 200 with ids 11-15, ids 1-18 and zero rows. Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED` in all three cases.
+
+### PARITY-GAP-053
+Observed (Robin-100 v2-15, `Robin_319_EmptyLogicalMembers`, issue #319). Capability: GraphQL `or` with an empty object member. Channel: GraphQL on a SQLite source. Input: `where: { or: [{}, { region: { eq: "North" } }] }`. Expected: 200 with all 18 rows (`{}` is true). Actual: 200 with the North rows only.
+
+### PARITY-GAP-054
+Observed (Robin-100 v2-17, `Robin_302_OffsetBoundaryAndFirstZero`, issue #302). Capability: row offset above the cap. Channel: REST on a SQLite source. Input: `offset=10001&limit=10` on `parity_big`. Expected: 400 `INVALID_QUERY`, as on GraphQL. Actual: HTTP 200 with zero rows.
+
+### PARITY-GAP-055
+Observed (Robin-100 v2-04, `Robin_Proactive_AggregateErrorsStableCode`). Capability: stable code for an unknown GROUP BY column. Channel: WebSQL on a SQLite source. Input: `SELECT COUNT(*) AS n FROM parity_sales GROUP BY nope`. Expected: 403 `SQL_POLICY_VIOLATION` (the code of an unknown select column). Actual: 403 `SQL_POLICY_DENIED`.
+
+### PARITY-GAP-056
+Observed (Robin-100 v2-10, `Robin_Proactive_TypeMismatchStableCode`). Capability: stable code for a malformed REST filter. Channel: REST on a SQLite source. Input: `filter=region eq` (dangling operator). Expected: 400 `INVALID_QUERY`. Actual: 400 `SQL_SYNTAX_ERROR`.
+
+### PARITY-GAP-057
+Observed (Robin-100 B3, `Robin_39_PageAboveCapIsRejectedOrSignalled`). Capability: GraphQL page size above the allowed limit. Channel: GraphQL on a SQLite source. Input: `first: 100000` on `parity_big`. Expected: `INVALID_QUERY`. Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED`.
+<!-- WP-V2a end -->
+
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 
 These cases are a 5xx or leak internals. They are never a `KnownGap`: they live in the data row list `BoundaryKnownGapData` (kind `ObservedServerError`), are excluded from `Boundary_Case`/`Invariant_NoServerError`, and run in `Invariant_ObservedServerErrors`, where they fail hard until production is fixed. Owner decision needed (fix, or accept and document). Ids are `<slot>.<column>.<value id>`; `none` = no column.
