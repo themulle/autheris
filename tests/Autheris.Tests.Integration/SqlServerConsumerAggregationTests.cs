@@ -80,6 +80,7 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public async Task ConcurrentActorInsert_SameKey_NoPkViolation()
     {
         // SEC-286-8: insert-if-absent with HOLDLOCK serialises the same key; no PK violation, exactly one row.
@@ -98,5 +99,17 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
 
         var actors = await repo.QueryDistinctActorCountsAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
         actors["powerbi"].ShouldBe(1);
+
+        // No lost update: one query-name row whose counter is the sum of all 24 concurrent increments.
+        await using var conn = new Microsoft.Data.SqlClient.SqlConnection(_shared.Db.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*), COALESCE(SUM(calls), 0) FROM dbo.CONSUMER_APP_QUERYNAME_DAILY WHERE tenant_id = @t AND table_id = @id";
+        cmd.Parameters.AddWithValue("@t", tenant.Value);
+        cmd.Parameters.AddWithValue("@id", table.ToString());
+        await using var reader = await cmd.ExecuteReaderAsync();
+        (await reader.ReadAsync()).ShouldBeTrue();
+        reader.GetInt32(0).ShouldBe(1);
+        reader.GetInt64(1).ShouldBe(24);
     }
 }

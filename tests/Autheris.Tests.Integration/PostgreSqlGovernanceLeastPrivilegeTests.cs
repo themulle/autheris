@@ -138,6 +138,7 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public async Task ConsumerAggregation_RuntimeRoleWithoutCreate_RecordsAndReads()
     {
         // Issue #286 (AC-2, SEC-286-7): the CONSUMER_APP_* tables come from the baseline; the runtime role holds no CREATE right
