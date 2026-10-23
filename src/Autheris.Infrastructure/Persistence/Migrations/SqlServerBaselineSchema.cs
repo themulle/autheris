@@ -927,6 +927,55 @@ CREATE TABLE dbo.CONSUMER_APP_QUERYNAME_DAILY (
 );
 ");
 
+            // Issue #281: runtime-managed, app-scoped trusted GraphQL documents (the runtime login never runs DDL).
+            ExecuteSchemaCommand(conn, @"
+IF OBJECT_ID(N'dbo.TRUSTED_DOCUMENT_APPS', N'U') IS NULL
+CREATE TABLE dbo.TRUSTED_DOCUMENT_APPS (
+    app_id NVARCHAR(64) NOT NULL,
+    created_at NVARCHAR(64) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_TRUSTED_DOCUMENT_APPS PRIMARY KEY (app_id)
+);
+
+IF OBJECT_ID(N'dbo.TRUSTED_DOCUMENT_APP_ORIGINS', N'U') IS NULL
+CREATE TABLE dbo.TRUSTED_DOCUMENT_APP_ORIGINS (
+    app_id NVARCHAR(64) NOT NULL,
+    origin NVARCHAR(256) NOT NULL,
+    CONSTRAINT PK_TRUSTED_DOCUMENT_APP_ORIGINS PRIMARY KEY (app_id, origin),
+    CONSTRAINT FK_TRUSTED_DOCUMENT_APP_ORIGINS_APP FOREIGN KEY (app_id) REFERENCES dbo.TRUSTED_DOCUMENT_APPS (app_id)
+);
+
+IF OBJECT_ID(N'dbo.TRUSTED_DOCUMENT_APP_VERSIONS', N'U') IS NULL
+CREATE TABLE dbo.TRUSTED_DOCUMENT_APP_VERSIONS (
+    app_id NVARCHAR(64) NOT NULL,
+    version NVARCHAR(64) NOT NULL,
+    status NVARCHAR(16) NOT NULL CONSTRAINT CK_TRUSTED_DOCUMENT_APP_VERSIONS_status CHECK (status IN (N'active', N'retired')),
+    created_at NVARCHAR(64) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    retired_at NVARCHAR(64) NULL,
+    CONSTRAINT PK_TRUSTED_DOCUMENT_APP_VERSIONS PRIMARY KEY (app_id, version),
+    CONSTRAINT FK_TRUSTED_DOCUMENT_APP_VERSIONS_APP FOREIGN KEY (app_id) REFERENCES dbo.TRUSTED_DOCUMENT_APPS (app_id)
+);
+
+IF OBJECT_ID(N'dbo.TRUSTED_DOCUMENT_HASHES', N'U') IS NULL
+CREATE TABLE dbo.TRUSTED_DOCUMENT_HASHES (
+    app_id NVARCHAR(64) NOT NULL,
+    version NVARCHAR(64) NOT NULL,
+    hash CHAR(64) NOT NULL,
+    CONSTRAINT PK_TRUSTED_DOCUMENT_HASHES PRIMARY KEY (app_id, version, hash),
+    CONSTRAINT FK_TRUSTED_DOCUMENT_HASHES_VERSION FOREIGN KEY (app_id, version) REFERENCES dbo.TRUSTED_DOCUMENT_APP_VERSIONS (app_id, version)
+);
+
+IF OBJECT_ID(N'dbo.TRUSTED_DOCUMENT_GENERATION', N'U') IS NULL
+CREATE TABLE dbo.TRUSTED_DOCUMENT_GENERATION (
+    id INT NOT NULL PRIMARY KEY CHECK (id = 1),
+    generation BIGINT NOT NULL
+);
+
+IF NOT EXISTS (SELECT 1 FROM dbo.TRUSTED_DOCUMENT_GENERATION WHERE id = 1)
+    INSERT INTO dbo.TRUSTED_DOCUMENT_GENERATION (id, generation) VALUES (1, 0);
+");
+
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only
             // hold INSERT/SELECT, the schema is applied with a separate migration login). CREATE TRIGGER must be alone in its batch.
             ExecuteSchemaCommand(conn, @"CREATE OR ALTER TRIGGER dbo.trg_audit_append_only ON dbo.AUDIT_LOG_ENTRIES

@@ -26,6 +26,17 @@ using OpenTelemetry.Trace;
 
 public static class GatewayCoreServiceExtensions
 {
+    /// <summary>
+    /// Allowed request headers of the developer CORS policy. The app identity header (Issue #281, SEC-281-10) is added only while app-scoped
+    /// trusted documents are enabled; CORS never replaces the Origin check of the middleware.
+    /// </summary>
+    internal static string[] DeveloperCorsHeaders(GatewayOptions options)
+    {
+        string[] baseHeaders = ["Content-Type", "Authorization", "Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID"];
+        var app = options.GraphQL.AppScopedTrustedDocuments;
+        return app.Enabled ? [.. baseHeaders, app.HeaderName] : baseHeaders;
+    }
+
     public static IServiceCollection AddAutherisCore(
         this IServiceCollection services,
         GatewayOptions gatewayOptions,
@@ -112,7 +123,7 @@ public static class GatewayCoreServiceExtensions
 
                         return false;
                     })
-                    .WithHeaders("Content-Type", "Authorization", "Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID")
+                    .WithHeaders(DeveloperCorsHeaders(gatewayOptions))
                     .WithExposedHeaders("Mcp-Session-Id", "WWW-Authenticate")
                     .WithMethods("GET", "POST", "DELETE", "OPTIONS");
                 });

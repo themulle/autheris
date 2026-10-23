@@ -49,6 +49,9 @@ public sealed class GraphQLOptions
     /// <summary>Issue #240: GraphQL metrics options (<c>Gateway:GraphQL:Metrics</c>).</summary>
     public GraphQLMetricsOptions Metrics { get; init; } = new();
 
+    /// <summary>Issue #281: runtime-managed, app-scoped trusted documents (<c>Gateway:GraphQL:AppScopedTrustedDocuments</c>).</summary>
+    public AppScopedTrustedDocumentsOptions AppScopedTrustedDocuments { get; init; } = new();
+
     /// <summary>Issue #254: ERP table GraphQL schema partitioning mode.</summary>
     public GraphQlSchemaPartitioningMode SchemaPartitioning { get; init; } = GraphQlSchemaPartitioningMode.None;
     public List<string> PartitionAllowedDomains { get; init; } = [];

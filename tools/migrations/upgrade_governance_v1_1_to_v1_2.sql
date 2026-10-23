@@ -421,6 +421,44 @@ CREATE TABLE IF NOT EXISTS CONSUMER_APP_QUERYNAME_DAILY (
     PRIMARY KEY (tenant_id, table_id, day, application, query_name)
 );
 
+-- Issue #281: runtime-managed, app-scoped trusted GraphQL documents (the runtime never creates them)
+CREATE TABLE IF NOT EXISTS TRUSTED_DOCUMENT_APPS (
+    app_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS TRUSTED_DOCUMENT_APP_ORIGINS (
+    app_id TEXT NOT NULL REFERENCES TRUSTED_DOCUMENT_APPS (app_id),
+    origin TEXT NOT NULL,
+    PRIMARY KEY (app_id, origin)
+);
+
+CREATE TABLE IF NOT EXISTS TRUSTED_DOCUMENT_APP_VERSIONS (
+    app_id TEXT NOT NULL REFERENCES TRUSTED_DOCUMENT_APPS (app_id),
+    version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'retired')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    retired_at TEXT,
+    PRIMARY KEY (app_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS TRUSTED_DOCUMENT_HASHES (
+    app_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    hash TEXT NOT NULL CHECK (length(hash) = 64),
+    PRIMARY KEY (app_id, version, hash),
+    FOREIGN KEY (app_id, version) REFERENCES TRUSTED_DOCUMENT_APP_VERSIONS (app_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS TRUSTED_DOCUMENT_GENERATION (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    generation BIGINT NOT NULL
+);
+
+INSERT INTO TRUSTED_DOCUMENT_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
 -- 2. Add missing columns on existing tables
 ALTER TABLE TABLES ADD COLUMN required_filter_columns_json TEXT;
 ALTER TABLE TABLES ADD COLUMN texts_json TEXT;

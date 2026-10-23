@@ -155,6 +155,22 @@ if command -v helm >/dev/null 2>&1; then
         echo "ERROR: forwardAuth render does not carry trusted proxies, networks and the shared secret reference" >&2
         FAILURES=$((FAILURES + 1))
     fi
+
+    # Admin API exposure (issue #281): the default ingress must deny /api/admin; the opt-out must remove the rule.
+    if ! DEFOUT="$(render)"; then
+        echo "ERROR: default Helm render failed: ${DEFOUT}" >&2
+        FAILURES=$((FAILURES + 1))
+    elif ! grep -q 'path: /api/admin' <<<"${DEFOUT}" || ! grep -q -- '-admin-blocked' <<<"${DEFOUT}"; then
+        echo "ERROR: default Helm ingress exposes /api/admin (no deny rule rendered)" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    if ! OPTOUT="$(render --set ingress.blockAdminPath=false)"; then
+        echo "ERROR: Helm render with ingress.blockAdminPath=false failed: ${OPTOUT}" >&2
+        FAILURES=$((FAILURES + 1))
+    elif grep -q 'path: /api/admin' <<<"${OPTOUT}"; then
+        echo "ERROR: ingress.blockAdminPath=false still renders the /api/admin rule" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
 else
     echo "--> helm not installed; skipping Helm render checks (CI job helm-render runs them)."
 fi

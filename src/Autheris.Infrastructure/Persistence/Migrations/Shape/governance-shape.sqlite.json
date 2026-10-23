@@ -2702,6 +2702,135 @@
       "indexes": []
     },
     {
+      "name": "TRUSTED_DOCUMENT_APPS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_APP_ORIGINS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "origin"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_APP_VERSIONS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "retired_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "version"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_GENERATION",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_HASHES",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "version",
+        "hash"
+      ],
+      "indexes": []
+    },
+    {
       "name": "VIRTUAL_FILTERS",
       "columns": [
         {
