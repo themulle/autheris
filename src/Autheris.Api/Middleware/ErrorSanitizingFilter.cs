@@ -56,7 +56,22 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "GRAPHQL_VARIABLE_INVALID",
         "GRAPHQL_PARSE_FAILED",
         "INVALID_JSON",
-        "MISSING_REQUIRED_FIELD"
+        "MISSING_REQUIRED_FIELD",
+        // Typed aggregation errors (AggregationErrorCodes and the aggregation exception codes): fixed messages without table or column names.
+        // Without these the Development branch passed them while every other environment masked them as INTERNAL_SERVER_ERROR.
+        "AGGREGATION_ALIAS_INVALID",
+        "AGGREGATION_ARGUMENT_INVALID",
+        "AGGREGATION_INVALID_FUNCTION_FOR_TYPE",
+        "AGGREGATION_LIMIT_EXCEEDED",
+        "AGGREGATION_ORDER_INVALID",
+        "AGGREGATION_RESULT_TYPE_MISMATCH",
+        "AGGREGATION_COLUMN_UNAVAILABLE",
+        "AGGREGATION_ROW_CAP_EXCEEDED",
+        "AGGREGATION_DISABLED",
+        "AGG_NEGATED_FILTER_REJECTED",
+        "UNKNOWN_METRIC",
+        "METRIC_FILTER_INVALID",
+        "PRIVACY_BUDGET_EXHAUSTED"
     };
 
     private const string ValidationMessage = "The GraphQL request is invalid.";

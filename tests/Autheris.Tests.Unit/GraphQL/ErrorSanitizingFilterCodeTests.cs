@@ -81,4 +81,19 @@ public sealed class ErrorSanitizingFilterCodeTests
         codes.ShouldContain("REQUIRED_FILTER_COLUMN_MISSING");
         codes.ShouldNotContain("REQUIRED_FILTER_MISSING");
     }
+
+    [Theory]
+    [InlineData("Development", "AGGREGATION_INVALID_FUNCTION_FOR_TYPE")]
+    [InlineData("Production", "AGGREGATION_INVALID_FUNCTION_FOR_TYPE")]
+    [InlineData("Production", "AGGREGATION_ROW_CAP_EXCEEDED")]
+    [InlineData("Production", "REQUIRED_FILTER_COLUMN_MISSING")]
+    public void TypedFixedMessageCodes_PassThroughInEveryEnvironment(string env, string code)
+    {
+        var error = ErrorBuilder.New().SetMessage("Fixed text.").SetCode(code).Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe(code);
+        result.Message.ShouldBe("Fixed text.");
+    }
 }

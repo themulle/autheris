@@ -64,6 +64,14 @@ Deviations from section 2, items 7-9:
 - `GovernedDataQueryService` plans `limit + 1` (zero stays zero in the envelope, `HasMore` reflects the look-ahead row); `SqlTableReadExecutor` no longer rounds 0 up to 1.
 - Caller audit (`GovernedTableReadPlanner.Plan`): `GovernedDataQueryService` (REST, MCP; callers default to 50 explicitly) and `SqlTableReadExecutor` (ExecuteAsync, StreamAsync). Out of #301 scope and unchanged: `GovernedTableReadPlanner.Keyset.cs` (rejects limit <= 0), `TableStreamEndpoints.cs` slice limit (0 means 5000), `LakehouseDataSourceExecutor.cs` (0 means default). Tests: `GovernedDataQueryServiceTests.PlannerCallerAudit_ZeroNeverBecomesDefault`, `SqlTableReadExecutorZeroLimitTests`.
 
+### WP-D implementation notes (2026-10-23)
+
+- `ErrorSanitizingFilter.OnError` is now one path for all environments: classification by exception/error type (`InvalidGraphQLRequestException` -> `INVALID_JSON`/`MISSING_REQUIRED_FIELD`; `FormatException`, `OverflowException`, `InvalidFormatException`, `SerializationException` -> `GRAPHQL_VARIABLE_INVALID`; `DbException` "LIKE or GLOB" -> `INVALID_QUERY`; exception-less errors with no code or an `HCnnnn` code -> `GRAPHQL_PARSE_FAILED`/`GRAPHQL_VARIABLE_INVALID`/`GRAPHQL_VALIDATION_FAILED` by message shape). Classified errors are rebuilt (fixed message, code, path, locations; engine extensions dropped). Anything else fails closed to `INTERNAL_SERVER_ERROR`. `TableNotFoundException` is masked as FORBIDDEN/"Access denied." in Development too. Development keeps only fix hints and the exception object (never its type or text in the message).
+- Deviation: the typed aggregation codes (`AGGREGATION_*`, `UNKNOWN_METRIC`, `METRIC_FILTER_INVALID`, `PRIVACY_BUDGET_EXHAUSTED`, `AGG_NEGATED_FILTER_REJECTED`) were missing from `WhitelistedSafeCodes`: Development passed them, every other environment masked them as `INTERNAL_SERVER_ERROR`. Removing the Development passthrough surfaced this (25 parity cells), so they were added to the whitelist (fixed messages, no names).
+- Deviation: `TimeBucketingAggregationSecurityTests` (SEC-DATA112B-02) now asserts `REQUIRED_FILTER_COLUMN_MISSING` (#306).
+- Not verified: whether HotChocolate routes request-body parser errors through `IErrorFilter` is decided by the parity result: the 18 GraphQL observed-server-error cells (including `raw.none.*`) all flip to "fixed", so no HTTP pipeline file was needed.
+- Remaining GAP-003 cells (about 200) still fail the oracle for other reasons than a missing code; WP-Z decides their classification.
+
 ## 4. Open questions (defaults taken)
 
 - Q1 GAP-019: remove `convert_timezone` from the SQLite allowlist instead of emulating zones (default taken, item 5).
