@@ -4,7 +4,7 @@ using Autheris.Tests.Parity.Seed;
 namespace Autheris.Tests.Parity.Boundary;
 
 /// <summary>The expected outcome of one case. <see cref="Ids"/> is null when no oracle exists (Rejected / Either / unconstrained).</summary>
-public sealed record BoundaryExpectation(Expectation Kind, IReadOnlyList<int>? Ids, bool Ordered);
+public sealed record BoundaryExpectation(Expectation Kind, IReadOnlyList<int>? Ids, bool Ordered, string? Code = null);
 
 /// <summary>Expected row ids per case, computed in C# from the seed row literals (never by SQL).</summary>
 public static class BoundaryOracle
@@ -34,6 +34,12 @@ public static class BoundaryOracle
         }
 
         var v = c.Value!;
+        if (c.Slot is BoundarySlot.Eq or BoundarySlot.Like && channel is "WebSql" or "Rest" && IsRejectedLiteral(v))
+        {
+            // Documented rejection (#296): a string literal with a comment marker or backslash is not accepted inline; a parameter is the supported path.
+            return new(Expectation.Rejected, null, true, "SQL_LITERAL_NOT_PERMITTED");
+        }
+
         switch (c.Slot)
         {
             case BoundarySlot.Eq:
@@ -70,6 +76,9 @@ public static class BoundaryOracle
             _ => Enumerable.Range(0, 1000).Select(i => i == 0 ? first : column.Type == ParityType.Whole ? (object)(100000L + i) : $"filler_{i}").ToList(),
         };
     }
+
+    private static bool IsRejectedLiteral(BoundaryValue v) =>
+        v.Value is string text && (text.Contains("--", StringComparison.Ordinal) || text.Contains("/*", StringComparison.Ordinal) || text.Contains('\\', StringComparison.Ordinal));
 
     private static BoundaryExpectation SortExpectation(BoundaryValue v)
     {

@@ -52,11 +52,11 @@ public static class ParityMatrix
         Cap("agg_max", Scalar("MAX(amount)", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.Max, "amount")), ScalarGql("MAX", "amount", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.Max, "amount")), noAgg);
         Cap("agg_count_distinct", Scalar("COUNT(DISTINCT product)", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.CountDistinct, "product")), ScalarGql("COUNT_DISTINCT", "product", ParityOracle.Aggregate(ParityOracle.Rows, ParityFn.CountDistinct, "product")), noAgg);
 
-        // Aggregates that are invalid for the column type: a stable 4xx (GraphQL) is the contract; WebSQL on SQLite accepts them (PARITY-GAP-021).
+        // Aggregates that are invalid for the column type: a stable 4xx (GraphQL) is the contract; WebSQL answers the same code (fixed #310).
         MatrixCell RejectedGql(string fn, string column) => new Unsupported(Agg($"aggregates: [{{ fn: {fn}, column: {column}, alias: \"v\" }}]"), InvalidForType, "aggregate");
-        Cap("agg_sum_text", new Unsupported(new SqlRequest($"SELECT SUM(product) AS v FROM {Sales}"), null, "SUM"), RejectedGql("SUM", "product"), noAgg);
-        Cap("agg_avg_date", new Unsupported(new SqlRequest($"SELECT AVG(sale_date) AS v FROM {Sales}"), null, "AVG"), RejectedGql("AVG", "sale_date"), noAgg);
-        Cap("agg_sum_bool", new Unsupported(new SqlRequest($"SELECT SUM(is_return) AS v FROM {Sales}"), null, "SUM"), RejectedGql("SUM", "is_return"), noAgg);
+        Cap("agg_sum_text", new Unsupported(new SqlRequest($"SELECT SUM(product) AS v FROM {Sales}"), InvalidForType, null), RejectedGql("SUM", "product"), noAgg);
+        Cap("agg_avg_date", new Unsupported(new SqlRequest($"SELECT AVG(sale_date) AS v FROM {Sales}"), InvalidForType, null), RejectedGql("AVG", "sale_date"), noAgg);
+        Cap("agg_sum_bool", new Unsupported(new SqlRequest($"SELECT SUM(is_return) AS v FROM {Sales}"), InvalidForType, null), RejectedGql("SUM", "is_return"), noAgg);
 
         // ---- group by ----
         var byRegion = new ExpectedSpec(["region", "n"], ParityOracle.Grouped(ParityOracle.Rows, r => r.Region, (ParityFn.Count, null)));

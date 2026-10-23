@@ -86,17 +86,32 @@ Candidates from code reading; each is confirmed (or deleted) by the first run of
 ### PARITY-GAP-001
 Capability: request validation. Channel: WebSQL. Input: `POST /api/v1/sql` with an empty body, `{`, `[]`, `{"sql":123}`, `{"sql":null}`, `{"sql":""}`, `{"sql":"   "}`, `null`, `{"sql":"SELECT 1","parameters":5}`. Observed: HTTP 400 with `{"error":"Invalid JSON payload."}` or `{"error":"Missing 'sql' query parameter in request body."}`; no `code`, and the `error` field holds the human message instead of a token (the governed-SQL errors, by contrast, carry `error` token plus stable `SQL_*` code). Expected: every 4xx carries a stable `code` (for example `INVALID_JSON`, `MISSING_REQUIRED_FIELD` from `ApiErrorCodes`). Issue draft: "WebSQL request-validation 400s have no stable error code". Found by: WP2 boundary sweep (`raw.*` cases). Earlier candidate wording (generic `BadRequest` for all WebSQL errors) is refuted: governed-SQL failures already return `SQL_SYNTAX_ERROR`, `SQL_POLICY_DENIED`, `SQL_CONSTRUCT_NOT_SUPPORTED`, `SQL_PROVIDER_ERROR`.
 
+Fixed 2026-10-23 on fix/parity-gaps (#293): WebSQL request-validation 4xx bodies carry a stable code with a fixed message.
+
+
 ### PARITY-GAP-002
 Observed (WP3). Capability: unsupported function for a dialect. Channel: WebSQL on a SQLite source. Input: `SELECT CAST(convert_timezone('UTC','Europe/Berlin', CAST(sold_at AS timestamp)) AS date) ... GROUP BY ...`. Observed: HTTP 501 `NotImplemented` with code `SQL_FUNCTION_UNSUPPORTED_DIALECT`, a 5xx. D-9 tolerates it as Unsupported and records it as an observation (JSONL `observation`, listed by `parity-report.py` under "Tolerated 501"). Expected (the ask): a 4xx (for example 422 with the same code), because a 5xx should mean a server fault and monitoring cannot tell the two apart. The capability itself is tracked by PARITY-GAP-019. This id is not used by any KnownGap; the observation stays visible until production answers with a 4xx.
+
+Fixed 2026-10-23 on fix/parity-gaps (#308): `SQL_FUNCTION_UNSUPPORTED_DIALECT` answers 422 instead of 501; the parity harness keeps its tolerance for a catalogue-coded 501 (Unsupported, D-9) unchanged.
+
 
 ### PARITY-GAP-003
 Capability: error contract. Channel: GraphQL. Input: unknown field/argument (`{ nope }`, `orderBy: [{ North: ASC }]`), unknown operation name, `mutation { nope }`, wrong literal type (`amount: { eq: "NaN" }`, `qty: { eq: "x" }`), variable coercion (`$v: Int` with `"abc"`), `in: [..., null]`. Observed: HTTP 400 `errors[]` with `message`, `locations`, no `extensions.code`. Expected: every error carries an `extensions.code` from a documented set (the sanitizer already emits codes for resolver errors). Issue draft: "GraphQL validation and variable-coercion errors have no extensions.code". 207 sweep cells.
 
+Fixed 2026-10-23 on fix/parity-gaps (#294): every GraphQL validation, coercion and variable error carries `extensions.code` (`GRAPHQL_VALIDATION_FAILED`, `GRAPHQL_VARIABLE_INVALID`, `GRAPHQL_PARSE_FAILED`) with a fixed message in every environment.
+
+
 ### PARITY-GAP-004
 Capability: error contract. Channel: REST `GET /api/v1/data/{domain}/{schema}/{table}`. Input: unknown column in `filter`/`orderBy`/`select`, malformed `orderBy`, `offset` above 100000, SQL text above 64000 characters, unknown table or domain (404), unterminated quote in `filter`. Observed: 400/404 with `{"error":"<message>"}`, no `code`; messages expose internal parameter names (`(Parameter 'intent')`, `'rawSql'`, `'request'`) and echo the submitted token. Expected: RFC 7807 problem bodies with a stable `code` from `ApiErrorCodes` and no internal parameter names. Issue draft: "REST data endpoint 4xx bodies lack a stable code and name internal parameters". 37 sweep cells.
 
+Fixed 2026-10-23 on fix/parity-gaps (#295): REST data endpoint 4xx bodies carry a stable `code` (`INVALID_QUERY` and catalogue codes) with fixed messages.
+
+
 ### PARITY-GAP-005
 Capability: string equality/LIKE with a literal operand. Channels: WebSQL and REST `filter` (parameters and GraphQL variables work). Input: literal strings `North'; DROP TABLE parity_sales; --`, `' UNION SELECT 1 --`, `/* c */ North` and `back\slash`, in `region = '...'`, `note = '...'`, `note LIKE '...'` (quotes doubled correctly). Observed: HTTP 400 `SQL_SYNTAX_ERROR` "Invalid SQL syntax." although the literal is well-formed. Strings with a quote but without `--`, `/*` or a backslash (`O'Brien`, `' OR '1'='1`) work. Expected: a quoted literal is data whatever it contains (or the rejection is a documented hardening with its own code). Issue draft: "Literals containing comment markers or backslash rejected as SQL syntax errors". 20 sweep cells.
+
+Fixed 2026-10-23 on fix/parity-gaps (#296): a string literal with a comment marker or backslash is a documented rejection: 400 `SQL_LITERAL_NOT_PERMITTED` on WebSQL and REST; parameters and GraphQL variables remain the supported path.
+
 
 ### PARITY-GAP-006
 Capability: typed date literal. Channel: WebSQL. Input: `SELECT id FROM parity_sales WHERE sale_date = DATE '2024-02-29'` (same for `TIMESTAMP '...'`). Observed: HTTP 422 `SQL_CONSTRUCT_NOT_SUPPORTED`. Expected: the ANSI typed literal is accepted and matches row 5, or the limitation is documented. Issue draft: "WebSQL does not support DATE/TIMESTAMP typed literals".
@@ -121,7 +136,7 @@ Fixed 2026-10-23 on fix/parity-gaps (#300): eq: null is a three-valued-logic com
 ### PARITY-GAP-010
 Capability: paging parameters. Channel: REST. Input: `limit=-1`, `offset=-1`, `limit=0`. Observed: HTTP 200; negative values are ignored (default page of 50 rows from offset 0) and `limit=0` returns the default page instead of zero rows. Expected: negative values rejected with a stable 4xx, `limit=0` returns zero rows. Issue draft: "REST silently ignores negative limit/offset and treats limit=0 as default". 3 sweep cells.
 
-Fixed 2026-10-23 on fix/parity-gaps (#301, limit=0 part only): limit=0 returns zero rows; negative limit/offset still open (WP-E).
+Fixed 2026-10-23 on fix/parity-gaps (#301): limit=0 returns zero rows; a negative limit or offset is 400 `INVALID_QUERY`.
 
 ### PARITY-GAP-011
 Capability: paging. Channel: GraphQL. Input: `first: 0`. Observed: HTTP 400 `QUERY_TOO_COMPLEX` (cost 110000: the list is costed as unbounded). Expected: zero rows, as `LIMIT 0` on WebSQL. Issue draft: "GraphQL first: 0 is costed as an unbounded list". 1 sweep cell.
@@ -141,11 +156,20 @@ Fixed 2026-10-23 on fix/parity-gaps (#304): EXTRACT, year/month/day..., date_par
 ### PARITY-GAP-014
 Capability: required filter column (#163), bulk export. Channel: `POST /api/v1/export/arrow?table=default.main.parity_scoped` without the required filter. Observed: HTTP 400 ProblemDetails (`title` "A required filter column was not constrained ...") without a `code` member. Expected: stable `code` `REQUIRED_FILTER_COLUMN_MISSING` as on WebSQL, GraphQL list and REST. Issue draft: "Arrow export required-filter 400 has no stable code". 1 cell.
 
+Fixed 2026-10-23 on fix/parity-gaps (#305): the Arrow export answers the required-filter-column problem with the stable code and the same status as the JSON path.
+
+
 ### PARITY-GAP-015
 Capability: required filter column (#163), aggregation. Channel: GraphQL `default_main_parity_scoped_aggregate` without a `where`. Observed: `errors[0].extensions.code = REQUIRED_FILTER_MISSING`; the list field and the other channels use `REQUIRED_FILTER_COLUMN_MISSING`. Expected: one code for the same condition on every channel. Issue draft: "GraphQL aggregate uses REQUIRED_FILTER_MISSING, every other path REQUIRED_FILTER_COLUMN_MISSING". 1 cell.
 
+Fixed 2026-10-23 on fix/parity-gaps (#306): GraphQL aggregation answers `REQUIRED_FILTER_COLUMN_MISSING`, like the other channels.
+
+
 ### PARITY-GAP-016
 Capability: required filter column (#163, #236), federated read. Channel: WebSQL `SELECT s.id FROM default.main.parity_scoped s JOIN second.main.parity_sales b ON s.id = b.id` (no filter). Observed: HTTP 403 `{"error":"Forbidden","message":"The SQL statement was rejected by the gateway security policy."}` with no `code`. Expected: HTTP 400 `REQUIRED_FILTER_COLUMN_MISSING`, as the single-source read answers. Issue draft: "Federated required-filter violation is a generic 403 without code". 1 cell.
+
+Fixed 2026-10-23 on fix/parity-gaps (#307): a federated read without the required filter answers 400 `REQUIRED_FILTER_COLUMN_MISSING`.
+
 
 ### PARITY-GAP-017
 Capability: federated join with a column predicate (#131 bound parameters, #236). Channel: WebSQL, sources `default` and `second`, `AllowedDataSources` listing both, cross-source enabled. Input: `... FROM default.main.parity_sales a JOIN second.main.parity_sales b ON a.id = b.id WHERE a.region = @region` (also literal `a.region = 'North'`, `a.id = 1`, `b.qty > 1`, `IN (@ids)`). Observed: HTTP 403 `SQL_POLICY_VIOLATION` for every column predicate (a join without a `WHERE`, or with `WHERE 1 = 1`, succeeds). Expected: the predicate is applied (4 rows for `region = 'North'`). UNVERIFIED: reproduce in `FederatedVirtualFilterWebApiFixture` before filing. Evidence: the parity catalog registration was aligned with that fixture (TableId on the columns, `IsActive`, `AllowedDataSources`, cross-source enabled) and the 403 persists. Issue draft: "Cross-source join with a column predicate is rejected as SQL_POLICY_VIOLATION". 2 cells (`Robin_131_FederatedQueryWithBoundParameter`, `Robin_163_RequiredFilterSatisfied` federated).
@@ -166,6 +190,9 @@ Fixed 2026-10-23 on fix/parity-gaps (#309): empty IN () yields zero rows (NOT IN
 ### PARITY-GAP-021
 Capability: aggregate function invalid for the column type. Channel: WebSQL on a SQLite source. Input: `SELECT SUM(product) AS v FROM parity_sales` (0), `AVG(sale_date)` (2024.33), `SUM(is_return)` (3), `MIN(is_return)`, `SUM(sold_at)`, `AVG(sold_at)`, `AVG`/`SUM` over text, date, timestamp and boolean columns, also grouped and filtered. Observed: HTTP 200 with a value made by SQLite type coercion. GraphQL answers every one of these with a stable HTTP 200 `errors[0].extensions.code = AGGREGATION_INVALID_FUNCTION_FOR_TYPE` ("The aggregate function is not valid for the column type."). Expected: the same stable 4xx on both channels (and not a provider error on the other dialects, which is checked by the dialect job). Issue draft: "WebSQL accepts SUM/AVG over non-numeric columns on SQLite while GraphQL rejects them". 17 cells (3 matrix cells `agg_sum_text`, `agg_avg_date`, `agg_sum_bool`; 14 pairwise cells of the default seed).
 
+Fixed 2026-10-23 on fix/parity-gaps (#310): an aggregate invalid for the column type is the documented rejection on WebSQL and GraphQL: 400/`AGGREGATION_INVALID_FUNCTION_FOR_TYPE`.
+
+
 ### PARITY-GAP-022
 Observed (WP6). Capability: advertised SQL functions that WebSQL rejects. Channel: WebSQL on a SQLite source. Input: `SELECT LEFT(product, 3) AS v FROM parity_sales WHERE id = 1`, `SELECT RIGHT(product, 3) ...`, `SELECT EXTRACT(YEAR FROM sold_at) AS v ...`; all three names are in `SqlFunctionAllowlists.Sqlite`. Observed: `left`/`right` HTTP 400 `SQL_SYNTAX_ERROR` ("Invalid SQL syntax."), `extract` HTTP 422 `SQL_CONSTRUCT_NOT_SUPPORTED`. Expected: an advertised function is callable once (`Widget` -> `Wid`/`get`, `2023`), or it is removed from the allowlist. `extract` likely shares the root cause of PARITY-GAP-013 (EXTRACT is not supported on SQLite). Issue draft: "SQLite allowlist advertises left, right and extract but WebSQL rejects them".
 
@@ -178,6 +205,9 @@ These cases are a 5xx or leak internals. They are never a `KnownGap`: they live 
 - WebSQL, HTTP 502 `SQL_PROVIDER_ERROR` (18 cases): unknown identifier reaching the provider. `ORDER BY "<key>"` for every key that is not a column (`North`, `north`, ` North`, `O'Brien`, `'`, `"`, `back\slash`, `50%`, `under_score`, emoji, unicode, bidi, `SELECT * FROM x`, `' OR '1'='1`, empty string, 1 KiB of `a`, a single `N`) and `SELECT id FROM parity_sales WHERE nope = 1` (`raw.none.unknown_column`). Expected: 4xx with a stable code (unknown column), as WebSQL already does for an unknown table (403 `SQL_POLICY_DENIED`).
 - REST, HTTP 500 ProblemDetails "The request could not be processed." without code (12 cases): non-integer or out-of-range `limit`/`offset` (`abc`, empty, `1.5`, `1e3`, `0x10`, `2147483648`, `9223372036854775808`, duplicate `limit=1&limit=2`). Expected: 400 with a stable code (binding failure).
 - GraphQL, leak of exception type names in error messages (18 cases, SEC-PAR-07): `InvalidGraphQLRequestException: Invalid JSON document.` (empty body, `{`), `...: Request must contain either a query...` (`query: null`, empty query), `...: Invalid 'variables' value`; `FormatException: One of the identified items was in an invalid format.` (variable `2147483648`/`9223372036854775807` for `Int`); `InvalidFormatException: The value ... is not ...` (`2147483648` or `9223372036854775808` as `offset`, `eq` literals above Int64 on `id`/`qty`/`amount`, decimal above Decimal range); `SqliteException: SQLite Error 1: 'LIKE or GLOB pattern too complex'` (`contains` with a 64 KiB pattern, `like.note.str.len64k`): an engine message through the GraphQL error. Expected: fixed messages with a code and no type or engine names.
+
+Fixed 2026-10-23 on fix/parity-gaps (#312 WebSQL, #313 REST, #314 GraphQL): WebSQL unknown identifiers are 403 `SQL_POLICY_DENIED` (18), REST non-integer or out-of-range paging is 400 `INVALID_QUERY` (12), GraphQL answers a stable code with a fixed message and no type names (18; an `Int` variable beyond Int32 is `GRAPHQL_VARIABLE_INVALID`). The cases run in the normal sweep; `BoundaryKnownGapData` is empty.
+
 
 ### Follow-ups (PARITY-FU-NNN, deferred work, not gaps)
 
@@ -206,6 +236,7 @@ Mutations and subscriptions of the GraphQL schema are not swept by block F (WP6)
 - 2026-10-23 (WP3 review fixes): `ParityHostFixture.Metadata` now sets `TableId` on the columns and `IsActive` like `FederatedVirtualFilterWebApiFixture`; PARITY-GAP-017/018 still reproduce and are marked unverified. A tolerated 501 is recorded as a cell observation (`ParityObservations`, JSONL `observation`, report section "Tolerated 501"); PARITY-GAP-002 is now "observed". `ParityErrorCodes.ReadWhitelist` is the tested seam of the fail-closed sanitizer whitelist read. The Robin_163 gapped cells (GAP-014..016) assert the stable code of a rejection that does occur; none is an authorization or deny assertion.
 - 2026-10-23 (WP3): drift against the plan. (a) D-17 said 26 runnable Robin cases; PRD section 8 items 1, 3-16, 19-28 are 25 items, implemented as 28 scenario methods (several items split by channel or variant) plus items 17 and 18 as `Pending`. Item 3 (declared query) is covered by the WebSQL named parameter and GraphQL variable; no declared-query catalog exists in the host. (b) Host fixture additions (`ParityHostFixture`, `ParitySeed`): tables `parity_scoped` (catalog `RequiredFilterColumns = [region]`), `parity_masked` (masking rule NULLIFY on `amount`), `parity_big` (1000 rows), the sales table registered also for source `second`, `Gateway:WebSql:AllowedDataSources` = `default`,`second` (otherwise `second.*` is a 403) and `Gateway:WebSql:CrossSource:Enabled`. (c) k-anonymity: governed aggregations hide groups below 5 rows (`Analytics:Privacy:DefaultMinGroupSize`, validated >= 1); the fixture sets it to 1 so exact group results of the 18-row seed are assertable. Suppression itself is by design and not asserted here. (d) D-9 tolerance of 501 widened from the literal code `NotImplemented` to any 501 whose code is in `ParityErrorCodes.All` (WebSQL answers `SQL_FUNCTION_UNSUPPORTED_DIALECT`, error token `NotImplemented`); a 501 without a catalogue code stays a hard failure. (e) Known gaps of the Robin suite are cell-level (`RobinKnownGaps`, keyed `Method|Channel|Variant`) like the sweeps, not method attributes, because one theory spans channels and variants. (f) `.github/pull_request_template.md` does not exist in the repository; the checklist line of D-17 is skipped (no file is created). Section 7 documents how to add a Robin case instead.
 - 2026-10-23 (WP1 review fixes): `RunSummary` bookkeeping moved to `ParityRunner.Reconcile` (Failed/Skipped consistent when a pass is flipped to failed or a failure to a skip); the Security-trait check for `KnownGap` also reads class-level traits, and the architecture source check covers class-level traits.
+- 2026-10-23 (WP-Z part 2, fix/parity-gaps): GAP-001..005, 010, 014..016, 021 and the observed-error list are fixed and their cells are normal green cells (`BoundaryKnownGapData`, `RobinKnownGaps` 163 cells, `MatrixKnownGaps` and `PairwiseKnownGaps` emptied; WebSQL type-invalid aggregates expect `AGGREGATION_INVALID_FUNCTION_FOR_TYPE` and the differential allow-list covers WebSQL); GAP-017/018 stay gapped (WP-F); the tolerated-501 handling stays.
 
 ## 7. Adding a Robin case (new issue from rgruebel)
 

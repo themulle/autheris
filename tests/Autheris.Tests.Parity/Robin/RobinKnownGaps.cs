@@ -8,9 +8,6 @@ public static class RobinKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["Robin_163_RequiredFilterMissingGivesStableCode|Export|arrow"] = "PARITY-GAP-014",
-        ["Robin_163_RequiredFilterMissingGivesStableCode|GraphQl|aggregate"] = "PARITY-GAP-015",
-        ["Robin_163_RequiredFilterMissingGivesStableCode|WebSql|federated"] = "PARITY-GAP-016",
         ["Robin_163_RequiredFilterSatisfied|WebSql|federated"] = "PARITY-GAP-017",
         ["Robin_131_FederatedQueryWithBoundParameter|WebSql|"] = "PARITY-GAP-017",
         ["Robin_131_FederatedAggregationGroupBy|WebSql|"] = "PARITY-GAP-018",

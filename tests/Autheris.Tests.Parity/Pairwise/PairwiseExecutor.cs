@@ -34,7 +34,7 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
 
         if (PairwiseModel.IsInvalidCombination(c.Aggregate, c.Type))
         {
-            result.Rejected(web ? null : Invalid);
+            result.Rejected(Invalid);
             return;
         }
 

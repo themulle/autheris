@@ -16,10 +16,10 @@ public static class DifferentialAllowList
     public static IReadOnlyList<AllowEntry> Entries { get; } =
     [
         new(
-            "graphql_rejects_type_invalid_aggregate",
-            c => c.Channel == "GraphQl" && c.RejectedByTypedAggregation,
+            "typed_aggregation_rejects_type_invalid_aggregate",
+            c => c.Channel is "GraphQl" or "WebSql" && c.RejectedByTypedAggregation,
             "documented: the typed aggregation contract rejects an aggregate function that is invalid for the column type (AGGREGATION_INVALID_FUNCTION_FOR_TYPE); SQLite coerces the values",
-            // GraphQL answers HTTP 200 with errors[]; only a rejection by that exact code is the contract, a wrong value or another code is a real mismatch
+            // GraphQL answers HTTP 200 with errors[], WebSQL a 400 with the same code; only a rejection by that exact code is the contract, a wrong value or another code is a real mismatch
             r => ParityAssert.IsError(r) && r.Status < 500 && r.Code == "AGGREGATION_INVALID_FUNCTION_FOR_TYPE"),
     ];
 

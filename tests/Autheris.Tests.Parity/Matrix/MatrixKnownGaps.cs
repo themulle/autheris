@@ -9,9 +9,6 @@ public static class MatrixKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["agg_sum_text|WebSql"] = "PARITY-GAP-021",
-        ["agg_avg_date|WebSql"] = "PARITY-GAP-021",
-        ["agg_sum_bool|WebSql"] = "PARITY-GAP-021",
     };
 
     public static IReadOnlyDictionary<string, string> All => Gaps;

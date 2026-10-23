@@ -53,7 +53,7 @@ public static class DifferentialCorpus
         {
             var (sql, parameters) = PairwiseExecutor.RenderWebSql(c);
             yield return new DifferentialCase(
-                $"pairwise.{c.Id}", "pairwise", "WebSql", sql, parameters, new SqlRequest(sql, parameters), false, null, null, DateGrouping: IsDateGrouping(c.Grouping));
+                $"pairwise.{c.Id}", "pairwise", "WebSql", sql, parameters, new SqlRequest(sql, parameters), false, null, null, PairwiseModel.IsInvalidCombination(c.Aggregate, c.Type), IsDateGrouping(c.Grouping));
 
             if (c.Grouping == "expression")
             {

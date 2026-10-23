@@ -8,8 +8,6 @@ public static class PairwiseKnownGaps
 {
     private static readonly (string Name, Func<PairwiseCase, string, bool> Matches, string GapId)[] Rules =
     [
-        // SQLite accepts every aggregate over every column type, so the type-invalid combinations that GraphQL rejects are not rejected by WebSQL.
-        ("webSql accepts type-invalid aggregates on sqlite", (c, ch) => ch == "WebSql" && c.Dialect == PairwiseModel.Sqlite && PairwiseModel.IsInvalidCombination(c.Aggregate, c.Type), "PARITY-GAP-021"),
     ];
 
     public static IReadOnlyList<string> GapIds => Rules.Select(r => r.GapId).Distinct().ToList();
