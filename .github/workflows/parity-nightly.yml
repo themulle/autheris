@@ -1,0 +1,146 @@
+name: Parity nightly
+
+# REQ-PARITY-NIGHTLY: cross-channel/dialect parity suite (tests/Autheris.Tests.Parity, not part of Autheris.sln).
+# This file must never get a pull_request, pull_request_target, push or workflow_run trigger (SEC-PAR-01).
+# No secrets, no retries. Inputs reach the shell only via env: and are validated before use (SEC-PAR-02).
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'Optional extra dotnet test filter (narrows the Parity selection)'
+        type: string
+        default: ''
+      seed:
+        description: 'Optional pairwise seed (digits only)'
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  parity-sqlite:
+    name: Parity (SQLite, in-process)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_PARITY_RUN: '1'
+      AUTHERIS_PARITY_REPORT_DIR: ${{ github.workspace }}/parity-report
+      PARITY_FILTER_INPUT: ${{ inputs.filter }}
+      PARITY_SEED_INPUT: ${{ inputs.seed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ "$PARITY_FILTER_INPUT" =~ ^[A-Za-z0-9_.~=\!\&\|\(\)]*$ ]]; then
+            echo "::error::filter input contains characters outside [A-Za-z0-9_.~=!&|()]"
+            exit 1
+          fi
+          if ! [[ "$PARITY_SEED_INPUT" =~ ^[0-9]{0,10}$ ]]; then
+            echo "::error::seed input must be up to 10 digits"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: dotnet restore tests/Autheris.Tests.Parity --locked-mode
+
+      - name: Parity tests (SQLite)
+        run: |
+          set -euo pipefail
+          FILTER="Category=Parity&Dialect!=Container"
+          if [ -n "$PARITY_FILTER_INPUT" ]; then
+            FILTER="$FILTER&($PARITY_FILTER_INPUT)"
+          fi
+          if [ -n "$PARITY_SEED_INPUT" ]; then
+            export AUTHERIS_PARITY_SEED="$PARITY_SEED_INPUT"
+          fi
+          dotnet test tests/Autheris.Tests.Parity -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory "$AUTHERIS_PARITY_REPORT_DIR/trx" --verbosity normal
+
+      - name: Parity report (known gaps, green-to-red check)
+        if: always()
+        run: python3 -I .github/scripts/parity-report.py "$AUTHERIS_PARITY_REPORT_DIR/parity-results.jsonl" tests/Autheris.Tests.Parity/parity-baseline.json "$AUTHERIS_PARITY_REPORT_DIR/known-gaps.md"
+
+      - name: Upload parity results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: parity-results-sqlite
+          path: ${{ github.workspace }}/parity-report
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # WP4: PostgreSQL via Testcontainers (the runner provides Docker). SQL Server cells are registered Pending (no host yet).
+  parity-dialects:
+    name: Parity (PostgreSQL container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_PARITY_RUN: '1'
+      AUTHERIS_PARITY_REPORT_DIR: ${{ github.workspace }}/parity-report-dialects
+      PARITY_FILTER_INPUT: ${{ inputs.filter }}
+      PARITY_SEED_INPUT: ${{ inputs.seed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ "$PARITY_FILTER_INPUT" =~ ^[A-Za-z0-9_.~=\!\&\|\(\)]*$ ]]; then
+            echo "::error::filter input contains characters outside [A-Za-z0-9_.~=!&|()]"
+            exit 1
+          fi
+          if ! [[ "$PARITY_SEED_INPUT" =~ ^[0-9]{0,10}$ ]]; then
+            echo "::error::seed input must be up to 10 digits"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: dotnet restore tests/Autheris.Tests.Parity --locked-mode
+
+      - name: Parity tests (container dialects)
+        run: |
+          set -euo pipefail
+          FILTER="Category=Parity&Dialect=Container"
+          if [ -n "$PARITY_FILTER_INPUT" ]; then
+            FILTER="$FILTER&($PARITY_FILTER_INPUT)"
+          fi
+          if [ -n "$PARITY_SEED_INPUT" ]; then
+            export AUTHERIS_PARITY_SEED="$PARITY_SEED_INPUT"
+          fi
+          dotnet test tests/Autheris.Tests.Parity -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory "$AUTHERIS_PARITY_REPORT_DIR/trx" --verbosity normal
+
+      - name: Parity report (known gaps, green-to-red check)
+        if: always()
+        run: python3 -I .github/scripts/parity-report.py "$AUTHERIS_PARITY_REPORT_DIR/parity-results.jsonl" tests/Autheris.Tests.Parity/parity-baseline-dialects.json "$AUTHERIS_PARITY_REPORT_DIR/known-gaps.md"
+
+      - name: Upload parity results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: parity-results-dialects
+          path: ${{ github.workspace }}/parity-report-dialects
+          retention-days: 14
+          if-no-files-found: ignore

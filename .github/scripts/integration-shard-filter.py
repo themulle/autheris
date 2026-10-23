@@ -15,7 +15,7 @@ import sys
 
 NAMESPACE = "Autheris.Tests.Integration."
 DEFAULT_WEIGHT = 10.0
-BASE_FILTER = "Category!=Spark"
+BASE_FILTER = "Category!=Spark&Category!=Parity"
 
 root = pathlib.Path(__file__).resolve().parents[2]
 project = root / "tests" / "Autheris.Tests.Integration"

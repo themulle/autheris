@@ -41,7 +41,7 @@ jobs:
 
       # WP-TS-02: Autheris.Tests.Integration runs in the parallel integration-tests shards below.
       - name: Test Autheris Solution (excluding Spark and integration)
-        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
+        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
 
       # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
       - name: Lint and render Helm chart

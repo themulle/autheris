@@ -1591,6 +1591,166 @@
       ]
     },
     {
+      "name": "consumer_app_actor_daily",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "day",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "application",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "actor_hash",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "table_id",
+        "day",
+        "application",
+        "actor_hash"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "consumer_app_daily",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "day",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "application",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "client_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "calls",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rows_returned",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rows_measured_calls",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_access",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_rate_limit",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_cost",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_other",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "table_id",
+        "day",
+        "application",
+        "client_id",
+        "version"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "consumer_app_queryname_daily",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "day",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "application",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "query_name",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "calls",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "table_id",
+        "day",
+        "application",
+        "query_name"
+      ],
+      "indexes": []
+    },
+    {
       "name": "data_owner_delegations",
       "columns": [
         {
@@ -2883,6 +3043,135 @@
       ],
       "primaryKey": [
         "normalized_key"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "trusted_document_app_origins",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "origin"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "trusted_document_app_versions",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "retired_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "version"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "trusted_document_apps",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "trusted_document_generation",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "trusted_document_hashes",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "family": "string"
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "version",
+        "hash"
       ],
       "indexes": []
     },

@@ -237,6 +237,8 @@ public static class GatewayApplicationBuilderExtensions
             mapQueryAnalysis: switches.QueryAnalysisEnabled);
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
+        app.MapTrustedDocumentAdminEndpointsWhenEnabled(gatewayOptions); // Issue #281
+
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();

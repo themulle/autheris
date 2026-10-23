@@ -140,5 +140,9 @@ public static class AuditEventTypes
     public const string CallerAttributeDefinitionDeleted = "CALLER_ATTRIBUTE_DEFINITION_DELETED";
     public const string CallerAttributeServiceSetChanged = "CALLER_ATTRIBUTE_SERVICE_SET_CHANGED";
     public const string CallerAttributeSimulationRead = "CALLER_ATTRIBUTE_SIMULATION_READ";
+
+    // Issue #281: app-scoped trusted GraphQL documents
+    public const string TrustedDocumentsReplaced = "TRUSTED_DOCUMENTS_REPLACED";
+    public const string TrustedDocumentsRetired = "TRUSTED_DOCUMENTS_RETIRED";
 }
 
