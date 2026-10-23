@@ -33,6 +33,15 @@ public sealed class ParitySeedAndResultsTests : ParityTestBase
         rows.GroupBy(r => r.Product).ToDictionary(g => g.Key, g => g.Count()).ShouldBe(ParityExpected.RowsByProduct, ignoreOrder: true);
         rows.GroupBy(r => r.Product).ToDictionary(g => g.Key, g => g.Sum(r => r.Amount ?? 0m)).ShouldBe(ParityExpected.SumAmountByProduct, ignoreOrder: true);
         rows.Where(r => r.Region == "Empty").ShouldAllBe(r => r.Amount == null && r.Qty == null);
+
+        rows.GroupBy(r => int.Parse(r.SaleDate[..4], System.Globalization.CultureInfo.InvariantCulture)).ToDictionary(g => g.Key, g => g.Count())
+            .ShouldBe(ParityExpected.RowsByYear, ignoreOrder: true);
+        rows.GroupBy(r => int.Parse(r.SaleDate[..4], System.Globalization.CultureInfo.InvariantCulture)).ToDictionary(g => g.Key, g => g.Sum(r => r.Amount ?? 0m))
+            .ShouldBe(ParityExpected.SumAmountByYear, ignoreOrder: true);
+        rows.Select(r => r.SaleDate[..7]).Distinct().Count().ShouldBe(ParityExpected.DistinctYearMonths);
+        rows.Select(r => r.SaleDate).Distinct().Count().ShouldBe(ParityExpected.DistinctSaleDates);
+        rows.Where(r => r.Region is not null).Select(r => r.Region).Distinct().Count().ShouldBe(ParityExpected.DistinctRegionsNonNull);
+        rows.Where(r => r.Qty is not null).Average(r => (decimal)r.Qty!.Value).ShouldBe(ParityExpected.AvgQty);
     }
 
     [Fact]

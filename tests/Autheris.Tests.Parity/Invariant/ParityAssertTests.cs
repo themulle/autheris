@@ -29,6 +29,8 @@ public sealed class ParityAssertTests : ParityTestBase
     {
         Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "NotImplemented", "{\"error\":\"NotImplemented\"}")));
         Should.Throw<ParityHardFailureException>(() => ParityAssert.NoServerError(Result(501, "Whatever", "{}")));
+        // A 501 with a stable catalogue code (an unsupported function for the dialect) is Unsupported, not a server fault.
+        Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", "{\"error\":\"NotImplemented\",\"code\":\"SQL_FUNCTION_UNSUPPORTED_DIALECT\"}")));
     }
 
     [ParityTheory]
@@ -168,6 +170,36 @@ public sealed class ParityAssertTests : ParityTestBase
         }
 
         ParityAssert.FindLeaks("Column 'a' does not exist on table 'main.parity_sales'.").ShouldBeEmpty();
+    }
+
+    [ParityTheory]
+    [Trait("Category", "Security")]
+    [InlineData("stack-trace-word", "{\"detail\":\"StackTrace: x\"}")]
+    [InlineData("inner-exception", "{\"detail\":\"InnerException was null\"}")]
+    [InlineData("hotchocolate-type", "{\"message\":\"HotChocolate.Execution.Foo\"}")]
+    [InlineData("autheris-type", "{\"message\":\"Autheris.Application.Foo failed\"}")]
+    [InlineData("autheris-type", "{\"message\":\"Autheris.Infrastructure.Db\"}")]
+    [InlineData("server-setting", "{\"message\":\"Server=db;Database=x\"}")]
+    [InlineData("host-setting", "{\"message\":\"Host=10.0.0.1;Port=5432\"}")]
+    public void NoLeak_DetectsInternalsPattern(string name, string body)
+    {
+        ParityAssert.FindLeaks(body).ShouldContain(name);
+        Should.Throw<ParityHardFailureException>(() => ParityAssert.NoLeak(body));
+    }
+
+    [ParityFact]
+    public void NoLeak_NewPatternsHaveNoFalsePositiveOnPlainMessages()
+    {
+        ParityAssert.FindLeaks("{\"message\":\"The host is unreachable; the server rejected the request. Autheris is fine.\"}").ShouldBeEmpty();
+        ParityAssert.FindLeaks("{\"message\":\"Stack of plates and an inner exception-free message\"}").ShouldBeEmpty();
+    }
+
+    [ParityFact]
+    public void ParityErrorCodes_ContainsSanitizerWhitelistMembers()
+    {
+        ParityErrorCodes.All.ShouldContain("ACCESS_DENIED");
+        ParityErrorCodes.All.ShouldContain("INVALID_QUERY");
+        ParityErrorCodes.All.ShouldContain("RATE_LIMIT_EXCEEDED");
     }
 
     [ParityFact]

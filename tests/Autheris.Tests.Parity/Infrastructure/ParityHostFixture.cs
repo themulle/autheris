@@ -89,6 +89,9 @@ public sealed class ParityHostFixture : IAsyncLifetime
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "100000000");
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "1000000");
+        // k-anonymity: governed aggregations hide groups below the minimum group size (default 5). Lifted here so that exact group
+        // results of the 18-row seed can be asserted; the suppression itself is out of scope of the parity suite.
+        b.UseSetting("Analytics:Privacy:DefaultMinGroupSize", "1");
         b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_govPath}");
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
@@ -102,23 +105,42 @@ public sealed class ParityHostFixture : IAsyncLifetime
         b.UseSetting("Gateway:WebSql:Enabled", "true");
         b.UseSetting("Gateway:WebSql:AllowDml", "false");
         b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
+        // Federated scenarios (Robin #131) join the sources "default" and "second".
+        b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
+        b.UseSetting("Gateway:WebSql:AllowedDataSources:0", "default");
+        b.UseSetting("Gateway:WebSql:AllowedDataSources:1", "second");
     });
+
+    private static readonly (string Name, string Type)[] SalesColumns =
+    [
+        ("id", "integer"), ("region_id", "integer"), ("region", "varchar"), ("product", "varchar"), ("qty", "integer"),
+        ("amount", "decimal"), ("sale_date", "date"), ("sold_at", "timestamp"), ("is_return", "boolean"), ("note", "varchar"),
+    ];
 
     private static async Task RegisterCatalogAsync(WebApplicationFactory<Program> host)
     {
         using var scope = host.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-        await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.RegionsTable,
+        await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.RegionsTable, "default",
             ("id", "integer"), ("name", "varchar"), ("tz", "varchar")));
-        await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.SalesTable,
-            ("id", "integer"), ("region_id", "integer"), ("region", "varchar"), ("product", "varchar"), ("qty", "integer"),
-            ("amount", "decimal"), ("sale_date", "date"), ("sold_at", "timestamp"), ("is_return", "boolean"), ("note", "varchar")));
+        await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.SalesTable, "default", SalesColumns));
+        await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.SalesTable, "second", SalesColumns));
+        await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.BigTable, "default", ("id", "integer"), ("grp", "varchar")));
+
+        var scoped = Metadata(ParitySeed.ScopedTable, "default", SalesColumns);
+        await repo.UpsertTableMetadataAsync(scoped with { Table = scoped.Table with { RequiredFilterColumns = ["region"] } });
+
+        var masked = Metadata(ParitySeed.MaskedTable, "default", SalesColumns);
+        await repo.UpsertTableMetadataAsync(masked with
+        {
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["amount"] = new MaskingRule { RuleType = "NULLIFY" } },
+        });
     }
 
-    private static TableMetadata Metadata(string table, params (string Name, string Type)[] columns) => new()
+    private static TableMetadata Metadata(string table, string source, params (string Name, string Type)[] columns) => new()
     {
-        Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
-        Identifier = new TableIdentifier("default", "main", table),
+        Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "Sqlite", SourceName = source },
+        Identifier = new TableIdentifier(source, "main", table),
         Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList(),
     };
 }

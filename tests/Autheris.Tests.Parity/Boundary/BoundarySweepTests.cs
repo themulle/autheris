@@ -63,6 +63,12 @@ public sealed class BoundarySweepTests(ParityHostFixture host) : ParityTestBase
             }
 
             ParityAssert.NoServerError(result, submitted);
+            if (block == "observed5xx")
+            {
+                throw new XunitException(
+                    $"Observed server error fixed ({channel}/{caseId}, HTTP {result.Status}): move the case back into the normal sweep (remove it from BoundaryKnownGapData) so the oracle checks it.");
+            }
+
             ParityAssert.StableCode(result);
             if (assertExpectation)
             {

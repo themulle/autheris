@@ -37,6 +37,12 @@ public static class ParityAssert
         ("unix-path", Rx(@"/(home|root|src|app|tmp)/")),
         ("connection-string", Rx(@"Data Source=")),
         ("credential-token", Rx(@"Password=")),
+        ("stack-trace-word", Rx(@"\bStackTrace\b")),
+        ("inner-exception", Rx(@"\bInnerException\b")),
+        ("hotchocolate-type", Rx(@"\bHotChocolate\.")),
+        ("autheris-type", Rx(@"\bAutheris\.(Api|Application|Infrastructure)\.")),
+        ("server-setting", Rx(@"\bServer=")),
+        ("host-setting", Rx(@"\bHost=")),
     ];
 
     private static Regex Rx(string pattern) => new(pattern, RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, MatchTimeout);
@@ -86,7 +92,7 @@ public static class ParityAssert
     }
 
     private static bool IsTolerated501(ChannelResult r) =>
-        r.Status == 501 && r.Code is "NotImplemented" or "NOT_IMPLEMENTED";
+        r.Status == 501 && r.Code is not null && ParityErrorCodes.All.Contains(r.Code);
 
     /// <summary>
     /// No 5xx (except 501 NotImplemented, treated as Unsupported), no internal-fault code and no leaked internals in any error body

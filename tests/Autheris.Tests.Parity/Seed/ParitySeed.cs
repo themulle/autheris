@@ -13,6 +13,17 @@ public static class ParitySeed
     public const string SalesTable = "parity_sales";
     public const string RegionsTable = "parity_regions";
 
+    /// <summary>Copy of the sales rows whose catalog entry requires a filter on <c>region</c> (#163, #236).</summary>
+    public const string ScopedTable = "parity_scoped";
+
+    /// <summary>Copy of the sales rows whose <c>amount</c> column carries a masking rule (#28).</summary>
+    public const string MaskedTable = "parity_masked";
+
+    /// <summary>1000 rows (<c>id</c> 1..1000, <c>grp</c> <c>g0</c>..<c>g9</c>) for paging and truncation scenarios (#39).</summary>
+    public const string BigTable = "parity_big";
+
+    public const int BigRowCount = 1000;
+
     public static readonly IReadOnlyList<RegionRow> Regions =
     [
         new(1, "North", "Europe/Berlin"),
@@ -45,6 +56,10 @@ public static class ParitySeed
     /// <summary>Rows of the second source <c>second</c> (same schema, 4 rows; federation scenarios).</summary>
     public static IEnumerable<SaleRow> SecondSales => Sales.Take(4);
 
+    private static string SalesDdl(string table) =>
+        $"CREATE TABLE {table} (id INTEGER PRIMARY KEY, region_id INTEGER NULL, region TEXT NULL, product TEXT NOT NULL, qty INTEGER NULL, " +
+        "amount NUMERIC(12,2) NULL, sale_date DATE NOT NULL, sold_at TIMESTAMP NOT NULL, is_return BOOLEAN NULL, note TEXT NULL);";
+
     public static void Create(string path) => Create(path, Sales);
 
     public static void Create(string path, IEnumerable<SaleRow> sales)
@@ -55,9 +70,15 @@ public static class ParitySeed
         {
             create.CommandText =
                 "CREATE TABLE parity_regions (id INTEGER PRIMARY KEY, name TEXT NOT NULL, tz TEXT NOT NULL);" +
-                "CREATE TABLE parity_sales (id INTEGER PRIMARY KEY, region_id INTEGER NULL, region TEXT NULL, product TEXT NOT NULL, qty INTEGER NULL, " +
-                "amount NUMERIC(12,2) NULL, sale_date DATE NOT NULL, sold_at TIMESTAMP NOT NULL, is_return BOOLEAN NULL, note TEXT NULL);";
+                SalesDdl(SalesTable) + SalesDdl(ScopedTable) + SalesDdl(MaskedTable);
             create.ExecuteNonQuery();
+        }
+
+        using (var extra = conn.CreateCommand())
+        {
+            extra.CommandText =
+                "CREATE TABLE parity_big (id INTEGER PRIMARY KEY, grp TEXT NOT NULL);";
+            extra.ExecuteNonQuery();
         }
 
         using var tx = conn.BeginTransaction();
@@ -91,6 +112,17 @@ public static class ParitySeed
             cmd.ExecuteNonQuery();
         }
 
+        using (var copy = conn.CreateCommand())
+        {
+            copy.Transaction = tx;
+            copy.CommandText =
+                "INSERT INTO parity_scoped SELECT * FROM parity_sales;" +
+                "INSERT INTO parity_masked SELECT * FROM parity_sales;" +
+                $"WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < {BigRowCount}) " +
+                "INSERT INTO parity_big (id, grp) SELECT i, 'g' || (i % 10) FROM n;";
+            copy.ExecuteNonQuery();
+        }
+
         tx.Commit();
     }
 }
@@ -116,6 +148,17 @@ public static class ParityExpected
     public const decimal SumAmountNullRegion = 70.00m;
 
     public static readonly IReadOnlyDictionary<string, int> RowsByProduct = new Dictionary<string, int> { ["Widget"] = 8, ["Gadget"] = 6, ["Gizmo"] = 4 };
+
+    public static readonly IReadOnlyDictionary<int, int> RowsByYear = new Dictionary<int, int> { [2023] = 2, [2024] = 8, [2025] = 8 };
+
+    public static readonly IReadOnlyDictionary<int, decimal> SumAmountByYear = new Dictionary<int, decimal> { [2023] = 150.50m, [2024] = 1405.25m, [2025] = 325.75m };
+
+    public const int DistinctYearMonths = 13;
+    public const int DistinctSaleDates = 16;
+    public const int DistinctRegionsNonNull = 3;
+
+    /// <summary>AVG(qty): 69 over the 15 non-null quantities, a fractional result of an integer column.</summary>
+    public const decimal AvgQty = 4.6m;
 
     public static readonly IReadOnlyDictionary<string, decimal> SumAmountByProduct = new Dictionary<string, decimal> { ["Widget"] = 380.50m, ["Gadget"] = 1260.00m, ["Gizmo"] = 241.00m };
 }

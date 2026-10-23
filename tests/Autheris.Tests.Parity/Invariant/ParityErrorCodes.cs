@@ -44,13 +44,19 @@ public static class ParityErrorCodes
 
     /// <summary>
     /// The safe-code whitelist of the GraphQL error sanitizer (the single place that decides which GraphQL codes reach a client),
-    /// read by reflection so a new code is accepted automatically. Empty when the member moved (the literal lists above still apply).
+    /// read by reflection so a new code is accepted automatically. Fails closed: a renamed type or member throws instead of
+    /// silently shrinking the accepted set.
     /// </summary>
     private static IEnumerable<string> SanitizerWhitelist()
     {
-        var type = typeof(ApiErrorCodes).Assembly.GetType("Autheris.Api.Middleware.ErrorSanitizingFilter");
-        var field = type?.GetField("WhitelistedSafeCodes", BindingFlags.NonPublic | BindingFlags.Static);
-        return field?.GetValue(null) is IEnumerable<string> codes ? codes.ToList() : [];
+        const string typeName = "Autheris.Api.Middleware.ErrorSanitizingFilter";
+        var type = typeof(ApiErrorCodes).Assembly.GetType(typeName)
+                   ?? throw new InvalidOperationException($"Type {typeName} not found; update ParityErrorCodes.");
+        var field = type.GetField("WhitelistedSafeCodes", BindingFlags.NonPublic | BindingFlags.Static)
+                    ?? throw new InvalidOperationException($"{typeName}.WhitelistedSafeCodes not found; update ParityErrorCodes.");
+        return field.GetValue(null) is IEnumerable<string> codes
+            ? codes.ToList()
+            : throw new InvalidOperationException($"{typeName}.WhitelistedSafeCodes has no string value; update ParityErrorCodes.");
     }
 
     private static HashSet<string> Build()
