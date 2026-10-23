@@ -64,4 +64,17 @@ public sealed class GatewayExceptionHandlerCodeTests
         status.ShouldBe(expectedStatus);
         body.GetProperty("code").GetString().ShouldBe(expectedCode);
     }
+
+    [Theory]
+    [InlineData(408, "REQUEST_TIMEOUT")]
+    [InlineData(414, "URI_TOO_LONG")]
+    [InlineData(431, "REQUEST_HEADER_FIELDS_TOO_LARGE")]
+    public async Task BadHttpRequest_KeepsTransportStatus_WithFixedText_SEC_PG_14(int statusCode, string code)
+    {
+        var (status, body, raw) = await HandleAsync(new BadHttpRequestException("secret-header-name rejected", statusCode));
+
+        status.ShouldBe(statusCode);
+        body.GetProperty("code").GetString().ShouldBe(code);
+        raw.ShouldNotContain("secret-header-name");
+    }
 }

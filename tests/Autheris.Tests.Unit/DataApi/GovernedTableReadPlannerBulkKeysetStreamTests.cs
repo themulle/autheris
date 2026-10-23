@@ -301,6 +301,6 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
 
         var ex = Should.Throw<RequiredFilterColumnMissingException>(() => planner.PlanKeysetStream(request, metadata, decision));
         ex.Message.ShouldContain("REQUIRED_FILTER_COLUMN_MISSING");
-        ex.Message.ShouldContain("tenant_id");
+        ex.Message.ShouldNotContain("tenant_id");
     }
 }

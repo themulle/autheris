@@ -130,7 +130,10 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         StatusCodes.Status400BadRequest => ApiErrorCodes.BadRequest,
         StatusCodes.Status401Unauthorized => ApiErrorCodes.Unauthorized,
         StatusCodes.Status403Forbidden => ApiErrorCodes.AccessDenied,
+        StatusCodes.Status408RequestTimeout => ApiErrorCodes.RequestTimeout,
         StatusCodes.Status413PayloadTooLarge => ApiErrorCodes.PayloadTooLarge,
+        StatusCodes.Status414UriTooLong => ApiErrorCodes.UriTooLong,
+        StatusCodes.Status431RequestHeaderFieldsTooLarge => ApiErrorCodes.RequestHeaderFieldsTooLarge,
         StatusCodes.Status429TooManyRequests => ApiErrorCodes.TooManyRequests,
         StatusCodes.Status501NotImplemented => ApiErrorCodes.NotImplemented,
         StatusCodes.Status503ServiceUnavailable => ApiErrorCodes.ServiceUnavailable,
@@ -142,6 +145,9 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
     {
         // SEC-PG-14: the framework message names the binding parameter; only the status survives, with a fixed text.
         BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge } => (StatusCodes.Status413PayloadTooLarge, "The request is too large.", null),
+        BadHttpRequestException { StatusCode: StatusCodes.Status408RequestTimeout } => (StatusCodes.Status408RequestTimeout, "The request timed out.", null),
+        BadHttpRequestException { StatusCode: StatusCodes.Status414UriTooLong } => (StatusCodes.Status414UriTooLong, "The request URI is too long.", null),
+        BadHttpRequestException { StatusCode: StatusCodes.Status431RequestHeaderFieldsTooLarge } => (StatusCodes.Status431RequestHeaderFieldsTooLarge, "The request headers are too large.", null),
         BadHttpRequestException => (StatusCodes.Status400BadRequest, "The request is malformed.", null),
         GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
