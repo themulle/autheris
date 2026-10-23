@@ -95,3 +95,21 @@ Input: [`2026-10-23-req-robin-100-scenarios.md`](2026-10-23-req-robin-100-scenar
 | R100 | Proactive_SumAmountScopedTwoRegions | W,G | parity_scoped SUM(amount) `region IN ('North','South')` | 1811.50 |
 
 Total: 30 existing + 35 + 35 = 100 distinct `Robin_` methods (2 Pending stay: #157, #270).
+
+## 3. Phase 3 security review (SEC-R100)
+
+Verdict: APPROVED WITH CONDITIONS. Test-only, no `src/` change; no scenario expects a fail-open outcome. Reviewed closely: R71, R82-R86, R88-R99.
+
+Binding conditions:
+- SEC-R100-01: Every error-contract scenario (R46, R71, R82, R83, R85, R88-R90, R92-R98) asserts the exact stable code named in section 2 plus a 4xx; a 5xx, a stack frame, an engine text ("no such column", SQL fragment) or a missing code fails the cell and is never a KnownGap.
+- SEC-R100-02: A leak (clear masked value in R91-R95, a result for a denied or required-filter-less request in R96-R98, a clear order in R93) throws `DeniedRequestSucceededException`; a denied request that succeeds is never a KnownGap, and `RobinKnownGaps` may not hold a key for R88-R89 or R91-R98 security cells.
+- SEC-R100-03: R92 and R94 "or zero rows / one null group" alternatives must also assert that no clear amount is present anywhere in the body; R93's alternative must compare against the full clear order of R73 and fail on equality. Prefer pinning `Rejected()` once the observed behaviour is known.
+- SEC-R100-04: R96 and R97 assert the missing-filter variant is rejected with `REQUIRED_FILTER_COLUMN_MISSING` before the satisfied variant runs; R99 pins a single-value IN only (a multi-value IN must not be added as accepted).
+- SEC-R100-05: R88 asserts the follow-up `COUNT(*)` equals 18 after all three write variants (no mutation), and R89 asserts the second statement did not run.
+- SEC-R100-06: R82 compares status and code between unknown table and unknown schema per channel (no existence oracle); R84 and R85 bodies contain no row values or stack frames.
+- SEC-R100-07: `RobinClient.PostJsonAsync` and the bulk/analyze calls use the same authenticated host client as existing helpers (no extra anonymous or header-stripped client, no hard-coded token); R71 mutates the cursor on the real signed value and must be 400 `INVALID_CURSOR`, with a variant swapping the cursor to another table's route also rejected; R70 never reuses a cursor across principals.
+- SEC-R100-08: No existing security test, KnownGap, `ParityExpected` literal or baseline cell is weakened or removed; shared-file edits only append inside the WP blocks.
+- SEC-R100-09: Suite stays nightly-only: new parts carry no own `[Fact]` outside `RobinScenarios` (inherit `Category=Parity` and the `AUTHERIS_PARITY_RUN=1` guard); no workflow, csproj or `src/` change; `ParityIsolationArchitectureTests` stays green.
+- SEC-R100-10: Gap drafts and failure messages carry ids and codes only, never masked or seed values from parity_masked/parity_scoped.
+
+Mandatory tests (`[Trait("Category","Security")]`, Architecture project): `Robin100_NewPartsAddNoUnguardedTests`, `Robin100_NoKnownGapForDeniedOrLeakCells`, `Robin100_PostJsonAsyncUsesAuthenticatedHostClient`. The 70 scenarios themselves stay `Category=Parity`.
