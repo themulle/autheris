@@ -12,7 +12,6 @@ namespace Autheris.Tests.Parity.Robin;
 // WP-R2 (R66-R100) of the Robin-100 plan. Second part of the same class: no own [Trait]/[Collection] (inherited from the attributed part).
 public sealed partial class RobinScenarios
 {
-    private const string Big = ParitySeed.BigTable;
     private const string Masked = ParitySeed.MaskedTable;
     private const string Scoped = ParitySeed.ScopedTable;
     private const string AnalyzePath = "/api/v1/governance/queries/analyze";

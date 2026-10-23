@@ -113,3 +113,10 @@ Binding conditions:
 - SEC-R100-10: Gap drafts and failure messages carry ids and codes only, never masked or seed values from parity_masked/parity_scoped.
 
 Mandatory tests (`[Trait("Category","Security")]`, Architecture project): `Robin100_NewPartsAddNoUnguardedTests`, `Robin100_NoKnownGapForDeniedOrLeakCells`, `Robin100_PostJsonAsyncUsesAuthenticatedHostClient`. The 70 scenarios themselves stay `Category=Parity`.
+
+## 4. Delivery result (2026-10-23, feat/robin-100)
+
+- 100 distinct `Robin_*` methods (guarded by `RobinSuite_HasExactly100DistinctScenarios`, Architecture project). Local SQLite run (`Category=Parity&Dialect!=Container`): 228 Robin cells, 218 pass, 8 known-gap cells, 2 Pending (#157, #270), 0 fail. `parity-baseline.json` updated (138 new pass cells, none removed).
+- New known gaps (drafts in section 5 of the nightly parity plan): PARITY-GAP-030 (REST translator rejects OData `startswith`), 033 (REST `eq null` / `ne null` return zero rows), 034 (GraphQL QUARTER bucket `AGGREGATION_RESULT_TYPE_MISMATCH`), 035 (GraphQL HOUR bucket ignores the summer offset of `timeZone`), 050 (WebSQL federated join chain order gives `SQL_SYNTAX_ERROR`). Ids 031, 032, 051, 052 were test bugs and are unused.
+- Test-fixture fix: `ParityHostFixture.RegisterCatalogAsync` declares key `id` and Full visibility for `parity_sales` and `parity_big` (bulk route and analyze route need them); masked, scoped and second-source tables are unchanged.
+- Decisions taken: R88 asserts the observed 403 `SQL_POLICY_VIOLATION`; R46 asserts GraphQL `INVALID_QUERY` (HTTP 200 per GraphQL convention). Open Low: R89 write variant (`SELECT 1; DELETE ...`) accepts any stable 4xx code; the no-mutation COUNT check holds.

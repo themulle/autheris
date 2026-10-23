@@ -41,6 +41,21 @@ public sealed partial class Robin100ArchitectureTests
         return Directory.GetFiles(dir, "RobinScenarios.Wp*.cs");
     }
 
+    [GeneratedRegex(@"public\s+(?:async\s+)?Task\s+(?<name>Robin_[A-Za-z0-9_]+)\s*\(")]
+    private static partial Regex ScenarioMethodPattern();
+
+    /// <summary>Owner decision 2026-10-23: the Robin suite holds exactly 100 distinct scenario methods (Pending ones included).</summary>
+    [Fact]
+    public void RobinSuite_HasExactly100DistinctScenarios()
+    {
+        var dir = Path.Combine(ParityIsolationArchitectureTests.FindRepoRoot(), RobinDir);
+        Directory.Exists(dir).ShouldBeTrue("Robin directory not found: the guard fails closed.");
+        var names = Directory.GetFiles(dir, "RobinScenarios*.cs")
+            .SelectMany(f => ScenarioMethodPattern().Matches(File.ReadAllText(f)).Select(m => m.Groups["name"].Value))
+            .ToHashSet(StringComparer.Ordinal);
+        names.Count.ShouldBe(100);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public void Robin100_NewPartsAddNoUnguardedTests()
