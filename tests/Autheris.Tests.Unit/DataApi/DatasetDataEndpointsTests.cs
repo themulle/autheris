@@ -63,14 +63,14 @@ public sealed class DatasetDataEndpointsTests
         queryService.ExecuteQueryAsync(Arg.Any<DatasetQueryRequest>(), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
             .Returns(envelope);
 
+        httpContext.Request.QueryString = new QueryString("?limit=10");
         await DatasetDataEndpoints.HandleQueryThreePartAsync(
             "sales", "dbo", "customers",
             httpContext,
             queryService,
             NullLoggerFactory.Instance,
             CancellationToken.None,
-            select: "id,email",
-            limit: 10);
+            select: "id,email");
 
         httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
         httpContext.Response.ContentType.ShouldNotBeNull();

@@ -118,9 +118,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
                     if (!anyGroupSatisfied)
                     {
-                        throw new GatewaySecurityException(
-                            GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
-                            GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                        throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException();
                     }
                 }
 
@@ -130,9 +128,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     {
                         if (!IsSatisfied(reqCol))
                         {
-                            throw new GatewaySecurityException(
-                                GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
-                                GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                            throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException();
                         }
                     }
                 }

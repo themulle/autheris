@@ -16,9 +16,6 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
     [
         "CatalogApiEndpoints.cs|return Results.BadRequest(new { error = ex.Message });",
         "DataContractEndpoints.cs|return Results.BadRequest(new { error = ex.Message });",
-        "DatasetDataEndpoints.cs|await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);",
-        "DatasetDataEndpoints.cs|await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);",
-        "DatasetDataEndpoints.cs|await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);",
         "DuckDbOlapEndpoints.cs|await httpContext.Response.WriteAsJsonAsync(new { error = \"Analytical query execution failed.\", details = ex.Message }, ct);",
         "DuckDbOlapEndpoints.cs|await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct);",
         "DuckDbOlapEndpoints.cs|await httpContext.Response.WriteAsJsonAsync(new { error = isDev ? ex.Message : \"OLAP query result exceeded maximum allowed memory size.\" }, ct);",
