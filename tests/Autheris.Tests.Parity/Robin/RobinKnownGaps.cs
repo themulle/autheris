@@ -8,6 +8,13 @@ public static class RobinKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        // --- WP-R2 ---
+        ["Robin_178_BulkCursorContinuation|Rest|"] = "PARITY-GAP-050",
+        ["Robin_222_TamperedCursorRejected|Rest|"] = "PARITY-GAP-050",
+        ["Robin_123_FederatedSameSourceSubqueryPart|WebSql|"] = "PARITY-GAP-051",
+        ["Robin_124_FederatedKeySetJoin|WebSql|"] = "PARITY-GAP-051",
+        ["Robin_79_AnalyzeValidQuery|WebSql|"] = "PARITY-GAP-052",
+        // --- end WP-R2 ---
     };
 
     public static string? For(string caseMethod, string channel, string? variant) =>

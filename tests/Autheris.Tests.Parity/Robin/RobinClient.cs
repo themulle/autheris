@@ -61,6 +61,20 @@ public sealed class RobinClient(IParityHost host)
         return Checked(WebSqlChannel.Parse((int)response.StatusCode, body), null);
     }
 
+    // --- WP-R2 ---
+    /// <summary>Raw JSON POST through the same authenticated host client as every other helper (SEC-R100-07); response headers are kept for cursor reads.</summary>
+    public async Task<RobinHttpResponse> PostJsonAsync(string path, object body)
+    {
+        using var client = host.CreateClient();
+        using var response = await client.PostAsJsonAsync(path, body);
+        var text = await response.Content.ReadAsStringAsync();
+        var headers = response.Headers.Concat(response.Content.Headers)
+            .ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase);
+        return new RobinHttpResponse(Checked(WebSqlChannel.Parse((int)response.StatusCode, text), null), headers);
+    }
+
+    // --- end WP-R2 ---
+
     private static ChannelResult Checked(ChannelResult r, string? submittedSql)
     {
         ParityAssert.NoServerError(r, submittedSql);
@@ -268,4 +282,12 @@ public static class RobinAssert
     public static string Day(object? value) => (value?.ToString() ?? string.Empty)[..Math.Min(10, (value?.ToString() ?? string.Empty).Length)];
 
     public static string Snippet(string body) => body.Length <= 300 ? body : body[..300] + "...";
+}
+
+/// <summary>Status, body (inside <see cref="Result"/>) and response headers of a raw JSON POST.</summary>
+public sealed record RobinHttpResponse(ChannelResult Result, IReadOnlyDictionary<string, string> Headers)
+{
+    public int Status => Result.Status;
+
+    public string Body => Result.RawBody;
 }

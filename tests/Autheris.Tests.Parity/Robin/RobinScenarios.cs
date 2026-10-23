@@ -17,7 +17,7 @@ namespace Autheris.Tests.Parity.Robin;
 /// </summary>
 [Trait("Category", "Parity")]
 [Collection(ParityHostCollection.Name)]
-public sealed class RobinScenarios(ParityHostFixture host) : ParityTestBase
+public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestBase
 {
     private const string Sales = ParitySeed.SalesTable;
     private const string AllRows = "first: 100, orderBy: [{ id: ASC }]";

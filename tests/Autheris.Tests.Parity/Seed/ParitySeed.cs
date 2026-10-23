@@ -161,4 +161,15 @@ public static class ParityExpected
     public const decimal AvgQty = 4.6m;
 
     public static readonly IReadOnlyDictionary<string, decimal> SumAmountByProduct = new Dictionary<string, decimal> { ["Widget"] = 380.50m, ["Gadget"] = 1260.00m, ["Gizmo"] = 241.00m };
+
+    // --- WP-R2 ---
+    /// <summary>SUM(amount) of Widget (380.50) plus Gizmo (241.00).</summary>
+    public const decimal SumAmountWidgetAndGizmo = 621.50m;
+
+    /// <summary>SUM(amount) of North (635.75) plus South (1175.75).</summary>
+    public const decimal SumAmountNorthAndSouth = 1811.50m;
+
+    /// <summary>COUNT(note): rows 1-6 and 8 carry a note.</summary>
+    public const int RowsWithNote = 7;
+    // --- end WP-R2 ---
 }

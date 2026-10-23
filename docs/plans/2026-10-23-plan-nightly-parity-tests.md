@@ -204,6 +204,16 @@ Observed (WP6). Capability: advertised SQL functions that WebSQL rejects. Channe
 
 Fixed 2026-10-23 on fix/parity-gaps (#311): left and right are removed from the allowlists (documented 400 SQL_SYNTAX_ERROR, LEFT/RIGHT are join keywords); extract works.
 
+<!-- WP-R2 -->
+### PARITY-GAP-050
+Observed (Robin-100 WP-R2, R70 and R71). Capability: bulk keyset export. Channel: REST `POST /api/v1/data/{domain}/{schema}/{table}/bulk`. Input: `{"select":["id"],"limit":400}` on a table that is queryable through the data, SQL and GraphQL channels but has no entry in the metadata repository (the parity host registers live tables only). Expected: 200 NDJSON with `_meta.nextCursor`, a tampered cursor gives 400 `INVALID_CURSOR`. Actual: 404 `Table 'main.<table>' not found.` (anti-enumeration branch of the bulk handler). Open: either register the parity tables in the metadata repository of the host or let the bulk planner read live tables; until then R70/R71 cannot be observed.
+
+### PARITY-GAP-051
+Observed (Robin-100 WP-R2, R78 and R79). Capability: federated join chain. Channel: WebSQL. Input: a join of a default-source table to a default-source dimension table followed by a join to the `second` source (`a JOIN default.main.parity_regions r ON ... JOIN second.main.parity_sales b ON ...`). Expected: 200 with the four overlapping rows. Actual: 400 `SQL_SYNTAX_ERROR`. The same chain with the `second` join first and the default-source dimension join last returns 200 with the four rows.
+
+### PARITY-GAP-052
+Observed (Robin-100 WP-R2, R84). Capability: query analysis. Channel: `POST /api/v1/governance/queries/analyze` with `{"queries":[{"sqlQuery":"SELECT id FROM default.main.parity_sales WHERE region = 'North'","dataSource":"default"}]}`. Expected: `validationReport.isValid` true, `sourceDatabaseReadsExecuted` 0. Actual: 200 with `isValid` false and diagnostic `UNKNOWN_TABLE` (dataset not visible), although the same table is queryable through `/api/v1/sql`. Same root cause as PARITY-GAP-050: the parity host has no metadata-repository entries for its live tables.
+
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 
 These cases are a 5xx or leak internals. They are never a `KnownGap`: they live in the data row list `BoundaryKnownGapData` (kind `ObservedServerError`), are excluded from `Boundary_Case`/`Invariant_NoServerError`, and run in `Invariant_ObservedServerErrors`, where they fail hard until production is fixed. Owner decision needed (fix, or accept and document). Ids are `<slot>.<column>.<value id>`; `none` = no column.
