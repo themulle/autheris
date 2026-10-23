@@ -27,12 +27,7 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
         var web = channel == "WebSql";
         if (!web && c.Grouping == "expression")
         {
-            throw new PendingCellException(channel, "group_by_expression_not_expressible");
-        }
-
-        if (web && c.Grouping is "year" or "month" or "day" && c.Dialect != PairwiseModel.Sqlite)
-        {
-            throw new PendingCellException(channel, "date_part_function_not_verified_for_dialect");
+            throw new PendingCellException(channel, "inexpressible: group_by_expression_graphql");
         }
 
         var result = web ? await ExecuteWebSqlAsync(c) : await ExecuteGraphQlAsync(c);
@@ -69,7 +64,31 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
         return (["k", "v"], [keyName, "v"], ParityOracle.Grouped(rows, key, (fn, column)));
     }
 
+    /// <summary>
+    /// WebSQL text of the grouping key. SQLite uses <c>strftime</c>; PostgreSQL uses <c>EXTRACT</c> (year) and <c>to_char</c> (month, day) and
+    /// expects the oracle result: whether the product accepts them is decided by the first nightly dispatch (gaps are registered afterwards).
+    /// </summary>
+    public static string? RenderGroupKey(string grouping, string dialect) => (grouping, dialect == PairwiseModel.Sqlite) switch
+    {
+        ("none", _) => null,
+        ("column", _) => "region",
+        ("year", true) => "strftime('%Y', sale_date)",
+        ("month", true) => "strftime('%Y-%m', sale_date)",
+        ("day", true) => "strftime('%Y-%m-%d', sale_date)",
+        ("year", false) => "EXTRACT(YEAR FROM sale_date)",
+        ("month", false) => "to_char(sale_date, 'YYYY-MM')",
+        ("day", false) => "to_char(sale_date, 'YYYY-MM-DD')",
+        _ => "LOWER(region)",
+    };
+
     private Task<ChannelResult> ExecuteWebSqlAsync(PairwiseCase c)
+    {
+        var (sql, parameters) = RenderWebSql(c);
+        return _client.WebSqlAsync(sql, parameters);
+    }
+
+    /// <summary>The WebSQL text (and parameters) of a case; plain SQL that SQLite executes as is.</summary>
+    public static (string Sql, object? Parameters) RenderWebSql(PairwiseCase c)
     {
         var column = PairwiseModel.Column(c.Type);
         var agg = c.Aggregate switch
@@ -78,15 +97,7 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
             "count_distinct" => $"COUNT(DISTINCT {column})",
             _ => $"{c.Aggregate.ToUpperInvariant()}({column})",
         };
-        var key = c.Grouping switch
-        {
-            "none" => null,
-            "column" => "region",
-            "year" => "strftime('%Y', sale_date)",
-            "month" => "strftime('%Y-%m', sale_date)",
-            "day" => "strftime('%Y-%m-%d', sale_date)",
-            _ => "LOWER(region)",
-        };
+        var key = RenderGroupKey(c.Grouping, c.Dialect);
         var (where, parameters) = c.Filter switch
         {
             "none" => (string.Empty, null),
@@ -102,10 +113,17 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
         var sql = key is null
             ? $"SELECT {agg} AS v FROM {Table}{where}"
             : $"SELECT {key} AS k, {agg} AS v FROM {Table}{where} GROUP BY {key}";
-        return _client.WebSqlAsync(sql, parameters);
+        return (sql, parameters);
     }
 
     private Task<ChannelResult> ExecuteGraphQlAsync(PairwiseCase c)
+    {
+        var (query, field, variables) = RenderGraphQl(c, schema);
+        return _client.GraphQlAsync(query, field, variables);
+    }
+
+    /// <summary>The GraphQL document, result field and variables of a case.</summary>
+    public static (string Query, string Field, object? Variables) RenderGraphQl(PairwiseCase c, string schema = "main")
     {
         var field = $"default_{schema}_{Table}_aggregate";
         var column = PairwiseModel.Column(c.Type);
@@ -153,6 +171,6 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
         var query = new StringBuilder("query").Append(declaration).Append(" { ").Append(field).Append('(').Append(string.Join(", ", args)).Append(") { groups { ")
             .Append(keys.Length > 0 ? $"key {{ {keys} }} " : string.Empty)
             .Append("rowCount aggregates { ").Append(RobinClient.AggregateSelection).Append(" } } } }");
-        return _client.GraphQlAsync(query.ToString(), field, variables);
+        return (query.ToString(), field, variables);
     }
 }

@@ -14,9 +14,9 @@ public static class ParityMatrix
     private const string ListField = "default_main_" + Sales;
     private const string AggField = "default_main_" + Sales + "_aggregate";
     private const string InvalidForType = "AGGREGATION_INVALID_FUNCTION_FOR_TYPE";
-    private const string RestPending = "REST data endpoint (OData filter grammar) cannot express this capability";
-    private const string RestNoAggregation = "REST data endpoint has no aggregation";
-    private const string McpPending = "MCP channel is not driven by the parity host yet";
+    private const string RestPending = "inexpressible: the OData filter grammar of the REST data endpoint cannot express this capability";
+    private const string RestNoAggregation = "inexpressible: the REST data endpoint has no aggregation";
+    private const string McpPending = "MCP channel driver deferred (PARITY-FU-001)";
 
     public static IReadOnlyList<MatrixChannel> Channels { get; } = [MatrixChannel.WebSql, MatrixChannel.GraphQl, MatrixChannel.Rest, MatrixChannel.Mcp];
 
@@ -90,14 +90,14 @@ public static class ParityMatrix
         Cap(
             "group_date_part_standard_sql",
             new Supported(new SqlRequest($"SELECT EXTRACT(YEAR FROM sale_date) AS d, COUNT(*) AS n FROM {Sales} GROUP BY EXTRACT(YEAR FROM sale_date)"), yearSpec),
-            new Pending("the typed aggregate has no SQL expression text; date parts are covered by group_date_year (timeBuckets)"),
+            new Pending("inexpressible: the typed aggregate has no SQL expression text; date parts are covered by group_date_year (timeBuckets)"),
             noAgg);
 
         var byLowerProduct = new ExpectedSpec(["p", "n"], ParityOracle.Grouped(ParityOracle.Rows, r => r.Product.ToLowerInvariant(), (ParityFn.Count, null)));
         Cap(
             "group_expression",
             new Supported(new SqlRequest($"SELECT LOWER(product) AS p, COUNT(*) AS n FROM {Sales} GROUP BY LOWER(product)"), byLowerProduct),
-            new Pending("the typed aggregate groups by columns and time buckets only; a groupBy expression is a GraphQL validation error without extensions.code (PARITY-GAP-003)"),
+            new Pending("inexpressible: the typed aggregate groups by columns and time buckets only; a groupBy expression is a GraphQL validation error without extensions.code (PARITY-GAP-003)"),
             noAgg);
 
         // ---- filters (list of ids) ----
@@ -138,18 +138,18 @@ public static class ParityMatrix
             "filter_like",
             new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE note LIKE '%off%' ORDER BY id"), Ids(r => r.Note?.Contains("off", StringComparison.Ordinal) == true)),
             new Supported(ListGql("where: { note: { contains: \"off\" } }, "), Ids(r => r.Note?.Contains("off", StringComparison.Ordinal) == true)),
-            new Pending("the OData filter grammar of the REST data endpoint has no contains/LIKE function (PARITY-GAP-004 family: 400 without a stable code)"));
+            new Pending("inexpressible: the OData filter grammar of the REST data endpoint has no contains/LIKE function (PARITY-GAP-004 family: 400 without a stable code)"));
         Filter("filter_in_list", r => r.Region is "North" or "Empty", " WHERE region IN ('North', 'Empty')", "region: { in: [\"North\", \"Empty\"] }", "region in ('North','Empty')");
         Cap(
             "filter_in_empty",
             new Unsupported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IN () ORDER BY id"), "SQL_SYNTAX_ERROR", @"\bIN\b"),
             new Supported(ListGql("where: { region: { in: [] } }, "), Ids(_ => false)),
-            new Pending("REST `in ()` is not asserted: the answer of the OData parser is not specified"));
+            new Unsupported(RestList("region in ()"), "SQL_SYNTAX_ERROR"));
         Cap(
             "filter_is_null",
             new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IS NULL ORDER BY id"), Ids(r => r.Region is null)),
             new Supported(ListGql("where: { region: { isNull: true } }, "), Ids(r => r.Region is null)),
-            new Pending("the REST filter grammar has no IS NULL operator; `region eq null` is SQL equality and returns no rows (see PARITY-GAP-009)"));
+            new Pending("inexpressible: the REST filter grammar has no IS NULL operator; `region eq null` is SQL equality and returns no rows (see PARITY-GAP-009)"));
 
         // ---- order and paging ----
         var newest = new ExpectedSpec(["id"], ParityOracle.Rows.OrderByDescending(r => r.SaleDate, StringComparer.Ordinal).ThenBy(r => r.Id).Take(5).Select(r => new object?[] { r.Id }).ToArray(), true);

@@ -39,6 +39,16 @@ public sealed class PairwiseTests : ParityTestBase
     }
 
     [Fact]
+    public void Pairwise_PostgresDatePartGroupingIsRenderedNotPending()
+    {
+        PairwiseExecutor.RenderGroupKey("year", PairwiseModel.Postgres).ShouldBe("EXTRACT(YEAR FROM sale_date)");
+        PairwiseExecutor.RenderGroupKey("month", PairwiseModel.Postgres)!.ShouldContain("to_char");
+        PairwiseExecutor.RenderGroupKey("day", PairwiseModel.Postgres)!.ShouldContain("YYYY-MM-DD");
+        PairwiseExecutor.RenderGroupKey("year", PairwiseModel.Sqlite)!.ShouldContain("strftime");
+        PairwiseExecutor.RenderGroupKey("none", PairwiseModel.Postgres).ShouldBeNull();
+    }
+
+    [Fact]
     public void Pairwise_CaseCountWithinBudget()
     {
         var cases = PairwiseModel.Cases(Seed);

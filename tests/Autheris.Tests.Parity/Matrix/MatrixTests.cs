@@ -60,6 +60,34 @@ public sealed class MatrixTests(ParityHostFixture host) : ParityTestBase
     }
 
     [Fact]
+    public void Matrix_PendingReasonsAreInexpressibleOrFollowUp()
+    {
+        var followUps = PendingReasons.FollowUpIds(PendingReasons.ReadPlan());
+        followUps.ShouldContain("PARITY-FU-001");
+        foreach (var ((capability, channel), cell) in ParityMatrix.Cells)
+        {
+            if (cell is Pending p)
+            {
+                PendingReasons.IsValid(p.Reason, followUps).ShouldBeTrue($"{capability}/{channel}: '{p.Reason}'");
+            }
+        }
+
+        ParityMatrix.Cells[("agg_sum", MatrixChannel.Mcp)].ShouldBeOfType<Pending>().Reason.ShouldContain("PARITY-FU-001");
+    }
+
+    [Fact]
+    public void Matrix_PendingReasonCheckFailsClosed()
+    {
+        string[] known = ["PARITY-FU-001"];
+        PendingReasons.IsValid("inexpressible: no such operator", known).ShouldBeTrue();
+        PendingReasons.IsValid("deferred (PARITY-FU-001)", known).ShouldBeTrue();
+        PendingReasons.IsValid("deferred (PARITY-FU-009)", known).ShouldBeFalse();
+        PendingReasons.IsValid("inexpressible:", known).ShouldBeFalse();
+        PendingReasons.IsValid("not driven by the host yet", known).ShouldBeFalse();
+        PendingReasons.IsValid("deferred (PARITY-FU-001) and PARITY-FU-009", known).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Matrix_GapsPointAtExistingNonPendingCells()
     {
         foreach (var key in MatrixKnownGaps.All.Keys)
