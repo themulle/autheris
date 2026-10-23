@@ -178,6 +178,10 @@ public static class PushedClauseBuilder
             pushedParameters,
             refCols)
         {
+            // Strict required-filter rule: only "col op @param" with =, <, <=, >, >= or IN constrains a column (never <>, NOT IN).
+            ConstrainedColumns = rendered
+                .Where(r => r.Operator is "=" or "<" or "<=" or ">" or ">=" or "IN")
+                .Select(r => r.Column).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             // SQLA-13: rendered from the conjuncts BuildClause actually bound, so markers and bound parameters can never diverge.
             TrinoSqlFactory = resolve => string.Join(" AND ", rendered.Select(r =>
                 r.Markers.Length == 1 && !r.IsList
