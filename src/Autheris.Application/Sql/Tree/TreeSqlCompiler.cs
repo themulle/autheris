@@ -192,6 +192,26 @@ public static partial class TreeSqlCompiler
         }
     }
 
+    /// <summary>
+    /// SQLA-06 follow-up: binds the parameters of a secured source. Each engine marker gets a fresh <c>@gqN</c> name from the shared counter and
+    /// the shared parameter budget; the remap is a tokenising one (C4) on the post-compile text only.
+    /// </summary>
+    private static string BindSecuredSource(CompileContext context, TreeSecuredSource source)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var parameter in source.Parameters)
+        {
+            if (map.ContainsKey(parameter.Marker))
+            {
+                throw TreeSecuredSourceMarkers.Denied();
+            }
+
+            map[parameter.Marker] = context.AddParameter(parameter.Value);
+        }
+
+        return TreeSecuredSourceMarkers.Remap(source.Sql, source.Dialect, map);
+    }
+
     /// <summary>SQL2-11: replaces @name parameter tokens outside string literals and quoted identifiers.</summary>
     internal static string RenameParameters(string sql, IReadOnlyDictionary<string, string> renames)
     {
@@ -651,7 +671,17 @@ public static partial class TreeSqlCompiler
             sb.Append("TOP (").Append(limit.ToString(CultureInfo.InvariantCulture)).Append(") ");
         }
         sb.Append(string.Join(", ", plan.InnerColumns.Select(c => $"{target}.{Q(context, c)} AS {Q(context, c)}")));
-        sb.Append(" FROM ").Append(dialect.FormatTableIdentifier(metadata.Identifier));
+        var securedSource = plan.Access.SecuredSource;
+        if (securedSource != null)
+        {
+            // SQLA-06 follow-up: the derived table carries the engine-applied tenant and row policy; it projects every catalog column by name.
+            sb.Append(" FROM (").Append(BindSecuredSource(context, securedSource)).Append(')');
+        }
+        else
+        {
+            sb.Append(" FROM ").Append(dialect.FormatTableIdentifier(metadata.Identifier));
+        }
+
         sb.Append(" AS ").Append(target);
 
         var where = new List<string>();
@@ -663,7 +693,7 @@ public static partial class TreeSqlCompiler
         }
 
         var rowFilter = plan.Access.Decision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(rowFilter))
+        if (!string.IsNullOrWhiteSpace(rowFilter) && securedSource == null)
         {
             // SQLA-06: the spliced text carries no tenant wrapper for policy subqueries (the engine pipeline adds it); deny instead of emitting it.
             if (RowPolicyRequiresEnginePipeline(plan.Access.Decision))

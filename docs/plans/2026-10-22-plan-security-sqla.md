@@ -81,6 +81,14 @@ Mandatory security tests (`[Trait("Category","Security")]`):
 - `SQLA06F_RootLimitInSource_Denied`, `SQLA06F_KeySetStageOff_TreeRowsEqualExistsPath`.
 - Gate: `SQLA_06_TreeSqlCompiler_TypedSubqueryFilter_NeverReturnsForeignTenantRows` (as planned).
 
+**WP-SQLA-1b changelog (G-PLAN-REBASE, 2026-10-23; drift between the addendum and the code, recorded before implementing):**
+- The engine's SQLite marker style is `?N` (`QuestionOrdinal`, e.g. `?1`), not `@pN`; PostgreSQL uses `$N` and SQL Server `@pN`. The remap tokenises all three styles and denies a bare or undeclared `?`.
+- `FastSqlEngine` is registered in DI only as `ISqlEngine`; the builder takes `ISqlEngine` (same `Compile` signature, and substitutable in unit tests).
+- `GovernancePolicyFactory.TryAdmit` drops the whole table when a policy dependent is unusable (inactive, `RequireTenantColumn` violation, uncataloged). The compile of `SELECT ... FROM table` then fails, so F5 is realised as a denial of the request (`TREE_ROW_POLICY_UNSUPPORTED`), not as zero rows. This equals WebSQL (which answers `SQL_POLICY_DENIED`) and never yields more rows than WebSQL (C1).
+- The engine wraps the secured source in `SELECT cols FROM (...) AS "<table>"`; the tree's derived table `AS autheris_target` sits around it. The inner `autheris_target` alias stays in its own scope.
+- `GovernedTreeQueryService` takes the builder (`TreeSecuredSourceBuilder?`, registered as a singleton next to the service) instead of `GovernancePolicyFactory?` and `FastSqlEngine?`; a missing builder leaves the table without a secured source, so `TREE_ROW_POLICY_UNSUPPORTED` stays (C8).
+- The tree-vs-compile Sqlite parity tests live in the new class `TreeVsCompileSubqueryPolicyParityTests` (the existing `TreeVsCompilePolicyParityTests` is unchanged).
+
 ### SQLA-01: tree row budget overflow
 1. **Fix.** Replace `EstimateRows` with `static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList, long cap)`. It uses saturating arithmetic (`Math.BigMul`, or a `checked` multiply in a try block that returns `long.MaxValue`) and stops recursing as soon as the running total exceeds `cap` (`maxBudget`). `ValidateTreeBudget` compares the saturated total.
 2. **Fail-closed.** Overflow saturates to `long.MaxValue`, which is always over budget. A non-positive `Limit` is treated as `MaxLimit`, not 1.

@@ -92,6 +92,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ICrossSourceRelationResolver? _crossSourceResolver;
     private readonly ITableRelationRepository? _relationRepository;
     private readonly IConsumerUsageRecorder? _usageRecorder;
+    private readonly TreeSecuredSourceBuilder? _securedSourceBuilder;
 
     // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId, tenant, and user to isolate operations and prevent cross-tenant/cross-principal leak.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OperationMemo> _memos = new();
@@ -110,8 +111,10 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         ICrossSourceRelationResolver? crossSourceResolver = null,
         ITableRelationRepository? relationRepository = null,
-        IConsumerUsageRecorder? usageRecorder = null)
+        IConsumerUsageRecorder? usageRecorder = null,
+        TreeSecuredSourceBuilder? securedSourceBuilder = null)
     {
+        _securedSourceBuilder = securedSourceBuilder;
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
@@ -448,7 +451,21 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 access.Metadata,
                 _options.DataSources?.RequireTenantColumn == true,
                 _options.DataSources?.TenantColumnExemptTables);
-            treeAccess[tableId] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value);
+            TreeSecuredSource? securedSource = null;
+            if (TreeSqlCompiler.RowPolicyRequiresEnginePipeline(access.Decision)
+                && access.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy
+                && _securedSourceBuilder is not null)
+            {
+                // SQLA-06 follow-up: built per request from this table's own decision and tenant (C2, C9). F6: the tenant is the root's tenant.
+                if (access.Tenant != rootAccess.Tenant)
+                {
+                    throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
+                }
+
+                securedSource = await _securedSourceBuilder.BuildAsync(access, sourceName, dialect, ct).ConfigureAwait(false);
+            }
+
+            treeAccess[tableId] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value, securedSource);
         }
 
         var compiled = TreeSqlCompiler.Compile(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
