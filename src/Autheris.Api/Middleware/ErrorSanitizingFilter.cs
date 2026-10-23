@@ -74,6 +74,34 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "PRIVACY_BUDGET_EXHAUSTED"
     };
 
+    /// <summary>
+    /// SEC-PG-12: the client text of every typed code is fixed here, never taken from the thrower, so a changed or
+    /// verbose exception message (policy names, column names, privacy wording) cannot reach a client.
+    /// </summary>
+    private static readonly Dictionary<string, string> FixedClientMessages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
+        ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
+        ["GRAPHQL_PARSE_FAILED"] = ParseMessage,
+        ["INVALID_JSON"] = InvalidJsonMessage,
+        ["MISSING_REQUIRED_FIELD"] = MissingFieldMessage,
+        ["REQUIRED_FILTER_COLUMN_MISSING"] = "A required filter column is missing.",
+        ["AGGREGATION_ALIAS_INVALID"] = "The aggregate alias is not valid.",
+        ["AGGREGATION_ARGUMENT_INVALID"] = "The aggregation arguments are not valid.",
+        ["AGGREGATION_INVALID_FUNCTION_FOR_TYPE"] = "The aggregate function is not valid for the column type.",
+        ["AGGREGATION_LIMIT_EXCEEDED"] = "The requested limit is above the allowed maximum.",
+        ["AGGREGATION_ORDER_INVALID"] = "The aggregation ordering is not valid.",
+        ["AGGREGATION_RESULT_TYPE_MISMATCH"] = "An aggregation result could not be converted to its declared type.",
+        ["AGGREGATION_COLUMN_UNAVAILABLE"] = "The requested column is not available for aggregation.",
+        ["AGGREGATION_ROW_CAP_EXCEEDED"] = "The aggregation covers more rows than the allowed limit; narrow the filter.",
+        ["AGGREGATION_DISABLED"] = "Governed aggregation queries are disabled by configuration.",
+        ["AGGREGATION_ON_MASKED_COLUMN"] = "A requested column is masked for the current caller and cannot be used in an aggregation.",
+        ["AGG_NEGATED_FILTER_REJECTED"] = "The aggregation filter is rejected by the privacy policy.",
+        ["UNKNOWN_METRIC"] = "The metric is not available.",
+        ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
+        ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted."
+    };
+
     private const string ValidationMessage = "The GraphQL request is invalid.";
     private const string VariableMessage = "A variable value is invalid.";
     private const string ParseMessage = "The GraphQL document could not be parsed.";
@@ -122,6 +150,11 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             error = error
                 .WithMessage(message)
                 .WithCode(code);
+        }
+
+        if (error.Code != null && FixedClientMessages.TryGetValue(error.Code, out var fixedMessage))
+        {
+            error = error.WithMessage(fixedMessage);
         }
 
         // Server-side logging keeps the full exception (never sent to the client).
@@ -238,16 +271,20 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
                     : ("MISSING_REQUIRED_FIELD", MissingFieldMessage);
             }
 
-            if (ex is System.Text.Json.JsonException)
+            // Request-parse stage only: a JSON failure inside a resolver (error has a path) is an internal fault.
+            if (ex is System.Text.Json.JsonException && error.Path == null)
             {
                 return ("INVALID_JSON", InvalidJsonMessage);
             }
 
-            if (ex is FormatException or OverflowException or ArgumentOutOfRangeException || typeName is "InvalidFormatException" or "SerializationException")
+            // Input and variable coercion failures raised by HotChocolate's own coercion types. A bare FormatException or
+            // OverflowException from application code is not assumed to be a client mistake (fails closed to internal).
+            if (typeName is "InvalidFormatException" or "SerializationException")
             {
                 return ("GRAPHQL_VARIABLE_INVALID", VariableMessage);
             }
 
+            // Provider layer: Microsoft.Data.Sqlite raises SqliteException (SQLITE_ERROR) for "LIKE or GLOB pattern too complex".
             if (ex is System.Data.Common.DbException && ex.Message.Contains("LIKE or GLOB", StringComparison.OrdinalIgnoreCase))
             {
                 return ("INVALID_QUERY", InvalidQueryMessage);
@@ -259,16 +296,17 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             }
         }
 
-        // Engine validation and coercion errors carry no exception and either no code or an HCnnnn code.
+        // Engine validation and coercion errors carry no exception and either no code or an HCnnnn code. They are told apart by
+        // code and extension keys (HotChocolate puts the variable name under a "variable" extension), not by message text;
+        // everything else is a validation failure. Pinned by ErrorSanitizingFilterEngineErrorTests against the real engine.
         if (error.Exception == null && IsEngineOrMissingCode(error.Code))
         {
-            var text = error.Message ?? string.Empty;
-            if (error.Code == "HC0011" || text.StartsWith("Syntax Error", StringComparison.OrdinalIgnoreCase) || text.StartsWith("Expected a `", StringComparison.Ordinal))
+            if (error.Code == "HC0011")
             {
                 return ("GRAPHQL_PARSE_FAILED", ParseMessage);
             }
 
-            if (text.StartsWith("Variable", StringComparison.OrdinalIgnoreCase) || text.Contains("variable", StringComparison.OrdinalIgnoreCase))
+            if (error.Extensions != null && error.Extensions.Keys.Any(k => k.Contains("variable", StringComparison.OrdinalIgnoreCase)))
             {
                 return ("GRAPHQL_VARIABLE_INVALID", VariableMessage);
             }

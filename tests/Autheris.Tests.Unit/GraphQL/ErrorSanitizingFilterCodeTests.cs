@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>#294 GAP-003 (SEC-PG-12): code-less engine validation and coercion errors get a stable code and a fixed message.</summary>
+[Trait("Category", "Security")]
 public sealed class ErrorSanitizingFilterCodeTests
 {
     private static ErrorSanitizingFilter CreateFilter(string envName)
@@ -51,7 +52,7 @@ public sealed class ErrorSanitizingFilterCodeTests
     [InlineData("Production")]
     public void VariableCoercion_GetsVariableCode(string env)
     {
-        var error = ErrorBuilder.New().SetMessage("Variable `$amount` got an invalid value for type `Decimal`.").SetCode("HC0016").Build();
+        var error = ErrorBuilder.New().SetMessage("Variable `$amount` got an invalid value for type `Decimal`.").SetCode("HC0016").SetExtension("variable", "amount").Build();
 
         var result = CreateFilter(env).OnError(error);
 
@@ -89,11 +90,12 @@ public sealed class ErrorSanitizingFilterCodeTests
     [InlineData("Production", "REQUIRED_FILTER_COLUMN_MISSING")]
     public void TypedFixedMessageCodes_PassThroughInEveryEnvironment(string env, string code)
     {
-        var error = ErrorBuilder.New().SetMessage("Fixed text.").SetCode(code).Build();
+        var error = ErrorBuilder.New().SetMessage("Thrower text.").SetCode(code).Build();
 
         var result = CreateFilter(env).OnError(error);
 
         result.Code.ShouldBe(code);
-        result.Message.ShouldBe("Fixed text.");
+        result.Message.ShouldNotBe("Thrower text.");
+        result.Message.ShouldNotBeNullOrWhiteSpace();
     }
 }

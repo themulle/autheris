@@ -9,6 +9,7 @@ using Xunit;
 public sealed class AggregateFailureMapperTests
 {
     [Fact]
+    [Trait("SecurityCondition", "SEC-PG-13")]
     public void SEC_PG_13_RequiredFilterMissing_UsesColumnCode()
     {
         var mapped = AggregateFailureMapper.ForAggregate(new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException("REQUIRED_FILTER_COLUMN_MISSING: Table requires filter on column 'tenant_id'."));

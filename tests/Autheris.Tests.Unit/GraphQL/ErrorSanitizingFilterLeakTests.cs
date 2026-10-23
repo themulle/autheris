@@ -43,24 +43,80 @@ public sealed class ErrorSanitizingFilterLeakTests
     [Theory]
     [InlineData("Development")]
     [InlineData("Production")]
-    public void SEC_PG_12_NumericOverflow_MapsToVariableInvalid(string env)
+    public void SEC_PG_12_BareFormatOrOverflowFromApplicationCode_FailsClosedToInternal(string env)
     {
-        var result = CreateFilter(env).OnError(WithException(new FormatException("Input string '99999999999999999999' was not in a correct format.")));
+        foreach (var ex in new Exception[] { new FormatException("Input string '99999999999999999999' was not in a correct format."), new OverflowException("Value was too large for an Int64.") })
+        {
+            var result = CreateFilter(env).OnError(WithException(ex));
 
-        result.Code.ShouldBe("GRAPHQL_VARIABLE_INVALID");
-        result.Message.ShouldNotContain("FormatException");
-        result.Message.ShouldNotContain("9999");
+            result.Code.ShouldBe("INTERNAL_SERVER_ERROR");
+            result.Message.ShouldNotContain("Int64");
+            result.Message.ShouldNotContain("9999");
+            result.Message.ShouldNotContain(ex.GetType().Name);
+        }
     }
 
     [Theory]
     [InlineData("Development")]
     [InlineData("Production")]
-    public void SEC_PG_12_OverflowException_MapsToVariableInvalid(string env)
+    public void SEC_PG_12_EngineCoercionException_MapsToVariableInvalid(string env)
     {
-        var result = CreateFilter(env).OnError(WithException(new OverflowException("Value was either too large or too small for an Int64.")));
+        var result = CreateFilter(env).OnError(WithException(new InvalidFormatException("Cannot coerce 99999999999999999999 to Int64")));
 
         result.Code.ShouldBe("GRAPHQL_VARIABLE_INVALID");
-        result.Message.ShouldNotContain("Int64");
+        result.Message.ShouldNotContain("InvalidFormatException");
+        result.Message.ShouldNotContain("9999");
+    }
+
+    [Fact]
+    public void SEC_PG_12_JsonExceptionInsideResolver_IsInternal_NotInvalidJson()
+    {
+        var error = ErrorBuilder.New().SetMessage("bad").SetException(new System.Text.Json.JsonException("bad json at secret")).SetPath(Path.Root.Append("field")).Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Code.ShouldBe("INTERNAL_SERVER_ERROR");
+    }
+
+    [Fact]
+    public void SEC_PG_12_JsonExceptionAtRequestParse_MapsToInvalidJson()
+    {
+        var result = CreateFilter("Production").OnError(WithException(new System.Text.Json.JsonException("secret detail")));
+
+        result.Code.ShouldBe("INVALID_JSON");
+        result.Message.ShouldNotContain("secret");
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    public void SEC_PG_12_EveryTypedCode_SendsTheFixedTableText_NeverTheThrowerText(string env)
+    {
+        var field = typeof(ErrorSanitizingFilter).GetField("FixedClientMessages", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        field.ShouldNotBeNull();
+        var table = (IReadOnlyDictionary<string, string>)field!.GetValue(null)!;
+        table.Count.ShouldBeGreaterThan(15);
+
+        foreach (var (code, text) in table)
+        {
+            var thrower = new GatewayInvalidQueryException("RestrictNegatedFilters differential privacy column 'ssn' hr.employees");
+            var error = ErrorBuilder.New().SetMessage(thrower.Message).SetCode(code).SetException(thrower).Build();
+
+            var result = CreateFilter(env).OnError(error);
+
+            result.Code.ShouldBe(code);
+            result.Message.ShouldBe(text);
+            result.Message.ShouldNotContain("RestrictNegatedFilters");
+            result.Message.ShouldNotContain("differential privacy");
+            result.Message.ShouldNotContain("ssn");
+        }
+    }
+
+    [Fact]
+    public void SEC_PG_12_NegatedFilterRejection_MessageIsGenericAtTheSource()
+    {
+        Autheris.Application.Analytics.AggregationFilterRejectedException.FixedMessage.ShouldNotContain("RestrictNegatedFilters");
+        new Autheris.Application.Analytics.AggregationFilterRejectedException().Message.ShouldBe(Autheris.Application.Analytics.AggregationFilterRejectedException.FixedMessage);
     }
 
     [Theory]
@@ -108,6 +164,8 @@ public sealed class ErrorSanitizingFilterLeakTests
 
         logger.ReceivedCalls().Any(c => c.GetMethodInfo().Name == "Log" && c.GetArguments()[0] is LogLevel.Error && c.GetArguments()[3] == ex).ShouldBeTrue();
     }
+
+    private sealed class InvalidFormatException(string message) : Exception(message);
 
     private sealed class TestDbException(string message) : System.Data.Common.DbException(message);
 }

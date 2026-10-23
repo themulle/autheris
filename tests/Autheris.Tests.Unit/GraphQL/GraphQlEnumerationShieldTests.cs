@@ -94,7 +94,10 @@ public sealed class GraphQlEnumerationShieldTests
     {
         var executor = await CreateExecutorAsync("Development");
 
-        (await RunAsync(executor, "{ salaries }")).ShouldContain("salaries");
+        // SEC-PG-12 (#294): validation texts never name fields, not even in Development; they carry a stable code.
+        var unknown = await RunAsync(executor, "{ salaries }");
+        unknown.ShouldContain("GRAPHQL_VALIDATION_FAILED");
+        unknown.ShouldNotContain("salaries");
         (await RunAsync(executor, "{ employees }")).ShouldContain("ssn");
     }
 

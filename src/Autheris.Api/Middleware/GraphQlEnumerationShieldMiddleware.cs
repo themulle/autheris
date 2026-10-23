@@ -49,12 +49,22 @@ public sealed class GraphQlEnumerationShieldMiddleware
 
         // Unknown environment counts as production (fail-closed).
         var environment = context.RequestServices.GetService<IHostEnvironment>();
+        bool validationFailed = result.ContextData.ContainsKey(ExecutionContextData.ValidationErrors);
         if (environment?.IsDevelopment() == true)
         {
+            // #294: HotChocolate validation errors never reach the IErrorFilter; in Development they keep their path and
+            // locations but get the stable code and fixed message of the sanitizer (SEC-PG-12: no engine text, no names).
+            if (validationFailed && context.RequestServices.GetService<ErrorSanitizingFilter>() is { } filter)
+            {
+                var sanitized = ImmutableList.CreateRange(errors.Select(filter.OnError));
+                var contextData = result.ContextData;
+                await result.DisposeAsync().ConfigureAwait(false);
+                context.Result = new OperationResult(sanitized) { ContextData = contextData };
+            }
+
             return;
         }
 
-        bool validationFailed = result.ContextData.ContainsKey(ExecutionContextData.ValidationErrors);
         bool mustShield = validationFailed
             ? errors.Any(e => e.Code is null || !NeutralValidationCodes.Contains(e.Code))
             : errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code));
