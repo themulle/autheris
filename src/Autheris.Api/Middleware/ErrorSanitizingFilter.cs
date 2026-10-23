@@ -102,7 +102,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted."
     };
 
-    private const string ValidationMessage = "The GraphQL request is invalid.";
+    internal const string ValidationCode = "GRAPHQL_VALIDATION_FAILED";
+    internal const string ValidationMessage = "The GraphQL request is invalid.";
     private const string VariableMessage = "A variable value is invalid.";
     private const string ParseMessage = "The GraphQL document could not be parsed.";
     private const string InvalidJsonMessage = "The request body is not valid JSON.";

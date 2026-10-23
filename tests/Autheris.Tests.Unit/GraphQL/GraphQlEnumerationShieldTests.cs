@@ -65,7 +65,8 @@ public sealed class GraphQlEnumerationShieldTests
         deniedTable.ShouldBe(unknown);
         deniedColumn.ShouldBe(unknown);
         deniedNextToAllowed.ShouldBe(unknown);
-        unknown.ShouldContain(GraphQlEnumerationShieldMiddleware.Message);
+        unknown.ShouldContain(ErrorSanitizingFilter.ValidationMessage);
+        unknown.ShouldContain("GRAPHQL_VALIDATION_FAILED");
         unknown.ShouldNotContain("salaries");
         unknown.ShouldNotContain("\"data\"");
     }
@@ -90,7 +91,7 @@ public sealed class GraphQlEnumerationShieldTests
     }
 
     [Fact]
-    public async Task Development_KeepsDetailedMessages()
+    public async Task Development_ValidationErrorsAreSanitized()
     {
         var executor = await CreateExecutorAsync("Development");
 

@@ -84,4 +84,28 @@ public sealed class ErrorSanitizingFilterEngineErrorTests
         errors.ShouldAllBe(e => e.Code == "GRAPHQL_PARSE_FAILED" || e.Code == "GRAPHQL_VALIDATION_FAILED");
         errors.ShouldAllBe(e => !e.Message.Contains("Expected"));
     }
+
+    [Theory]
+    [InlineData("{ secretField }", "{ otherUnknown }")]
+    [InlineData("{ secretField }", "{ count(id: 1) extra }")]
+    [InlineData("{ count(id: 1, hiddenArg: 2) }", "{ count(id: 1, otherArg: 2) }")]
+    [InlineData("{ secretField }", "{ count(id: \"text\") }")]
+    public async Task SEC_PG_12_InvalidDocument_SameBodyInEveryEnvironment_AndForAnyName(string first, string second)
+    {
+        var bodies = new List<string>();
+        foreach (var env in new[] { "Development", "Production" })
+        {
+            var executor = await CreateAsync(env);
+            foreach (var query in new[] { first, second })
+            {
+                await using var result = await executor.ExecuteAsync(query);
+                bodies.Add(result.ToJson());
+            }
+        }
+
+        bodies.Distinct().Count().ShouldBe(1, string.Join(" | ", bodies.Distinct()));
+        bodies[0].ShouldContain("GRAPHQL_VALIDATION_FAILED");
+        bodies[0].ShouldNotContain("locations");
+        bodies[0].ShouldNotContain("secretField");
+    }
 }
