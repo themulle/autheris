@@ -10,6 +10,9 @@ public static class SpecKnownGaps
     public static readonly IReadOnlyDictionary<string, string> Functions = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["convert_timezone"] = "PARITY-GAP-019",
+        ["left"] = "PARITY-GAP-022",
+        ["right"] = "PARITY-GAP-022",
+        ["extract"] = "PARITY-GAP-022",
     };
 
     /// <summary>Function names (lower case) that currently answer 5xx or leak.</summary>

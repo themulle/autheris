@@ -35,7 +35,8 @@ public sealed class KnownGapObservedException(string gapId, string reason) : Exc
 }
 
 /// <summary>The cell is registered but its channel/capability is not implemented yet.</summary>
-public sealed class PendingCellException(string channel, string capability) : Exception($"PENDING: {channel}/{capability}");
+public sealed class PendingCellException(string channel, string capability, string? reason = null)
+    : Exception(reason is null ? $"PENDING: {channel}/{capability}" : $"PENDING: {channel}/{capability} ({reason})");
 
 public static partial class KnownGap
 {

@@ -80,16 +80,10 @@ public sealed class SpecFunctionTests(ParityHostFixture host) : ParityTestBase
             throw new XunitException($"Observed server error fixed ({name}, HTTP {result.Status}): remove it from SpecKnownGaps.ObservedFunctionServerErrors.");
         }
 
-        if (result.Status == 501)
-        {
-            throw new XunitException($"{name}: HTTP 501 '{result.Code}' for an advertised function: {Snip(body)}");
-        }
-
-        ParityAssert.StableCode(result);
+        // every advertised function must be callable once: any rejection, 4xx included, is a deviation (a gap while tracked)
         if (ParityAssert.IsError(result))
         {
-            Console.WriteLine($"spec-function: rejected {name} HTTP {result.Status} {result.Code}");
-            return; // a stable 4xx is allowed by the spec (D-12); rejected advertised functions are listed by the run output
+            throw new XunitException($"{name}: advertised function rejected, HTTP {result.Status} '{result.Code}': {Snip(body)}");
         }
 
         Console.WriteLine($"spec-function: ok {name}{(sig.CheckValue ? " (value checked)" : string.Empty)}");

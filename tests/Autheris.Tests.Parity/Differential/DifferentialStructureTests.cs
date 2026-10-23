@@ -61,9 +61,57 @@ public sealed partial class DifferentialStructureTests : ParityTestBase, IDispos
         // unordered: row order is irrelevant, ordered: it is not
         ResultComparer.Compare(reference, Set(["a", "b"], [2L, null], [1L, 100.5]), ordered: false).ShouldBeNull();
         ResultComparer.Compare(reference, Set(["a", "b"], [2L, null], [1L, 100.5]), ordered: true).ShouldNotBeNull();
-        // a date part matches the start of a timestamp text, a numeric text matches a number
-        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-03-01T00:00:00Z"]), ordered: false).ShouldBeNull();
-        ResultComparer.Compare(Set(["k"], ["2024"]), Set(["k"], [2024L]), ordered: false).ShouldBeNull();
+        // a reference date part matches the first instant of the period (date groupings only), a product numeric text matches a reference number
+        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-03-01T00:00:00Z"]), ordered: false, dateGrouping: true).ShouldBeNull();
+        ResultComparer.Compare(Set(["k"], [2024L]), Set(["k"], ["2024"]), ordered: false).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Differential_ComparerNumericTextRuleIsOneWay()
+    {
+        ResultComparer.Compare(Set(["k"], ["2024"]), Set(["k"], [2024L]), ordered: false).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["k"], [2024L]), Set(["k"], ["2025"]), ordered: false).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Differential_ComparerDatePartNeedsBoundaryAndFlag()
+    {
+        // not flagged as a date grouping: no prefix rule
+        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-03-01T00:00:00Z"]), ordered: false).ShouldNotBeNull();
+        // a month key is the first of the month, not any day of it; a year key is January 1st
+        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-03-15"]), ordered: false, dateGrouping: true).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-03-15T00:00:00Z"]), ordered: false, dateGrouping: true).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["k"], ["2024"]), Set(["k"], ["2024-03-01T00:00:00Z"]), ordered: false, dateGrouping: true).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-03-01T10:00:00Z"]), ordered: false, dateGrouping: true).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["k"], ["2024-03"]), Set(["k"], ["2024-031"]), ordered: false, dateGrouping: true).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["k"], ["2024"]), Set(["k"], ["2024-01-01"]), ordered: false, dateGrouping: true).ShouldBeNull();
+        ResultComparer.Compare(Set(["k"], ["2024-03-15"]), Set(["k"], ["2024-03-15 00:00:00"]), ordered: false, dateGrouping: true).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Differential_ComparerSurvivesHugeValuesAndRoundingBoundaries()
+    {
+        // (decimal)double overflows above 7.9e28; the comparer must not throw
+        ResultComparer.Compare(Set(["v"], [1e300]), Set(["v"], [1e300]), ordered: false).ShouldBeNull();
+        ResultComparer.Compare(Set(["v"], [1e300]), Set(["v"], [2e300]), ordered: false).ShouldNotBeNull();
+        ResultComparer.Compare(Set(["v"], [decimal.MaxValue]), Set(["v"], [decimal.MinValue]), ordered: false).ShouldNotBeNull();
+        // values straddling a rounding boundary of the sort key still match within the tolerance
+        ResultComparer.Compare(Set(["v"], [0.0000005m], [0.0000004999m]), Set(["v"], [0.0000004999m], [0.0000005m]), ordered: false).ShouldBeNull();
+        ResultComparer.Compare(Set(["v"], [1.0000005m], [1.0000014m]), Set(["v"], [1.0000015m], [1.0000004m]), ordered: false).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Differential_AllowListChecksTheProductAnswer()
+    {
+        var c = new DifferentialCase("x", "agg", "GraphQl", "SELECT 1", null, new Matrix.SqlRequest("SELECT 1", null), false, RejectedByTypedAggregation: true);
+        ChannelResult Answer(int status, string? code, string body) => new(status, code, ChannelResult.NoRows, body);
+        const string error = "{\"errors\":[{\"extensions\":{\"code\":\"AGGREGATION_INVALID_FUNCTION_FOR_TYPE\"}}]}";
+        DifferentialAllowList.Find(c, Answer(200, "AGGREGATION_INVALID_FUNCTION_FOR_TYPE", error)).ShouldNotBeNull();
+        DifferentialAllowList.Find(c, Answer(400, "AGGREGATION_INVALID_FUNCTION_FOR_TYPE", error)).ShouldNotBeNull();
+        DifferentialAllowList.Find(c, Answer(200, "AGGREGATION_ORDER_INVALID", error)).ShouldBeNull();
+        DifferentialAllowList.Find(c, Answer(200, null, "{\"data\":{}}")).ShouldBeNull();
+        DifferentialAllowList.Find(c, Answer(500, "AGGREGATION_INVALID_FUNCTION_FOR_TYPE", error)).ShouldBeNull();
+        DifferentialAllowList.Find(c with { RejectedByTypedAggregation = false }, Answer(200, "AGGREGATION_INVALID_FUNCTION_FOR_TYPE", error)).ShouldBeNull();
     }
 
     [Fact]

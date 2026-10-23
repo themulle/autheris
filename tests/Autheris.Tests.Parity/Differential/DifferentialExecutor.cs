@@ -32,7 +32,7 @@ public sealed class DifferentialExecutor(ParityHostFixture host)
             return;
         }
 
-        if (DifferentialAllowList.Find(c) is { } allowed)
+        if (DifferentialAllowList.Find(c, product) is { } allowed)
         {
             ParityObservationsNote(allowed);
             return;
@@ -57,7 +57,7 @@ public sealed class DifferentialExecutor(ParityHostFixture host)
         }
 
         // the comparer matches columns by name, so the product columns are presented under the reference aliases
-        return ResultComparer.Compare(reference, new ResultSet(reference.Columns, rows), c.Ordered);
+        return ResultComparer.Compare(reference, new ResultSet(reference.Columns, rows), c.Ordered, c.DateGrouping);
     }
 
     private static object? Lookup(IReadOnlyDictionary<string, object?> row, string column)

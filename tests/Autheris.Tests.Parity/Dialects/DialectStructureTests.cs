@@ -1,4 +1,5 @@
 using Autheris.Tests.Parity.Infrastructure;
+using Autheris.Tests.Parity.Matrix;
 using Shouldly;
 
 namespace Autheris.Tests.Parity.Dialects;
@@ -42,5 +43,18 @@ public sealed class DialectStructureTests : ParityTestBase
         var cases = Pairwise.PairwiseModel.Cases().Where(c => c.Dialect == Pairwise.PairwiseModel.SqlServer).ToList();
         cases.Count.ShouldBe(Pairwise.PairwiseModel.Cases().Count(c => c.Dialect == Pairwise.PairwiseModel.Sqlite));
         DialectPairwiseTests.ContainerCases().Count(r => ((string)r[1]).EndsWith("_sqlserver", StringComparison.Ordinal)).ShouldBe(cases.Count * 2);
+    }
+
+    [Fact]
+    public void Dialect_SqliteOnlyPendingReasonPassesThePendingRule()
+    {
+        PendingReasons.IsValid(DialectMatrixTests.SqliteOnlyReason, PendingReasons.FollowUpIds(PendingReasons.ReadPlan())).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Dialect_MatrixGapsAreSqliteOnly()
+    {
+        Matrix.MatrixKnownGaps.For("group_date_part_standard_sql", Matrix.MatrixChannel.WebSql).ShouldBe("PARITY-GAP-013");
+        Matrix.MatrixKnownGaps.For("group_date_part_standard_sql", Matrix.MatrixChannel.WebSql, "postgres").ShouldBeNull();
     }
 }

@@ -16,7 +16,8 @@ public sealed record DifferentialCase(
     bool Ordered,
     string[]? ProductColumns = null,
     string? GapId = null,
-    bool RejectedByTypedAggregation = false)
+    bool RejectedByTypedAggregation = false,
+    bool DateGrouping = false)
 {
     /// <summary>Case part of the parity cell id (the capability part already names the matrix capability).</summary>
     public string CellCaseId => Id.StartsWith("pairwise.", StringComparison.Ordinal) ? Id["pairwise.".Length..] : "ref";

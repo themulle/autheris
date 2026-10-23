@@ -35,15 +35,17 @@ public static class DifferentialCorpus
             var request = (SqlRequest)sql.Request;
             var reference = ReferenceSql.TryGetValue(capability, out var text) ? text : request.Sql;
             yield return new DifferentialCase(
-                $"matrix.{capability}", capability, "WebSql", reference, request.Parameters, request, sql.Expected.Ordered, null, MatrixKnownGaps.For(capability, MatrixChannel.WebSql));
+                $"matrix.{capability}", capability, "WebSql", reference, request.Parameters, request, sql.Expected.Ordered, null, MatrixKnownGaps.For(capability, MatrixChannel.WebSql), DateGrouping: capability.StartsWith("group_date_", StringComparison.Ordinal));
 
             if (ParityMatrix.Cells[(capability, MatrixChannel.GraphQl)] is Supported gql && (gql.ActualColumns ?? gql.Expected.Columns).Length == sql.Expected.Columns.Length)
             {
                 yield return new DifferentialCase(
-                    $"matrix.{capability}", capability, "GraphQl", reference, request.Parameters, gql.Request, sql.Expected.Ordered && gql.Expected.Ordered, gql.ActualColumns ?? gql.Expected.Columns, MatrixKnownGaps.For(capability, MatrixChannel.GraphQl));
+                    $"matrix.{capability}", capability, "GraphQl", reference, request.Parameters, gql.Request, sql.Expected.Ordered && gql.Expected.Ordered, gql.ActualColumns ?? gql.Expected.Columns, MatrixKnownGaps.For(capability, MatrixChannel.GraphQl), DateGrouping: capability.StartsWith("group_date_", StringComparison.Ordinal));
             }
         }
     }
+
+    private static bool IsDateGrouping(string grouping) => grouping is not ("none" or "column" or "expression");
 
     private static IEnumerable<DifferentialCase> Pairwise()
     {
@@ -52,7 +54,7 @@ public static class DifferentialCorpus
             var (sql, parameters) = PairwiseExecutor.RenderWebSql(c);
             // WebSQL rejects an empty IN list (PARITY-GAP-020); SQLite answers it with zero rows.
             yield return new DifferentialCase(
-                $"pairwise.{c.Id}", "pairwise", "WebSql", sql, parameters, new SqlRequest(sql, parameters), false, null, c.Filter == "in_empty" ? "PARITY-GAP-020" : null);
+                $"pairwise.{c.Id}", "pairwise", "WebSql", sql, parameters, new SqlRequest(sql, parameters), false, null, c.Filter == "in_empty" ? "PARITY-GAP-020" : null, DateGrouping: IsDateGrouping(c.Grouping));
 
             if (c.Grouping == "expression")
             {
@@ -67,7 +69,7 @@ public static class DifferentialCorpus
                 _ => ["sale_date", "v"],
             };
             yield return new DifferentialCase(
-                $"pairwise.{c.Id}", "pairwise", "GraphQl", sql, parameters, new GraphQlRequest(query, field, variables), false, actual, null, PairwiseModel.IsInvalidCombination(c.Aggregate, c.Type));
+                $"pairwise.{c.Id}", "pairwise", "GraphQl", sql, parameters, new GraphQlRequest(query, field, variables), false, actual, null, PairwiseModel.IsInvalidCombination(c.Aggregate, c.Type), IsDateGrouping(c.Grouping));
         }
     }
 }
