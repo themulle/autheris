@@ -95,7 +95,7 @@ public static class ParityAssert
         r.Status == 501 && r.Code is not null && ParityErrorCodes.All.Contains(r.Code);
 
     /// <summary>
-    /// No 5xx (except 501 NotImplemented, treated as Unsupported), no internal-fault code and no leaked internals in any error body
+    /// No 5xx (except a 501 with a catalogue code, treated as Unsupported and recorded as an observation), no internal-fault code and no leaked internals in any error body
     /// (every status code, SEC-PAR-07). <paramref name="submittedSql"/> must not be echoed back by a 5xx.
     /// </summary>
     public static void NoServerError(ChannelResult r, string? submittedSql = null)
@@ -114,6 +114,11 @@ public static class ParityAssert
         if (r.Code is not null && ParityErrorCodes.InternalFaultCodes.Contains(r.Code, StringComparer.Ordinal))
         {
             throw new ServerErrorObservedException($"Internal fault code '{r.Code}' (HTTP {r.Status}).");
+        }
+
+        if (r.Status == 501 && IsTolerated501(r))
+        {
+            ParityObservations.RecordTolerated501(r.Code!);
         }
 
         if (r.Status >= 500 && !IsTolerated501(r))

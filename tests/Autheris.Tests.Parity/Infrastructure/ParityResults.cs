@@ -12,7 +12,7 @@ public enum ParityOutcome
 }
 
 /// <summary>One cell result; serialized as one JSON line (D-6). Never carries headers, bodies or data values (SEC-PAR-08).</summary>
-public sealed record ParityResult(string CellId, string Block, string Channel, string Capability, string Dialect, ParityOutcome Outcome, string? GapId, string Seed);
+public sealed record ParityResult(string CellId, string Block, string Channel, string Capability, string Dialect, ParityOutcome Outcome, string? GapId, string Seed, string? Observation = null);
 
 public static partial class ParityEnvironment
 {
@@ -56,6 +56,7 @@ public sealed partial class ParityResultsWriter(string directory)
             outcome = result.Outcome.ToString().ToLowerInvariant(),
             gapId = result.GapId,
             seed = result.Seed,
+            observation = result.Observation,
         });
         lock (Gate)
         {
@@ -83,6 +84,7 @@ public static class ParityCell
     {
         writer ??= ParityResultsWriter.Default;
         var outcome = ParityOutcome.Pass;
+        var observations = ParityObservations.Begin();
         try
         {
             await KnownGap.RunAsync(cell.GapId, body, cell.Aspect);
@@ -104,7 +106,34 @@ public static class ParityCell
         }
         finally
         {
-            writer.Record(new ParityResult(cell.CellId, cell.Block, cell.Channel, cell.Capability, cell.Dialect, outcome, cell.GapId, ParityEnvironment.Seed));
+            writer.Record(new ParityResult(cell.CellId, cell.Block, cell.Channel, cell.Capability, cell.Dialect, outcome, cell.GapId, ParityEnvironment.Seed, observations.Tolerated501));
+        }
+    }
+}
+
+/// <summary>
+/// Observations made while a cell runs. A tolerated 501 (an unsupported capability answered with a stable code, D-9) is a 5xx and must stay
+/// visible: the cell records it and the report lists it. The holder is created by <see cref="ParityCell"/> so callees can fill it.
+/// </summary>
+public sealed class ParityObservations
+{
+    private static readonly AsyncLocal<ParityObservations?> Current = new();
+
+    /// <summary>Code of a tolerated 501 seen by the running cell, or null.</summary>
+    public string? Tolerated501 { get; private set; }
+
+    public static ParityObservations Begin()
+    {
+        var holder = new ParityObservations();
+        Current.Value = holder;
+        return holder;
+    }
+
+    public static void RecordTolerated501(string code)
+    {
+        if (Current.Value is { } holder)
+        {
+            holder.Tolerated501 = code;
         }
     }
 }

@@ -47,16 +47,19 @@ public static class ParityErrorCodes
     /// read by reflection so a new code is accepted automatically. Fails closed: a renamed type or member throws instead of
     /// silently shrinking the accepted set.
     /// </summary>
-    private static IEnumerable<string> SanitizerWhitelist()
+    private static IEnumerable<string> SanitizerWhitelist() =>
+        ReadWhitelist(typeof(ApiErrorCodes).Assembly, "Autheris.Api.Middleware.ErrorSanitizingFilter", "WhitelistedSafeCodes");
+
+    /// <summary>Reads a private static string collection by reflection; any missing piece throws (no silent empty set).</summary>
+    internal static IEnumerable<string> ReadWhitelist(Assembly assembly, string typeName, string fieldName)
     {
-        const string typeName = "Autheris.Api.Middleware.ErrorSanitizingFilter";
-        var type = typeof(ApiErrorCodes).Assembly.GetType(typeName)
+        var type = assembly.GetType(typeName)
                    ?? throw new InvalidOperationException($"Type {typeName} not found; update ParityErrorCodes.");
-        var field = type.GetField("WhitelistedSafeCodes", BindingFlags.NonPublic | BindingFlags.Static)
-                    ?? throw new InvalidOperationException($"{typeName}.WhitelistedSafeCodes not found; update ParityErrorCodes.");
+        var field = type.GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static)
+                    ?? throw new InvalidOperationException($"{typeName}.{fieldName} not found; update ParityErrorCodes.");
         return field.GetValue(null) is IEnumerable<string> codes
             ? codes.ToList()
-            : throw new InvalidOperationException($"{typeName}.WhitelistedSafeCodes has no string value; update ParityErrorCodes.");
+            : throw new InvalidOperationException($"{typeName}.{fieldName} has no string value; update ParityErrorCodes.");
     }
 
     private static HashSet<string> Build()

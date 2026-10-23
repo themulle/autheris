@@ -25,7 +25,7 @@ public sealed class ParityAssertTests : ParityTestBase
         Should.Throw<ParityHardFailureException>(() => ParityAssert.NoServerError(Result(status, "BadGateway", "{}")));
 
     [ParityFact]
-    public void NoServerError_Tolerates501NotImplemented()
+    public void NoServerError_Tolerates501WithCatalogueCode()
     {
         Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "NotImplemented", "{\"error\":\"NotImplemented\"}")));
         Should.Throw<ParityHardFailureException>(() => ParityAssert.NoServerError(Result(501, "Whatever", "{}")));
@@ -200,6 +200,36 @@ public sealed class ParityAssertTests : ParityTestBase
         ParityErrorCodes.All.ShouldContain("ACCESS_DENIED");
         ParityErrorCodes.All.ShouldContain("INVALID_QUERY");
         ParityErrorCodes.All.ShouldContain("RATE_LIMIT_EXCEEDED");
+    }
+
+    private static readonly int[] NotStrings = [1];
+
+    [ParityFact]
+    public void ParityErrorCodes_WhitelistReaderFailsClosed()
+    {
+        var assembly = typeof(ParityAssertTests).Assembly;
+        const string self = "Autheris.Tests.Parity.Invariant.ParityAssertTests";
+        Should.Throw<InvalidOperationException>(() => ParityErrorCodes.ReadWhitelist(assembly, "No.Such.Type", "WhitelistedSafeCodes"));
+        Should.Throw<InvalidOperationException>(() => ParityErrorCodes.ReadWhitelist(assembly, self, "NoSuchField"));
+        Should.Throw<InvalidOperationException>(() => ParityErrorCodes.ReadWhitelist(assembly, self, nameof(NotStrings)));
+        ParityErrorCodes.ReadWhitelist(typeof(Autheris.Api.Errors.ApiErrorCodes).Assembly, "Autheris.Api.Middleware.ErrorSanitizingFilter", "WhitelistedSafeCodes")
+            .ShouldContain("FORBIDDEN");
+    }
+
+    [ParityFact]
+    public async Task NoServerError_RecordsTolerated501AsObservation()
+    {
+        using var dir = new Autheris.Tests.Common.TempDirectory();
+        var writer = new ParityResultsWriter(dir.Path);
+        await ParityCell.RunAsync(
+            new ParityCellInfo("t", "WebSql", "cap", "tolerated501"),
+            () =>
+            {
+                ParityAssert.NoServerError(Result(501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", "{\"error\":\"NotImplemented\"}"));
+                return Task.CompletedTask;
+            },
+            writer);
+        File.ReadAllText(writer.FilePath).ShouldContain("\"observation\":\"SQL_FUNCTION_UNSUPPORTED_DIALECT\"");
     }
 
     [ParityFact]

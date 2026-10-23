@@ -126,6 +126,12 @@ def render(rows: list[dict], baseline: dict[str, str]) -> tuple[str, list[str], 
             lines.append(f"| {clean(gap)} | {clean(channels)} | {clean(capabilities)} | {entry['cells']} | {clean(draft)} |")
     else:
         lines.append("No known gaps observed.")
+    tolerated = sorted((cell, row["observation"]) for cell, row in latest.items() if row.get("observation"))
+    lines += ["", "## Tolerated 501 (unsupported, a 5xx: decide whether it should be a 4xx)", ""]
+    if tolerated:
+        lines += [f"- {clean(cell)}: {clean(code)}" for cell, code in tolerated]
+    else:
+        lines.append("None.")
     lines += ["", "## Green to red", ""]
     if regressions:
         lines += [f"- {clean(cell)} ({clean(latest[cell]['outcome'])})" for cell in regressions]
@@ -191,6 +197,12 @@ def self_test() -> int:
         assert run(results, baseline, out, False) == 0, "new failing cell must be ignored"
         text = out.read_text(encoding="utf-8")
         assert "| PARITY-GAP-002 | GraphQl | avg, sum | 2 |" in text, "gap table row missing"
+        # tolerated 501 observations are listed
+        tolerated = row("t.1", "gap", "PARITY-GAP-019")
+        tolerated["observation"] = "SQL_FUNCTION_UNSUPPORTED_DIALECT"
+        write(results, [row("a.x.y.1", "pass"), row("a.x.y.2", "pass"), tolerated])
+        assert run(results, baseline, out, False) == 0
+        assert "- t.1: SQL_FUNCTION_UNSUPPORTED_DIALECT" in out.read_text(encoding="utf-8"), "tolerated 501 not listed"
         # pending is not a regression
         write(results, [row("a.x.y.1", "pending"), row("a.x.y.2", "pass")])
         assert run(results, baseline, out, False) == 0, "pending is not a regression"

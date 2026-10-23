@@ -137,10 +137,23 @@ public sealed class ParityHostFixture : IAsyncLifetime
         });
     }
 
-    private static TableMetadata Metadata(string table, string source, params (string Name, string Type)[] columns) => new()
+    private static TableMetadata Metadata(string table, string source, params (string Name, string Type)[] columns)
     {
-        Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "Sqlite", SourceName = source },
-        Identifier = new TableIdentifier(source, "main", table),
-        Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList(),
-    };
+        var id = Guid.NewGuid();
+        return new TableMetadata
+        {
+            Table = new Table
+            {
+                Id = id,
+                DisplayName = table,
+                TableName = table,
+                SchemaName = "main",
+                SourceType = "Sqlite",
+                SourceName = source,
+                IsActive = true,
+            },
+            Identifier = new TableIdentifier(source, "main", table),
+            Columns = columns.Select(c => new TableColumn { TableId = id, ColumnName = c.Name, DataType = c.Type }).ToList(),
+        };
+    }
 }
