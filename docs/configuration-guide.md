@@ -527,7 +527,7 @@ With `GraphQL:AppScopedTrustedDocuments:Enabled=true` an operator registers, per
 - A request with the header never falls back to the global directory. Requests without the header use the global `TrustedDocumentsDirectory` as before. With the feature disabled the header is ignored.
 - Every rejection returns the same `TRUSTED_DOCUMENT_REQUIRED` error; the reason is only logged at Debug level (reason code, app id and version, never document text).
 - Multi-instance coherence: a write is effective on the instance that handled it before the call returns; other instances pick it up within `CacheRefreshSeconds` (default 5 s), so a retired version can stay usable on other instances for up to that interval. If the store cannot be read, requests with the app header are rejected.
-- Apps are gateway-wide (not tenant-scoped).
+- Apps are gateway-wide (not tenant-scoped). Allowed origins are app-level: a PUT for any version replaces the origins of all versions of that app.
 
 The admin API is mapped only while the feature is enabled and is meant to be reached from inside the cluster (the Helm chart has no dedicated `/api/admin` rule, but its default catch-all `/` path forwards it, so block `/api/admin` at your public ingress). It requires the `ClusterAdmin` role plus a delegated scope; every change is audited (`TRUSTED_DOCUMENTS_REPLACED`, `TRUSTED_DOCUMENTS_RETIRED`):
 

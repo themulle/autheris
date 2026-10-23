@@ -168,4 +168,25 @@ public sealed class SqliteTrustedDocumentRepositoryTests : IDisposable
         snapshot.ActiveVersions.Single(v => v.AppId == "a").Hashes.ShouldBe([H1]);
         snapshot.ActiveVersions.Single(v => v.AppId == "b").Origins.ShouldBe(["https://b.example.com"]);
     }
+
+    [Fact]
+    public async Task ConcurrentPuts_NeverExceedTheActiveVersionCap_AndNeverFailUnexpectedly()
+    {
+        var tasks = Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+        {
+            try
+            {
+                await Repo.ReplaceTrustedDocumentVersionAsync("shop", "v" + i, Origins, [H1], 3, Now);
+                return (Exception?)null;
+            }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+        })).ToArray();
+        var outcomes = await Task.WhenAll(tasks);
+
+        outcomes.Where(e => e is not null).ShouldAllBe(e => e is TrustedDocumentVersionLimitException || e is TrustedDocumentConcurrentChangeException);
+        (await Repo.LoadTrustedDocumentSnapshotAsync()).ActiveVersions.Count(v => v.AppId == "shop").ShouldBeLessThanOrEqualTo(3);
+    }
 }

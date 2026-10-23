@@ -26,6 +26,7 @@ public sealed class TrustedDocumentAdminException : Exception
     public const string InvalidOriginCount = "InvalidOriginCount";
     public const string VersionRetired = "VersionRetired";
     public const string VersionLimit = "VersionLimit";
+    public const string ConcurrentChange = "ConcurrentChange";
 
     public TrustedDocumentAdminException(string code, string message, bool isConflict = false) : base(message)
     {
@@ -95,6 +96,10 @@ public sealed class TrustedDocumentAdministrationService
         catch (TrustedDocumentVersionRetiredException)
         {
             throw new TrustedDocumentAdminException(TrustedDocumentAdminException.VersionRetired, "The version is retired.", isConflict: true);
+        }
+        catch (TrustedDocumentConcurrentChangeException)
+        {
+            throw new TrustedDocumentAdminException(TrustedDocumentAdminException.ConcurrentChange, "The version was changed concurrently; retry.", isConflict: true);
         }
         catch (TrustedDocumentVersionLimitException)
         {

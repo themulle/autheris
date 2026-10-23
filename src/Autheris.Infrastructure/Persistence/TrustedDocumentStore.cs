@@ -17,6 +17,8 @@ internal static class TrustedDocumentStore
     {
         await using var ownedTx = snapshot == null ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false) : null;
         var tx = snapshot ?? ownedTx!;
+        // Without a snapshot transaction (PostgreSql/SqlServer) a concurrent write can land between the generation read and the data reads:
+        // the registry then holds newer data under an older generation and reloads once more at the next poll. It never serves stale data.
         long generation = await ReadGenerationAsync(connection, tx, ct).ConfigureAwait(false);
 
         var versions = new List<(string App, string Version)>();
@@ -93,6 +95,20 @@ internal static class TrustedDocumentStore
         var stamp = Time(at);
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
+        // Serialize writers per app: the app row is locked first, so the active-version count and the version insert cannot interleave.
+        // A concurrent first PUT of a new app loses on the app insert (primary key) and gets a conflict.
+        if (await ExecuteAsync(connection, tx, "UPDATE TRUSTED_DOCUMENT_APPS SET updated_at = @at WHERE app_id = @app;", [("@at", stamp), ("@app", appId)], ct).ConfigureAwait(false) == 0)
+        {
+            try
+            {
+                await ExecuteAsync(connection, tx, "INSERT INTO TRUSTED_DOCUMENT_APPS (app_id, created_at, updated_at) VALUES (@app, @at, @at);", [("@app", appId), ("@at", stamp)], ct).ConfigureAwait(false);
+            }
+            catch (DbException)
+            {
+                throw new TrustedDocumentConcurrentChangeException();
+            }
+        }
+
         string? status = null;
         await using (var cmd = Command(connection, tx, "SELECT status FROM TRUSTED_DOCUMENT_APP_VERSIONS WHERE app_id = @app AND version = @ver;", [("@app", appId), ("@ver", version)]))
         {
@@ -117,15 +133,6 @@ internal static class TrustedDocumentStore
             }
         }
 
-        if (await ExistsAsync(connection, tx, "SELECT 1 FROM TRUSTED_DOCUMENT_APPS WHERE app_id = @app;", [("@app", appId)], ct).ConfigureAwait(false))
-        {
-            await ExecuteAsync(connection, tx, "UPDATE TRUSTED_DOCUMENT_APPS SET updated_at = @at WHERE app_id = @app;", [("@at", stamp), ("@app", appId)], ct).ConfigureAwait(false);
-        }
-        else
-        {
-            await ExecuteAsync(connection, tx, "INSERT INTO TRUSTED_DOCUMENT_APPS (app_id, created_at, updated_at) VALUES (@app, @at, @at);", [("@app", appId), ("@at", stamp)], ct).ConfigureAwait(false);
-        }
-
         var storedOrigins = (await ReadOriginsAsync(connection, tx, appId, ct).ConfigureAwait(false)).GetValueOrDefault(appId) ?? [];
         var wantedOrigins = origins.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
         bool originsChanged = !storedOrigins.SequenceEqual(wantedOrigins, StringComparer.Ordinal);
@@ -140,9 +147,16 @@ internal static class TrustedDocumentStore
 
         if (versionCreated)
         {
-            await ExecuteAsync(connection, tx,
-                "INSERT INTO TRUSTED_DOCUMENT_APP_VERSIONS (app_id, version, status, created_at, updated_at) VALUES (@app, @ver, @status, @at, @at);",
-                [("@app", appId), ("@ver", version), ("@status", TrustedDocumentVersionStatus.Active), ("@at", stamp)], ct).ConfigureAwait(false);
+            try
+            {
+                await ExecuteAsync(connection, tx,
+                    "INSERT INTO TRUSTED_DOCUMENT_APP_VERSIONS (app_id, version, status, created_at, updated_at) VALUES (@app, @ver, @status, @at, @at);",
+                    [("@app", appId), ("@ver", version), ("@status", TrustedDocumentVersionStatus.Active), ("@at", stamp)], ct).ConfigureAwait(false);
+            }
+            catch (DbException)
+            {
+                throw new TrustedDocumentConcurrentChangeException();
+            }
         }
         else
         {
@@ -266,6 +280,13 @@ internal static class TrustedDocumentStore
             var p = cmd.CreateParameter();
             p.ParameterName = name;
             p.Value = value ?? DBNull.Value;
+            if (name == "@hash" && value is string && connection.GetType().Name.Contains("SqlConnection", StringComparison.Ordinal))
+            {
+                // CHAR(64) column on SQL Server: a fixed-length ANSI parameter keeps the primary key seek (no NVARCHAR conversion).
+                p.DbType = System.Data.DbType.AnsiStringFixedLength;
+                p.Size = 64;
+            }
+
             cmd.Parameters.Add(p);
         }
 

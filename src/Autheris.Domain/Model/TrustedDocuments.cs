@@ -50,3 +50,11 @@ public sealed class TrustedDocumentVersionLimitException : InvalidOperationExcep
     {
     }
 }
+
+/// <summary>A concurrent writer created the same app or version first; the caller retries (409).</summary>
+public sealed class TrustedDocumentConcurrentChangeException : InvalidOperationException
+{
+    public TrustedDocumentConcurrentChangeException() : base("The trusted document set was changed concurrently.")
+    {
+    }
+}
