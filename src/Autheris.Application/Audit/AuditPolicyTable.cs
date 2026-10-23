@@ -99,6 +99,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.MetricQuery] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MetadataSyntheticSample] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.QueryAnalysisEvaluated] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.McpOutputInjectionSuspected] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.RowFilterEvaluationChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TableRowFilterStrategyChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeDefinitionPending] = AuditFailurePolicy.FailClosed,

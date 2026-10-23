@@ -208,8 +208,9 @@ public static class HitLEndpoints
         if (ticket == null ||
             (!approver.IsCrossTenantAdmin && !string.Equals(ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase)))
         {
-            // Let the service produce the uniform "not found" answer (no existence oracle for foreign tenants).
-            return null;
+            // MCP-12: fail closed. A missing ticket (unknown, foreign tenant or a transient cluster-state error) must never
+            // skip the ownership check; unknown and foreign tickets share one answer (no existence oracle).
+            return Results.NotFound();
         }
 
         var ownershipRepository = context.RequestServices.GetService<IDataOwnershipRepository>();

@@ -11,6 +11,9 @@ public sealed record SqlRowLimit(long DefaultMaxRows, long MaxAllowedRows)
 {
     private const long FallbackDefaultMaxRows = 1000;
 
+    /// <summary>Internal ceiling of an explicit LIMIT when <see cref="MaxAllowedRows"/> is 0 (SQLA-04): buffered paths never materialize more.</summary>
+    public const long HardMaxRows = 1_000_000;
+
     /// <summary>The limits of <paramref name="channel"/>; unset values fall back to the WebSQL limits.</summary>
     public static SqlRowLimit For(WebSqlOptions webSql, ChannelRowLimitOptions? channel = null)
     {
@@ -30,7 +33,7 @@ public sealed record SqlRowLimit(long DefaultMaxRows, long MaxAllowedRows)
     {
         if (explicitLimit is > 0)
         {
-            return MaxAllowedRows > 0 ? Math.Min(explicitLimit.Value, MaxAllowedRows) : explicitLimit.Value;
+            return Math.Min(explicitLimit.Value, MaxAllowedRows > 0 ? MaxAllowedRows : HardMaxRows);
         }
 
         long defaultLimit = DefaultMaxRows > 0 ? DefaultMaxRows : FallbackDefaultMaxRows;

@@ -444,20 +444,21 @@ CREATE TABLE IF NOT EXISTS _upgrade_apa (
     subject_type TEXT NOT NULL DEFAULT 'User',
     assigned_at TEXT NOT NULL,
     expires_at TEXT,
-    subject_norm TEXT,
+    subject_norm TEXT NOT NULL,
     created_by TEXT,
     approved_by TEXT,
     approved_at TEXT,
     justification TEXT,
     kind TEXT NOT NULL DEFAULT 'Standard',
     renewal_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (tenant_id, profile_id, subject_type, subject)
+    PRIMARY KEY (tenant_id, profile_id, subject_type, subject_norm)
 );
 
+-- PERS-06: assignments are keyed by the normalized subject; spellings that differ only in case/whitespace collapse to one row.
 INSERT OR IGNORE INTO _upgrade_apa (
-    profile_id, tenant_id, subject, subject_type, assigned_at, expires_at
+    profile_id, tenant_id, subject, subject_type, assigned_at, expires_at, subject_norm
 )
-SELECT profile_id, tenant_id, subject, subject_type, assigned_at, expires_at
+SELECT profile_id, tenant_id, subject, subject_type, assigned_at, expires_at, UPPER(TRIM(subject))
 FROM ACCESS_PROFILE_ASSIGNMENTS;
 
 DROP TABLE ACCESS_PROFILE_ASSIGNMENTS;

@@ -47,7 +47,7 @@ public partial class SqliteGovernanceRepository : IIdentityStoreRepository
     public Task UpsertGroupAsync(ScimGroup group, TenantId tenantId, string realmId, CancellationToken ct = default) =>
         IdentityStoreInstance.UpsertGroupAsync(group, tenantId, realmId, ct);
 
-    public Task DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default) =>
+    public Task<IReadOnlyList<string>> DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default) =>
         IdentityStoreInstance.DeleteGroupAsync(tenantId, realmId, groupId, ct);
 
     public Task<IReadOnlyList<ScimGroup>> ListGroupsAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default) =>

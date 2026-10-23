@@ -44,15 +44,30 @@ public sealed class AnalyticsOptionsValidator : IValidateOptions<AnalyticsOption
         }
 
         var minAllowed = options.Privacy.AllowDisabled ? 1 : 2;
-        if (options.Privacy.DefaultMinGroupSize < minAllowed && options.Privacy.DefaultMinGroupSize != 1)
+        // MISC-10: a floor of 1 switches small-group suppression off, so it needs the explicit AllowDisabled opt-in. The per-table and
+        // per-dataset overrides REPLACE the default and are held to the same minimum.
+        if (options.Privacy.DefaultMinGroupSize < minAllowed)
         {
             return ValidateOptionsResult.Fail(
                 $"Analytics:Privacy:DefaultMinGroupSize must be >= {minAllowed}.");
         }
 
-        if (options.Privacy.DefaultMinGroupSize < 1)
+        foreach (var (table, tableMin) in options.TableMinimumGroupSizes)
         {
-            return ValidateOptionsResult.Fail("Analytics:Privacy:DefaultMinGroupSize must be >= 1.");
+            if (tableMin < minAllowed)
+            {
+                return ValidateOptionsResult.Fail(
+                    $"Analytics:TableMinimumGroupSizes:{table} must be >= {minAllowed}.");
+            }
+        }
+
+        foreach (var (dataset, overrides) in options.Privacy.Datasets)
+        {
+            if (overrides?.MinGroupSize is { } datasetMin && datasetMin < minAllowed)
+            {
+                return ValidateOptionsResult.Fail(
+                    $"Analytics:Privacy:Datasets:{dataset}:MinGroupSize must be >= {minAllowed}.");
+            }
         }
 
         if (options.Privacy.Noise is { Enabled: true } noise)

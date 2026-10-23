@@ -54,7 +54,13 @@ public static partial class VirtualFilterEndpoints
                 return Forbidden();
             }
 
+            // VF-05: no hash, no approval; a mismatch stays a 409.
             var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(expectedHash))
+            {
+                return Results.BadRequest(new { error = "expected_hash_required" });
+            }
+
             var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(FilterView(approved));
         });
@@ -90,7 +96,13 @@ public static partial class VirtualFilterEndpoints
                 return Forbidden();
             }
 
+            // VF-05: no hash, no approval; a mismatch stays a 409.
             var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(expectedHash))
+            {
+                return Results.BadRequest(new { error = "expected_hash_required" });
+            }
+
             var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(approved));
         });
@@ -123,6 +135,7 @@ public static partial class VirtualFilterEndpoints
         pending_deletion = f.PendingDeletion,
         has_draft = f.Draft != null,
         draft_hash = f.Draft?.ComputeDefinitionHash(),
+        pending_hash = VirtualFilterAdministrationService.PendingHash(f),
         created_by = f.CreatedBy?.Value,
         approved_by = f.ApprovedBy?.Value,
         approved_at = f.ApprovedAt,
@@ -155,6 +168,7 @@ public static partial class VirtualFilterEndpoints
         pending_deletion = p.PendingDeletion,
         has_draft = p.Draft != null,
         draft_hash = p.Draft?.ComputeDefinitionHash(),
+        pending_hash = VirtualFilterAdministrationService.PendingHash(p),
         created_by = p.CreatedBy?.Value,
         approved_by = p.ApprovedBy?.Value,
         approved_at = p.ApprovedAt,

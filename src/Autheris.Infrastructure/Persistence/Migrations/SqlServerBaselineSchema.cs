@@ -440,14 +440,14 @@ BEGIN
         subject_type NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_type DEFAULT 'User',
         assigned_at DATETIMEOFFSET NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_assigned DEFAULT SYSDATETIMEOFFSET(),
         expires_at DATETIMEOFFSET NULL,
-        subject_norm NVARCHAR(256) NULL,
+        subject_norm NVARCHAR(256) NOT NULL,
         created_by NVARCHAR(256) NULL,
         approved_by NVARCHAR(256) NULL,
         approved_at DATETIMEOFFSET NULL,
         justification NVARCHAR(MAX) NULL,
         kind NVARCHAR(32) NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_kind DEFAULT 'Standard',
         renewal_count INT NOT NULL CONSTRAINT DF_ACCESS_PROFILE_ASSIGNMENTS_renewals DEFAULT 0,
-        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY NONCLUSTERED (tenant_id, profile_id, subject_type, subject),
+        CONSTRAINT PK_ACCESS_PROFILE_ASSIGNMENTS PRIMARY KEY NONCLUSTERED (tenant_id, profile_id, subject_type, subject_norm),
         CONSTRAINT FK_ACCESS_PROFILE_ASSIGNMENTS_PROFILE FOREIGN KEY (tenant_id, profile_id) 
             REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
     );

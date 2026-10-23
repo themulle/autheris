@@ -162,6 +162,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         bool countTotal,
         CancellationToken ct)
     {
+        // GQL-03: bound the offset for every caller (negative values are invalid SQL, huge ones force deep OFFSET scans).
+        var maxOffset = _options?.GraphQL?.MaxAllowedOffset >= 0 ? _options.GraphQL.MaxAllowedOffset : 10_000;
+        if (after is < 0 || after > maxOffset)
+        {
+            throw new GatewayInvalidQueryException($"Offset must be between 0 and {maxOffset}.", "INVALID_OFFSET");
+        }
+
         using var _ = _drainController?.TrackQuery();
         var resolved = await ResolveTableAccessAsync(principal, table, requestedFields, requestHeaders, ct);
         principal = resolved.Principal;

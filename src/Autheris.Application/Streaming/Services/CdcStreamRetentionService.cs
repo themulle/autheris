@@ -152,7 +152,12 @@ public sealed class CdcStreamRetentionJob(
         {
             var mid = lo + ((hi - lo) / 2);
             var read = await store.ReadAsync(stream.Id, mid, 1, ct).ConfigureAwait(false);
-            if (read.Events.Count == 0 || read.Events[0].ProducedAt < cutoff)
+            if (read.Events.Count == 0)
+            {
+                // INF-14: nothing at or after mid (offset gap or concurrent purge) - expiry was not observed, so never advance the tail past it.
+                hi = mid;
+            }
+            else if (read.Events[0].ProducedAt < cutoff)
             {
                 lo = mid + 1;
             }

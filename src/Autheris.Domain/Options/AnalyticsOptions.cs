@@ -78,6 +78,12 @@ public sealed class AnalyticsPrivacyOptions
     public int DefaultMinGroupSize { get; set; } = AnalyticsOptions.DefaultMinimumGroupSize;
     public bool AllowDisabled { get; set; }
     public SmallGroupStrategy SuppressionMode { get; set; } = SmallGroupStrategy.Suppress;
+    /// <summary>
+    /// MISC-09: when true and the effective minimum group size is above 1, a WHERE predicate that negates (<c>&lt;&gt;</c>, <c>NOT IN</c>,
+    /// <c>NOT LIKE</c>, <c>NOT BETWEEN</c>, <c>IS NOT</c> other than <c>IS NOT NULL</c>, <c>NOT (...)</c>) or isolates one row (equality on a unique
+    /// or primary key column) on a column that is not a group-by column is rejected. Note: k-anonymity without noise does not fully resist
+    /// differencing; enable the noise option for stronger protection.
+    /// </summary>
     public bool RestrictNegatedFilters { get; set; } = true;
     public bool ExposeSuppressedGroupsCount { get; set; } = true;
     public Dictionary<string, DatasetPrivacyOverrideOptions> Datasets { get; set; } = new(StringComparer.OrdinalIgnoreCase);

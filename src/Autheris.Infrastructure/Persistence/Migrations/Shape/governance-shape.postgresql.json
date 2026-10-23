@@ -209,7 +209,7 @@
         "tenant_id",
         "profile_id",
         "subject_type",
-        "subject"
+        "subject_norm"
       ],
       "indexes": [
         {

@@ -105,7 +105,7 @@ public sealed class WebSqlSameSourceSubtreeTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true, MaxTablesPerSubtree = 12 });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true, MaxTablesPerSubtree = 12 }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.StagingRequests.Count.ShouldBe(2);
         plan.StagingRequests[0].Subtree.ShouldNotBeNull();
@@ -152,7 +152,7 @@ public sealed class WebSqlSameSourceSubtreeTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.StagingRequests.Count.ShouldBe(2);
         plan.StagingRequests[0].Subtree.ShouldNotBeNull();
@@ -195,7 +195,7 @@ public sealed class WebSqlSameSourceSubtreeTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.GeneratedDuckDbSql.ShouldContain("LEFT OUTER JOIN \"s1\"");
     }
@@ -235,7 +235,7 @@ public sealed class WebSqlSameSourceSubtreeTests
             t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true });
+        var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
         plan.StagingRequests[0].Subtree.ShouldNotBeNull();
         plan.StagingRequests[0].Subtree!.ProjectedColumns.ShouldContain("o_id");

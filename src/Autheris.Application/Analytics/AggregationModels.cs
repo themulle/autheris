@@ -158,6 +158,21 @@ public sealed class AggregationColumnUnavailableException : GatewaySecurityExcep
 }
 
 /// <summary>
+/// MISC-09: thrown when <c>RestrictNegatedFilters</c> rejects a WHERE predicate that negates or isolates a non-grouping column
+/// (<c>AGG_NEGATED_FILTER_REJECTED</c>, 400).
+/// </summary>
+public sealed class AggregationFilterRejectedException : GatewaySecurityException
+{
+    public const string ErrorCodeConst = "AGG_NEGATED_FILTER_REJECTED";
+    public const string FixedMessage = "The aggregation filter negates or isolates a column that is not a grouping column and is rejected by the privacy policy (RestrictNegatedFilters).";
+
+    public AggregationFilterRejectedException()
+        : base(FixedMessage, ErrorCodeConst)
+    {
+    }
+}
+
+/// <summary>
 /// Thrown when an aggregation would have to read at least the in-memory row cap: the aggregate over a truncated prefix would be wrong,
 /// so the call fails closed (<c>AGGREGATION_ROW_CAP_EXCEEDED</c>) instead of returning a silently truncated result.
 /// </summary>

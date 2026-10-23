@@ -182,13 +182,14 @@ internal static class ConsumerAggregationStore
         {
             var versions = await LoadVersionsAsync(connection, tx, tenantId, tableId, item.Day, item.Application, ct).ConfigureAwait(false);
             var queryNames = await LoadQueryNamesAsync(connection, tx, tenantId, tableId, item.Day, item.Application, ct).ConfigureAwait(false);
-            int actorCount = await LoadDistinctActorCountAsync(connection, tx, tenantId, tableId, item.Day, item.Application, ct).ConfigureAwait(false);
+            var actorKeys = await LoadActorKeysAsync(connection, tx, tenantId, tableId, item.Day, item.Application, ct).ConfigureAwait(false);
 
             enriched.Add(item with
             {
                 Versions = versions,
                 QueryNames = queryNames,
-                DistinctActors = actorCount
+                DistinctActors = actorKeys.Count,
+                ActorKeys = actorKeys
             });
         }
 
@@ -311,11 +312,12 @@ internal static class ConsumerAggregationStore
         return list;
     }
 
-    private static async Task<int> LoadDistinctActorCountAsync(
+    /// <summary>The distinct (HMAC-pseudonymised) actor keys of one (day, application) cell.</summary>
+    private static async Task<IReadOnlySet<string>> LoadActorKeysAsync(
         DbConnection connection, DbTransaction? tx, TenantId tenantId, TableIdentifier tableId, string day, string application, CancellationToken ct)
     {
         const string sql = @"
-            SELECT COUNT(DISTINCT actor_hash) FROM CONSUMER_APP_ACTOR_DAILY
+            SELECT DISTINCT actor_hash FROM CONSUMER_APP_ACTOR_DAILY
             WHERE tenant_id = @tenant_id AND table_id = @table_id AND day = @day AND application = @application;
         ";
         var p = new (string Name, object? Value)[]
@@ -326,9 +328,15 @@ internal static class ConsumerAggregationStore
             ("@application", application)
         };
 
+        var keys = new HashSet<string>(StringComparer.Ordinal);
         await using var cmd = Command(connection, tx, sql, p);
-        var val = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return val is null or DBNull ? 0 : Convert.ToInt32(val, CultureInfo.InvariantCulture);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            keys.Add(reader.GetString(0));
+        }
+
+        return keys;
     }
 
     private static async Task<int> ExecuteAsync(DbConnection connection, DbTransaction? tx, string sql, (string Name, object? Value)[] parameters, CancellationToken ct)

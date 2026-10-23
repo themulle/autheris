@@ -207,7 +207,7 @@ public sealed class AccessPlanningTenantBindingTests
     public async Task GovernancePlanEndpoints_Apply_PassesRequestTenant()
     {
         var planningService = Substitute.For<IAccessPlanningService>();
-        planningService.ApplyAccessAsync(Arg.Any<AdminApplyAccessRequest>(), Arg.Any<string>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        planningService.ApplyAccessAsync(Arg.Any<AdminApplyAccessRequest>(), Arg.Any<string>(), Arg.Any<TenantId>(), Arg.Any<ClaimsPrincipal?>(), Arg.Any<CancellationToken>())
             .Returns(new AdminApplyAccessResult(true, "plan-1", 1, "Applied successfully"));
 
         var context = new DefaultHttpContext();
@@ -232,12 +232,13 @@ public sealed class AccessPlanningTenantBindingTests
 
         requestTenant.Value.ShouldBe(RequestTenant);
 
-        await planningService.ApplyAccessAsync(applyReq, adminSid, requestTenant, CancellationToken.None);
+        await planningService.ApplyAccessAsync(applyReq, adminSid, requestTenant, ct: CancellationToken.None);
 
         await planningService.Received(1).ApplyAccessAsync(
             Arg.Is<AdminApplyAccessRequest>(r => r.PlanId == "plan-1"),
             AdminSid,
             Arg.Is<TenantId>(t => t.Value == RequestTenant),
+            Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<CancellationToken>());
     }
 }

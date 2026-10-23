@@ -189,6 +189,26 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         doc.RootElement.GetProperty("filters").GetArrayLength().ShouldBe(1);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task List_ExposesPendingHash_TheValueApprovalCompares()
+    {
+        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
+        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_pending_hash", createContext, approvalService), createContext);
+        var stored = (await _repository.LoadSnapshotAsync()).Filters.Single();
+
+        var context = Context(Tenant, null, "GovernanceAdmin");
+        await StatusAsync(await VirtualFilterEndpoints.ListAsync(context, approvalService), context);
+
+        context.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var view = doc.RootElement.GetProperty("filters")[0];
+        view.GetProperty("pending_hash").GetString().ShouldBe(VirtualFilterAdministrationService.PendingHash(stored));
+        view.GetProperty("pending_hash").GetString().ShouldNotBeNullOrWhiteSpace();
+    }
+
     private static object SyncBody(string commit) => new
     {
         path = "governance/access",
@@ -292,8 +312,12 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var putStatus = await StatusAsync(putResult, createContext);
         putStatus.ShouldBe(StatusCodes.Status200OK);
 
+        // VF-05: every approval carries the reviewed (pending) hash.
+        var pendingHash = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Filters.Single());
+
         // Creator attempts to approve -> HTTP 400 (Four-eyes principle violation)
         var selfApproveContext = Context(Tenant, null, "GovernanceAdmin"); // UserSid is "S-1-5-21-CALLER" by default in Context()
+        selfApproveContext.Request.QueryString = new QueryString($"?hash={pendingHash}");
         var selfApproveResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", selfApproveContext, approvalService);
         var selfApproveStatus = await StatusAsync(selfApproveResult, selfApproveContext);
         selfApproveStatus.ShouldBe(StatusCodes.Status400BadRequest);
@@ -308,6 +332,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var supervisorContext = Context(Tenant, null, "GovernanceAdmin");
         var supervisorSec = (SecurityPrincipalContext)supervisorContext.Items[SecurityPrincipalContext.ItemKey]!;
         supervisorContext.Items[SecurityPrincipalContext.ItemKey] = supervisorSec with { UserSid = new Sid("S-1-5-21-SUPERVISOR") };
+        supervisorContext.Request.QueryString = new QueryString($"?hash={pendingHash}");
         var approveResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", supervisorContext, approvalService);
         var approveStatus = await StatusAsync(approveResult, supervisorContext);
         approveStatus.ShouldBe(StatusCodes.Status200OK);
@@ -316,6 +341,27 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         var stored = snapshot.Filters.ShouldHaveSingleItem();
         stored.Status.ShouldBe(FilterApprovalStatus.Active);
         stored.ApprovedBy.ShouldBe(new Sid("S-1-5-21-SUPERVISOR"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Endpoint_ApproveWithoutHash_Returns400()
+    {
+        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
+        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_nohash", createContext, approvalService), createContext)).ShouldBe(StatusCodes.Status200OK);
+
+        var approve = Context(Tenant, null, "GovernanceAdmin");
+        var sec = (SecurityPrincipalContext)approve.Items[SecurityPrincipalContext.ItemKey]!;
+        approve.Items[SecurityPrincipalContext.ItemKey] = sec with { UserSid = new Sid("S-1-5-21-SUPERVISOR") };
+
+        var status = await StatusAsync(await VirtualFilterEndpoints.ApproveFilterAsync("filter_nohash", approve, approvalService), approve);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        approve.Response.Body.Position = 0;
+        new StreamReader(approve.Response.Body).ReadToEnd().ShouldContain("expected_hash_required");
+        (await _repository.LoadSnapshotAsync()).Filters.Single().Status.ShouldBe(FilterApprovalStatus.PendingApproval);
     }
 
     [Fact]

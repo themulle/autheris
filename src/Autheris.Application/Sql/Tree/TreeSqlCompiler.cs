@@ -69,6 +69,32 @@ public static partial class TreeSqlCompiler
     }
 
     /// <summary>
+    /// Runs the validation phase of <see cref="Compile"/> (column, filter and required-filter-column checks) without emitting SQL and
+    /// without consulting any secured source, so policy-independent client errors surface before row-policy support checks.
+    /// </summary>
+    public static void Validate(
+        TreeQueryNode root,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        DatabaseDialect dialect,
+        bool maskingDisabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(access);
+
+        if (!SupportsTreeCompile(dialect))
+        {
+            throw new NotSupportedException($"Dialect '{dialect}' does not support single-statement JSON queries.");
+        }
+
+        if (Depth(root) > MaxDepth)
+        {
+            throw new GatewayInvalidQueryException($"The query nests relations deeper than {MaxDepth} levels.");
+        }
+
+        _ = Prepare(root, new CompileContext(dialect, access, maskingDisabled), path: []);
+    }
+
+    /// <summary>
     /// Lists the selected columns that <see cref="Compile"/> masks for the caller (same decision, same column
     /// resolution), so that transports can report them (GraphQL <c>extensions.maskedFields</c>). Columns that are unknown
     /// or denied are skipped here; <see cref="Compile"/> rejects them.
@@ -190,6 +216,26 @@ public static partial class TreeSqlCompiler
 
             return renames.Count == 0 ? filterSql : RenameParameters(filterSql, renames);
         }
+    }
+
+    /// <summary>
+    /// SQLA-06 follow-up: binds the parameters of a secured source. Each engine marker gets a fresh <c>@gqN</c> name from the shared counter and
+    /// the shared parameter budget; the remap is a tokenising one (C4) on the post-compile text only.
+    /// </summary>
+    private static string BindSecuredSource(CompileContext context, TreeSecuredSource source)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var parameter in source.Parameters)
+        {
+            if (map.ContainsKey(parameter.Marker))
+            {
+                throw TreeSecuredSourceMarkers.Denied();
+            }
+
+            map[parameter.Marker] = context.AddParameter(parameter.Value);
+        }
+
+        return TreeSecuredSourceMarkers.Remap(source.Sql, source.Dialect, map);
     }
 
     /// <summary>SQL2-11: replaces @name parameter tokens outside string literals and quoted identifiers.</summary>
@@ -543,24 +589,32 @@ public static partial class TreeSqlCompiler
         }
     }
 
+    private static bool ComparisonRestrictsRows(TreeComparison comp)
+    {
+        switch (comp.Operator)
+        {
+            case TreeFilterOperator.IsNull:
+                return comp.Value is true;   // isNull:false does not restrict rows
+            case TreeFilterOperator.Eq or TreeFilterOperator.Gt or TreeFilterOperator.Gte or TreeFilterOperator.Lt or TreeFilterOperator.Lte:
+                return comp.Value is not null;
+            case TreeFilterOperator.Contains or TreeFilterOperator.StartsWith or TreeFilterOperator.EndsWith:
+                return comp.Value is string { Length: > 0 };
+            case TreeFilterOperator.In:
+                return comp.Value is not string && comp.Value is IEnumerable list && list.Cast<object?>().Any(static item => item is not null);
+            default:
+                return false;
+        }
+    }
+
     private static bool IsColumnConstrained(TreeFilter? filter, string column)
     {
         if (filter == null) return false;
 
         return filter switch
         {
+            // SQLA-02: only a comparison that really restricts rows counts; any value shape that is not recognised is "not constrained".
             TreeComparison comp =>
-                string.Equals(comp.Column, column, StringComparison.OrdinalIgnoreCase) &&
-                (comp.Operator is TreeFilterOperator.Eq
-                               or TreeFilterOperator.Gt
-                               or TreeFilterOperator.Gte
-                               or TreeFilterOperator.Lt
-                               or TreeFilterOperator.Lte
-                               or TreeFilterOperator.IsNull
-                               or TreeFilterOperator.Contains
-                               or TreeFilterOperator.StartsWith
-                               or TreeFilterOperator.EndsWith ||
-                 (comp.Operator == TreeFilterOperator.In && comp.Value is IEnumerable list && list.Cast<object?>().Any())),
+                string.Equals(comp.Column, column, StringComparison.OrdinalIgnoreCase) && ComparisonRestrictsRows(comp),
 
             TreeAndFilter andFilter =>
                 andFilter.Items.Any(item => IsColumnConstrained(item, column)),
@@ -613,6 +667,21 @@ public static partial class TreeSqlCompiler
 
     private static string Q(CompileContext context, string identifier) => context.Dialect.QuoteIdentifier(identifier);
 
+    /// <summary>
+    /// SQLA-06: true when the row policy cannot be spliced as text. A typed predicate without subqueries is spliced; a predicate with a subquery,
+    /// an untyped text filter and any unknown <see cref="IRowPolicy"/> need the engine pipeline (tenant wrapper, coverage verifier) and are denied here.
+    /// </summary>
+    internal static bool RowPolicyRequiresEnginePipeline(TableAccessDecision decision)
+    {
+        if (string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        {
+            return false;
+        }
+
+        return decision.RowPolicy is not Autheris.Application.Policy.PolicyPredicateRowPolicy typed
+            || Autheris.Application.Sql.Policy.PolicyPredicateSubqueryDetector.ContainsSubquery(typed.Predicate.Expression);
+    }
+
     private static string BuildInner(NodePlan plan, CompileContext context, NodePlan? parent, TreeRelationNode? relation)
     {
         var dialect = context.Dialect;
@@ -628,7 +697,17 @@ public static partial class TreeSqlCompiler
             sb.Append("TOP (").Append(limit.ToString(CultureInfo.InvariantCulture)).Append(") ");
         }
         sb.Append(string.Join(", ", plan.InnerColumns.Select(c => $"{target}.{Q(context, c)} AS {Q(context, c)}")));
-        sb.Append(" FROM ").Append(dialect.FormatTableIdentifier(metadata.Identifier));
+        var securedSource = plan.Access.SecuredSource;
+        if (securedSource != null)
+        {
+            // SQLA-06 follow-up: the derived table carries the engine-applied tenant and row policy; it projects every catalog column by name.
+            sb.Append(" FROM (").Append(BindSecuredSource(context, securedSource)).Append(')');
+        }
+        else
+        {
+            sb.Append(" FROM ").Append(dialect.FormatTableIdentifier(metadata.Identifier));
+        }
+
         sb.Append(" AS ").Append(target);
 
         var where = new List<string>();
@@ -640,8 +719,14 @@ public static partial class TreeSqlCompiler
         }
 
         var rowFilter = plan.Access.Decision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(rowFilter))
+        if (!string.IsNullOrWhiteSpace(rowFilter) && securedSource == null)
         {
+            // SQLA-06: the spliced text carries no tenant wrapper for policy subqueries (the engine pipeline adds it); deny instead of emitting it.
+            if (RowPolicyRequiresEnginePipeline(plan.Access.Decision))
+            {
+                throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
+            }
+
             SqlSecurityValidator.ValidateRowFilter(plan.Access.Decision);
             where.Add($"({context.BindRowFilter(rowFilter, plan.Access.Decision.RowFilterParameters)})");
         }

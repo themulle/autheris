@@ -411,16 +411,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 builder.Append(TableAliasKeyword);
                 FormatIdentifier(ref builder, subquery.Alias, context);
-                if (subquery.ColumnAliases != null && subquery.ColumnAliases.Count > 0)
-                {
-                    builder.Append(" (");
-                    for (int i = 0; i < subquery.ColumnAliases.Count; i++)
-                    {
-                        if (i > 0) builder.Append(", ");
-                        FormatIdentifier(ref builder, subquery.ColumnAliases[i], context);
-                    }
-                    builder.Append(')');
-                }
+                AppendColumnAliasList(ref builder, subquery.ColumnAliases, context);
                 break;
             case JoinedTableSource joined:
                 GenerateTableSource(joined.Left, ref builder, context);
@@ -458,8 +449,22 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 builder.Append(TableAliasKeyword);
                 FormatIdentifier(ref builder, lateral.Alias, context);
+                // SQLE-04: the column alias list of a LATERAL source was dropped, so outer references saw the inner names.
+                AppendColumnAliasList(ref builder, lateral.ColumnAliases, context);
                 break;
         }
+    }
+
+    private void AppendColumnAliasList(ref ValueStringBuilder builder, IReadOnlyList<SqlIdentifier>? aliases, SqlEmitterContext context)
+    {
+        if (aliases == null || aliases.Count == 0) return;
+        builder.Append(" (");
+        for (int i = 0; i < aliases.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            FormatIdentifier(ref builder, aliases[i], context);
+        }
+        builder.Append(')');
     }
 
     private static string GetJoinTypeKeyword(JoinType type) => type switch

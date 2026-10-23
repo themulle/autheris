@@ -22,10 +22,21 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Error: '$RELEASE_TAG' is not a release tag" >&2
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # MISC-02: build exactly the tagged commit, never the dispatching branch head.
+          ref: refs/tags/${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -121,9 +132,22 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    # MISC-02: publishing runs in a protected environment (required reviewers configured in the repository settings).
+    environment: release
     permissions:
       contents: write
     steps:
+      - name: Fail if a release for the tag already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Error: a release for '$RELEASE_TAG' already exists" >&2
+            exit 1
+          fi
+
       - name: Download Artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -136,3 +160,4 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: artifacts/*
           generate_release_notes: true
+          overwrite_files: false

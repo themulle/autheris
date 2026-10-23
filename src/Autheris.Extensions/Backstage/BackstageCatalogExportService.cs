@@ -259,7 +259,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                 foreach (var tableMetadata in tables)
                 {
                     var table = tableMetadata.Table;
-                    var entityName = SanitizeEntityName($"data-{table.SchemaName}-{table.TableName}");
+                    var entityName = BuildTableEntityName(tableMetadata.Identifier);
                     var tags = new List<string> { "data-product", "table", SanitizeEntityName(table.SourceType) };
 
                     if (table.RequiresFourEyes || table.IsHighlySensitive)
@@ -288,6 +288,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                     {
                         ["backstage.io/managed-by-location"] = $"url:/api/integrations/backstage/catalog-entities/{entityName}",
                         ["autheris.io/source-type"] = table.SourceType,
+                        ["autheris.io/domain"] = tableMetadata.Identifier.Domain,
                         ["autheris.io/schema-name"] = table.SchemaName,
                         ["autheris.io/table-name"] = table.TableName,
                         ["autheris.io/sensitivity"] = table.Sensitivity,
@@ -417,6 +418,23 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// EXT-15: "data-{domain}-{schema}-{table}" plus a short hash of the exact identifier, so tenants, same-named tables and names that
+    /// only differ in case or special characters never share a Backstage entity name (the name stays within Backstage's 63 characters).
+    /// </summary>
+    internal static string BuildTableEntityName(Autheris.Domain.Common.TableIdentifier identifier)
+    {
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            Encoding.UTF8.GetBytes($"{identifier.Domain}\n{identifier.Schema}\n{identifier.TableName}")))[..8];
+        var readable = SanitizeEntityName($"data-{identifier.Domain}-{identifier.Schema}-{identifier.TableName}");
+        if (readable.Length > 54)
+        {
+            readable = readable[..54].TrimEnd('-', '.');
+        }
+
+        return $"{readable}-{hash}";
     }
 
     public static string SanitizeEntityName(string raw)

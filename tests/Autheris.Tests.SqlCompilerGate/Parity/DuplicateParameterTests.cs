@@ -16,9 +16,10 @@ public sealed class DuplicateParameterTests(ParityFixture<SqliteGateDatabase> fi
 {
     private const string Text = "\"status\" = @__gql_rls_0";
 
+    // The tree compiler is not listed: SQLA-06 denies every text-only filter before parameter names matter (see SQLA_06_TreeSqlCompiler_DeniesATextOnlyRowFilter);
+    // its tenant-parameter collision is covered with a typed policy below.
     public static IEnumerable<object[]> Consumers() =>
     [
-        [new TreeSqlCompilerConsumer()],
         [new ProcedureRowScopeConsumer()],
         [new InMemoryFilterRowsConsumer()],
         [new DatasetSpliceConsumer()]
@@ -70,8 +71,15 @@ public sealed class DuplicateParameterTests(ParityFixture<SqliteGateDatabase> fi
     public async Task TreeSqlCompiler_RenamesAFilterParameterThatCollidesWithItsTenantParameter_AndKeepsTenantIsolation()
     {
         // @gq0 is the tree compiler's own tenant parameter ("A"). A row filter value of the same name ("B") must never replace it.
-        var filter = new FilterText("\"status\" = @__gql_rls_0 OR \"tenant_id\" = @gq0",
-            new Dictionary<string, object?> { ["@__gql_rls_0"] = "open", ["@gq0"] = "B" });
+        // SQLA-06: the tree compiler only splices a typed policy, so the colliding names come from a typed predicate (prefix "gq": gq0 = "open", gq1 = "B").
+        var namer = new Autheris.Application.Sql.Policy.PolicyParameterNamer("gq");
+        var status = namer.Add(new TrinoSqlEngine.Governance.PolicyValue("open", TrinoSqlEngine.Ast.Emit.SqlParameterType.String));
+        var tenant = namer.Add(new TrinoSqlEngine.Governance.PolicyValue("B", TrinoSqlEngine.Ast.Emit.SqlParameterType.String));
+        var expression = new TrinoSqlEngine.Ast.Nodes.BinaryExpression(
+            new TrinoSqlEngine.Ast.Nodes.BinaryExpression(Autheris.Application.Sql.Policy.PolicyParameterNamer.Column("status"), TrinoSqlEngine.Ast.Nodes.BinaryOperator.Equal, status),
+            TrinoSqlEngine.Ast.Nodes.BinaryOperator.Or,
+            new TrinoSqlEngine.Ast.Nodes.BinaryExpression(Autheris.Application.Sql.Policy.PolicyParameterNamer.Column("tenant_id"), TrinoSqlEngine.Ast.Nodes.BinaryOperator.Equal, tenant));
+        var filter = new FilterText("(unused)", FilterText.NoParameters) { Typed = TrinoSqlEngine.Governance.PolicyPredicate.Create(expression, namer.Values) };
 
         var outcome = await new TreeSqlCompilerConsumer().RunAsync(fixture.Env, filter);
 
@@ -79,5 +87,16 @@ public sealed class DuplicateParameterTests(ParityFixture<SqliteGateDatabase> fi
         var ids = rows.Data.Select(r => Convert.ToInt64(r[0], System.Globalization.CultureInfo.InvariantCulture)).ToList();
         ids.ShouldAllBe(id => GateModel.Rows.Any(r => r.Table == "orders" && r.Id == id && r.Tenant == GateModel.TenantA), "a tenant-B id was returned: the tenant parameter was replaced");
         ids.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SQLA_06_TreeSqlCompiler_DeniesATextOnlyRowFilter()
+    {
+        // SQLA-06: an untyped text filter has no tenant wrapper and is never spliced by the tree compiler (fail closed).
+        var outcome = await new TreeSqlCompilerConsumer().RunAsync(fixture.Env, new FilterText(Text, new Dictionary<string, object?> { ["@__gql_rls_0"] = "open" }));
+
+        var rejected = outcome.ShouldBeOfType<EngineOutcome.Rejected>();
+        rejected.Stage.ShouldBe(RejectionStage.Compile);
     }
 }

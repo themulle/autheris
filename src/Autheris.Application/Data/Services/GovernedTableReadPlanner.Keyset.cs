@@ -120,25 +120,10 @@ public sealed partial class GovernedTableReadPlanner
         // 3. Enforce Required Filter Columns & Groups (#163 / #221 / #236 / SEC-DATA178-04)
         if (metadata.RequiredFilterColumns.Length > 0 || metadata.RequiredFilterColumnGroups.Length > 0)
         {
-            bool IsSatisfied(string req)
-            {
-                if (request.Filter != null && IsColumnConstrained(request.Filter, req))
-                {
-                    return true;
-                }
-
-                if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) && decision.CombinedRowFilterSql.Contains(req, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                if (decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls && rls.Predicate.ReferencedColumns.Contains(req.ToLowerInvariant()))
-                {
-                    return true;
-                }
-
-                return false;
-            }
+            // MISC-04: the row filter text counts only through whole identifiers (shared rule); the typed client filter keeps its own check.
+            bool IsSatisfied(string req) =>
+                (request.Filter != null && IsColumnConstrained(request.Filter, req)) ||
+                RequiredFilterColumnRule.IsColumnSatisfied(req, metadata, decision, clientFilterColumns: null, tenantColumnCounts: false);
 
             if (metadata.RequiredFilterColumnGroups.Length > 0)
             {
@@ -172,14 +157,8 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         // 4. Translate Typed Filter Node to Parameterized SQL
+        // VF-06: policy text and parameters are never spliced into the client SQL; the governed rewriter (PlannedTableRead) applies the row policy once.
         var parameters = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (decision.RowFilterParameters != null)
-        {
-            foreach (var (k, v) in decision.RowFilterParameters)
-            {
-                parameters[k] = v;
-            }
-        }
 
         int paramCounter = 0;
         string? clientFilterSql = null;
@@ -243,16 +222,6 @@ public sealed partial class GovernedTableReadPlanner
         if (!string.IsNullOrWhiteSpace(seekSql))
         {
             whereClauses.Add(seekSql.StartsWith('(') && seekSql.EndsWith(')') ? seekSql : $"({seekSql})");
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            whereClauses.Add(decision.CombinedRowFilterSql.StartsWith('(') && decision.CombinedRowFilterSql.EndsWith(')') ? decision.CombinedRowFilterSql : $"({decision.CombinedRowFilterSql})");
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql))
-        {
-            whereClauses.Add(decision.MandatoryRowPredicateSql.StartsWith('(') && decision.MandatoryRowPredicateSql.EndsWith(')') ? decision.MandatoryRowPredicateSql : $"({decision.MandatoryRowPredicateSql})");
         }
 
         // 7. Assemble Complete Single-Table SELECT Statement
@@ -466,6 +435,13 @@ public sealed partial class GovernedTableReadPlanner
 
         if (!string.IsNullOrWhiteSpace(node.Field))
         {
+            // VF-06: a tautology ({op: notin, value: []} renders "1 = 1") constrains nothing.
+            if (string.Equals(node.Op?.Trim(), "notin", StringComparison.OrdinalIgnoreCase) &&
+                node.Value is { ValueKind: JsonValueKind.Array } list && list.GetArrayLength() == 0)
+            {
+                return false;
+            }
+
             return string.Equals(node.Field, columnName, StringComparison.OrdinalIgnoreCase);
         }
 

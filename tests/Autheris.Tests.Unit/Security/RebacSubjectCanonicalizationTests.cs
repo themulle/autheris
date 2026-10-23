@@ -213,7 +213,7 @@ public sealed class RebacSubjectCanonicalizationTests
             Reason: "MCP grant");
 
         var planResult = new AdminPlanAccessResult("plan-mcp", DatasetId, [], [], DateTimeOffset.UtcNow.AddMinutes(10));
-        planning.PlanAccessAsync(Arg.Any<AdminPlanAccessRequest>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        planning.PlanAccessAsync(Arg.Any<AdminPlanAccessRequest>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<ClaimsPrincipal?>(), Arg.Any<CancellationToken>())
             .Returns(planResult);
 
         var sessionContext = new McpSessionContext(
@@ -232,6 +232,7 @@ public sealed class RebacSubjectCanonicalizationTests
             Arg.Is<AdminPlanAccessRequest>(r => r.Grants.All(g => g.ValidUntil != null)),
             AdminSid,
             Tenant,
+            Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<CancellationToken>());
     }
 

@@ -202,7 +202,7 @@ public sealed class AggregationPrivacyHardeningTests
             OrdersTableId,
             GroupBy: ["department"],
             MinGroupSizeOverride: overrideValue,
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.MinimumGroupSize.ShouldBe(expected);
     }
@@ -221,7 +221,7 @@ public sealed class AggregationPrivacyHardeningTests
             OrdersTableId,
             GroupBy: ["department"],
             MinGroupSizeOverride: 1,
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.MinimumGroupSize.ShouldBe(7);
     }
@@ -239,7 +239,7 @@ public sealed class AggregationPrivacyHardeningTests
             OrdersTableId,
             GroupBy: ["department"],
             SmallGroupStrategyOverride: SmallGroupStrategy.MergeIntoOther,
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.Metadata.Strategy.ShouldBe(SmallGroupStrategy.Suppress);
         result.MergedIntoOther.ShouldBeFalse();
@@ -260,7 +260,7 @@ public sealed class AggregationPrivacyHardeningTests
             TrinoSqlFactory = _ => predicate
         };
 
-        var query = new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision());
+        var query = new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision().AsPdpEvaluated());
 
         if (expected == "masked")
         {
@@ -328,7 +328,7 @@ public sealed class AggregationPrivacyHardeningTests
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
-            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision())));
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
 
         ex.ErrorCode.ShouldBe("AGGREGATION_ROW_CAP_EXCEEDED");
     }
@@ -347,7 +347,7 @@ public sealed class AggregationPrivacyHardeningTests
 
         var result = await service.ExecuteAggregationAsync(
             CreatePrincipal(),
-            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision()));
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.Groups.Single().Count.ShouldBe(99_999);
     }
@@ -370,22 +370,22 @@ public sealed class AggregationPrivacyHardeningTests
 
         var query = position switch
         {
-            "groupBy" => new AggregationQuery(OrdersTableId, GroupBy: [column], PreEvaluatedDecision: decision),
+            "groupBy" => new AggregationQuery(OrdersTableId, GroupBy: [column], PreEvaluatedDecision: decision.AsPdpEvaluated()),
             "aggregate" => new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["department"],
                 Aggregates: [new AggregateSelection(AggregateFunction.Count, column)],
-                PreEvaluatedDecision: decision),
+                PreEvaluatedDecision: decision.AsPdpEvaluated()),
             "where" => new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["department"],
                 Where: TableFilterClause.FromTrinoText($"{column} = 'y'", [column]),
-                PreEvaluatedDecision: decision),
+                PreEvaluatedDecision: decision.AsPdpEvaluated()),
             _ => new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["department"],
                 OrderBy: [new TableOrderBy(column, false)],
-                PreEvaluatedDecision: decision)
+                PreEvaluatedDecision: decision.AsPdpEvaluated())
         };
 
         var ex = await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), query));
@@ -412,7 +412,7 @@ public sealed class AggregationPrivacyHardeningTests
             new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 5, ExposeSuppressedGroupsCount = false } });
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision()));
+            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.Suppressed.ShouldBeTrue();
         result.SuppressedGroupsCount.ShouldBe(0);
@@ -427,7 +427,7 @@ public sealed class AggregationPrivacyHardeningTests
         var (service, _, _) = CreateService(DepartmentRows(("Big", 6, 1m), ("Tiny", 1, 1m)), NoiseOptions());
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision()));
+            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.NoiseApplied.ShouldBeTrue();
         result.SuppressedRowsCount.ShouldBe(0);
@@ -441,7 +441,7 @@ public sealed class AggregationPrivacyHardeningTests
             new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 5 } });
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision()));
+            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.SuppressedRowsCount.ShouldBe(2);
     }
@@ -475,7 +475,7 @@ public sealed class AggregationPrivacyHardeningTests
                 new AggregateSelection(AggregateFunction.Max, "amount", "max_amount"),
                 new AggregateSelection(AggregateFunction.CountDistinct, "amount", "distinct_amount")
             ],
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.MergedIntoOther.ShouldBeTrue();
         var other = result.Groups.Single(g => g.IsMergedOther);
@@ -516,7 +516,7 @@ public sealed class AggregationPrivacyHardeningTests
                 new AggregateSelection(AggregateFunction.Count, "amount", "c1"),
                 new AggregateSelection(AggregateFunction.Count, "amount", "c2")
             ],
-            PreEvaluatedDecision: CreateDecision())));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
 
         ex.ErrorCode.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
         executor.Calls.ShouldBe(0);
@@ -533,7 +533,7 @@ public sealed class AggregationPrivacyHardeningTests
             OrdersTableId,
             GroupBy: ["department"],
             Aggregates: [new AggregateSelection(function, "amount", "x")],
-            PreEvaluatedDecision: CreateDecision())));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
 
         ex.ErrorCode.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
         executor.Calls.ShouldBe(0);
@@ -552,7 +552,7 @@ public sealed class AggregationPrivacyHardeningTests
                 new AggregateSelection(AggregateFunction.Min, "amount", "m1"),
                 new AggregateSelection(AggregateFunction.Min, "amount", "m2")
             ],
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.Groups.Single().Aggregates["m1"].ShouldBe(1m);
     }
@@ -571,7 +571,7 @@ public sealed class AggregationPrivacyHardeningTests
                 new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount"),
                 new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount")
             ],
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         // Two column aggregates (sum, avg) plus the row count: 3 x 1.5.
         result.Metadata.EpsilonConsumed.ShouldBe(4.5);
@@ -740,7 +740,7 @@ public sealed class AggregationPrivacyHardeningTests
             new AggregationQuery(
                 OrdersTableId,
                 GroupBy: ["department"],
-                PreEvaluatedDecision: TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason"))));
+                PreEvaluatedDecision: TableAccessDecision.Denied(OrdersTableId, "secret-denial-reason").AsPdpEvaluated())));
 
         ex.Message.ShouldBe("Access denied.");
         ex.Message.ShouldNotContain("orders");
@@ -767,7 +767,7 @@ public sealed class AggregationPrivacyHardeningTests
                 new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount"),
                 new AggregateSelection(AggregateFunction.CountDistinct, "amount", "distinct_amount")
             ],
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.NoiseApplied.ShouldBeTrue();
         result.MergedIntoOther.ShouldBeTrue();
@@ -814,7 +814,7 @@ public sealed class AggregationPrivacyHardeningTests
 
         await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
-            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision())));
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
         executor.Calls.ShouldBe(0);
     }
 
@@ -830,7 +830,7 @@ public sealed class AggregationPrivacyHardeningTests
         // The placeholder name gq1 is not a column; the query is accepted (no AGGREGATION_COLUMN_UNAVAILABLE).
         await Should.NotThrowAsync(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
-            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision())));
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
     }
 
     [Fact]
@@ -845,7 +845,7 @@ public sealed class AggregationPrivacyHardeningTests
         // Only placeholders of bound parameters are removed before the text scan; an unbound @name keeps its identifier.
         await Should.ThrowAsync<AggregationColumnUnavailableException>(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
-            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision())));
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], Where: where, PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
         executor.Calls.ShouldBe(0);
     }
 
@@ -873,7 +873,7 @@ public sealed class AggregationPrivacyHardeningTests
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
-            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision())));
+            new AggregationQuery(OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
 
         ex.ErrorCode.ShouldBe("AGGREGATION_ROW_CAP_EXCEEDED");
     }
@@ -920,7 +920,7 @@ public sealed class AggregationPrivacyHardeningTests
                 new AggregateSelection(AggregateFunction.Max, "amount", "max_amount"),
                 new AggregateSelection(AggregateFunction.CountDistinct, "amount", "distinct_amount")
             ],
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.MergedIntoOther.ShouldBeTrue();
         var other = result.Groups.Single(g => g.IsMergedOther);
@@ -956,7 +956,7 @@ public sealed class AggregationPrivacyHardeningTests
             GroupBy: ["department"],
             OrderBy: [new TableOrderBy("count", true)],
             Limit: 1,
-            PreEvaluatedDecision: CreateDecision()));
+            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         // Without noise B (8) would lead; with the noised counts A (106) leads and the limit keeps A only.
         result.Metadata.Truncated.ShouldBeTrue();

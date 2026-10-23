@@ -19,7 +19,8 @@ public static class PushedClauseBuilder
 {
     public static TableFilterClause Build(
         IReadOnlyList<SingleTableConjunct> conjuncts,
-        TableMetadata metadata)
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, object?>? clientParameters = null)
     {
         ArgumentNullException.ThrowIfNull(conjuncts);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -43,7 +44,7 @@ public static class PushedClauseBuilder
                 referencedColumns.Add(col);
             }
 
-            var rendered = PrepareConjunct(conjunct.Predicate, parameters, ref paramIndex, structuralPredicates);
+            var rendered = PrepareConjunct(conjunct.Predicate, parameters, ref paramIndex, structuralPredicates, clientParameters);
             conjunctPredicates.Add(rendered);
         }
 
@@ -75,9 +76,10 @@ public static class PushedClauseBuilder
         Expression expr,
         Dictionary<string, object?> parameters,
         ref int paramIndex,
-        List<PushdownPredicateInfo> structuralPredicates)
+        List<PushdownPredicateInfo> structuralPredicates,
+        IReadOnlyDictionary<string, object?>? clientParameters)
     {
-        var renderer = BuildRenderer(expr, parameters, ref paramIndex, structuralPredicates);
+        var renderer = BuildRenderer(expr, parameters, ref paramIndex, structuralPredicates, clientParameters);
         return new RenderedConjunct(renderer);
     }
 
@@ -85,7 +87,8 @@ public static class PushedClauseBuilder
         SqlNode node,
         Dictionary<string, object?> parameters,
         ref int paramIndex,
-        List<PushdownPredicateInfo> structuralPredicates)
+        List<PushdownPredicateInfo> structuralPredicates,
+        IReadOnlyDictionary<string, object?>? clientParameters)
     {
         switch (node)
         {
@@ -102,20 +105,21 @@ public static class PushedClauseBuilder
             }
 
             case ParameterReference:
-            {
-                var marker = AllocateParameter(parameters, ref paramIndex, null);
-                return _ => marker;
-            }
-
             case NamedBindMarkerExpression:
             {
-                var marker = AllocateParameter(parameters, ref paramIndex, null);
+                // SQLA-09: bind the value the client supplied; NULL is never bound. An unresolvable parameter means the conjunct must not be pushed.
+                if (!PushdownParameterResolver.TryResolve(node, clientParameters, out var clientValue))
+                {
+                    throw new PushdownRejectedException();
+                }
+
+                var marker = AllocateParameter(parameters, ref paramIndex, clientValue);
                 return _ => marker;
             }
 
             case ParenthesizedExpression paren:
             {
-                var inner = BuildRenderer(paren.Expression, parameters, ref paramIndex, structuralPredicates);
+                var inner = BuildRenderer(paren.Expression, parameters, ref paramIndex, structuralPredicates, clientParameters);
                 return resolve => $"({inner(resolve)})";
             }
 
@@ -124,8 +128,8 @@ public static class PushedClauseBuilder
                 if (binary.Operator is BinaryOperator.And or BinaryOperator.Or)
                 {
                     var opStr = binary.Operator == BinaryOperator.And ? "AND" : "OR";
-                    var leftRenderer = BuildRenderer(binary.Left, parameters, ref paramIndex, structuralPredicates);
-                    var rightRenderer = BuildRenderer(binary.Right, parameters, ref paramIndex, structuralPredicates);
+                    var leftRenderer = BuildRenderer(binary.Left, parameters, ref paramIndex, structuralPredicates, clientParameters);
+                    var rightRenderer = BuildRenderer(binary.Right, parameters, ref paramIndex, structuralPredicates, clientParameters);
                     return resolve => $"({leftRenderer(resolve)} {opStr} {rightRenderer(resolve)})";
                 }
 
@@ -146,8 +150,8 @@ public static class PushedClauseBuilder
                     structuralPredicates.Add(new PushdownPredicateInfo(col, binary.Operator.ToString()));
                 }
 
-                var leftR = BuildRenderer(binary.Left, parameters, ref paramIndex, structuralPredicates);
-                var rightR = BuildRenderer(binary.Right, parameters, ref paramIndex, structuralPredicates);
+                var leftR = BuildRenderer(binary.Left, parameters, ref paramIndex, structuralPredicates, clientParameters);
+                var rightR = BuildRenderer(binary.Right, parameters, ref paramIndex, structuralPredicates, clientParameters);
                 return resolve => $"{leftR(resolve)} {opString} {rightR(resolve)}";
             }
 
@@ -157,20 +161,20 @@ public static class PushedClauseBuilder
                 if (unary.Operator == UnaryOperator.IsNull)
                 {
                     if (col != null) structuralPredicates.Add(new PushdownPredicateInfo(col, "IsNull"));
-                    var opR = BuildRenderer(unary.Operand, parameters, ref paramIndex, structuralPredicates);
+                    var opR = BuildRenderer(unary.Operand, parameters, ref paramIndex, structuralPredicates, clientParameters);
                     return resolve => $"{opR(resolve)} IS NULL";
                 }
 
                 if (unary.Operator == UnaryOperator.IsNotNull)
                 {
                     if (col != null) structuralPredicates.Add(new PushdownPredicateInfo(col, "IsNotNull"));
-                    var opR = BuildRenderer(unary.Operand, parameters, ref paramIndex, structuralPredicates);
+                    var opR = BuildRenderer(unary.Operand, parameters, ref paramIndex, structuralPredicates, clientParameters);
                     return resolve => $"{opR(resolve)} IS NOT NULL";
                 }
 
                 if (unary.Operator == UnaryOperator.Not)
                 {
-                    var opR = BuildRenderer(unary.Operand, parameters, ref paramIndex, structuralPredicates);
+                    var opR = BuildRenderer(unary.Operand, parameters, ref paramIndex, structuralPredicates, clientParameters);
                     return resolve => $"NOT ({opR(resolve)})";
                 }
 
@@ -185,11 +189,11 @@ public static class PushedClauseBuilder
                     structuralPredicates.Add(new PushdownPredicateInfo(col, inList.IsNotIn ? "NotIn" : "In"));
                 }
 
-                var operandR = BuildRenderer(inList.Operand, parameters, ref paramIndex, structuralPredicates);
+                var operandR = BuildRenderer(inList.Operand, parameters, ref paramIndex, structuralPredicates, clientParameters);
                 var itemRenderers = new List<Func<Func<string, string>, string>>(inList.Items.Count);
                 foreach (var item in inList.Items)
                 {
-                    itemRenderers.Add(BuildRenderer(item, parameters, ref paramIndex, structuralPredicates));
+                    itemRenderers.Add(BuildRenderer(item, parameters, ref paramIndex, structuralPredicates, clientParameters));
                 }
                 var opStr = inList.IsNotIn ? "NOT IN" : "IN";
 
@@ -209,9 +213,9 @@ public static class PushedClauseBuilder
                     structuralPredicates.Add(new PushdownPredicateInfo(col, between.IsNotBetween ? "NotBetween" : "Between"));
                 }
 
-                var operandR = BuildRenderer(between.Operand, parameters, ref paramIndex, structuralPredicates);
-                var lowerR = BuildRenderer(between.Lower, parameters, ref paramIndex, structuralPredicates);
-                var upperR = BuildRenderer(between.Upper, parameters, ref paramIndex, structuralPredicates);
+                var operandR = BuildRenderer(between.Operand, parameters, ref paramIndex, structuralPredicates, clientParameters);
+                var lowerR = BuildRenderer(between.Lower, parameters, ref paramIndex, structuralPredicates, clientParameters);
+                var upperR = BuildRenderer(between.Upper, parameters, ref paramIndex, structuralPredicates, clientParameters);
                 var opStr = between.IsNotBetween ? "NOT BETWEEN" : "BETWEEN";
 
                 return resolve => $"{operandR(resolve)} {opStr} {lowerR(resolve)} AND {upperR(resolve)}";
@@ -225,9 +229,9 @@ public static class PushedClauseBuilder
                     structuralPredicates.Add(new PushdownPredicateInfo(col, like.IsNotLike ? "NotLike" : "Like"));
                 }
 
-                var operandR = BuildRenderer(like.Operand, parameters, ref paramIndex, structuralPredicates);
-                var patR = BuildRenderer(like.Pattern, parameters, ref paramIndex, structuralPredicates);
-                var escapeR = like.Escape != null ? BuildRenderer(like.Escape, parameters, ref paramIndex, structuralPredicates) : null;
+                var operandR = BuildRenderer(like.Operand, parameters, ref paramIndex, structuralPredicates, clientParameters);
+                var patR = BuildRenderer(like.Pattern, parameters, ref paramIndex, structuralPredicates, clientParameters);
+                var escapeR = like.Escape != null ? BuildRenderer(like.Escape, parameters, ref paramIndex, structuralPredicates, clientParameters) : null;
                 var opStr = like.IsNotLike ? "NOT LIKE" : "LIKE";
 
                 return resolve =>

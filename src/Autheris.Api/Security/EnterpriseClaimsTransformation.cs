@@ -1,14 +1,17 @@
 namespace Autheris.Api.Security;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Application.Governance.Rights;
 using Autheris.Domain.Interfaces;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Logging;
 
 public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 {
@@ -19,16 +22,19 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
     private readonly IIdentityRealmRegistry? _realmRegistry;
     private readonly IRoleResolver? _roleResolver;
-    private readonly IFunctionalRightRepository? _functionalRightRepo;
+    private readonly IFunctionalRightMapper? _functionalRightMapper;
+    private readonly ILogger<EnterpriseClaimsTransformation>? _logger;
 
     public EnterpriseClaimsTransformation(
         IIdentityRealmRegistry? realmRegistry = null,
         IRoleResolver? roleResolver = null,
-        IFunctionalRightRepository? functionalRightRepo = null)
+        IFunctionalRightMapper? functionalRightMapper = null,
+        ILogger<EnterpriseClaimsTransformation>? logger = null)
     {
+        _logger = logger;
         _realmRegistry = realmRegistry;
         _roleResolver = roleResolver;
-        _functionalRightRepo = functionalRightRepo;
+        _functionalRightMapper = functionalRightMapper;
     }
 
     public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
@@ -68,6 +74,14 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
                 ?? principal.GetUserSid()?.Value
                 ?? string.Empty;
 
+            // GOV-08: without a user key there is nothing to resolve; an empty key would otherwise share one cache entry between
+            // all such callers. The request is marked degraded and the PDP denies data access.
+            if (string.IsNullOrWhiteSpace(userKey))
+            {
+                MarkDegraded(identity, realmId, "no user key");
+                return ClaimsNormalizer.Normalize(principal);
+            }
+
             var tenantId = principal.GetTenantId();
             var upn = identity.FindFirst("upn")?.Value ?? identity.FindFirst(ClaimTypes.Upn)?.Value;
             var name = identity.FindFirst("name")?.Value ?? identity.FindFirst(ClaimTypes.Name)?.Value;
@@ -84,6 +98,10 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             );
 
             var rolesResolution = await _roleResolver.ResolveRolesAsync(resolvedIdentity).ConfigureAwait(false);
+            if (rolesResolution.IsDegraded)
+            {
+                MarkDegraded(identity, realmId, "role provider unavailable");
+            }
 
             foreach (var group in rolesResolution.Groups)
             {
@@ -96,18 +114,40 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
                 identity.AddClaim(new System.Security.Claims.Claim(ClaimTypes.Role, role));
             }
 
-            // Map functional rights for the groups and roles
-            if (_functionalRightRepo != null)
+            // PERS-09: functional-right claims come only from FunctionalRightMapper (four-eyes for privileged rights, customer-realm
+            // ceiling); a mapper failure yields no functional-right claims (fail closed).
+            if (_functionalRightMapper != null)
             {
                 var groupsAndRoles = rolesResolution.Groups.Concat(rolesResolution.Roles).Distinct().ToList();
-                var mappings = await _functionalRightRepo.GetApprovedMappingsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles).ConfigureAwait(false);
-                foreach (var m in mappings)
+                try
                 {
-                    identity.AddClaim(new System.Security.Claims.Claim(RequireFunctionalRightHandler.FunctionalRightClaimType, m.FunctionalRight.Name));
+                    var rights = await _functionalRightMapper.GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles).ConfigureAwait(false);
+                    foreach (var right in rights)
+                    {
+                        identity.AddClaim(new System.Security.Claims.Claim(RequireFunctionalRightHandler.FunctionalRightClaimType, right.Name));
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger?.LogError(ex, "Functional right mapping failed for realm {RealmId}; no functional-right claims are issued (fail-closed).", realmId);
                 }
             }
         }
 
         return ClaimsNormalizer.Normalize(principal);
+    }
+
+    private void MarkDegraded(ClaimsIdentity identity, string realmId, string reason)
+    {
+        // Any client-supplied value is replaced: the claim only ever restricts access.
+        foreach (var existing in identity.FindAll(RoleResolutionClaims.ClaimType).ToList())
+        {
+            identity.RemoveClaim(existing);
+        }
+
+        identity.AddClaim(new Claim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded));
+        Autheris.Domain.Diagnostics.GatewayDiagnostics.RoleResolutionDegradedCounter.Add(
+            1, new KeyValuePair<string, object?>("realm", realmId));
+        _logger?.LogWarning("Group and role resolution is degraded for realm {RealmId} ({Reason}); data access is denied for this request (fail-closed).", realmId, reason);
     }
 }

@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using TrinoSqlEngine.Ast.Buffer;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
@@ -25,7 +26,8 @@ public sealed record SqlSlot(
     string? ColumnType = null,
     int? ListIndex = null,
     int? ListCount = null,
-    bool ZoneArgument = false);
+    bool ZoneArgument = false,
+    bool EscapeLikePattern = false);
 
 /// <summary>
 /// Value-free cached compile output (SEC-ADG-01, INV-12). It holds the SQL text and slot descriptors; tenant, policy and
@@ -63,7 +65,7 @@ public sealed record CompiledSqlTemplate(
         {
             slots.Add(new SqlSlot(
                 p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
-                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType, p.ListIndex, p.ListCount, p.ZoneArgument));
+                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType, p.ListIndex, p.ListCount, p.ZoneArgument, p.EscapeLikePattern));
         }
 
         return slots.MoveToImmutable();
@@ -89,9 +91,22 @@ public sealed record CompiledSqlTemplate(
                 {
                     value = slot.LiteralValue;   // mutant: the template keeps the value of the request that created it
                 }
+                else if (slot.EscapeLikePattern)
+                {
+                    // SQLE-10: the escaped bind of a LIKE pattern is re-applied on every hit; a non-string value fails closed like on a miss.
+                    if (value is not string text)
+                    {
+                        throw new System.Security.SecurityException("A LIKE pattern parameter must be a string.");
+                    }
+
+                    if (!CompilerHooks.IsDisabled(SecurityControl.CacheRebindLikeEscape))
+                    {
+                        value = LikePatternEscaper.Escape(text);   // mutant (disabled): the raw value is bound
+                    }
+                }
             }
 
-            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount, slot.ZoneArgument));
+            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount, slot.ZoneArgument, slot.EscapeLikePattern));
         }
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)

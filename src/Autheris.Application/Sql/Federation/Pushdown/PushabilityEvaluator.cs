@@ -19,6 +19,7 @@ public static class RejectionReason
     public const string GatewayEnforcedTable = "GATEWAY_ENFORCED_TABLE";
     public const string NullInNotInList = "NULL_IN_NOT_IN_LIST";
     public const string MaxInListExceeded = "MAX_IN_LIST_EXCEEDED";
+    public const string UnresolvedParameter = "UNRESOLVED_PARAMETER";
 }
 
 public sealed record PushdownEvaluationResult(
@@ -40,7 +41,8 @@ public static class PushabilityEvaluator
         TableAccessDecision decision,
         DatabaseDialect dialect,
         VirtualFilterTablePlan? vfPlan,
-        PredicatePushdownOptions options)
+        PredicatePushdownOptions options,
+        IReadOnlyDictionary<string, object?>? clientParameters = null)
     {
         ArgumentNullException.ThrowIfNull(conjunct);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -71,41 +73,60 @@ public static class PushabilityEvaluator
         }
 
         // Evaluate AST expression safety
-        return ValidateExpression(conjunct.Predicate, metadata, dialect, options);
+        return ValidateExpression(conjunct.Predicate, metadata, dialect, options, clientParameters, negated: false);
     }
 
     private static PushdownEvaluationResult ValidateExpression(
         SqlNode node,
         TableMetadata metadata,
         DatabaseDialect dialect,
-        PredicatePushdownOptions options)
+        PredicatePushdownOptions options,
+        IReadOnlyDictionary<string, object?>? clientParameters,
+        bool negated)
     {
         switch (node)
         {
             case ColumnReference:
             case LiteralExpression:
-            case ParameterReference:
-            case NamedBindMarkerExpression:
                 return PushdownEvaluationResult.Allowed();
 
+            case ParameterReference:
+            case NamedBindMarkerExpression:
+                // SQLA-09: a parameter is pushed only when its value can be bound from the client values (never as NULL).
+                return PushdownParameterResolver.TryResolve(node, clientParameters, out _)
+                    ? PushdownEvaluationResult.Allowed()
+                    : PushdownEvaluationResult.Rejected(RejectionReason.UnresolvedParameter);
+
             case ParenthesizedExpression paren:
-                return ValidateExpression(paren.Expression, metadata, dialect, options);
+                return ValidateExpression(paren.Expression, metadata, dialect, options, clientParameters, negated);
 
             case BinaryExpression binary:
             {
                 if (binary.Operator is BinaryOperator.And or BinaryOperator.Or)
                 {
-                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options);
+                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options, clientParameters, negated);
                     if (!leftRes.IsPushable) return leftRes;
-                    return ValidateExpression(binary.Right, metadata, dialect, options);
+                    return ValidateExpression(binary.Right, metadata, dialect, options, clientParameters, negated);
                 }
 
                 if (binary.Operator is BinaryOperator.Equal or BinaryOperator.LessThan or
                     BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual)
                 {
-                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options);
+                    // SQLA-10: under NOT every comparison is a negative filter; a string range comparison is collation sensitive even without NOT.
+                    bool isRange = binary.Operator != BinaryOperator.Equal;
+                    if (negated || isRange)
+                    {
+                        var rangeColName = ExtractColumnName(binary.Left) ?? ExtractColumnName(binary.Right);
+                        var rangeCol = rangeColName != null ? metadata.GetColumn(rangeColName) : null;
+                        if (!PushabilityMatrix.IsNegativeFilterSafeForDialect(dialect, rangeCol))
+                        {
+                            return PushdownEvaluationResult.Rejected(RejectionReason.CollationRisk);
+                        }
+                    }
+
+                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options, clientParameters, negated);
                     if (!leftRes.IsPushable) return leftRes;
-                    return ValidateExpression(binary.Right, metadata, dialect, options);
+                    return ValidateExpression(binary.Right, metadata, dialect, options, clientParameters, negated);
                 }
 
                 if (binary.Operator is BinaryOperator.NotEqual)
@@ -117,9 +138,9 @@ public static class PushabilityEvaluator
                         return PushdownEvaluationResult.Rejected(RejectionReason.CollationRisk);
                     }
 
-                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options);
+                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options, clientParameters, negated);
                     if (!leftRes.IsPushable) return leftRes;
-                    return ValidateExpression(binary.Right, metadata, dialect, options);
+                    return ValidateExpression(binary.Right, metadata, dialect, options, clientParameters, negated);
                 }
 
                 return PushdownEvaluationResult.Rejected(RejectionReason.UnsupportedExpression);
@@ -127,9 +148,15 @@ public static class PushabilityEvaluator
 
             case UnaryExpression unary:
             {
-                if (unary.Operator is UnaryOperator.IsNull or UnaryOperator.IsNotNull or UnaryOperator.Not)
+                if (unary.Operator is UnaryOperator.IsNull or UnaryOperator.IsNotNull)
                 {
-                    return ValidateExpression(unary.Operand, metadata, dialect, options);
+                    return ValidateExpression(unary.Operand, metadata, dialect, options, clientParameters, negated);
+                }
+
+                if (unary.Operator is UnaryOperator.Not)
+                {
+                    // SQLA-10: NOT turns a CI-collation superset into a subset; every comparison below it is checked as a negative filter.
+                    return ValidateExpression(unary.Operand, metadata, dialect, options, clientParameters, negated: true);
                 }
 
                 return PushdownEvaluationResult.Rejected(RejectionReason.UnsupportedExpression);
@@ -147,7 +174,7 @@ public static class PushabilityEvaluator
                     return PushdownEvaluationResult.Rejected(RejectionReason.NullInNotInList);
                 }
 
-                if (inList.IsNotIn)
+                if (inList.IsNotIn || negated)
                 {
                     var colName = ExtractColumnName(inList.Operand);
                     var col = colName != null ? metadata.GetColumn(colName) : null;
@@ -157,12 +184,12 @@ public static class PushabilityEvaluator
                     }
                 }
 
-                var operandRes = ValidateExpression(inList.Operand, metadata, dialect, options);
+                var operandRes = ValidateExpression(inList.Operand, metadata, dialect, options, clientParameters, negated);
                 if (!operandRes.IsPushable) return operandRes;
 
                 foreach (var item in inList.Items)
                 {
-                    var itemRes = ValidateExpression(item, metadata, dialect, options);
+                    var itemRes = ValidateExpression(item, metadata, dialect, options, clientParameters, negated);
                     if (!itemRes.IsPushable) return itemRes;
                 }
 
@@ -171,7 +198,7 @@ public static class PushabilityEvaluator
 
             case BetweenExpression between:
             {
-                if (between.IsNotBetween)
+                // SQLA-10: BETWEEN is a pair of string range comparisons; it needs the same collation guarantee as a negative filter.
                 {
                     var colName = ExtractColumnName(between.Operand);
                     var col = colName != null ? metadata.GetColumn(colName) : null;
@@ -181,11 +208,11 @@ public static class PushabilityEvaluator
                     }
                 }
 
-                var opRes = ValidateExpression(between.Operand, metadata, dialect, options);
+                var opRes = ValidateExpression(between.Operand, metadata, dialect, options, clientParameters, negated);
                 if (!opRes.IsPushable) return opRes;
-                var lowRes = ValidateExpression(between.Lower, metadata, dialect, options);
+                var lowRes = ValidateExpression(between.Lower, metadata, dialect, options, clientParameters, negated);
                 if (!lowRes.IsPushable) return lowRes;
-                return ValidateExpression(between.Upper, metadata, dialect, options);
+                return ValidateExpression(between.Upper, metadata, dialect, options, clientParameters, negated);
             }
 
             case LikeExpression like:
@@ -195,7 +222,7 @@ public static class PushabilityEvaluator
                     return PushdownEvaluationResult.Rejected(RejectionReason.UnsupportedExpression);
                 }
 
-                if (like.IsNotLike)
+                if (like.IsNotLike || negated)
                 {
                     var colName = ExtractColumnName(like.Operand);
                     var col = colName != null ? metadata.GetColumn(colName) : null;
@@ -205,13 +232,13 @@ public static class PushabilityEvaluator
                     }
                 }
 
-                var opRes = ValidateExpression(like.Operand, metadata, dialect, options);
+                var opRes = ValidateExpression(like.Operand, metadata, dialect, options, clientParameters, negated);
                 if (!opRes.IsPushable) return opRes;
-                var patRes = ValidateExpression(like.Pattern, metadata, dialect, options);
+                var patRes = ValidateExpression(like.Pattern, metadata, dialect, options, clientParameters, negated);
                 if (!patRes.IsPushable) return patRes;
                 if (like.Escape != null)
                 {
-                    return ValidateExpression(like.Escape, metadata, dialect, options);
+                    return ValidateExpression(like.Escape, metadata, dialect, options, clientParameters, negated);
                 }
 
                 return PushdownEvaluationResult.Allowed();

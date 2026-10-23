@@ -87,13 +87,14 @@ public sealed class PathLookupConnectorTests
     }
 
     [Fact]
-    public async Task UpstreamRepeatsRows_AreDeduplicatedByTheKey()
+    public async Task UpstreamRepeatsRows_AreDeduplicatedByFullRowIdentity_DifferentRowsOfTheKeyAreKept()
     {
+        // VF-07: a key may legitimately match several rows (a full fetch returns all of them); only identical repeats collapse.
         var (connector, _) = Build(Lookup(values: ["2"]), _ => [AllRows[1], AllRows[1], Row(("id", (object?)2L), ("name", "other"))]);
 
         var rows = await ReadAsync(connector);
 
-        rows.ShouldHaveSingleItem()["name"].ShouldBe("n2");
+        rows.Select(r => r["name"]).ShouldBe(["n2", "other"]);
     }
 
     [Theory]

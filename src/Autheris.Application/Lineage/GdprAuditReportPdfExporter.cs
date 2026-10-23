@@ -1,169 +1,175 @@
 namespace Autheris.Application.Lineage;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
+using System.Linq;
 using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Standardized Audit & PDF Exporter for External Data Protection Officers (Datenschutzbeauftragte / DSB).
-/// Generates compliant, sealed PDF 1.4 documents containing Art. 15 Abs. 1 Bst. c recipient disclosures,
-/// sensitivity categories, masking rules, and cryptographic SHA-256 integrity seal.
+/// Audit and PDF exporter for external Data Protection Officers (Datenschutzbeauftragte / DSB).
+/// Generates PDF 1.4 documents containing the Art. 15 Abs. 1 Bst. c recipient disclosures, sensitivity categories and masking rules.
+/// MISC-12: the rendered text model is the single source for both the document and the seal; the seal is a keyed signature from
+/// <see cref="IAuditAnchorSigner"/> over exactly that text. Without a signer the document carries no seal and no tamper-evidence claim.
+/// All recipients are rendered (paginated), and an incomplete report says so.
 /// </summary>
-public sealed class GdprAuditReportPdfExporter : IGdprAuditReportExporter
+public sealed class GdprAuditReportPdfExporter(IAuditAnchorSigner? signer = null) : IGdprAuditReportExporter
 {
+    /// <summary>Header and PDF prefix of a keyed seal value.</summary>
+    public const string SealPrefix = "hmac-sha256:";
+
+    private const int LinesPerPage = 48;
+
     public GdprAuditExportResult ExportReportToPdf(GdprDisclosureReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
 
-        var auditText = ExportReportToAuditDocument(report);
-        var sealHash = ComputeSha256(auditText);
-
-        var pdfBytes = GeneratePdfDocument(report, sealHash);
-        var fileName = $"GDPR_Art15_Disclosure_{report.SubjectSid ?? "ALL"}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.pdf";
+        var lines = BuildLines(report);
+        var seal = Seal(lines);
+        var pdfBytes = GeneratePdfDocument(lines, seal);
+        var fileName = $"GDPR_Art15_Disclosure_{SanitizeFileName(report.SubjectSid ?? "ALL")}_{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.pdf";
 
         return new GdprAuditExportResult(
             pdfBytes,
             "application/pdf",
             fileName,
-            sealHash,
+            seal,
             DateTimeOffset.UtcNow);
     }
 
     public string ExportReportToAuditDocument(GdprDisclosureReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
-
-        var sb = new StringBuilder();
-        sb.AppendLine("================================================================================");
-        sb.AppendLine("              AUTHERIS - GDPR ARTICLE 15 AUDIT DISCLOSURE REPORT             ");
-        sb.AppendLine("================================================================================");
-        sb.AppendLine($"Generated At:            {report.GeneratedAt:yyyy-MM-dd HH:mm:ss 'UTC'}");
-        sb.AppendLine($"Target Table:            {report.TargetTable ?? "ALL TABLES"}");
-        sb.AppendLine($"Data Subject SID:        {report.SubjectSid ?? "ALL SUBJECTS"}");
-        sb.AppendLine($"Time Window:             {report.TimeWindowDays} days");
-        sb.AppendLine($"Total Access Events:     {report.TotalAccessEvents}");
-        sb.AppendLine($"Legal Basis Notice:      {report.LegalBasisNotice}");
-        sb.AppendLine();
-        sb.AppendLine("DATA SENSITIVITY CLASSIFICATIONS (Art. 9 DSGVO):");
-        foreach (var category in report.SensitivityCategories)
-        {
-            sb.AppendLine($"  - {category}");
-        }
-        sb.AppendLine();
-        sb.AppendLine("DISCLOSED RECIPIENTS (Art. 15 Abs. 1 Bst. c DSGVO):");
-        sb.AppendLine("--------------------------------------------------------------------------------");
-        sb.AppendLine(string.Format("{0,-20} | {1,-18} | {2,8} | {3,-20}", "Recipient SID", "Category", "Queries", "Masking Rule"));
-        sb.AppendLine("--------------------------------------------------------------------------------");
-        foreach (var recipient in report.DisclosedRecipients)
-        {
-            sb.AppendLine(string.Format("{0,-20} | {1,-18} | {2,8} | {3,-20}",
-                recipient.RecipientSid,
-                recipient.RecipientCategory,
-                recipient.TotalQueries,
-                recipient.MaskingRuleApplied ?? "None (Clear)"));
-        }
-        sb.AppendLine("--------------------------------------------------------------------------------");
-
-        return sb.ToString();
+        return RenderText(BuildLines(report));
     }
 
-    private static byte[] GeneratePdfDocument(GdprDisclosureReport report, string sealHash)
+    /// <summary>The single rendered text model (one entry per line); the document and the seal are both derived from it.</summary>
+    private static List<string> BuildLines(GdprDisclosureReport report)
     {
+        var lines = new List<string>
+        {
+            "AUTHERIS - GDPR ARTICLE 15 AUDIT DISCLOSURE REPORT",
+            $"Generated At: {report.GeneratedAt:yyyy-MM-dd HH:mm:ss 'UTC'}",
+            $"Target Table: {report.TargetTable ?? "ALL TABLES"}",
+            $"Data Subject SID: {report.SubjectSid ?? "ALL SUBJECTS"}",
+            $"Time Window: {report.TimeWindowDays} days",
+            $"Total Access Events: {report.TotalAccessEvents}",
+            $"Evidence Level: {report.EvidenceLevel}",
+            $"Complete: {(report.IsComplete ? "yes" : "NO")}",
+            $"Legal Basis Notice: {report.LegalBasisNotice}"
+        };
+
+        if (!report.IsComplete)
+        {
+            lines.Add("INCOMPLETE REPORT: the evidence below is not complete.");
+            foreach (var reason in report.IncompletenessReasons ?? [])
+            {
+                lines.Add($"  - {reason}");
+            }
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("DATA SENSITIVITY CLASSIFICATIONS (Art. 9 DSGVO):");
+        lines.AddRange(report.SensitivityCategories.Select(c => $"  - {c}"));
+        lines.Add(string.Empty);
+        lines.Add("POTENTIAL RECIPIENTS (accessed tables containing the subject's data; Art. 15 Abs. 1 Bst. c DSGVO):");
+        lines.Add("Recipient SID | Category | Queries | Masking Rule");
+        foreach (var r in report.DisclosedRecipients)
+        {
+            lines.Add($"{r.RecipientSid} | {r.RecipientCategory} | {r.TotalQueries} | {r.MaskingRuleApplied ?? "None (Clear)"}");
+        }
+
+        return lines;
+    }
+
+    private static string RenderText(IReadOnlyList<string> lines) => string.Join("\n", lines) + "\n";
+
+    private string? Seal(IReadOnlyList<string> lines)
+    {
+        if (signer == null)
+        {
+            return null;
+        }
+
+        return SealPrefix + signer.Sign(Encoding.UTF8.GetBytes(RenderText(lines)));
+    }
+
+    private static byte[] GeneratePdfDocument(IReadOnlyList<string> lines, string? seal)
+    {
+        var footer = seal == null
+            ? new[] { "Unsigned document: no integrity seal (no audit signer configured)." }
+            : new[] { $"Audit Seal ({SealPrefix.TrimEnd(':')}): {seal}", "Signed by the Autheris audit signer over the text of this report." };
+
+        var allLines = lines.Concat([string.Empty]).Concat(footer).ToList();
+        var pageLines = allLines.Chunk(LinesPerPage).ToList();
+        if (pageLines.Count == 0)
+        {
+            pageLines.Add([]);
+        }
+
+        // Object layout: 1 Catalog, 2 Pages, 3 Font, then (Page, Contents) per page.
+        var pageCount = pageLines.Count;
+        var objectCount = 3 + (pageCount * 2);
+        var offsets = new long[objectCount + 1];
+
         using var ms = new MemoryStream();
         using var writer = new StreamWriter(ms, Encoding.Latin1);
 
-        // Build PDF text stream
-        var contentSb = new StringBuilder();
-        contentSb.AppendLine("BT");
-        contentSb.AppendLine("/F1 16 Tf");
-        contentSb.AppendLine("50 780 Td");
-        contentSb.AppendLine("(AUTHERIS - GDPR ARTICLE 15 AUDIT DISCLOSURE REPORT) Tj");
-        contentSb.AppendLine("/F1 10 Tf");
-        contentSb.AppendLine("0 -25 Td");
-        contentSb.AppendLine($"(Generated: {report.GeneratedAt:yyyy-MM-dd HH:mm:ss 'UTC'} | Window: {report.TimeWindowDays} days) Tj");
-        contentSb.AppendLine("0 -15 Td");
-        contentSb.AppendLine($"(Subject: {SanitizePdfText(report.SubjectSid ?? "ALL")} | Target Table: {SanitizePdfText(report.TargetTable ?? "ALL")}) Tj");
-        contentSb.AppendLine("0 -15 Td");
-        contentSb.AppendLine($"(Total Access Events Evaluated: {report.TotalAccessEvents}) Tj");
-        contentSb.AppendLine("0 -15 Td");
-        contentSb.AppendLine($"(Legal Basis: {SanitizePdfText(report.LegalBasisNotice)}) Tj");
-
-        contentSb.AppendLine("0 -25 Td");
-        contentSb.AppendLine("/F1 12 Tf");
-        contentSb.AppendLine("(Sensitivity Classifications:) Tj");
-        contentSb.AppendLine("/F1 9 Tf");
-        foreach (var cat in report.SensitivityCategories)
+        void Write(string text)
         {
-            contentSb.AppendLine("0 -13 Td");
-            contentSb.AppendLine($"(- {SanitizePdfText(cat)}) Tj");
+            writer.Write(text);
+            writer.Flush();
         }
 
-        contentSb.AppendLine("0 -25 Td");
-        contentSb.AppendLine("/F1 12 Tf");
-        contentSb.AppendLine("(Disclosed Third-Party Recipients:) Tj");
-        contentSb.AppendLine("/F1 9 Tf");
-        contentSb.AppendLine("0 -15 Td");
-        contentSb.AppendLine("(Recipient SID | Category | Queries | Applied Masking) Tj");
+        Write("%PDF-1.4\n");
 
-        int count = 0;
-        foreach (var r in report.DisclosedRecipients)
-        {
-            if (++count > 25) break; // Keep within single page layout
-            contentSb.AppendLine("0 -13 Td");
-            var line = $"{SanitizePdfText(r.RecipientSid)} | {r.RecipientCategory} | {r.TotalQueries} | {SanitizePdfText(r.MaskingRuleApplied ?? "None")}";
-            contentSb.AppendLine($"({line}) Tj");
-        }
-
-        contentSb.AppendLine("0 -35 Td");
-        contentSb.AppendLine("/F1 8 Tf");
-        contentSb.AppendLine($"(SHA-256 Audit Seal: {sealHash}) Tj");
-        contentSb.AppendLine("0 -12 Td");
-        contentSb.AppendLine("(Verified Tamper-Evident by Autheris Governance Engine) Tj");
-        contentSb.AppendLine("ET");
-
-        var contentStream = Encoding.Latin1.GetBytes(contentSb.ToString());
-
-        // Construct standard PDF 1.4 vector structure
-        var offsets = new long[5];
-        writer.Write("%PDF-1.4\n");
-        writer.Flush();
-
-        // 1: Catalog
         offsets[1] = ms.Position;
-        writer.Write("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-        writer.Flush();
+        Write("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
 
-        // 2: Pages
         offsets[2] = ms.Position;
-        writer.Write("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-        writer.Flush();
+        var kids = string.Join(" ", Enumerable.Range(0, pageCount).Select(i => $"{4 + (i * 2)} 0 R"));
+        Write($"2 0 obj\n<< /Type /Pages /Kids [{kids}] /Count {pageCount} >>\nendobj\n");
 
-        // 3: Page
         offsets[3] = ms.Position;
-        writer.Write("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>\nendobj\n");
-        writer.Flush();
+        Write("3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
-        // 4: Contents
-        offsets[4] = ms.Position;
-        writer.Write($"4 0 obj\n<< /Length {contentStream.Length} >>\nstream\n");
-        writer.Flush();
-        ms.Write(contentStream, 0, contentStream.Length);
-        writer.Write("\nendstream\nendobj\n");
-        writer.Flush();
-
-        // Cross-reference table
-        var xrefOffset = ms.Position;
-        writer.Write("xref\n0 5\n0000000000 65535 f \n");
-        for (int i = 1; i <= 4; i++)
+        for (var i = 0; i < pageCount; i++)
         {
-            writer.Write($"{offsets[i]:D10} 00000 n \n");
-        }
-        writer.Write($"trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xrefOffset}\n%%EOF\n");
-        writer.Flush();
+            var pageObject = 4 + (i * 2);
+            var contentObject = pageObject + 1;
 
+            var content = new StringBuilder();
+            content.AppendLine("BT");
+            content.AppendLine("/F1 9 Tf");
+            content.AppendLine("11 TL");
+            content.AppendLine("40 800 Td");
+            foreach (var line in pageLines[i])
+            {
+                content.AppendLine($"({SanitizePdfText(line)}) '");
+            }
+
+            content.AppendLine("ET");
+            var contentBytes = Encoding.Latin1.GetBytes(content.ToString());
+
+            offsets[pageObject] = ms.Position;
+            Write($"{pageObject} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Contents {contentObject} 0 R /Resources << /Font << /F1 3 0 R >> >> >>\nendobj\n");
+
+            offsets[contentObject] = ms.Position;
+            Write($"{contentObject} 0 obj\n<< /Length {contentBytes.Length} >>\nstream\n");
+            ms.Write(contentBytes, 0, contentBytes.Length);
+            Write("\nendstream\nendobj\n");
+        }
+
+        var xrefOffset = ms.Position;
+        Write($"xref\n0 {objectCount + 1}\n0000000000 65535 f \n");
+        for (var i = 1; i <= objectCount; i++)
+        {
+            Write($"{offsets[i]:D10} 00000 n \n");
+        }
+
+        Write($"trailer\n<< /Size {objectCount + 1} /Root 1 0 R >>\nstartxref\n{xrefOffset}\n%%EOF\n");
         return ms.ToArray();
     }
 
@@ -177,11 +183,6 @@ public sealed class GdprAuditReportPdfExporter : IGdprAuditReportExporter
             .Replace("\n", " ");
     }
 
-
-    private static string ComputeSha256(string content)
-    {
-        var bytes = Encoding.UTF8.GetBytes(content);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexStringLower(hash);
-    }
+    private static string SanitizeFileName(string value) =>
+        new(value.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray());
 }

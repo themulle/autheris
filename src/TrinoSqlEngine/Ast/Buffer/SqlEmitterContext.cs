@@ -74,6 +74,9 @@ public sealed class SqlEmitterContext
     /// <summary>True when values are collected as <see cref="BoundParameter"/> (compiler path).</summary>
     public bool IsBound => _bound != null;
 
+    /// <summary>True while the pattern of a policy LIKE is emitted: declared policy values are bound escaped (SQLE-09).</summary>
+    public bool EmittingLikePattern { get; set; }
+
     public SqlEmitterContext(TargetSqlDialect dialect, int maxParameterBudget = int.MaxValue)
     {
         Dialect = dialect;
@@ -164,23 +167,11 @@ public sealed class SqlEmitterContext
                 throw new SecurityException("A LIKE pattern parameter must be a string.");
             }
 
-            return Bind(new DedupKey(DedupKind.PolicyLike, 0, 0, parameter.Name, parameter.ColumnType, 0, null), EscapeLike(text), policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
+            return Bind(new DedupKey(DedupKind.PolicyLike, 0, 0, parameter.Name, parameter.ColumnType, 0, null), LikePatternEscaper.Escape(text), policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType, escapeLikePattern: true);
         }
 
         // The compared column's type is part of the identity: one tenant value is bound once per distinct column type.
         return Bind(new DedupKey(DedupKind.Policy, 0, 0, parameter.Name, parameter.ColumnType, 0, null), policyValue.Value, policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
-    }
-
-    private static string EscapeLike(string text)
-    {
-        var sb = new System.Text.StringBuilder(text.Length + 4);
-        foreach (char c in text)
-        {
-            if (c is '\\' or '%' or '_' or '[') sb.Append('\\');
-            sb.Append(c);
-        }
-
-        return sb.ToString();
     }
 
     /// <summary>Binds a client named parameter; the binder resolves the value per request.</summary>
@@ -233,7 +224,7 @@ public sealed class SqlEmitterContext
     }
 
     private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null, int? listIndex = null, int? listCount = null,
-        bool zoneArgument = false)
+        bool zoneArgument = false, bool escapeLikePattern = false)
     {
         if (_bound is null || _dedup is null || Capabilities is null)
         {
@@ -252,7 +243,7 @@ public sealed class SqlEmitterContext
         }
 
         var (marker, name) = MarkerAndName(Capabilities.MarkerStyle, ordinal);
-        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType, listIndex, listCount, zoneArgument));
+        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType, listIndex, listCount, zoneArgument, escapeLikePattern));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;
         return marker;

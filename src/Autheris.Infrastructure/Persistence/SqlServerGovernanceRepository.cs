@@ -18,7 +18,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     private readonly string _connectionString;
     private readonly IEpochValidationService _epochValidationService;
     // WP-PF-06: bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
-    private readonly Autheris.Application.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    private readonly Autheris.Application.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
@@ -50,6 +50,8 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     private readonly ICallerContextProvider? _callerContextProvider;
     private readonly IEventBus? _eventBus;
 
+    private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
+
     public SqlServerGovernanceRepository(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
@@ -58,8 +60,10 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
         IAuditChainAnchorStore auditAnchorStore,
         ICallerContextProvider callerContextProvider,
         ILogger<SqlServerGovernanceRepository>? logger = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);

@@ -95,6 +95,11 @@ public static class GatewayExecutionServiceExtensions
             auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
+        // SQLA-06 follow-up (SQLA06F-C8): the secured-source builder is registered wherever the tree service is; without it a subquery policy is denied.
+        services.AddSingleton<TreeSecuredSourceBuilder>(sp => new TreeSecuredSourceBuilder(
+            sp.GetService<Autheris.Application.Sql.Policy.GovernancePolicyFactory>(),
+            sp.GetService<TrinoSqlEngine.ISqlEngine>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<TreeSecuredSourceBuilder>>()));
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
 

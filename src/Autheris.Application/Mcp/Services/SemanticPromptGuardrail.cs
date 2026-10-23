@@ -22,7 +22,7 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
 
     // 1. Direct Instruction Overrides
     [GeneratedRegex(
-        @"(?:ignore|disregard|forget|bypass|override)\s+(?:all\s+)?(?:previous|prior|preceding|system|all)\s+(?:instructions|directives|prompts|rules|guidelines|guardrails)|(?:output|print|reveal|show|dump)\s+(?:the\s+)?(?:system\s+prompt|initial\s+instructions)",
+        @"(?:ignore|disregard|forget|bypass|override)\s+(?:all\s+)?(?:(?:the|your|any|of)\s+)?(?:previous|prior|preceding|above|earlier|system|all)\s+(?:instructions?|directives?|prompts?|rules?|guidelines?|guardrails?)|(?:output|print|reveal|show|dump)\s+(?:the\s+)?(?:system\s+prompt|initial\s+instructions)",
         RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 200)]
     private static partial Regex DirectInstructionOverrideRegex();
@@ -50,7 +50,7 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
 
     // 5. Potential Base64 Segments
     [GeneratedRegex(
-        @"(?:[A-Za-z0-9+/]{4}){6,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?",
+        @"(?:[A-Za-z0-9+/_-]{4}){6,}(?:[A-Za-z0-9+/_-]{2}==|[A-Za-z0-9+/_-]{3}=)?",
         RegexOptions.None,
         matchTimeoutMilliseconds: 200)]
     private static partial Regex Base64SegmentRegex();
@@ -84,7 +84,7 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
         return PromptGuardrailEvaluation.Allow();
     }
 
-    private PromptGuardrailEvaluation EvaluateText(string toolName, string text)
+    private PromptGuardrailEvaluation EvaluateText(string toolName, string text, bool forOutput = false)
     {
         // Direct Text Checks
         if (DirectInstructionOverrideRegex().IsMatch(text))
@@ -105,14 +105,15 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
             return PromptGuardrailEvaluation.Deny("InstructionDelimiterEscape", "Prompt contains adversarial prompt boundary markers or synthetic delimiter tokens.");
         }
 
-        if (ExfiltrationCoercionRegex().IsMatch(text))
+        // The coercion words (leak, drop table, ...) are ordinary vocabulary in catalog descriptions and runbooks, so they only gate input.
+        if (!forOutput && ExfiltrationCoercionRegex().IsMatch(text))
         {
             _logger?.LogWarning("Coercive exfiltration pattern detected in tool '{ToolName}'.", toolName);
             return PromptGuardrailEvaluation.Deny("PrivilegeCoercion", "Prompt contains malicious privilege elevation or exfiltration instruction.");
         }
 
         // Check for Base64 obfuscated injections
-        var base64Evaluation = CheckBase64Payloads(text);
+        var base64Evaluation = CheckBase64Payloads(text, forOutput);
         if (!base64Evaluation.IsAllowed)
         {
             _logger?.LogWarning("Obfuscated base64 prompt injection detected in tool '{ToolName}': {Reason}", toolName, base64Evaluation.Reason);
@@ -120,6 +121,151 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
         }
 
         return PromptGuardrailEvaluation.Allow();
+    }
+
+    /// <summary>Marker that replaces a result value suspected to carry a prompt injection.</summary>
+    internal const string WithheldMarker = "[content withheld: suspected prompt injection]";
+
+    private const string OversizeMarker = "[content withheld: output too large to inspect]";
+
+    /// <summary>Upper bound of the characters inspected per result (MCP-09); values beyond it are withheld, never passed uninspected.</summary>
+    internal const int MaxInspectedChars = 256 * 1024;
+
+    public PromptGuardrailEvaluation EvaluateToolOutput(string toolName, string resultJson)
+    {
+        SanitizeToolOutput(toolName, resultJson, out var count, out var attackType);
+        return count == 0
+            ? PromptGuardrailEvaluation.Allow()
+            : PromptGuardrailEvaluation.Deny(attackType ?? "OutputInjection", "Tool output contains a suspected prompt injection.");
+    }
+
+    public string SanitizeToolOutput(string toolName, string resultJson, out int withheldCount, out string? attackType)
+    {
+        withheldCount = 0;
+        attackType = null;
+        if (string.IsNullOrEmpty(resultJson))
+        {
+            return resultJson;
+        }
+
+        string? firstAttack = null;
+        var withheld = 0;
+        var inspected = 0;
+
+        string Inspect(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+
+            inspected += value.Length;
+            if (inspected > MaxInspectedChars)
+            {
+                withheld++;
+                return OversizeMarker;
+            }
+
+            var evaluation = EvaluateText(toolName, NormalizeForInspection(value), forOutput: true);
+            if (evaluation.IsAllowed)
+            {
+                return value;
+            }
+
+            withheld++;
+            firstAttack ??= evaluation.AttackType;
+            return WithheldMarker;
+        }
+
+        string result;
+        try
+        {
+            result = RewriteJsonStrings(resultJson, Inspect);
+        }
+        catch (JsonException)
+        {
+            // Not JSON (Markdown resources, plain text): inspect line by line, so only the offending lines are withheld.
+            // The failed JSON attempt may already have counted values; start over.
+            withheld = 0;
+            inspected = 0;
+            firstAttack = null;
+            result = RewriteLines(resultJson, Inspect);
+        }
+
+        withheldCount = withheld;
+        attackType = firstAttack;
+        return withheld == 0 ? resultJson : result;
+    }
+
+    private static string RewriteJsonStrings(string json, Func<string, string> inspect)
+    {
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Disallow, MaxDepth = 64 });
+        using var stream = new System.IO.MemoryStream(bytes.Length + 64);
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, SkipValidation = true }))
+        {
+            while (reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.StartObject:
+                        writer.WriteStartObject();
+                        break;
+                    case JsonTokenType.EndObject:
+                        writer.WriteEndObject();
+                        break;
+                    case JsonTokenType.StartArray:
+                        writer.WriteStartArray();
+                        break;
+                    case JsonTokenType.EndArray:
+                        writer.WriteEndArray();
+                        break;
+                    case JsonTokenType.PropertyName:
+                        writer.WritePropertyName(reader.GetString()!);
+                        break;
+                    case JsonTokenType.String:
+                        writer.WriteStringValue(inspect(reader.GetString() ?? string.Empty));
+                        break;
+                    case JsonTokenType.Number:
+                        writer.WriteRawValue(reader.ValueSpan, skipInputValidation: true);
+                        break;
+                    case JsonTokenType.True:
+                        writer.WriteBooleanValue(true);
+                        break;
+                    case JsonTokenType.False:
+                        writer.WriteBooleanValue(false);
+                        break;
+                    case JsonTokenType.Null:
+                        writer.WriteNullValue();
+                        break;
+                }
+            }
+        }
+
+        // A document that has trailing content or is incomplete throws JsonException in Read(); the caller falls back to line mode.
+        return Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+    }
+
+    private static string RewriteLines(string text, Func<string, string> inspect)
+    {
+        var sb = new StringBuilder(text.Length);
+        var start = 0;
+        while (start <= text.Length)
+        {
+            var end = text.IndexOf('\n', start);
+            var lineEnd = end < 0 ? text.Length : end;
+            var line = text.Substring(start, lineEnd - start);
+            sb.Append(inspect(line));
+            if (end < 0)
+            {
+                break;
+            }
+
+            sb.Append('\n');
+            start = end + 1;
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>
@@ -190,7 +336,7 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
             {
                 continue;
             }
-            sb.Append(c);
+            sb.Append(ConfusableFold.Fold(c));
         }
         return sb.ToString();
     }
@@ -203,42 +349,84 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
         || (c >= '\uFE00' && c <= '\uFE0F')
         || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format;
 
-    private static PromptGuardrailEvaluation CheckBase64Payloads(string text)
+    private static PromptGuardrailEvaluation CheckBase64Payloads(string text, bool forOutput)
     {
-        // Find potential base64 segments of length >= 24
+        // Find potential base64 segments of length >= 24 (standard and URL-safe alphabet).
         var matches = Base64SegmentRegex().Matches(text);
-        Span<byte> buffer = stackalloc byte[512];
         foreach (Match match in matches)
         {
-            var matchSpan = match.ValueSpan;
-            var maxByteCount = (matchSpan.Length * 3) / 4;
-            byte[]? rented = null;
-            Span<byte> dest = maxByteCount <= buffer.Length ? buffer : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
+            // URL-safe base64 uses '-' and '_'; map them to the standard alphabet before decoding.
+            var segment = match.Value;
+            if (segment.AsSpan().IndexOfAny('-', '_') >= 0)
+            {
+                segment = segment.Replace('-', '+').Replace('_', '/');
+            }
 
-            try
+            // A payload need not start at a 4-character boundary of the run (any prefix shifts the alignment): try all four offsets.
+            for (var offset = 0; offset < 4 && offset < segment.Length; offset++)
             {
-                if (Convert.TryFromBase64Chars(matchSpan, dest, out var bytesWritten) && bytesWritten >= 12)
+                var evaluation = DecodeAndCheck(segment.AsSpan(offset), forOutput);
+                if (!evaluation.IsAllowed)
                 {
-                    var decoded = NormalizeForInspection(Encoding.UTF8.GetString(dest[..bytesWritten]));
-                    if (DirectInstructionOverrideRegex().IsMatch(decoded) ||
-                        JailbreakPersonaRegex().IsMatch(decoded) ||
-                        InstructionDelimiterRegex().IsMatch(decoded) ||
-                        ExfiltrationCoercionRegex().IsMatch(decoded))
-                    {
-                        return PromptGuardrailEvaluation.Deny("Base64ObfuscatedInjection", $"Payload contains base64-obfuscated prompt injection directive: '{decoded[..Math.Min(40, decoded.Length)]}...'");
-                    }
+                    return evaluation;
                 }
             }
-            catch
+        }
+
+        return PromptGuardrailEvaluation.Allow();
+    }
+
+    private static PromptGuardrailEvaluation DecodeAndCheck(ReadOnlySpan<char> candidate, bool forOutput)
+    {
+        // Whole groups of four characters only; a trailing partial group is dropped.
+        var full = candidate.Length & ~3;
+        if (full < 24)
+        {
+            return PromptGuardrailEvaluation.Allow();
+        }
+
+        var slice = candidate[..full];
+        var evaluation = CheckSlice(slice, forOutput);
+        if (!evaluation.IsAllowed || slice[^1] != '=')
+        {
+            return evaluation;
+        }
+
+        // Padding that ended up inside a shifted slice is not valid: decode the slice without it, again in whole groups.
+        var trimmed = slice.TrimEnd('=');
+        trimmed = trimmed[..(trimmed.Length & ~3)];
+        return trimmed.Length < 24 ? PromptGuardrailEvaluation.Allow() : CheckSlice(trimmed, forOutput);
+    }
+
+    private static PromptGuardrailEvaluation CheckSlice(ReadOnlySpan<char> slice, bool forOutput)
+    {
+        var maxByteCount = (slice.Length * 3) / 4;
+        Span<byte> buffer = stackalloc byte[512];
+        byte[]? rented = null;
+        Span<byte> dest = maxByteCount <= buffer.Length ? buffer : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount));
+        try
+        {
+            if (Convert.TryFromBase64Chars(slice, dest, out var bytesWritten) && bytesWritten >= 12)
             {
-                // Not valid base64 or not UTF-8, ignore
-            }
-            finally
-            {
-                if (rented != null)
+                var decoded = NormalizeForInspection(Encoding.UTF8.GetString(dest[..bytesWritten]));
+                if (DirectInstructionOverrideRegex().IsMatch(decoded) ||
+                    JailbreakPersonaRegex().IsMatch(decoded) ||
+                    InstructionDelimiterRegex().IsMatch(decoded) ||
+                    (!forOutput && ExfiltrationCoercionRegex().IsMatch(decoded)))
                 {
-                    ArrayPool<byte>.Shared.Return(rented);
+                    return PromptGuardrailEvaluation.Deny("Base64ObfuscatedInjection", $"Payload contains base64-obfuscated prompt injection directive: '{decoded[..Math.Min(40, decoded.Length)]}...'");
                 }
+            }
+        }
+        catch
+        {
+            // Not valid base64 or not UTF-8, ignore
+        }
+        finally
+        {
+            if (rented != null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
             }
         }
 

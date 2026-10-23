@@ -46,6 +46,18 @@ public interface IConsentDecisionGuard
 /// </summary>
 public static class DecisionPerson
 {
+    private static bool IsClientCredentialsToken(ClaimsPrincipal principal)
+    {
+        var grantType = principal.FindFirst("gty")?.Value;
+        if (string.Equals(grantType, "client-credentials", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(grantType, "client_credentials", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return principal.FindFirst("preferred_username")?.Value?.StartsWith("service-account-", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
     private static readonly string[] PersonIdentifierClaimTypes =
     [
         ClaimTypes.PrimarySid,
@@ -72,6 +84,13 @@ public static class DecisionPerson
         }
 
         if (string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase))
+        {
+            return ConsentDecisionVerdict.Deny(ConsentDecisionDenialReasons.NotPerson);
+        }
+
+        // GOV-15: OIDC servers (Keycloak) put a human-looking preferred_username ("service-account-<client>") into client-credentials tokens
+        // without idtyp; such a token is an application, never a person.
+        if (IsClientCredentialsToken(principal))
         {
             return ConsentDecisionVerdict.Deny(ConsentDecisionDenialReasons.NotPerson);
         }

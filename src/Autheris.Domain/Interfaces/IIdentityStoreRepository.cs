@@ -18,7 +18,8 @@ public interface IIdentityStoreRepository
     Task<ScimGroup?> GetGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default);
     Task<ScimGroup?> GetGroupByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default);
     Task UpsertGroupAsync(ScimGroup group, TenantId tenantId, string realmId, CancellationToken ct = default);
-    Task DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default);
+    /// <summary>Deletes the group and its memberships atomically; returns the user keys that were members (for role cache invalidation).</summary>
+    Task<IReadOnlyList<string>> DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default);
     Task<IReadOnlyList<ScimGroup>> ListGroupsAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default);
 
     Task AddGroupMemberAsync(TenantId tenantId, string realmId, string groupId, string userKey, CancellationToken ct = default);

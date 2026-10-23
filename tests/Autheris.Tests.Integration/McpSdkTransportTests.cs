@@ -187,6 +187,8 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
                 b.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "false");
                 b.UseSetting("Gateway:Mcp:AllowAnonymousDiscovery", "false");
+                // MISC-05: Production fails closed without a container memory limit or an explicit OLAP budget (CI runners have no cgroup limit).
+                b.UseSetting("Gateway:DuckDbOlap:MemoryBudgetBytes", "2147483648");
                 b.ConfigureServices(services =>
                 {
                     services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(new ConnectionItemsStartupFilter());

@@ -87,40 +87,21 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             // SR-H-06: tenant/global data-source allowlists apply to every staged table before any read.
+            // SQLA-07: both the identifier domain and the effective source (catalog SourceName, mapped) must pass; the connection below uses the latter.
+            var webSqlOptions = _gatewayOptions.Value.WebSql ?? new WebSqlOptions();
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
-                _gatewayOptions.Value.WebSql ?? new WebSqlOptions(), tenantId,
+                webSqlOptions, tenantId,
                 req.Metadata.Identifier.Domain);
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
+                webSqlOptions, tenantId,
+                Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EffectiveDataSource(webSqlOptions, req.Metadata));
 
             if (req.Metadata.RequiredFilterColumns.Length > 0 || req.Metadata.RequiredFilterColumnGroups.Length > 0)
             {
-                bool IsSatisfied(string reqCol)
-                {
-                    if (req.Metadata.TenantColumnName != null &&
-                        string.Equals(req.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    if (req.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
-                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
-                    {
-                        return true;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(req.Decision.CombinedRowFilterSql) &&
-                        req.Decision.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    if (req.PushdownFilter != null &&
-                        req.PushdownFilter.ReferencedColumns.Any(c => string.Equals(c, reqCol, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return true;
-                    }
-
-                    return false;
-                }
+                // MISC-04: shared whole-identifier rule.
+                bool IsSatisfied(string reqCol) =>
+                    Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+                        reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ReferencedColumns, tenantColumnCounts: true);
 
                 if (req.Metadata.RequiredFilterColumnGroups.Length > 0)
                 {

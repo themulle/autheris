@@ -62,7 +62,7 @@ public sealed class LdapsRoleProvider : IRoleProvider
 
         if (_adapter == null)
         {
-            return ProviderRoleResult.Empty;
+            return ProviderRoleResult.FailedResult;
         }
 
         try
@@ -79,7 +79,7 @@ public sealed class LdapsRoleProvider : IRoleProvider
         catch (Exception)
         {
             // SEC-SC-12: Fail closed
-            return ProviderRoleResult.Empty;
+            return ProviderRoleResult.FailedResult;
         }
     }
 }

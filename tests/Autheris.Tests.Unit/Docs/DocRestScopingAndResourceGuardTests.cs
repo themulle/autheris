@@ -311,9 +311,9 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     {
         var guardrail = Substitute.For<IAiDataGuardrailService>();
         var compiler = Substitute.For<ISemanticMcpCompiler>();
-        compiler.GetSemanticResourcesAsync(Arg.Any<string?>(), Arg.Any<ClaimsPrincipal?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<McpResourceItem>>(
-                [new McpResourceItem("glossary://finance/mrr", "mrr", "Monthly recurring revenue", "text/markdown", "RAW contact jane@example.com")]));
+        compiler.ReadSemanticResourceAsync(Arg.Any<ClaimsPrincipal?>(), "glossary://finance/mrr", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<McpResourceItem?>(
+                new McpResourceItem("glossary://finance/mrr", "mrr", "Monthly recurring revenue", "text/markdown", "RAW contact jane@example.com")));
         var handler = new McpProtocolHandler(
             new McpSessionStore(NullLogger<McpSessionStore>.Instance),
             Substitute.For<IMcpToolRegistry>(),
@@ -410,6 +410,6 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
 
         await handler.HandleMessageAsync(sid, Read("glossary://finance/mrr"));
 
-        await compiler.DidNotReceive().GetSemanticResourcesAsync(Arg.Any<string?>(), Arg.Any<ClaimsPrincipal?>(), Arg.Any<CancellationToken>());
+        await compiler.DidNotReceive().ReadSemanticResourceAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 }

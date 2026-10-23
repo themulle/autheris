@@ -83,6 +83,7 @@ internal static class SecurityMutants
         m.Add(new SecurityMutant("allow-policy-column-assignment-in-update", "allow a policy-column assignment in UPDATE", "M-3, SEC-ADG-06", Relax(d => d with { RejectPolicyColumnAssignment = false })));
         m.Add(new SecurityMutant("accept-when-not-matched-by-source", "accept an unknown MERGE clause such as WHEN NOT MATCHED BY SOURCE", "M-3, SEC-ADG-08", Off(SecurityControl.MergeClauseClosedSet)));
         m.Add(new SecurityMutant("omit-policy-values-from-cache-rebind", "omit the tenant and policy values from the cache rebind", "M-3, M-8", Off(SecurityControl.CacheRebindPolicyValues)));
+        m.Add(new SecurityMutant("cache-rebind-raw-like-pattern", "bind the raw value of an escaped LIKE pattern slot on a cache hit", "SQLE-10", Off(SecurityControl.CacheRebindLikeEscape)));
         m.Add(new SecurityMutant("cte-case-insensitive-scope", "resolve a CTE case-insensitively against a quoted physical name", "M-3, INV-11", Off(SecurityControl.CteCaseInsensitiveScope)));
         m.Add(new SecurityMutant("accept-dollar-brace-in-databricks-identifier", "accept ${ in a Databricks identifier", "M-3, SEC-ADG-10", Off(SecurityControl.VariableSubstitution)));
         m.Add(new SecurityMutant("skip-execution-stack-guard", "skip the execution-stack guard", "M-3, SEC-ADG-05", Off(SecurityControl.ExecutionStackGuard)));

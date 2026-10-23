@@ -133,6 +133,37 @@ public sealed class McpDatasetCatalogScopeLevelTests
         Json(clear).ShouldContain("SENTINEL_ALLOWED");
     }
 
+    // MCP-06: a synthetic sample is audited as METADATA_SYNTHETIC_SAMPLE (metadata audit, no real rows involved).
+    [Fact]
+    public async Task SampleRows_SyntheticTrue_WritesMetadataSyntheticSampleAudit()
+    {
+        var audit = Substitute.For<IAuditLogRepository>();
+        var catalog = CreateCatalog(CreateTable(), [Allow(IdClear, GradeClear)], auditLogRepository: audit);
+
+        var sample = await catalog.SampleRowsAsync(WithScopes(), Dataset, count: 3, synthetic: true);
+
+        sample.IsSynthetic.ShouldBeTrue();
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == Autheris.Domain.Audit.AuditEventTypes.MetadataSyntheticSample &&
+                e.Decision == "ALLOW" &&
+                e.Query != null && e.Query.Contains("synthetic=true")),
+            Arg.Any<CancellationToken>());
+    }
+
+    // MCP-06: a tier-Full dataset released to viewers without any consent never yields real mask values in synthetic rows.
+    [Fact]
+    public async Task SampleRowsSynthetic_ReleasedFullViewerWithoutConsent_NoRealMaskValues()
+    {
+        var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true, gradeSensitive: true);
+        var catalog = CreateCatalog(table, []);
+
+        var sample = await catalog.SampleRowsAsync(WithScopes(), Dataset, count: 5, synthetic: true);
+
+        sample.IsSynthetic.ShouldBeTrue();
+        Json(sample).ShouldNotContain("SENTINEL_");
+    }
+
     // T-10 (guard): the not-granted baseline of ReleaseProfileToCatalogViewers stays.
     [Fact]
     public async Task Describe_NotGranted_ReleaseProfile_StillShowsBaselineProfile_SensitiveStaysMasked()
@@ -377,6 +408,18 @@ public sealed class McpDatasetCatalogScopeLevelTests
 
         var sensitive = CreateCatalog(CreateTable(gradeSensitive: true), [], gatewayOptions: bypass);
         ShouldShowNoValues(await DescribeAsync(sensitive, anonymous));
+    }
+
+    // MCP-17: the bypass path must not serve inactive (quarantined) tables.
+    [Fact]
+    public async Task Describe_McpAuthBypass_InactiveTable_IsNotFound()
+    {
+        var bypass = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
+        var anonymous = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
+        var table = CreateTable();
+        var catalog = CreateCatalog(table with { Table = table.Table with { IsActive = false } }, [], gatewayOptions: bypass);
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => DescribeAsync(catalog, anonymous));
     }
 
     // ST-11: access profile Strict is not modelled; the catalog reports Mask (no values) for a sensitive column.

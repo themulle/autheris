@@ -285,7 +285,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
     }
 
     [Fact]
-    public async Task CrossSourceFilterAndSort_EnforcesMaxFilterKeySetAndRejectsCrossSourceSort()
+    public async Task CrossSourceSort_IsRejected()
     {
         // Arrange
         var ordersMeta = CreateOrdersTable();
@@ -324,7 +324,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             rowReader,
             new SimpleMaskingProvider(),
             new FakeAuditLogRepository(),
-            options: Options.Create(new CrossSourceRelationOptions { MaxCrossSourceFilterKeys = 2 }));
+            options: Options.Create(new CrossSourceRelationOptions()));
 
         var relation = new TableRelation
         {
@@ -336,14 +336,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             AllowCrossDataSource = true
         };
 
-        // 1. Filter matching 3 keys when MaxCrossSourceFilterKeys = 2 fails closed with CROSS_SOURCE_FILTER_KEY_SET_EXCEEDED
-        var exceedAct = () => resolver.ResolveCrossSourceFilterKeysAsync(
-            new CrossSourceFilterPushdownRequest(relation, "region = 'EU'", ["region"], CreatePrincipal(), DefaultTenant));
-
-        var exceedEx = await exceedAct.Should().ThrowAsync<CrossSourceRelationException>();
-        exceedEx.Which.ErrorCode.Should().Be(CrossSourceRelationErrorCodes.CrossSourceFilterKeySetExceeded);
-
-        // 2. Sorting parent by cross-source relation fails with CROSS_SOURCE_SORT_NOT_SUPPORTED
+        // Sorting parent by cross-source relation fails with CROSS_SOURCE_SORT_NOT_SUPPORTED
         var sortAct = () => resolver.ResolveRelationAsync(
             new CrossSourceRelationRequest(
                 relation,
@@ -463,8 +456,8 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
         // Changes between v10 and v15:
         // - id=1: Inserted in EU (matches RLS) -> should be in Upserted (with masked email)
         // - id=2: Updated from region='EU' to region='US' (RLS-exit transition!) -> should be in Removed!
-        // - id=3: Physically deleted, AND caller passes id=3 in KnownKeys -> should be in Removed!
-        // - id=99: Physically deleted foreign row (not in KnownKeys, no pre-image) -> must NOT be leaked under KnownKeysOnly!
+        // - id=3: Physically deleted with a pre-image the caller could see (and listed in KnownKeys) -> should be in Removed!
+        // - id=99: Physically deleted foreign row (no pre-image) -> must NOT be leaked (VF-11: knownKeys never authorize, scoped tables need a pre-image)!
         versionStore.RecordChange(
             customersKnownOnly.Identifier,
             new SourceChangeRecord(
@@ -485,7 +478,8 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
             new SourceChangeRecord(
                 new Dictionary<string, object?> { ["id"] = 3 },
                 CdcOperation.Delete,
-                ChangeVersion: 13L));
+                ChangeVersion: 13L,
+                PreImage: new Dictionary<string, object?> { ["id"] = 3, ["region"] = "EU", ["tenant_id"] = "tenant-a" }));
 
         versionStore.RecordChange(
             customersKnownOnly.Identifier,
@@ -523,7 +517,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
         deltaKnownOnly.Upserted[0]["email"].Should().Be("***@***", "masked columns must remain masked in Upserted");
 
         var removedIdsKnownOnly = deltaKnownOnly.Removed.Select(r => Convert.ToInt32(r["id"])).ToList();
-        removedIdsKnownOnly.Should().BeEquivalentTo([2, 3], "id=2 (RLS-exit) and id=3 (in KnownKeys) are returned, while foreign deleted key id=99 is not leaked");
+        removedIdsKnownOnly.Should().BeEquivalentTo([2, 3], "id=2 (RLS-exit) and id=3 (visible pre-image, in KnownKeys) are returned, while foreign deleted key id=99 is not leaked");
 
         // Act 2: Opt-in AllDeletedKeys policy on the table
         var customersAllDeleted = CreateCustomersTable(DeletedKeyPolicy.AllDeletedKeys);
@@ -538,7 +532,7 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
                 KnownKeys: null));
 
         var removedIdsAll = deltaAllDeleted.Removed.Select(r => Convert.ToInt32(r["id"])).ToList();
-        removedIdsAll.Should().BeEquivalentTo([2, 3, 99], "under DeletedKeyPolicy.AllDeletedKeys, all deleted/RLS-exited keys are disclosed");
+        removedIdsAll.Should().BeEquivalentTo([2, 3], "on a scoped table AllDeletedKeys never discloses a key without a visible pre-image (VF-11)");
     }
 
     [Fact]
@@ -712,6 +706,83 @@ public sealed class CrossSourceRelationsAndChangesSinceTests
 
         var ex = await act.Should().ThrowAsync<CrossSourceRelationException>();
         ex.Which.ErrorCode.Should().Be(CrossSourceRelationErrorCodes.CrossSourceRelationKeyNotClear);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ResolveRelation_ChildWithVirtualFilter_Forbidden()
+    {
+        // VF-02: a Virtual Filter is a subquery; the in-memory evaluation cannot enforce it, so the child read is refused.
+        var (resolver, relation, customers, pdp) = CreateTenantedResolver(
+        [
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "Alice", ["tenant_id"] = "tenant-a" }
+        ]);
+        pdp.SetDecision(customers.Identifier, TableAccessDecision.Allowed(
+            customers.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true) with { MandatoryRowPredicateSql = "EXISTS (SELECT 1)", AppliedVirtualFilters = ["vf1"] });
+        var parentRows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["customer_id"] = 10 } };
+
+        var act = () => resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        await act.Should().ThrowAsync<GatewayForbiddenException>();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ResolveRelation_ChildRowWithNullOrOtherTenant_Dropped()
+    {
+        // VF-03: a row without a tenant value (NULL) or with another tenant never attaches.
+        var (resolver, relation, _, _) = CreateTenantedResolver(
+        [
+            new Dictionary<string, object?> { ["id"] = 10, ["name"] = "NullTenant", ["tenant_id"] = null },
+            new Dictionary<string, object?> { ["id"] = 20, ["name"] = "CaseTenant", ["tenant_id"] = "TENANT-A" },
+            new Dictionary<string, object?> { ["id"] = 30, ["name"] = "Own", ["tenant_id"] = "tenant-a" }
+        ]);
+        var parentRows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["customer_id"] = 10 },
+            new Dictionary<string, object?> { ["customer_id"] = 20 },
+            new Dictionary<string, object?> { ["customer_id"] = 30 }
+        };
+
+        var result = await resolver.ResolveRelationAsync(new CrossSourceRelationRequest(relation, parentRows, CreatePrincipal(), DefaultTenant));
+
+        result.ManyToOneByParentIndex[0].Should().BeNull();
+        result.ManyToOneByParentIndex[1].Should().BeNull();
+        result.ManyToOneByParentIndex[2]!["name"].Should().Be("Own");
+    }
+
+    private static (CrossSourceRelationResolver Resolver, TableRelation Relation, TableMetadata Customers, FakePolicyDecisionPoint Pdp) CreateTenantedResolver(
+        IEnumerable<IReadOnlyDictionary<string, object?>> customerRows)
+    {
+        var orders = CreateOrdersTable();
+        var customers = CreateCustomersTable();
+        var pdp = new FakePolicyDecisionPoint();
+        pdp.SetDecision(orders.Identifier, TableAccessDecision.Allowed(
+            orders.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["order_id"] = ColumnAccessLevel.Clear, ["customer_id"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true));
+        pdp.SetDecision(customers.Identifier, TableAccessDecision.Allowed(
+            customers.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["name"] = ColumnAccessLevel.Clear },
+            hasUnconstrainedColumnAllow: true));
+        var rowReader = new InMemoryCrossSourceRowReader();
+        rowReader.SeedTable(customers.Identifier, customerRows);
+        var resolver = new CrossSourceRelationResolver(
+            new FakeMetadataRepository(orders, customers), pdp, rowReader, new SimpleMaskingProvider(), new FakeAuditLogRepository(),
+            options: Options.Create(new CrossSourceRelationOptions()));
+        var relation = new TableRelation
+        {
+            ParentTableIdentifier = orders.Identifier,
+            ChildTableIdentifier = customers.Identifier,
+            RelationName = "customer",
+            JoinKeysParent = ["customer_id"],
+            JoinKeysChild = ["id"],
+            Cardinality = RelationCardinality.ManyToOne,
+            AllowCrossDataSource = true
+        };
+        return (resolver, relation, customers, pdp);
     }
 
     // =========================================================================

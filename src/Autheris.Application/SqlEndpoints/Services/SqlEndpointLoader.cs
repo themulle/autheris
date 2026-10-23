@@ -206,7 +206,7 @@ public sealed class SqlEndpointLoader : IDisposable
         string summary = string.Empty;
         string? dataSource = null;
         string httpMethod = "GET";
-        int timeoutSeconds = 30;
+        int? timeoutSeconds = null;
         var headerParams = new Dictionary<string, (Type Type, bool IsRequired, object? DefaultVal, string? Desc, bool IsList)>(StringComparer.OrdinalIgnoreCase);
 
         var matches = HeaderRegex.Matches(content);
@@ -230,7 +230,9 @@ public sealed class SqlEndpointLoader : IDisposable
                     httpMethod = val.ToUpperInvariant();
                     break;
                 case "timeout" when int.TryParse(val, out int t):
-                    timeoutSeconds = t;
+                    timeoutSeconds = t > 0
+                        ? t
+                        : throw new ArgumentException($"Endpoint '{SanitizeHeaderValue(name)}': '-- @timeout' must be a positive number of seconds.", nameof(content));
                     break;
                 case "param":
                     ParseParamHeader(val, headerParams, defaultName);
@@ -578,25 +580,33 @@ public sealed class SqlEndpointLoader : IDisposable
         object? defaultVal = null;
         if (defaultText != null)
         {
-            defaultVal = isList ? ParseListDefault(defaultText, clrType, Invalid) : ParseScalarDefault(defaultText.Trim(' ', '"', '\''), clrType);
+            defaultVal = isList ? ParseListDefault(defaultText, clrType, Invalid) : ParseScalarDefault(defaultText.Trim(' ', '"', '\''), clrType, Invalid);
         }
 
         headerParams[name] = (clrType, isRequired, defaultVal, null, isList);
     }
 
-    private static object? ParseScalarDefault(string defaultRaw, Type clrType)
+    /// <summary>
+    /// SQLA-15: the default is converted to the declared CLR type at load (invariant culture, the same conversions as a client value), so an
+    /// omitted parameter binds the same provider type as a supplied one. A default that does not convert refuses the file.
+    /// </summary>
+    private static object? ParseScalarDefault(string defaultRaw, Type clrType, Func<string, string> invalid)
     {
+        var inv = CultureInfo.InvariantCulture;
         try
         {
-            if (clrType == typeof(int) && int.TryParse(defaultRaw, out int iv)) return iv;
-            if (clrType == typeof(long) && long.TryParse(defaultRaw, out long lv)) return lv;
-            if (clrType == typeof(decimal) && decimal.TryParse(defaultRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal dv)) return dv;
-            if (clrType == typeof(bool) && bool.TryParse(defaultRaw, out bool bv)) return bv;
+            if (clrType == typeof(int)) return int.Parse(defaultRaw, NumberStyles.Integer, inv);
+            if (clrType == typeof(long)) return long.Parse(defaultRaw, NumberStyles.Integer, inv);
+            if (clrType == typeof(decimal)) return decimal.Parse(defaultRaw, NumberStyles.Number, inv);
+            if (clrType == typeof(double)) return double.Parse(defaultRaw, NumberStyles.Float | NumberStyles.AllowThousands, inv);
+            if (clrType == typeof(bool)) return bool.Parse(defaultRaw);
+            if (clrType == typeof(DateTimeOffset)) return DateTimeOffset.Parse(defaultRaw, inv, DateTimeStyles.AssumeUniversal);
+            if (clrType == typeof(Guid)) return Guid.Parse(defaultRaw);
             return defaultRaw;
         }
-        catch
+        catch (Exception ex) when (ex is FormatException or OverflowException or ArgumentException)
         {
-            return defaultRaw;
+            throw new FormatException(invalid($"default is not a valid {clrType.Name}"));
         }
     }
 

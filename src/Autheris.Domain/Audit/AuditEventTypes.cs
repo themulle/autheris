@@ -126,6 +126,9 @@ public static class AuditEventTypes
     public const string MetadataSyntheticSample = "METADATA_SYNTHETIC_SAMPLE";
     public const string QueryAnalysisEvaluated = "QUERY_ANALYSIS_EVALUATED";
 
+    // MCP output inspection: a tool or resource result carried a suspected prompt injection and was withheld (MCP-09)
+    public const string McpOutputInjectionSuspected = "MCP_OUTPUT_INJECTION_SUSPECTED";
+
     // Row filter key-set cache strategy administration (#107)
     public const string RowFilterEvaluationChanged = "ROW_FILTER_EVALUATION_CHANGED";
     public const string TableRowFilterStrategyChanged = "TABLE_ROW_FILTER_STRATEGY_CHANGED";

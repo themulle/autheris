@@ -506,6 +506,12 @@ public static class GatewayStartupValidator
                 {
                     throw new ValidationException($"Security violation: Outside Development, BasicAuth PBKDF2 hashes must use at least {minIterations} iterations.");
                 }
+
+                // API-05: truncated hash / short salt (copy-paste, templating, line wrapping) must fail at boot, not authenticate weakly.
+                if (options.Authentication.BasicAuth.Users.Any(u => !PasswordHasher.HasWellFormedSaltAndHash(u.Password)))
+                {
+                    throw new ValidationException("Security violation (API-05): Outside Development, BasicAuth hashes must carry a salt of at least 16 bytes and a 32-byte hash (truncated value?).");
+                }
             }
 
             // SEC M-02: Fail-closed when JWT is active without audience or issuer.

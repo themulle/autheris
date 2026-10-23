@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
+using TrinoSqlEngine.Ast.Buffer;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
@@ -30,6 +31,12 @@ public static class DialectCapabilityValidator
                 case MergeStatement merge when capabilities.MergeShape == MergeClauseShape.OracleSingleClause:
                     ValidateSingleClauseMerge(merge);
                     break;
+                case SetOperationQuery { Right: SetOperationQuery right } outer when !capabilities.IntersectBindsTighter
+                    && !IsAssociativeUnionPair(outer, right):
+                    // SQLE-03: a right-nested set operation arises only from INTERSECT precedence (parenthesized primaries are rejected by the
+                    // builder); the emitter prints the operands flat, so a dialect that evaluates left to right would change the result.
+                    // Exception: UNION of the same kind is associative, so the balanced INSERT check-option row tree (CR-ADG-44) stays valid.
+                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INTERSECT mixed with UNION/EXCEPT");
                 case SetOperationQuery setOperation when capabilities.MaxCompoundSelectTerms is { } maxTerms:
                     int terms = CountTerms(setOperation);
                     if (terms > maxTerms)
@@ -38,7 +45,7 @@ public static class DialectCapabilityValidator
                     }
 
                     break;
-                case LikeExpression { Pattern: PolicyParameterExpression { Origin: ParameterOrigin.Policy } } when capabilities.LikeIsCaseInsensitive:
+                case LikeExpression lk when capabilities.LikeIsCaseInsensitive && LikePatternEscaper.ContainsPolicyParameter(lk.Pattern):
                     // SEC-ADG-18: the dialect LIKE is looser than the policy author expects (SQLite: ASCII case-insensitive).
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "policy LIKE on a case-insensitive LIKE dialect");
                 case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max
@@ -62,6 +69,9 @@ public static class DialectCapabilityValidator
     }
 
     /// <summary>The leaves of one connected UNION/INTERSECT/EXCEPT tree (SQLite counts them against SQLITE_MAX_COMPOUND_SELECT).</summary>
+    private static bool IsAssociativeUnionPair(SetOperationQuery outer, SetOperationQuery right) =>
+        outer.Operator == SetOperator.Union && right.Operator == SetOperator.Union && outer.Distinct == right.Distinct;
+
     private static int CountTerms(QueryBody body)
     {
         int count = 0;

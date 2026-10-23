@@ -1140,7 +1140,7 @@
       "Group": "operator",
       "Sql": "SELECT +a AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT NOT (`a`) AS `r` FROM `t`",
+      "Expected": "SELECT `a` AS `r` FROM `t`",
       "Parameters": []
     },
     {
@@ -1568,8 +1568,23 @@
       "Group": "operator",
       "Sql": "SELECT ROW(1, 'a') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT () AS `r` FROM `t`",
-      "Parameters": []
+      "Expected": "SELECT (:p1, :p2) AS `r` FROM `t`",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        },
+        {
+          "Marker": ":p2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "a"
+        }
+      ]
     },
     {
       "Id": "operator-043",
@@ -4869,9 +4884,9 @@
       "Id": "source-026",
       "Group": "source",
       "Sql": "SELECT a FROM t1 AS x (c1, c2)",
-      "Outcome": "ok",
-      "Expected": "SELECT `a` FROM `t1` AS `x`",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "source-027",

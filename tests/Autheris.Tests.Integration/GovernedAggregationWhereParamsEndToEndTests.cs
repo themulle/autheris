@@ -171,7 +171,7 @@ public abstract class GovernedAggregationWhereParamsBase : IDisposable
                     ["amount"] = ColumnAccessLevel.Clear
                 },
                 null,
-                hasUnconstrainedColumnAllow: true));
+                hasUnconstrainedColumnAllow: true) with { EvaluatedByPdp = true });
     }
 
     private static TreeFilter Window() => new TreeAndFilter(
