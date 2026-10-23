@@ -274,7 +274,7 @@ public sealed partial class ColumnValueProfileService : IColumnValueProfileServi
         {
             allowedValues = declaredAllowed;
         }
-        else if (IsValueListReleased(column, options) && snapshot?.ObservedAllowedValues is { Count: > 0 and <= 20 } obsLow)
+        else if (IsValueListReleased(column, options) && distinctCount is null or <= 20 && snapshot?.ObservedAllowedValues is { Count: > 0 and <= 20 } obsLow)
         {
             allowedValues = obsLow;
         }

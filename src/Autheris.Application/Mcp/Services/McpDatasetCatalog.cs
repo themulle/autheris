@@ -1263,7 +1263,7 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
         {
             var found = await _metadataRepository.GetTableMetadataAsync(requested, ct).ConfigureAwait(false);
             // MCP-17: the single-row read does not filter is_active; inactive/quarantined tables stay NotFound.
-            return found is { IsActive: true } && Shape(true, found) != CatalogOutputShape.NotFound
+            return found is { Table.IsActive: true } && Shape(true, found) != CatalogOutputShape.NotFound
                 ? (found, Shape(true, found))
                 : throw new TableNotFoundException(requested);
         }

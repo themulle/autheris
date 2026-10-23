@@ -162,8 +162,11 @@ public sealed partial class VirtualFilterAdministrationService
         }
 
         int totalRelaxationsInWindow = pastRelaxations + planRelaxations;
+        // The "no bindings left at all" rule keeps its pre-VF-10 meaning: a pure filter-definition update (counted above for the
+        // window limit) must not demand force just because the desired state happens to carry no bindings.
+        bool removesAnything = planRelaxations - updateFilters.Count > 0;
         bool requiresForce = planRelaxations > 0 &&
-            ((_options.MaxRemovals > 0 && totalRelaxationsInWindow > _options.MaxRemovals) || desiredKeys.Count == 0);
+            ((_options.MaxRemovals > 0 && totalRelaxationsInWindow > _options.MaxRemovals) || (desiredKeys.Count == 0 && removesAnything));
 
         changes = new VirtualFilterChangeSet
         {
