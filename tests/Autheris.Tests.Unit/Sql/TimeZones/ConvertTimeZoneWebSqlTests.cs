@@ -41,10 +41,10 @@ public sealed class ConvertTimeZoneWebSqlTests
     public async Task T24_SqliteIsUnsupportedWithTheFixedBodyThroughTheMapper()
     {
         await using var f = await CreateAsync(timeZoneState: new FixedState(true));
-        var ex = await Should.ThrowAsync<SqlTimeZoneException>(() => f.QueryAsync(Good, null));
+        // GAP-019: convert_timezone is not on the SQLite allowlist, so the function policy answers (403 SQL_POLICY_VIOLATION).
+        var ex = await Should.ThrowAsync<Autheris.Application.Sql.WebSqlPolicyException>(() => f.QueryAsync(Good, null));
 
-        ex.Code.ShouldBe(GovernedSqlErrorCodes.FunctionUnsupportedDialect);
-        Message(ex).ShouldBe("501 SQL_FUNCTION_UNSUPPORTED_DIALECT The function is not supported for this data source dialect.");
+        ex.Message.ShouldBe("Function 'convert_timezone' is not permitted in WebSQL.");
     }
 
     // ---- T-23: the state decides, fail closed ----
@@ -69,7 +69,8 @@ public sealed class ConvertTimeZoneWebSqlTests
     [Trait("Category", "Security")]
     public async Task ST_130_12_TheOperatorFormIsRejectedByThePreAnalysis(string sql)
     {
-        await using var f = await CreateAsync(timeZoneState: new FixedState(true));
+        // PostgreSql: SQLite does not advertise convert_timezone any more, so the policy would answer before the pre-analysis.
+        await using var f = await CreateAsync(provider: "PostgreSql", timeZoneState: new FixedState(true));
         await Should.ThrowAsync<TrinoSqlEngine.Ast.Builder.AstBuildException>(() => Validate(f, sql));
     }
 

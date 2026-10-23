@@ -13,13 +13,16 @@ public sealed class TimeZoneAllowlistTests
     [Fact]
     public void T7_ConvertTimezoneIsInEveryDialectAllowlist()
     {
-        foreach (var dialect in All)
+        // GAP-019: SQLite has no zone database, so it does not advertise the function (a 403 policy violation).
+        foreach (var dialect in All.Where(d => d != TargetSqlDialect.Sqlite))
         {
             Assert.Contains("convert_timezone", SqlFunctionAllowlists.Build(dialect, null));
             Assert.Contains("convert_timezone", SqlFunctionAllowlists.GetDefault(dialect));
         }
 
-        foreach (var dialect in new[] { TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.Sqlite, TargetSqlDialect.DuckDb, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks })
+        Assert.DoesNotContain("convert_timezone", SqlFunctionAllowlists.Build(TargetSqlDialect.Sqlite, null));
+
+        foreach (var dialect in new[] { TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks })
         {
             Assert.Contains("convert_timezone", SqlFunctionAllowlists.CompilerNames(dialect));
         }

@@ -886,12 +886,13 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                     bool isNot = inList.NOT() != null;
                     if (items.Count == 0)
                     {
-                        // SEC-PG-05: x IN () is FALSE and x NOT IN () is TRUE. The operand stays in the tree (IS NULL is never unknown, so
-                        // "x IS NULL AND FALSE" is exactly FALSE and "x IS NULL OR TRUE" exactly TRUE) and the security visitor still checks it.
+                        // SEC-PG-05: x IN () is FALSE and x NOT IN () is TRUE. The operand stays in the tree, so the security visitor still checks it:
+                        // "x IS NULL AND x IS NOT NULL" is exactly FALSE and "x IS NULL OR x IS NOT NULL" exactly TRUE (never unknown). A constant
+                        // such as "x IS NULL AND FALSE" would be folded by the simplifier before the visitor ran and drop the operand.
                         return new BinaryExpression(
                             new UnaryExpression(UnaryOperator.IsNull, left),
                             isNot ? BinaryOperator.Or : BinaryOperator.And,
-                            new LiteralExpression(isNot, LiteralType.Boolean));
+                            new UnaryExpression(UnaryOperator.IsNotNull, left));
                     }
 
                     return new InListExpression(left, items, isNot);

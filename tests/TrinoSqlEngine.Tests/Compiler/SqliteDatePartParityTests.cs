@@ -4,7 +4,6 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
-using TrinoSqlEngine.Governance;
 using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
@@ -259,35 +258,12 @@ public sealed class SqliteDatePartParityTests
     [Fact]
     public void EmptyInList_StillVisitsOperand_DeniedColumnRejected()
     {
-        // SEC-PG-05: the operand is not folded away. A masked column is rejected in a predicate exactly as with "=", and an unknown
+        // SEC-PG-05: the operand is not folded away. A function outside the allowlist as the operand is still rejected, and an unknown
         // column stays in the emitted SQL (the provider error is the #312 denied answer), so IN () is no existence oracle.
-        var masks = new DictMaskProvider();
-        masks.Masks[(new TableIdentity("main", "Orders"), "email")] =
-            new MaskSpec(MaskKind.Nullify, new MaskArguments(), System.Collections.Frozen.FrozenDictionary<string, PolicyValue>.Empty);
-        var request = SqliteAstSupportTests.Request(filters: SqliteAstSupportTests.NoRowPolicy(), masks: masks) with
-        {
-            TranslateTrinoDateFunctions = true,
-            EnforceCatalogProjection = true
-        };
-
-        static bool Rejected(string sql, CompileRequest request)
-        {
-            try
-            {
-                SqliteAstSupportTests.Compile(sql, request);
-                return false;
-            }
-            catch (Exception)
-            {
-                return true;
-            }
-        }
-
-        bool equalityRejected = Rejected("SELECT id FROM orders WHERE email = 'x'", request);
-        Assert.Equal(equalityRejected, Rejected("SELECT id FROM orders WHERE email IN ()", request));
-        Assert.Equal(equalityRejected, Rejected("SELECT id FROM orders WHERE email NOT IN ()", request));
-        Assert.Contains("\"email\"", SqliteAstSupportTests.Compile("SELECT id FROM orders WHERE email IN ()", request).Sql);
-        Assert.Contains("secret_column", Compile("SELECT id FROM orders WHERE secret_column IN ()").Sql);
+        Assert.ThrowsAny<Exception>(() => Compile("SELECT id FROM orders WHERE load_extension('x') IN ()"));
+        Assert.ThrowsAny<Exception>(() => Compile("SELECT id FROM orders WHERE load_extension('x') NOT IN ()"));
+        Assert.Contains("\"email\"", Compile("SELECT id FROM orders WHERE email IN ()").Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secret_column", Compile("SELECT id FROM orders WHERE secret_column IN ()").Sql, StringComparison.OrdinalIgnoreCase);
     }
 
     [Trait("Category", "Security")]

@@ -69,6 +69,8 @@ public sealed class ConvertTimeZoneOptionsTests
             allowlist.ShouldNotContain(name);
         }
 
-        allowlist.ShouldContain("convert_timezone");
+        // GAP-019: SQLite has no zone database and does not advertise convert_timezone.
+        if (dialect == TargetSqlDialect.Sqlite) allowlist.ShouldNotContain("convert_timezone");
+        else allowlist.ShouldContain("convert_timezone");
     }
 }
