@@ -71,7 +71,20 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "AGG_NEGATED_FILTER_REJECTED",
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
-        "PRIVACY_BUDGET_EXHAUSTED"
+        "PRIVACY_BUDGET_EXHAUSTED",
+        // WP-D: ConsentRequestException codes the removed Development passthrough used to expose; fixed messages only.
+        "ITSM_UNAVAILABLE",
+        "INVALID_STATE",
+        "CONSENT_ON_ATTRIBUTE_SOURCE",
+        "INDIVIDUAL_GRANT_REQUIRES_EXPIRY",
+        "INDIVIDUAL_GRANT_EXPIRY_IN_PAST",
+        "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM",
+        "INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES",
+        "INDIVIDUAL_GRANT_RENEWAL_BY_GRANTEE",
+        "INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN",
+        "INDIVIDUAL_GRANT_DISABLED_FOR_REALM",
+        "INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION",
+        "INDIVIDUAL_GRANT_INDETERMINATE"
     };
 
     /// <summary>
@@ -99,11 +112,24 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGG_NEGATED_FILTER_REJECTED"] = "The aggregation filter is rejected by the privacy policy.",
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
-        ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted."
+        ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted.",
+        ["ITSM_UNAVAILABLE"] = "The external ticketing system is unavailable; the request was not created.",
+        ["INVALID_STATE"] = "The consent request is not in a state that allows this operation.",
+        ["CONSENT_ON_ATTRIBUTE_SOURCE"] = "A consent on this table is not possible.",
+        ["INDIVIDUAL_GRANT_REQUIRES_EXPIRY"] = "An expiry date is required for this grant.",
+        ["INDIVIDUAL_GRANT_EXPIRY_IN_PAST"] = "The expiry date must be in the future.",
+        ["INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM"] = "The expiry date exceeds the maximum allowed for this grant.",
+        ["INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES"] = "This grant requires four-eyes approval.",
+        ["INDIVIDUAL_GRANT_RENEWAL_BY_GRANTEE"] = "A grantee cannot renew their own grant.",
+        ["INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN"] = "This grant can only be renewed through a recertification campaign.",
+        ["INDIVIDUAL_GRANT_DISABLED_FOR_REALM"] = "Individual grants are disabled for this realm.",
+        ["INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION"] = "A justification is required for this grant.",
+        ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated."
     };
 
     internal const string ValidationCode = "GRAPHQL_VALIDATION_FAILED";
     internal const string ValidationMessage = "The GraphQL request is invalid.";
+    internal const string DepthMessage = "The query exceeds the maximum allowed execution depth.";
     private const string VariableMessage = "A variable value is invalid.";
     private const string ParseMessage = "The GraphQL document could not be parsed.";
     private const string InvalidJsonMessage = "The request body is not valid JSON.";

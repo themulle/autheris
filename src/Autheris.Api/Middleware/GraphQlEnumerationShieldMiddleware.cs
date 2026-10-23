@@ -29,7 +29,22 @@ public sealed class GraphQlEnumerationShieldMiddleware
     /// <summary>Validation errors with these codes do not depend on the catalog and keep their own message.</summary>
     private static readonly HashSet<string> NeutralValidationCodes = new(StringComparer.OrdinalIgnoreCase)
     {
+        // QueryCostAnalyzerRule: depends on the document shape and configured budgets only, never on field existence.
+        "QUERY_TOO_COMPLEX"
     };
+
+    /// <summary>Stable code of the execution depth rule; its message is fixed and carries no schema detail.</summary>
+    internal const string DepthCode = "QUERY_TOO_DEEP";
+
+    /// <summary>
+    /// HotChocolate's max-execution-depth rule reports a code-less error with these extension keys; the depth depends on the
+    /// document shape only, so it is told apart by the keys and not by message text.
+    /// </summary>
+    private static bool IsDepthError(IError error) =>
+        error.Code is null && error.Extensions is { } extensions && extensions.ContainsKey("detectedExecutionDepth");
+
+    private static bool IsNeutral(IError error) =>
+        IsDepthError(error) || (error.Code is not null && NeutralValidationCodes.Contains(error.Code));
 
     private readonly RequestDelegate _next;
 
@@ -56,11 +71,22 @@ public sealed class GraphQlEnumerationShieldMiddleware
         // fixed message, no locations, path or extensions), whether or not the named field or type exists. Denied tables and
         // columns (resolver errors) get that same error outside Development; Development keeps their detail for debugging.
         bool mustShield = validationFailed
-            ? errors.Any(e => e.Code is null || !NeutralValidationCodes.Contains(e.Code))
+            ? errors.Any(e => !IsNeutral(e))
             : !isDevelopment && errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code));
 
         if (!mustShield)
         {
+            if (validationFailed && errors.Any(IsDepthError))
+            {
+                // Depth and cost violations keep a stable code; the engine text and its depth numbers are replaced by a fixed message.
+                var rewritten = errors.Select(e => IsDepthError(e)
+                    ? ErrorBuilder.New().SetMessage(ErrorSanitizingFilter.DepthMessage).SetCode(DepthCode).Build()
+                    : e).ToImmutableList();
+                var data = result.ContextData;
+                await result.DisposeAsync().ConfigureAwait(false);
+                context.Result = new OperationResult(rewritten) { ContextData = data };
+            }
+
             return;
         }
 
