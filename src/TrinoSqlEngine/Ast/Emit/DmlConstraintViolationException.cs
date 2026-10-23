@@ -73,6 +73,12 @@ public static class DmlErrorSanitizer
             if (IsRecursionLimit(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.LimitExceeded, dialect);
         }
 
+        // #312 (SEC-PG-10): an unknown identifier is answered like a denied column (SEC-X1-05): no oracle for column names.
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
+            if (IsUnknownIdentifier(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, dialect);
+        }
+
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
             if (IsDataError(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.DataError, dialect);
@@ -80,6 +86,24 @@ public static class DmlErrorSanitizer
 
         return new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, dialect);
     }
+
+    /// <summary>
+    /// Provider error numbers and codes of an unknown column: SQL Server 207, Oracle ORA-00904, PostgreSQL 42703, SQLite result code 1 with
+    /// the engine's own "no such column" token, DuckDB binder error and the Databricks UNRESOLVED_COLUMN error class (both have no number).
+    /// </summary>
+    private static bool IsUnknownIdentifier(TargetSqlDialect dialect, Exception error) => dialect switch
+    {
+        TargetSqlDialect.SqlServer => Number(error) == 207 || ErrorsContain(error, 207),
+        TargetSqlDialect.Oracle => Number(error) == 904 || ErrorsContain(error, 904),
+        TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) == "42703",
+        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") == 1 &&
+                                   error.Message.Contains("no such column", StringComparison.OrdinalIgnoreCase),
+        TargetSqlDialect.DuckDb => error.Message.Contains("Binder Error", StringComparison.Ordinal) &&
+                                   error.Message.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
+                                   error.Message.Contains("column", StringComparison.OrdinalIgnoreCase),
+        TargetSqlDialect.Databricks => error.Message.Contains("UNRESOLVED_COLUMN", StringComparison.Ordinal),
+        _ => false
+    };
 
     private static bool IsRecursionLimit(TargetSqlDialect dialect, Exception error) => dialect switch
     {

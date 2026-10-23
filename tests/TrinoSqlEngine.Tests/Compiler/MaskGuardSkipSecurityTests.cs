@@ -508,7 +508,7 @@ public class MaskGuardSkipSecurityTests
             Assert.Equal("MaskedAggregationException", Compile(engine, "SELECT sum(email) FROM orders", masked));   // rejecting, then accepted
             Assert.Equal("ok", Compile(engine, "SELECT sum(amount) FROM orders", masked));
             Assert.Equal("SecurityException", Compile(engine, "SELECT o FROM orders o", masked));
-            Assert.Equal("ok", Compile(engine, "SELECT sum(email), max(id) FROM orders", clean));   // unmasked after masked: accepted
+            Assert.Equal("ok", Compile(engine, "SELECT max(email), max(id) FROM orders", clean));   // unmasked after masked: accepted (max: sum over text is rejected by the #310 type guard)
             Assert.Equal("ok", Compile(engine, "SELECT id FROM entitlements", masked));
         }
     }

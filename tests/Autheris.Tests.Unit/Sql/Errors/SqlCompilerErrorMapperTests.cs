@@ -56,7 +56,16 @@ public sealed class SqlCompilerErrorMapperTests
         // REQ-SQL-130 (T-27): one stable code per cause; the exception is not a SecurityException, so it is never the generic 403.
         { "timezone-invalid", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid), 400, "SQL_TIMEZONE_INVALID", null },
         { "timezone-argument", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument), 422, "SQL_TIMEZONE_ARGUMENT", null },
-        { "timezone-unsupported-dialect", () => new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect), 501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", null },
+        { "timezone-unsupported-dialect", () => new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect), 422, "SQL_FUNCTION_UNSUPPORTED_DIALECT", null },
+        // GAP-002 (#308): the mapping is 422 for a function the dialect cannot offer.
+        // #296 (SEC-PG-08): the typed literal rejection; a plain ParseCanceledException stays SQL_SYNTAX_ERROR (row "parse-canceled").
+        { "literal-token-rejected", () => new ParseCanceledException("line 1:8: reason", new LiteralTokenRejectedException()), 400, "SQL_LITERAL_NOT_PERMITTED", null },
+        { "literal-token-rejected-wrapped", () => new InvalidOperationException(HostileMarker, new ParseCanceledException("x", new LiteralTokenRejectedException())), 400, "SQL_LITERAL_NOT_PERMITTED", null },
+        // #310 (SEC-PG-09)
+        { "aggregate-type-invalid", () => new TrinoSqlEngine.Ast.Visitors.AggregateTypeInvalidException(), 400, "AGGREGATION_INVALID_FUNCTION_FOR_TYPE", null },
+        // #312 (SEC-PG-10): the executor's classification of an unknown identifier answers like a denied column; an unrecognised provider error stays 502.
+        { "governed-policy-denied", () => new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.Sqlite), 403, "SQL_POLICY_DENIED", null },
+        { "governed-provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.Sqlite), 502, "SQL_PROVIDER_ERROR", null },
         { "timezone-unavailable", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneUnavailable), 503, "SQL_TIMEZONE_UNAVAILABLE", null },
         { "timezone-wrapped", () => new InvalidOperationException(HostileMarker, new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid)), 400, "SQL_TIMEZONE_INVALID", null },
         { "timezone-unknown-code", () => new SqlTimeZoneException("SQL_SOMETHING_ELSE"), 500, "SQL_COMPILER_INVARIANT", null },

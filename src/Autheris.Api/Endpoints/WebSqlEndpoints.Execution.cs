@@ -23,6 +23,22 @@ using Microsoft.Extensions.Options;
 
 public static partial class WebSqlEndpoints
 {
+    /// <summary>#293 (SEC-PG-11): fixed texts; never the JSON parser message, a property path or a .NET type name.</summary>
+    internal const string InvalidRequestBodyMessage = "The request body must be a JSON object with a string 'sql' and an optional 'parameters' object of scalar values.";
+    internal const string MissingSqlMessage = "A non-empty SQL statement is required.";
+
+    private static async Task WriteRequestValidationErrorAsync(HttpContext httpContext, string code, string message, CancellationToken ct)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await httpContext.Response.WriteAsJsonAsync(new
+        {
+            error = "BadRequest",
+            code,
+            message,
+            traceId = httpContext.TraceIdentifier
+        }, ct);
+    }
+
     internal static async Task HandleWebSqlRequest(
         HttpContext httpContext,
         IGovernedSqlExecutionService sqlService,
@@ -86,16 +102,14 @@ public static partial class WebSqlEndpoints
             {
                 // SEC M-10: Parser details stay in the server log
                 logger.Warning(ex, "WebSQL request body is not valid JSON. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON payload.", traceId = httpContext.TraceIdentifier }, ct);
+                await WriteRequestValidationErrorAsync(httpContext, Errors.ApiErrorCodes.InvalidJson, InvalidRequestBodyMessage, ct);
                 return;
             }
         }
 
         if (string.IsNullOrWhiteSpace(sql))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Missing 'sql' query parameter in request body." }, ct);
+            await WriteRequestValidationErrorAsync(httpContext, Errors.ApiErrorCodes.MissingRequiredField, MissingSqlMessage, ct);
             return;
         }
 

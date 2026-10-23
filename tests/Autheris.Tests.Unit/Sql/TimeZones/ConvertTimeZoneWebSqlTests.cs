@@ -44,7 +44,7 @@ public sealed class ConvertTimeZoneWebSqlTests
         var ex = await Should.ThrowAsync<SqlTimeZoneException>(() => f.QueryAsync(Good, null));
 
         ex.Code.ShouldBe(GovernedSqlErrorCodes.FunctionUnsupportedDialect);
-        Message(ex).ShouldBe("501 SQL_FUNCTION_UNSUPPORTED_DIALECT The function is not supported for this data source dialect.");
+        Message(ex).ShouldBe("422 SQL_FUNCTION_UNSUPPORTED_DIALECT The function is not supported for this data source dialect.");
     }
 
     // ---- T-23: the state decides, fail closed ----
