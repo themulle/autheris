@@ -398,6 +398,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
+        var creation = new CatalogCreationRun();
+
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -564,9 +566,10 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             ));
 
             // 3. Omnichannel Documentation Sync (F-DOC-01): Synchronize dbt model and column descriptions
-            if (!dryRun)
+            // Issue #282: the read also runs in dry run (read only) so that a missing entry can be reported as "would create".
             {
                 TableMetadata? existingMeta;
+                var metadataUnavailable = false;
                 try
                 {
                     existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
@@ -574,11 +577,21 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 catch (TableMetadataUnavailableException)
                 {
                     // SEC-94-01: no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
-                    warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
+                    if (!dryRun)
+                    {
+                        warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
+                    }
+
                     existingMeta = null;
+                    metadataUnavailable = true;
                 }
 
-                if (existingMeta != null)
+                if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
+                {
+                    existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
+                }
+
+                if (!dryRun && existingMeta != null)
                 {
                     // EXT-05: Ratchet governance properties rather than overwrite
                     var reqCols = DbtManifestRatchet.MergeRequiredFilterColumns(
@@ -749,7 +762,113 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             ImportedRelationsCount: importedRelations,
             RejectedModels: rejectedModels,
             SuppressedRelaxations: suppressedRelaxations
-        );
+        )
+        {
+            CreatedTables = creation.Created,
+            SkippedItems = creation.Skipped,
+            SkippedItemsTruncated = creation.SkippedTotal > creation.Skipped.Count
+        };
+    }
+
+    /// <summary>SEC-282-8: bounds per run so that a hostile manifest cannot flood the governance database or the response.</summary>
+    private const int MaxCreatedTablesPerRun = 5000;
+    private const int MaxSkippedItemsReported = 500;
+
+    private sealed class CatalogCreationRun
+    {
+        public List<string> Created { get; } = [];
+        public List<DbtSyncSkippedItem> Skipped { get; } = [];
+        public HashSet<string> Seen { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public int SkippedTotal { get; set; }
+    }
+
+    /// <summary>
+    /// Issue #282: registers a manifest model or source that has no catalog entry. Returns the new entry (live) so that the update step
+    /// applies descriptions, keys, tags and the ReBAC seed in the same run; null when nothing was created (skip, dry run, failure).
+    /// An entry that appears between the read and the write is returned as is and never overwritten (SEC-282-5).
+    /// </summary>
+    private async Task<TableMetadata?> TryRegisterMissingTableAsync(
+        DbtModelDefinition model,
+        TableIdentifier tableId,
+        Autheris.Domain.Options.GatewayOptions options,
+        bool dryRun,
+        CatalogCreationRun run,
+        List<string> warnings,
+        CancellationToken ct)
+    {
+        var kind = string.Equals(model.Materialization, "source", StringComparison.OrdinalIgnoreCase) ? "source" : "model";
+        var displayName = DbtIdentifierSanitizer.ForLog(tableId.ToString());
+
+        void Skip(string reason)
+        {
+            run.SkippedTotal++;
+            if (run.Skipped.Count < MaxSkippedItemsReported)
+            {
+                run.Skipped.Add(new DbtSyncSkippedItem(displayName, kind, reason));
+            }
+
+            _logger.LogWarning("dbt sync did not register {Kind} '{Name}': {Reason}", kind, displayName, reason);
+        }
+
+        if (!options.Dbt.CreateMissingTables)
+        {
+            Skip(DbtSyncSkipReasons.CreationDisabled);
+            return null;
+        }
+
+        if (!run.Seen.Add(tableId.ToString()))
+        {
+            Skip(DbtSyncSkipReasons.Duplicate);
+            return null;
+        }
+
+        if (run.Created.Count >= MaxCreatedTablesPerRun)
+        {
+            Skip(DbtSyncSkipReasons.Ineligible);
+            return null;
+        }
+
+        if (!DbtCatalogTableFactory.TryBuild(model, options, out var built, out var reason) || built is null)
+        {
+            Skip(reason ?? DbtSyncSkipReasons.Ineligible);
+            return null;
+        }
+
+        if (dryRun)
+        {
+            run.Created.Add(displayName);
+            return null;
+        }
+
+        try
+        {
+            // SEC-282-5: last read before the write; an entry that appeared meanwhile keeps its governance fields.
+            var current = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+            if (current != null)
+            {
+                return current;
+            }
+
+            var persisted = await _metadataRepository.UpsertTableMetadataAsync(built, ct).ConfigureAwait(false);
+            run.Created.Add(displayName);
+            if (options.Dbt.ActivateNewTables)
+            {
+                warnings.Add($"Table '{displayName}': registered active without masks or consents (Dbt:ActivateNewTables is enabled).");
+            }
+
+            return persisted ?? built;
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            Skip(DbtSyncSkipReasons.CreateFailed);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "dbt sync failed to register {Kind} '{Name}'.", kind, displayName);
+            Skip(DbtSyncSkipReasons.CreateFailed);
+            return null;
+        }
     }
 
     private sealed record ResolvedRelation(

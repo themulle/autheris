@@ -105,3 +105,12 @@ Reviewer: csharp-security-expert, 2026-10-23. Verified in code: `Table.Sensitivi
 - `Sync_AuditDetailsOnPartialFailure_ContainCreatedNamesWithoutColumnsOrSecrets`
 - `Sync_LogsAndAuditSanitizeControlCharsInNames`
 - `Sync_NonAdmin_Returns403AndServiceNotCalled`
+
+## Changelog
+- 2026-10-23 (Phase 4, WP-1/WP-2): plan facts verified against the branch; drift recorded.
+  - SEC-282-10 verified: `DbtWebhookReceiver.ProcessWebhookAsync` never calls `IngestManifest*`; the only caller of `IngestManifestStreamAsync` in `src` is `POST /api/extensions/dbt/sync` (authenticated, DbtAdmin or global governance admin). The webhook path (HMAC signature plus replay protection) therefore cannot create tables. Any future caller of the service must pass a `DbtGovernanceImportCaller`, so the tenant check and the factory rules apply to it as well.
+  - The `/dbt/sync` lambda moved into `DbtEndpoints.HandleSyncAsync` (internal) so that authorization and audit are unit-testable; behavior unchanged.
+  - `TableIdentifier` already rejects control characters and dots in its constructor (`model.ToTableIdentifier()` in the model filter throws `ArgumentException` before the factory runs). The factory regex (SEC-282-1) is therefore tested directly for those inputs; the pre-existing throw for such a manifest (HTTP 500 for the whole sync) is unchanged and out of scope.
+  - SEC-282-5: `ITableMetadataRepository` has no create-if-absent. The service re-reads immediately before the upsert and treats an entry that appeared meanwhile as existing. A residual window between that read and the write remains (needs a repository-level insert-if-absent; follow-up).
+  - `DbtSyncResult` also carries `SkippedItemsTruncated`. The audit entry is written in `finally` from the returned result; if the service throws before returning, only zero counts and `dry_run` are audited.
+  - WP-2: the integration test uses the PostgreSQL container as the `warehouse` data source and an in-memory SQLite governance DB (as the existing PostgreSQL WebSql test); the final query step and the audit-event assertion (AC-9) are covered at unit level only.

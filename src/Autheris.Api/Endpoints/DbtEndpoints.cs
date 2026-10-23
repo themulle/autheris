@@ -2,6 +2,7 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
@@ -22,51 +23,7 @@ public static class DbtEndpoints
     public static IEndpointRouteBuilder MapDbtEndpoints(this IEndpointRouteBuilder app)
     {
         // dbt Ingestion & Exposure Endpoints (F-DATA-11)
-        app.MapPost("/api/extensions/dbt/sync", async (
-            HttpContext context,
-            IDbtMetadataIngestionService dbtService) =>
-        {
-            // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
-            // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
-            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("DbtAdmin");
-            if (!isPrivileged)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            // SEC M-07: Server-side body limit instead of a bypassable Content-Length check.
-            const string manifestTooLarge = "Manifest size exceeds maximum allowed size (100 MB).";
-            var limitError = EndpointSecurity.TryApplyBodyLimit(context.Request, 100 * 1024 * 1024, manifestTooLarge);
-            if (limitError != null)
-            {
-                return limitError;
-            }
-
-            var dryRun = context.Request.Query.ContainsKey("dryRun") &&
-                         bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
-
-            Autheris.Domain.Security.SecurityPrincipalContext security;
-            try
-            {
-                security = EndpointSecurity.GetSecurityContext(context);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var caller = new DbtGovernanceImportCaller(
-                new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
-                EndpointSecurity.GetRequestTenant(context),
-                EndpointSecurity.IsCanonicalClusterAdmin(context.User));
-
-            return await EndpointSecurity.WithBodyLimitAsync(async () =>
-            {
-                var result = await dbtService.IngestManifestStreamAsync(context.Request.Body, caller, dryRun, context.RequestAborted);
-                return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-            }, manifestTooLarge);
-        }).RequireAuthorization()
+        app.MapPost("/api/extensions/dbt/sync", HandleSyncAsync).RequireAuthorization()
           .WithRequestBodyLimit(100 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
@@ -405,6 +362,78 @@ public static class DbtEndpoints
           .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
+    }
+
+    private const int MaxAuditedCreatedTables = 100;
+
+    /// <summary>Issue #282 (SEC-282-9): the created table names (capped) and counts go into the audit entry; never columns or secrets.</summary>
+    internal static void WriteSyncAudit(HttpContext context, DbtSyncResult? result, bool dryRun)
+    {
+        if (context.Features.Get<AuditContext>() is not { } auditContext)
+        {
+            return;
+        }
+
+        var created = result?.CreatedTables ?? [];
+        auditContext.AdditionalDetails["dry_run"] = dryRun;
+        auditContext.AdditionalDetails["created_tables_count"] = created.Count;
+        auditContext.AdditionalDetails["created_tables"] = created.Count > MaxAuditedCreatedTables
+            ? created.Take(MaxAuditedCreatedTables).ToArray()
+            : created.ToArray();
+        auditContext.AdditionalDetails["created_tables_truncated"] = created.Count > MaxAuditedCreatedTables;
+        auditContext.AdditionalDetails["skipped_items_count"] = result?.SkippedItems.Count ?? 0;
+    }
+
+    internal static async Task<IResult> HandleSyncAsync(HttpContext context, IDbtMetadataIngestionService dbtService)
+    {
+        // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
+        // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
+        var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+                           context.User.IsInRole("DbtAdmin");
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        // SEC M-07: Server-side body limit instead of a bypassable Content-Length check.
+        const string manifestTooLarge = "Manifest size exceeds maximum allowed size (100 MB).";
+        var limitError = EndpointSecurity.TryApplyBodyLimit(context.Request, 100 * 1024 * 1024, manifestTooLarge);
+        if (limitError != null)
+        {
+            return limitError;
+        }
+
+        var dryRun = context.Request.Query.ContainsKey("dryRun") &&
+                     bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
+
+        Autheris.Domain.Security.SecurityPrincipalContext security;
+        try
+        {
+            security = EndpointSecurity.GetSecurityContext(context);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var caller = new DbtGovernanceImportCaller(
+            new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
+            EndpointSecurity.GetRequestTenant(context),
+            EndpointSecurity.IsCanonicalClusterAdmin(context.User));
+
+        DbtSyncResult? syncResult = null;
+        try
+        {
+            return await EndpointSecurity.WithBodyLimitAsync(async () =>
+            {
+                syncResult = await dbtService.IngestManifestStreamAsync(context.Request.Body, caller, dryRun, context.RequestAborted);
+                return syncResult.Success ? Results.Ok(syncResult) : Results.BadRequest(syncResult);
+            }, manifestTooLarge);
+        }
+        finally
+        {
+            WriteSyncAudit(context, syncResult, dryRun);
+        }
     }
 
     internal static async Task<IResult> HandleImportSemanticManifestAsync(
