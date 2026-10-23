@@ -103,7 +103,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         var selected = ResolveSelectedColumns(context);
         RejectSpatialColumns(metadata, decision, selected);
 
-        var limit = Math.Max(1, context.Limit);
+        // #301/SEC-PG-07: 0 is an explicit zero-row page (the planner emits a bounded, unsatisfiable read); it never becomes 1 or a default.
+        // Planner callers: this executor (ExecuteAsync/StreamAsync) and GovernedDataQueryService (REST/MCP). Out of #301 scope and
+        // unchanged: GovernedTableReadPlanner.Keyset (stream slices), TableStreamEndpoints (slice limit) and LakehouseDataSourceExecutor.
+        var limit = Math.Max(0, context.Limit);
         var intent = new TableReadIntent(
             metadata.Identifier,
             selected,
@@ -178,7 +181,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         var selected = ResolveSelectedColumns(context);
         RejectSpatialColumns(metadata, decision, selected);
 
-        var limit = Math.Max(1, context.Limit);
+        // #301/SEC-PG-07: 0 is an explicit zero-row page (the planner emits a bounded, unsatisfiable read); it never becomes 1 or a default.
+        // Planner callers: this executor (ExecuteAsync/StreamAsync) and GovernedDataQueryService (REST/MCP). Out of #301 scope and
+        // unchanged: GovernedTableReadPlanner.Keyset (stream slices), TableStreamEndpoints (slice limit) and LakehouseDataSourceExecutor.
+        var limit = Math.Max(0, context.Limit);
         var intent = new TableReadIntent(
             metadata.Identifier,
             selected,

@@ -6,7 +6,7 @@ using Autheris.Application.Interfaces;
 namespace Autheris.Application.Sql.Tree;
 
 /// <summary>A catalog column as the filter builder sees it: the catalog spelling and the kind its values are coerced to.</summary>
-public sealed record ColumnRef(string CatalogName, ColumnValueKind Kind);
+public sealed record ColumnRef(string CatalogName, ColumnValueKind Kind, bool DateOnly = false);
 
 /// <summary>
 /// Turns a typed filter tree into one parameterized <see cref="TableFilterClause"/> in Trino syntax (#112 A-3). One builder serves
@@ -78,8 +78,8 @@ public static class TreeFilterClauseBuilder
                 EnsureStringLength(comparison.Value);
                 var column = resolve(comparison.Column) ?? throw new AggregationColumnUnavailableException();
                 referenced.Add(column.CatalogName);
-                var value = FilterValueCoercion.Coerce(comparison.Value, column.Kind, comparison.Operator);
-                return new TreeComparison(column.CatalogName, comparison.Operator, value);
+                var value = FilterValueCoercion.Coerce(comparison.Value, column.Kind, comparison.Operator, column.DateOnly);
+                return new TreeComparison(column.CatalogName, comparison.Operator, value) { BindNullOperand = comparison.BindNullOperand };
             }
             default:
                 throw new Autheris.Domain.Exceptions.GatewayInvalidQueryException("Unsupported filter.");

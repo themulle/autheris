@@ -56,6 +56,14 @@ Parallelism (max 2 lanes, 11 GB RAM; A, B, C, D, E have pairwise disjoint src an
 
 WP-Z steps: remove/convert the entries named in section 2 (GAP-005 and GAP-019, GAP-022 become documented-rejection cells; the three ObservedServerError blocks move back into the normal sweep; Robin_130 expects the documented rejection; PostgreSQL date-part pairwise cells use `EXTRACT`); add the GAP-017/018 parity fact or its correction; run `AUTHERIS_PARITY_RUN=1 dotnet test tests/Autheris.Tests.Parity -c Release -p:AutherisIncludeTestAuth=true` with JSONL output; `python3 .github/scripts/parity-report.py <jsonl> tests/Autheris.Tests.Parity/parity-baseline.json <out.md> --update-baseline`; parity plan section 5 marks each id fixed with its issue number and the changelog gets one entry (advertised SQLite functions 65 -> 62: `left`, `right`, `convert_timezone`). `.github/workflows/*` are not touched.
 
+### WP-B implementation notes (2026-10-23)
+
+Deviations from section 2, items 7-9:
+- The null operand is an untyped NULL parameter (`TreeComparison.BindNullOperand`); the compared column types it. `nin` drops null items like `in`; list operators with a bare `null` (`in: null`) are rejected with a fixed INVALID_QUERY message.
+- A zero page is planned as `WHERE [(pred) AND] 1 = 0 ... LIMIT 1`, never `LIMIT 0`, so no dialect emits `FETCH NEXT 0 ROWS`; the tree compiler does the same for a zero root page on SQL Server. Authorization, masking and required-filter checks run as for any N.
+- `GovernedDataQueryService` plans `limit + 1` (zero stays zero in the envelope, `HasMore` reflects the look-ahead row); `SqlTableReadExecutor` no longer rounds 0 up to 1.
+- Caller audit (`GovernedTableReadPlanner.Plan`): `GovernedDataQueryService` (REST, MCP; callers default to 50 explicitly) and `SqlTableReadExecutor` (ExecuteAsync, StreamAsync). Out of #301 scope and unchanged: `GovernedTableReadPlanner.Keyset.cs` (rejects limit <= 0), `TableStreamEndpoints.cs` slice limit (0 means 5000), `LakehouseDataSourceExecutor.cs` (0 means default). Tests: `GovernedDataQueryServiceTests.PlannerCallerAudit_ZeroNeverBecomesDefault`, `SqlTableReadExecutorZeroLimitTests`.
+
 ## 4. Open questions (defaults taken)
 
 - Q1 GAP-019: remove `convert_timezone` from the SQLite allowlist instead of emulating zones (default taken, item 5).

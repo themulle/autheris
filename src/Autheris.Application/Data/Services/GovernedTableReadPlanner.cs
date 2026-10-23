@@ -51,9 +51,9 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         ArgumentNullException.ThrowIfNull(intent);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(decision);
-        if (intent.Limit <= 0)
+        if (intent.Limit < 0)
         {
-            throw new ArgumentException("The read limit must be positive.", nameof(intent));
+            throw new ArgumentException("The read limit must not be negative.", nameof(intent));
         }
 
         EnsureAllowed(intent, decision);
@@ -67,6 +67,14 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
           .Append(string.Join(", ", columnsToSelect.Select(c => DataApiFilterTranslator.QuoteIdentifier(metadata.GetColumn(c)!.ColumnName))))
           .Append(" FROM ")
           .Append(intent.Table.ToString());
+
+        // SEC-PG-07 (#302/#301): a zero-row read keeps the full authorization, mask and filter path above, then is made unsatisfiable and
+        // fetches at most one row. The text never carries LIMIT 0 (SQL Server rejects FETCH NEXT 0 ROWS).
+        var zeroRows = intent.Limit == 0;
+        if (zeroRows)
+        {
+            predicate = predicate is null ? "1 = 0" : $"({predicate}) AND 1 = 0";
+        }
 
         if (predicate != null)
         {
@@ -85,7 +93,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             sb.Append(" OFFSET ").Append(intent.Offset.ToString(CultureInfo.InvariantCulture)).Append(" ROWS");
         }
 
-        sb.Append(" LIMIT ").Append(intent.Limit.ToString(CultureInfo.InvariantCulture));
+        sb.Append(" LIMIT ").Append((zeroRows ? 1 : intent.Limit).ToString(CultureInfo.InvariantCulture));
 
         return new PlannedTableRead(sb.ToString(), ClientParameters(intent), columnsToSelect, ordering);
     }
