@@ -49,24 +49,36 @@ public sealed class GraphQlEnumerationShieldMiddleware
 
         // Unknown environment counts as production (fail-closed).
         var environment = context.RequestServices.GetService<IHostEnvironment>();
-        if (environment?.IsDevelopment() == true)
-        {
-            return;
-        }
-
+        bool isDevelopment = environment?.IsDevelopment() == true;
         bool validationFailed = result.ContextData.ContainsKey(ExecutionContextData.ValidationErrors);
+
+        // SEC-PG-12 (#294): an invalid document answers the same single error in every environment (stable classified code,
+        // fixed message, no locations, path or extensions), whether or not the named field or type exists. Denied tables and
+        // columns (resolver errors) get that same error outside Development; Development keeps their detail for debugging.
         bool mustShield = validationFailed
             ? errors.Any(e => e.Code is null || !NeutralValidationCodes.Contains(e.Code))
-            : errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code));
+            : !isDevelopment && errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code));
 
         if (!mustShield)
         {
             return;
         }
 
+        var code = ErrorSanitizingFilter.ValidationCode;
+        var message = ErrorSanitizingFilter.ValidationMessage;
+        if (validationFailed && context.RequestServices.GetService<ErrorSanitizingFilter>() is { } filter)
+        {
+            var classified = filter.OnError(errors[0]);
+            if (classified.Code is ErrorSanitizingFilter.ValidationCode or "GRAPHQL_PARSE_FAILED" or "GRAPHQL_VARIABLE_INVALID" && classified.Message is { } text)
+            {
+                code = classified.Code;
+                message = text;
+            }
+        }
+
         await result.DisposeAsync().ConfigureAwait(false);
         context.Result = new OperationResult(ImmutableList.Create(
-            ErrorBuilder.New().SetMessage(Message).SetCode(Code).Build()))
+            ErrorBuilder.New().SetMessage(message).SetCode(code).Build()))
         {
             ContextData = ImmutableDictionary<string, object?>.Empty.Add(ExecutionContextData.ValidationErrors, true)
         };

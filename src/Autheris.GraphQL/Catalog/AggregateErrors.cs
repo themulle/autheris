@@ -56,7 +56,7 @@ internal static class AggregateFailureMapper
         GatewayUnauthorizedException => AggregateErrors.Create("UNAUTHORIZED", AggregateErrors.UnauthorizedMessage),
         GatewayForbiddenException or TableNotFoundException => AggregateErrors.Create("ACCESS_DENIED", AggregateErrors.AccessDeniedMessage),
         CostLimitExceededException => AggregateErrors.Create("QUERY_TOO_COMPLEX", AggregateErrors.TooComplexMessage),
-        TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException or Autheris.Domain.Model.RequiredFilterColumnMissingException => AggregateErrors.Create("REQUIRED_FILTER_MISSING", "A required filter column is missing."),
+        TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException or Autheris.Domain.Model.RequiredFilterColumnMissingException => AggregateErrors.Create("REQUIRED_FILTER_COLUMN_MISSING", "A required filter column is missing."),
         GatewayThrottledException => AggregateErrors.Create("TOO_MANY_REQUESTS", AggregateErrors.ThrottledMessage),
         GatewayInvalidQueryException or ArgumentException => AggregateErrors.ArgumentInvalid(),
         _ => ForDataAccess(ex)

@@ -125,7 +125,7 @@ public sealed class TimeBucketingAggregationSecurityTests
     [Trait("Category", "Security")]
     public void T_SEC_DATA112B_02_RequiredFilterColumnsEnforced()
     {
-        // SEC-DATA112B-02: Missing required filter column on aggregation fails closed with REQUIRED_FILTER_MISSING
+        // SEC-DATA112B-02: Missing required filter column on aggregation fails closed with REQUIRED_FILTER_COLUMN_MISSING
         var metadata = CreateTelemetryTable(withRequiredFilter: true);
         var decision = TableAccessDecision.Allowed(TelemetryTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
 
@@ -142,10 +142,10 @@ public sealed class TimeBucketingAggregationSecurityTests
         var ex = Should.Throw<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(
             () => planner.PlanAggregate(intentWithoutRequiredFilter, metadata, decision));
 
-        // When mapped in AggregateFailureMapper, verify it maps to REQUIRED_FILTER_MISSING
+        // When mapped in AggregateFailureMapper, verify it maps to REQUIRED_FILTER_COLUMN_MISSING
         var mapped = AggregateFailureMapper.ForAggregate(ex);
         mapped.ShouldNotBeNull();
-        mapped!.Errors[0].Code.ShouldBe("REQUIRED_FILTER_MISSING");
+        mapped!.Errors[0].Code.ShouldBe("REQUIRED_FILTER_COLUMN_MISSING");
     }
 
     [Fact]
