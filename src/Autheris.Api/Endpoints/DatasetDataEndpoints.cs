@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Data.Interfaces;
@@ -61,14 +62,11 @@ public static class DatasetDataEndpoints
         CancellationToken ct,
         string? select = null,
         string? filter = null,
-        string? orderBy = null,
-        int limit = 50,
-        int offset = 0)
+        string? orderBy = null)
     {
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Domain, schema, and table must be specified." }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Domain, schema, and table must be specified.").ConfigureAwait(false);
             return;
         }
 
@@ -78,8 +76,6 @@ public static class DatasetDataEndpoints
             select,
             filter,
             orderBy,
-            limit,
-            offset,
             httpContext,
             queryService,
             loggerFactory.CreateLogger(typeof(DatasetDataEndpoints)),
@@ -94,14 +90,11 @@ public static class DatasetDataEndpoints
         CancellationToken ct,
         string? select = null,
         string? filter = null,
-        string? orderBy = null,
-        int limit = 50,
-        int offset = 0)
+        string? orderBy = null)
     {
         if (!TableIdentifier.TryParse(datasetId, out var tableId))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = $"Invalid dataset identifier format: '{datasetId}'. Expected domain.schema.table or schema.table." }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Invalid dataset identifier format. Expected domain.schema.table or schema.table.").ConfigureAwait(false);
             return;
         }
 
@@ -110,8 +103,6 @@ public static class DatasetDataEndpoints
             select,
             filter,
             orderBy,
-            limit,
-            offset,
             httpContext,
             queryService,
             loggerFactory.CreateLogger(typeof(DatasetDataEndpoints)),
@@ -130,8 +121,7 @@ public static class DatasetDataEndpoints
     {
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table) || string.IsNullOrWhiteSpace(id))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Domain, schema, table, and id must be specified." }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Domain, schema, table, and id must be specified.").ConfigureAwait(false);
             return;
         }
 
@@ -144,12 +134,12 @@ public static class DatasetDataEndpoints
             select: null,
             filter: filter,
             orderBy: null,
-            limit: 1,
-            offset: 0,
             httpContext,
             queryService,
             loggerFactory.CreateLogger(typeof(DatasetDataEndpoints)),
-            ct).ConfigureAwait(false);
+            ct,
+            limit: 1,
+            offset: 0).ConfigureAwait(false);
     }
 
     private static async Task ExecuteAndStreamQueryAsync(
@@ -157,13 +147,25 @@ public static class DatasetDataEndpoints
         string? select,
         string? filter,
         string? orderBy,
-        int limit,
-        int offset,
         HttpContext httpContext,
         IGovernedDataQueryService queryService,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? limit = null,
+        int? offset = null)
     {
+        if (limit is null || offset is null)
+        {
+            if (!TryParsePaging(httpContext.Request, out var parsedLimit, out var parsedOffset))
+            {
+                await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
+                return;
+            }
+
+            limit = parsedLimit;
+            offset = parsedOffset;
+        }
+
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
         var requestContext = new RequestContext(httpContext.User, tenant, clientIp);
@@ -179,8 +181,8 @@ public static class DatasetDataEndpoints
             SelectColumns: selectCols,
             FilterExpression: filter,
             OrderBy: orderBy,
-            Limit: limit,
-            Offset: offset,
+            Limit: limit.Value,
+            Offset: offset.Value,
             Transport: SqlTransports.Rest);
 
         SqlErrorMapping mapped = default;
@@ -198,35 +200,91 @@ public static class DatasetDataEndpoints
         catch (TableNotFoundException ex)
         {
             logger.LogInformation("Table not found: {Table}", ex.Table);
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The requested table was not found.").ConfigureAwait(false);
         }
         catch (UnauthorizedAccessException ex)
         {
             logger.LogWarning("Access forbidden to {Table}: {Message}", tableId, ex.Message);
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage).ConfigureAwait(false);
+        }
+        catch (RequiredFilterColumnMissingException ex)
+        {
+            logger.LogWarning("Required filter column missing for {Table}: {Message}", tableId, ex.Message);
+            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.RequiredFilterColumnMissing, "A required filter column was not constrained by the query.").ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
+            // SEC-PG-14: ArgumentException messages name internal parameters; they stay in the log.
             logger.LogWarning("Invalid query parameters for {Table}: {Message}", tableId, ex.Message);
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is GatewaySecurityException or System.Security.SecurityException)
         {
             // Policy denials from the SQL/federation layer (e.g. cross-source disabled, incomplete HTTP response,
             // WebSQL policy) are fail-closed 403s, never 500s. Details stay in the log, not in the response.
             logger.LogWarning("Governed data query denied for {Table}: {Message}", tableId, ex.Message);
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = GenericForbiddenMessage }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unexpected error executing governed data query for {Table}", tableId);
-            httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "An internal error occurred executing the governed query." }, ct).ConfigureAwait(false);
+            await WriteProblemAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred executing the governed query.").ConfigureAwait(false);
         }
+    }
+
+    private const string InvalidQueryMessage = "The query parameters are invalid.";
+    private const int DefaultLimit = 50;
+    private const int MaxParamDigits = 10;
+
+    /// <summary>
+    /// #313 / #301, SEC-PG-14: strict parse of <c>limit</c> and <c>offset</c>. Each must occur at most once and consist of ASCII
+    /// digits only (no sign, whitespace, exponent or fraction), at most <see cref="MaxParamDigits"/> long before parsing, and fit an int.
+    /// </summary>
+    internal static bool TryParsePaging(HttpRequest request, out int limit, out int offset)
+    {
+        limit = DefaultLimit;
+        offset = 0;
+        return TryParseNonNegative(request.Query["limit"], DefaultLimit, out limit)
+            && TryParseNonNegative(request.Query["offset"], 0, out offset);
+    }
+
+    private static bool TryParseNonNegative(Microsoft.Extensions.Primitives.StringValues values, int fallback, out int result)
+    {
+        result = fallback;
+        if (values.Count == 0)
+        {
+            return true;
+        }
+
+        if (values.Count != 1)
+        {
+            return false;
+        }
+
+        var text = values[0];
+        if (string.IsNullOrEmpty(text) || text.Length > MaxParamDigits)
+        {
+            return false;
+        }
+
+        foreach (var c in text)
+        {
+            if (c is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out result);
+    }
+
+    private static Task WriteProblemAsync(HttpContext httpContext, int status, string code, string detail)
+    {
+        httpContext.Response.StatusCode = status;
+        return httpContext.Response.WriteAsJsonAsync(
+            ApiProblems.CreateProblemDetails(status, code, detail, httpContext),
+            (JsonSerializerOptions?)null,
+            "application/problem+json");
     }
 
     private static async Task StreamDatasetEnvelopeAsync(

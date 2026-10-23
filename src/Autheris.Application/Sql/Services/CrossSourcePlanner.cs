@@ -149,9 +149,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                         continue;
                     }
 
-                    throw new GatewaySecurityException(
-                        GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing),
-                        GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+                    throw new TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException();
                 }
             }
         }

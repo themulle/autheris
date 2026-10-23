@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using Autheris.Api.Errors;
 using Autheris.Application.Common;
 using Autheris.Application.Sql.Errors;
 using Autheris.Domain.Exceptions;
@@ -71,6 +72,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         else
         {
             (status, title, retryAfter) = Map(exception);
+            code = CodeForStatus(status);
         }
 
         if (status >= StatusCodes.Status500InternalServerError)
@@ -122,8 +124,25 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         return (status, title, null);
     }
 
+    /// <summary>SEC-PG-14: every problem carries a stable code derived from its status only, never from exception data.</summary>
+    private static string CodeForStatus(int status) => status switch
+    {
+        StatusCodes.Status400BadRequest => ApiErrorCodes.BadRequest,
+        StatusCodes.Status401Unauthorized => ApiErrorCodes.Unauthorized,
+        StatusCodes.Status403Forbidden => ApiErrorCodes.AccessDenied,
+        StatusCodes.Status413PayloadTooLarge => ApiErrorCodes.PayloadTooLarge,
+        StatusCodes.Status429TooManyRequests => ApiErrorCodes.TooManyRequests,
+        StatusCodes.Status501NotImplemented => ApiErrorCodes.NotImplemented,
+        StatusCodes.Status503ServiceUnavailable => ApiErrorCodes.ServiceUnavailable,
+        StatusCodes.Status504GatewayTimeout => ApiErrorCodes.GatewayTimeout,
+        _ => ApiErrorCodes.InternalError
+    };
+
     private static (int Status, string Title, int? RetryAfter) Map(Exception exception) => exception switch
     {
+        // SEC-PG-14: the framework message names the binding parameter; only the status survives, with a fixed text.
+        BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge } => (StatusCodes.Status413PayloadTooLarge, "The request is too large.", null),
+        BadHttpRequestException => (StatusCodes.Status400BadRequest, "The request is malformed.", null),
         GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
         Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),

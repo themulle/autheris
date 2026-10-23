@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Data.Interfaces;
@@ -61,10 +62,7 @@ public static class ArrowExportEndpoints
         var caller = EndpointSecurity.GetCallerIdentity(httpContext);
         if (string.IsNullOrWhiteSpace(caller))
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status401Unauthorized,
-                title: "Unauthorized",
-                detail: "Authentication required for Arrow export.");
+            return ApiProblems.Problem(StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "Authentication required for Arrow export.", httpContext, "Unauthorized");
         }
 
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
@@ -89,10 +87,7 @@ public static class ArrowExportEndpoints
                         {
                             if (!seen.Add(prop.Name))
                             {
-                                return Results.Problem(
-                                    statusCode: StatusCodes.Status400BadRequest,
-                                    title: "Bad Request",
-                                    detail: "Duplicate properties in JSON request body are not permitted.");
+                                return ApiProblems.Problem(StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Duplicate properties in JSON request body are not permitted.", httpContext, "Bad Request");
                             }
 
                             if (string.Equals(prop.Name, "table", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
@@ -119,10 +114,7 @@ public static class ArrowExportEndpoints
 
         if (string.IsNullOrWhiteSpace(table) && string.IsNullOrWhiteSpace(sql))
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                detail: "Target table parameter or SQL query is required.");
+            return ApiProblems.Problem(StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Target table parameter or SQL query is required.", httpContext, "Bad Request");
         }
 
         TableIdentifier? tableId = null;
@@ -136,10 +128,7 @@ public static class ArrowExportEndpoints
             }
             catch
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status400BadRequest,
-                    title: "Bad Request",
-                    detail: $"Invalid table identifier '{table}'.");
+                return ApiProblems.Problem(StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Invalid table identifier.", httpContext, "Bad Request");
             }
         }
 
@@ -149,10 +138,7 @@ public static class ArrowExportEndpoints
             var normRebac = TableIdentifierNormalizer.Normalize(rebacTable).ToQualifiedName();
             if (!string.Equals(table, normRebac, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "Forbidden",
-                    detail: "Access denied by ReBAC policy.");
+                return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by ReBAC policy.", httpContext, "Forbidden");
             }
         }
 
@@ -161,10 +147,7 @@ public static class ArrowExportEndpoints
         if (!string.IsNullOrWhiteSpace(sql) &&
             !await IsSqlPermittedByRebacAsync(httpContext, sql, caller, tenant, ct).ConfigureAwait(false))
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status403Forbidden,
-                title: "Forbidden",
-                detail: "Access denied by ReBAC policy.");
+            return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by ReBAC policy.", httpContext, "Forbidden");
         }
 
         var effectiveSql = !string.IsNullOrWhiteSpace(sql)
@@ -175,10 +158,7 @@ public static class ArrowExportEndpoints
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = Array.Empty<IReadOnlyDictionary<string, object?>>();
         if (sqlExecutionService == null)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                title: "Service Unavailable",
-                detail: "Governed SQL execution is not available.");
+            return ApiProblems.Problem(StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "Governed SQL execution is not available.", httpContext, "Service Unavailable");
         }
 
         try
@@ -206,36 +186,26 @@ public static class ArrowExportEndpoints
             if (SqlCompilerErrorMapper.TryMap(ex, out var mapping))
             {
                 SqlCompilerErrorMapper.RecordOutcome(mapping);
-                return Results.Problem(
-                    statusCode: mapping.Status,
-                    title: mapping.Title,
-                    detail: mapping.Title,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId, ["errorCode"] = mapping.Code });
+                return ApiProblems.Problem(
+                    mapping.Status,
+                    mapping.Code,
+                    mapping.Title,
+                    httpContext,
+                    mapping.Title,
+                    new Dictionary<string, object?> { ["errorCode"] = mapping.Code });
             }
 
             switch (ex)
             {
                 case System.Security.SecurityException secEx:
                     logger?.LogWarning(secEx, "Arrow export rejected by security policy. TraceId={TraceId}", traceId);
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status403Forbidden,
-                        title: "Forbidden",
-                        detail: (!isProduction && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage,
-                        extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+                    return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, (!isProduction && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage, httpContext, "Forbidden", new Dictionary<string, object?> { ["traceId"] = traceId });
                 case ArgumentException argEx:
                     logger?.LogWarning(argEx, "Arrow export bad request. TraceId={TraceId}", traceId);
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status400BadRequest,
-                        title: "Bad Request",
-                        detail: WebSqlEndpoints.GenericBadRequestMessage,
-                        extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+                    return ApiProblems.Problem(StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, WebSqlEndpoints.GenericBadRequestMessage, httpContext, "Bad Request", new Dictionary<string, object?> { ["traceId"] = traceId });
                 default:
                     logger?.LogError(ex, "Arrow export failed. TraceId={TraceId}", traceId);
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status500InternalServerError,
-                        title: "Internal Server Error",
-                        detail: "The export could not be completed.",
-                        extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+                    return ApiProblems.Problem(StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "The export could not be completed.", httpContext, "Internal Server Error", new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         }
 

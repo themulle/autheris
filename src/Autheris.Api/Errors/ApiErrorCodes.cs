@@ -6,6 +6,7 @@ namespace Autheris.Api.Errors;
 public static class ApiErrorCodes
 {
     public const string BadRequest = "BAD_REQUEST";
+    public const string InvalidQuery = "INVALID_QUERY";
     public const string InvalidDomainScope = "INVALID_DOMAIN_SCOPE";
     public const string InvalidTenantId = "INVALID_TENANT_ID";
     public const string InvalidJson = "INVALID_JSON";
