@@ -11,55 +11,14 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Architecture Phase 2 / Issue #114: Database operations for consumer aggregation counters and pseudonymous actor samples.
-/// Dialect-compatible with SQLite, PostgreSQL, and SQL Server.
+/// Dialect-compatible with SQLite, PostgreSQL, and SQL Server. Issue #286: the CONSUMER_APP_* tables are created by the
+/// governance baseline migrations; this store never runs DDL.
 /// </summary>
 internal static class ConsumerAggregationStore
 {
-    public static async Task EnsureTablesCreatedAsync(DbConnection connection, DbTransaction? tx = null, CancellationToken ct = default)
-    {
-        const string ddl = @"
-            CREATE TABLE IF NOT EXISTS CONSUMER_APP_DAILY (
-                tenant_id TEXT NOT NULL,
-                table_id TEXT NOT NULL,
-                day TEXT NOT NULL,
-                application TEXT NOT NULL,
-                client_id TEXT NOT NULL DEFAULT '',
-                version TEXT NOT NULL DEFAULT '',
-                calls INTEGER NOT NULL DEFAULT 0,
-                rows_returned INTEGER NOT NULL DEFAULT 0,
-                rows_measured_calls INTEGER NOT NULL DEFAULT 0,
-                rej_access INTEGER NOT NULL DEFAULT 0,
-                rej_rate_limit INTEGER NOT NULL DEFAULT 0,
-                rej_cost INTEGER NOT NULL DEFAULT 0,
-                rej_other INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (tenant_id, table_id, day, application, client_id, version)
-            );
-
-            CREATE TABLE IF NOT EXISTS CONSUMER_APP_ACTOR_DAILY (
-                tenant_id TEXT NOT NULL,
-                table_id TEXT NOT NULL,
-                day TEXT NOT NULL,
-                application TEXT NOT NULL,
-                actor_hash TEXT NOT NULL,
-                PRIMARY KEY (tenant_id, table_id, day, application, actor_hash)
-            );
-
-            CREATE TABLE IF NOT EXISTS CONSUMER_APP_QUERYNAME_DAILY (
-                tenant_id TEXT NOT NULL,
-                table_id TEXT NOT NULL,
-                day TEXT NOT NULL,
-                application TEXT NOT NULL,
-                query_name TEXT NOT NULL,
-                calls INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (tenant_id, table_id, day, application, query_name)
-            );
-        ";
-
-        await ExecuteAsync(connection, tx, ddl, Array.Empty<(string, object?)>(), ct).ConfigureAwait(false);
-    }
-
     public static async Task RecordDailyUsageAsync(
         DbConnection connection,
+        ConsumerAggregationDialect dialect,
         DbTransaction? tx,
         TableIdentifier tableId,
         TenantId tenantId,
@@ -76,27 +35,7 @@ internal static class ConsumerAggregationStore
         long rejOther,
         CancellationToken ct = default)
     {
-        await EnsureTablesCreatedAsync(connection, tx, ct).ConfigureAwait(false);
-
-        const string sql = @"
-            INSERT INTO CONSUMER_APP_DAILY (
-                tenant_id, table_id, day, application, client_id, version,
-                calls, rows_returned, rows_measured_calls,
-                rej_access, rej_rate_limit, rej_cost, rej_other
-            ) VALUES (
-                @tenant_id, @table_id, @day, @application, @client_id, @version,
-                @calls, @rows_returned, @rows_measured_calls,
-                @rej_access, @rej_rate_limit, @rej_cost, @rej_other
-            )
-            ON CONFLICT(tenant_id, table_id, day, application, client_id, version) DO UPDATE SET
-                calls = calls + excluded.calls,
-                rows_returned = rows_returned + excluded.rows_returned,
-                rows_measured_calls = rows_measured_calls + excluded.rows_measured_calls,
-                rej_access = rej_access + excluded.rej_access,
-                rej_rate_limit = rej_rate_limit + excluded.rej_rate_limit,
-                rej_cost = rej_cost + excluded.rej_cost,
-                rej_other = rej_other + excluded.rej_other;
-        ";
+        string sql = ConsumerAggregationSql.For(dialect).DailyUpsert;
 
         var parameters = new (string Name, object? Value)[]
         {
@@ -120,6 +59,7 @@ internal static class ConsumerAggregationStore
 
     public static async Task RecordActorSampleAsync(
         DbConnection connection,
+        ConsumerAggregationDialect dialect,
         DbTransaction? tx,
         TableIdentifier tableId,
         TenantId tenantId,
@@ -128,13 +68,7 @@ internal static class ConsumerAggregationStore
         string actorHash,
         CancellationToken ct = default)
     {
-        await EnsureTablesCreatedAsync(connection, tx, ct).ConfigureAwait(false);
-
-        const string sql = @"
-            INSERT INTO CONSUMER_APP_ACTOR_DAILY (tenant_id, table_id, day, application, actor_hash)
-            VALUES (@tenant_id, @table_id, @day, @application, @actor_hash)
-            ON CONFLICT(tenant_id, table_id, day, application, actor_hash) DO NOTHING;
-        ";
+        string sql = ConsumerAggregationSql.For(dialect).ActorInsert;
 
         var parameters = new (string Name, object? Value)[]
         {
@@ -150,6 +84,7 @@ internal static class ConsumerAggregationStore
 
     public static async Task RecordQueryNameAsync(
         DbConnection connection,
+        ConsumerAggregationDialect dialect,
         DbTransaction? tx,
         TableIdentifier tableId,
         TenantId tenantId,
@@ -159,14 +94,7 @@ internal static class ConsumerAggregationStore
         long calls,
         CancellationToken ct = default)
     {
-        await EnsureTablesCreatedAsync(connection, tx, ct).ConfigureAwait(false);
-
-        const string sql = @"
-            INSERT INTO CONSUMER_APP_QUERYNAME_DAILY (tenant_id, table_id, day, application, query_name, calls)
-            VALUES (@tenant_id, @table_id, @day, @application, @query_name, @calls)
-            ON CONFLICT(tenant_id, table_id, day, application, query_name) DO UPDATE SET
-                calls = calls + excluded.calls;
-        ";
+        string sql = ConsumerAggregationSql.For(dialect).QueryNameUpsert;
 
         var parameters = new (string Name, object? Value)[]
         {
@@ -190,20 +118,18 @@ internal static class ConsumerAggregationStore
         DateTimeOffset toUtc,
         CancellationToken ct = default)
     {
-        await EnsureTablesCreatedAsync(connection, tx, ct).ConfigureAwait(false);
-
         string fromDay = fromUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string toDay = toUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         const string sql = @"
             SELECT day, application,
-                   SUM(calls) as total_calls,
-                   SUM(rows_returned) as total_rows,
-                   SUM(rows_measured_calls) as total_measured,
-                   SUM(rej_access) as total_rej_access,
-                   SUM(rej_rate_limit) as total_rej_rate_limit,
-                   SUM(rej_cost) as total_rej_cost,
-                   SUM(rej_other) as total_rej_other
+                   CAST(SUM(calls) AS BIGINT) as total_calls,
+                   CAST(SUM(rows_returned) AS BIGINT) as total_rows,
+                   CAST(SUM(rows_measured_calls) AS BIGINT) as total_measured,
+                   CAST(SUM(rej_access) AS BIGINT) as total_rej_access,
+                   CAST(SUM(rej_rate_limit) AS BIGINT) as total_rej_rate_limit,
+                   CAST(SUM(rej_cost) AS BIGINT) as total_rej_cost,
+                   CAST(SUM(rej_other) AS BIGINT) as total_rej_other
             FROM CONSUMER_APP_DAILY
             WHERE tenant_id = @tenant_id AND table_id = @table_id AND day >= @from_day AND day <= @to_day
             GROUP BY day, application
@@ -278,13 +204,11 @@ internal static class ConsumerAggregationStore
         DateTimeOffset toUtc,
         CancellationToken ct = default)
     {
-        await EnsureTablesCreatedAsync(connection, tx, ct).ConfigureAwait(false);
-
         string fromDay = fromUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string toDay = toUtc.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         const string sql = @"
-            SELECT application, COUNT(DISTINCT actor_hash) as actor_count
+            SELECT application, CAST(COUNT(DISTINCT actor_hash) AS BIGINT) as actor_count
             FROM CONSUMER_APP_ACTOR_DAILY
             WHERE tenant_id = @tenant_id AND table_id = @table_id AND day >= @from_day AND day <= @to_day
             GROUP BY application;
@@ -321,8 +245,6 @@ internal static class ConsumerAggregationStore
         DateTimeOffset asOfUtc,
         CancellationToken ct = default)
     {
-        await EnsureTablesCreatedAsync(connection, tx, ct).ConfigureAwait(false);
-
         // SEC-AUD114-05: Bound retention window to max 400 days
         int boundedDays = Math.Clamp(retentionDays, 1, 400);
         string cutoff = asOfUtc.AddDays(-boundedDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

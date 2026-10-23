@@ -1610,6 +1610,166 @@
       ]
     },
     {
+      "name": "CONSUMER_APP_ACTOR_DAILY",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "day",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "application",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "actor_hash",
+          "type": "CHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "table_id",
+        "day",
+        "application",
+        "actor_hash"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CONSUMER_APP_DAILY",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "day",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "application",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "client_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "calls",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rows_returned",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rows_measured_calls",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_access",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_rate_limit",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_cost",
+          "type": "BIGINT",
+          "family": "integer"
+        },
+        {
+          "name": "rej_other",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "table_id",
+        "day",
+        "application",
+        "client_id",
+        "version"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CONSUMER_APP_QUERYNAME_DAILY",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "table_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "day",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "application",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "query_name",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "calls",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "tenant_id",
+        "table_id",
+        "day",
+        "application",
+        "query_name"
+      ],
+      "indexes": []
+    },
+    {
       "name": "DATA_OWNER_DELEGATIONS",
       "columns": [
         {

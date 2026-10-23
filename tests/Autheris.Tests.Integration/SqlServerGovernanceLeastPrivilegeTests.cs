@@ -144,6 +144,33 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
     }
 
     [Fact]
+    public async Task ConsumerAggregation_RuntimeLoginWithoutDdl_RecordsAndReads()
+    {
+        // Issue #286 (SEC-286-7): the CONSUMER_APP_* tables come from the baseline; the runtime login holds no DDL right and still records.
+        var options = GovernanceSchemaTestSupport.SqlServerOptions(_runtimeConnectionString, GovernanceMigrationMode.Verify);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
+        await new SqlServerGovernanceMigrationRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+        var table = new TableIdentifier("lpsource", "dbo", "usage_" + Guid.NewGuid().ToString("N")[..8]);
+        var tenant = new TenantId("tenant-lp");
+        var day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+
+        await repository.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 2, 20, 2, 0, 0, 0, 0);
+        await repository.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 3, 30, 3, 1, 0, 0, 0);
+        await repository.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('a', 64));
+        await repository.RecordQueryNameAsync(table, tenant, day, "powerbi", "GetReadings", 4);
+
+        var rows = await repository.QueryConsumerAppDailyAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        await repository.PurgeExpiredConsumerMetricsAsync(400, DateTimeOffset.UtcNow);
+
+        var row = rows.ShouldHaveSingleItem();
+        row.Calls.ShouldBe(5);
+        row.DistinctActors.ShouldBe(1);
+        row.QueryNames.ShouldBe(["GetReadings"]);
+        (await RuntimeFailsAsync("CREATE TABLE dbo.CONSUMER_APP_RUNTIME_DDL (a INT)")).ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task RuntimeLogin_CanSetReadAndClearRowFilterEvaluation_OnTheNewTableAndColumns()
     {
         // Issue #107 (plan section 7): the runtime login needs SELECT/INSERT/UPDATE/DELETE on TABLE_ROW_FILTER_STRATEGIES and UPDATE on

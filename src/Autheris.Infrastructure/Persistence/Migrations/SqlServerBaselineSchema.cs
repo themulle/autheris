@@ -884,6 +884,49 @@ CREATE TABLE dbo.RECERT_ITEMS (
 );
 ");
 
+            // Issue #286: consumer usage aggregates (formerly created at runtime; the runtime login never runs DDL).
+            // Key bytes stay below the 900-byte clustered key limit (DAILY 852, ACTOR 724, QUERYNAME 788).
+            ExecuteSchemaCommand(conn, @"
+IF OBJECT_ID(N'dbo.CONSUMER_APP_DAILY', N'U') IS NULL
+CREATE TABLE dbo.CONSUMER_APP_DAILY (
+    tenant_id NVARCHAR(128) NOT NULL,
+    table_id NVARCHAR(128) NOT NULL,
+    day NVARCHAR(10) NOT NULL,
+    application NVARCHAR(64) NOT NULL,
+    client_id NVARCHAR(64) NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_client_id DEFAULT N'',
+    version NVARCHAR(32) NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_version DEFAULT N'',
+    calls BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_calls DEFAULT 0,
+    rows_returned BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_rows_returned DEFAULT 0,
+    rows_measured_calls BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_rows_measured_calls DEFAULT 0,
+    rej_access BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_rej_access DEFAULT 0,
+    rej_rate_limit BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_rej_rate_limit DEFAULT 0,
+    rej_cost BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_rej_cost DEFAULT 0,
+    rej_other BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_DAILY_rej_other DEFAULT 0,
+    CONSTRAINT PK_CONSUMER_APP_DAILY PRIMARY KEY (tenant_id, table_id, day, application, client_id, version)
+);
+
+IF OBJECT_ID(N'dbo.CONSUMER_APP_ACTOR_DAILY', N'U') IS NULL
+CREATE TABLE dbo.CONSUMER_APP_ACTOR_DAILY (
+    tenant_id NVARCHAR(128) NOT NULL,
+    table_id NVARCHAR(128) NOT NULL,
+    day NVARCHAR(10) NOT NULL,
+    application NVARCHAR(64) NOT NULL,
+    actor_hash CHAR(64) NOT NULL,
+    CONSTRAINT PK_CONSUMER_APP_ACTOR_DAILY PRIMARY KEY (tenant_id, table_id, day, application, actor_hash)
+);
+
+IF OBJECT_ID(N'dbo.CONSUMER_APP_QUERYNAME_DAILY', N'U') IS NULL
+CREATE TABLE dbo.CONSUMER_APP_QUERYNAME_DAILY (
+    tenant_id NVARCHAR(128) NOT NULL,
+    table_id NVARCHAR(128) NOT NULL,
+    day NVARCHAR(10) NOT NULL,
+    application NVARCHAR(64) NOT NULL,
+    query_name NVARCHAR(64) NOT NULL,
+    calls BIGINT NOT NULL CONSTRAINT DF_CONSUMER_APP_QUERYNAME_DAILY_calls DEFAULT 0,
+    CONSTRAINT PK_CONSUMER_APP_QUERYNAME_DAILY PRIMARY KEY (tenant_id, table_id, day, application, query_name)
+);
+");
+
             // Append-only audit table (a table owner can still drop the trigger; the runtime login should only
             // hold INSERT/SELECT, the schema is applied with a separate migration login). CREATE TRIGGER must be alone in its batch.
             ExecuteSchemaCommand(conn, @"CREATE OR ALTER TRIGGER dbo.trg_audit_append_only ON dbo.AUDIT_LOG_ENTRIES

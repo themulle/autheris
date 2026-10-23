@@ -755,6 +755,43 @@ internal sealed class SqliteBaselineSchema
                 comments TEXT,
                 PRIMARY KEY (tenant_id, campaign_id, item_id)
             );
+
+            -- Issue #286: consumer usage aggregates (formerly created at runtime; the runtime role never runs DDL)
+            CREATE TABLE IF NOT EXISTS CONSUMER_APP_DAILY (
+                tenant_id TEXT NOT NULL,
+                table_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                application TEXT NOT NULL,
+                client_id TEXT NOT NULL DEFAULT '',
+                version TEXT NOT NULL DEFAULT '',
+                calls INTEGER NOT NULL DEFAULT 0,
+                rows_returned INTEGER NOT NULL DEFAULT 0,
+                rows_measured_calls INTEGER NOT NULL DEFAULT 0,
+                rej_access INTEGER NOT NULL DEFAULT 0,
+                rej_rate_limit INTEGER NOT NULL DEFAULT 0,
+                rej_cost INTEGER NOT NULL DEFAULT 0,
+                rej_other INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, table_id, day, application, client_id, version)
+            );
+
+            CREATE TABLE IF NOT EXISTS CONSUMER_APP_ACTOR_DAILY (
+                tenant_id TEXT NOT NULL,
+                table_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                application TEXT NOT NULL,
+                actor_hash TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, table_id, day, application, actor_hash)
+            );
+
+            CREATE TABLE IF NOT EXISTS CONSUMER_APP_QUERYNAME_DAILY (
+                tenant_id TEXT NOT NULL,
+                table_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                application TEXT NOT NULL,
+                query_name TEXT NOT NULL,
+                calls INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, table_id, day, application, query_name)
+            );
         ";
         cmd.ExecuteNonQuery();
 

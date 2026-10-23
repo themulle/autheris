@@ -28,7 +28,7 @@ public partial class SqlServerGovernanceRepository : IConsumerAggregationReposit
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await ConsumerAggregationStore.RecordDailyUsageAsync(
-            conn, null, tableId, tenantId, day, application, clientId, version,
+            conn, ConsumerAggregationDialect.SqlServer, null, tableId, tenantId, day, application, clientId, version,
             calls, rowsReturned, rowsMeasuredCalls, rejAccess, rejRateLimit, rejCost, rejOther, ct).ConfigureAwait(false);
     }
 
@@ -42,7 +42,7 @@ public partial class SqlServerGovernanceRepository : IConsumerAggregationReposit
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await ConsumerAggregationStore.RecordActorSampleAsync(
-            conn, null, tableId, tenantId, day, application, actorHash, ct).ConfigureAwait(false);
+            conn, ConsumerAggregationDialect.SqlServer, null, tableId, tenantId, day, application, actorHash, ct).ConfigureAwait(false);
     }
 
     public async Task RecordQueryNameAsync(
@@ -56,7 +56,7 @@ public partial class SqlServerGovernanceRepository : IConsumerAggregationReposit
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await ConsumerAggregationStore.RecordQueryNameAsync(
-            conn, null, tableId, tenantId, day, application, queryName, calls, ct).ConfigureAwait(false);
+            conn, ConsumerAggregationDialect.SqlServer, null, tableId, tenantId, day, application, queryName, calls, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<ConsumerAppDailySummary>> QueryConsumerAppDailyAsync(

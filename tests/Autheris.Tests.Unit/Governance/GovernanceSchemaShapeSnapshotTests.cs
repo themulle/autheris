@@ -76,6 +76,30 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
+    [InlineData("sqlite", "CONSUMER_APP_DAILY", "CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_QUERYNAME_DAILY")]
+    [InlineData("postgresql", "consumer_app_daily", "consumer_app_actor_daily", "consumer_app_queryname_daily")]
+    [InlineData("sqlserver", "CONSUMER_APP_DAILY", "CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_QUERYNAME_DAILY")]
+    public void EmbeddedSnapshot_CoversConsumerAppTables(string engine, string daily, string actor, string queryName)
+    {
+        // Issue #286, SEC-286-2: every column and primary key column of the three tables is part of the verified shape.
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+        string[] key = ["tenant_id", "table_id", "day", "application"];
+
+        var dailyTable = shape.Tables.Single(t => t.Name == daily);
+        dailyTable.Columns.Select(c => c.Name).ShouldBe(
+            [.. key, "client_id", "version", "calls", "rows_returned", "rows_measured_calls", "rej_access", "rej_rate_limit", "rej_cost", "rej_other"]);
+        dailyTable.PrimaryKey.ShouldBe([.. key, "client_id", "version"]);
+
+        var actorTable = shape.Tables.Single(t => t.Name == actor);
+        actorTable.Columns.Select(c => c.Name).ShouldBe([.. key, "actor_hash"]);
+        actorTable.PrimaryKey.ShouldBe([.. key, "actor_hash"]);
+
+        var queryTable = shape.Tables.Single(t => t.Name == queryName);
+        queryTable.Columns.Select(c => c.Name).ShouldBe([.. key, "query_name", "calls"]);
+        queryTable.PrimaryKey.ShouldBe([.. key, "query_name"]);
+    }
+
+    [Theory]
     [InlineData("sqlite", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
     [InlineData("postgresql", "table_row_filter_strategies", "consent_row_filters")]
     [InlineData("sqlserver", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]

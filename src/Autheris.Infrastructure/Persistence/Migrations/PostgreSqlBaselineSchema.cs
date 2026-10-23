@@ -762,6 +762,43 @@ internal static class PostgreSqlBaselineSchema
                 comments VARCHAR(512),
                 PRIMARY KEY (tenant_id, campaign_id, item_id)
             );
+
+            -- Issue #286: consumer usage aggregates (formerly created at runtime; the runtime role never runs DDL)
+            CREATE TABLE IF NOT EXISTS CONSUMER_APP_DAILY (
+                tenant_id TEXT NOT NULL,
+                table_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                application TEXT NOT NULL,
+                client_id TEXT NOT NULL DEFAULT '',
+                version TEXT NOT NULL DEFAULT '',
+                calls BIGINT NOT NULL DEFAULT 0,
+                rows_returned BIGINT NOT NULL DEFAULT 0,
+                rows_measured_calls BIGINT NOT NULL DEFAULT 0,
+                rej_access BIGINT NOT NULL DEFAULT 0,
+                rej_rate_limit BIGINT NOT NULL DEFAULT 0,
+                rej_cost BIGINT NOT NULL DEFAULT 0,
+                rej_other BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, table_id, day, application, client_id, version)
+            );
+
+            CREATE TABLE IF NOT EXISTS CONSUMER_APP_ACTOR_DAILY (
+                tenant_id TEXT NOT NULL,
+                table_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                application TEXT NOT NULL,
+                actor_hash TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, table_id, day, application, actor_hash)
+            );
+
+            CREATE TABLE IF NOT EXISTS CONSUMER_APP_QUERYNAME_DAILY (
+                tenant_id TEXT NOT NULL,
+                table_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                application TEXT NOT NULL,
+                query_name TEXT NOT NULL,
+                calls BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, table_id, day, application, query_name)
+            );
         ";
         cmd.ExecuteNonQuery();
 
