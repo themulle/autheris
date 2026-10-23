@@ -221,6 +221,14 @@ Observed (Robin WP-R1, R44 `Robin_130_HourBucketBerlinWinterSummer`). Capability
 ### PARITY-GAP-050
 Observed (Robin-100 WP-R2, R78 and R79). Capability: federated join chain. Channel: WebSQL. Input: a join of a default-source table to a default-source dimension table followed by a join to the `second` source (`a JOIN default.main.parity_regions r ON ... JOIN second.main.parity_sales b ON ...`). Expected: 200 with the four overlapping rows. Actual: 400 `SQL_SYNTAX_ERROR`. The same chain with the `second` join first and the default-source dimension join last returns 200 with the four rows.
 
+<!-- WP-V2b -->
+### PARITY-GAP-070
+Observed (Robin-100 rework v2, v2-18). Capability: malformed REST filter. Channel: REST. Input: `filter=(region eq 'North'` (unbalanced parenthesis) on the sales table. Expected: 400 `INVALID_QUERY` (the other malformed filter `nope(region)` already answers it). Observed: 400 `SQL_SYNTAX_ERROR`. A stable 4xx code without a row, a stack frame or engine text; only the code differs between the two malformed filters.
+
+### PARITY-GAP-071
+Observed (Robin-100 rework v2, R90). Capability: negative page size. Channel: GraphQL. Input: `first: -1` on the sales list. Expected: `INVALID_QUERY` (the builder comment of `GraphQlTreeBuilder` states "negative stays INVALID_QUERY"). Observed: HTTP 400 `GRAPHQL_VALIDATION_FAILED`. A stable 4xx code without a row; WebSQL (400 `SQL_SYNTAX_ERROR`) and REST (400 `INVALID_QUERY`) match the plan.
+<!-- end WP-V2b -->
+
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 
 These cases are a 5xx or leak internals. They are never a `KnownGap`: they live in the data row list `BoundaryKnownGapData` (kind `ObservedServerError`), are excluded from `Boundary_Case`/`Invariant_NoServerError`, and run in `Invariant_ObservedServerErrors`, where they fail hard until production is fixed. Owner decision needed (fix, or accept and document). Ids are `<slot>.<column>.<value id>`; `none` = no column.

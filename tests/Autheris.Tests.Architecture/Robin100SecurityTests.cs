@@ -17,6 +17,15 @@ public sealed class Robin100SecurityTests
         File.Exists(path).ShouldBeTrue("RobinClient.cs not found: the guard fails closed.");
         var source = File.ReadAllText(path);
 
+        // WP-V2b / SEC-R100-12: exactly one marked region may build the anonymous client; it is guarded by Robin100V2bSecurityTests.
+        const string regionStart = "// --- WP-V2b unauthenticated ---";
+        const string regionEnd = "// --- end WP-V2b unauthenticated ---";
+        Regex.Count(source, Regex.Escape(regionStart)).ShouldBe(1, "exactly one unauthenticated region is allowed.");
+        var regionBegin = source.IndexOf(regionStart, StringComparison.Ordinal);
+        var regionFinish = source.IndexOf(regionEnd, regionBegin, StringComparison.Ordinal);
+        regionFinish.ShouldBeGreaterThan(regionBegin);
+        source = source[..regionBegin] + source[(regionFinish + regionEnd.Length)..];
+
         var start = source.IndexOf("Task<RobinHttpResponse> PostJsonAsync(", StringComparison.Ordinal);
         start.ShouldBeGreaterThan(-1, "PostJsonAsync not found: the guard fails closed.");
         var end = source.IndexOf("// --- end WP-R2 ---", start, StringComparison.Ordinal);

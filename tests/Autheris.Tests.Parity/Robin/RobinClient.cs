@@ -75,6 +75,90 @@ public sealed class RobinClient(IParityHost host)
 
     // --- end WP-R2 ---
 
+    // --- WP-V2b ---
+    /// <summary>GET on an OData entity set through the same host client as every other helper; rows come from <c>value</c>, the code from <c>error.code</c>.</summary>
+    public async Task<ChannelResult> ODataAsync(string pathAndQuery)
+    {
+        using var client = host.CreateClient();
+        using var response = await client.GetAsync(pathAndQuery);
+        var body = await response.Content.ReadAsStringAsync();
+        return Checked(ParseOData((int)response.StatusCode, body), null);
+    }
+
+    public static ChannelResult ParseOData(int status, string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var error))
+            {
+                var code = error.ValueKind == JsonValueKind.Object && error.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                return new ChannelResult(status, code, ChannelResult.NoRows, body);
+            }
+
+            var rows = new List<IReadOnlyDictionary<string, object?>>();
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in value.EnumerateArray())
+                {
+                    rows.Add(item.EnumerateObject()
+                        .Where(p => !p.Name.StartsWith('@'))
+                        .ToDictionary(p => p.Name, p => ChannelResult.ToValue(p.Value), StringComparer.OrdinalIgnoreCase));
+                }
+            }
+
+            return new ChannelResult(status, null, rows, body);
+        }
+        catch (JsonException)
+        {
+            return new ChannelResult(status, null, ChannelResult.NoRows, body);
+        }
+    }
+
+    // --- WP-V2b unauthenticated ---
+    /// <summary>
+    /// SEC-R100-12: the one and only client without a test identity. Used by <see cref="AssertUnauthorizedAsync"/> and nowhere else;
+    /// never for a positive read or a baseline.
+    /// </summary>
+    public HttpClient CreateUnauthenticatedClient()
+    {
+        var client = host.CreateClient();
+        client.DefaultRequestHeaders.Remove("X-Test-User-Sid");
+        client.DefaultRequestHeaders.Remove("X-Test-Roles");
+        client.DefaultRequestHeaders.Remove("X-Test-Tenant");
+        return client;
+    }
+
+    /// <summary>Sends the request without an identity and asserts exactly HTTP 401 with no seed value in the body (no redirect, no 200).</summary>
+    public async Task AssertUnauthorizedAsync(HttpMethod method, string path, string? jsonBody = null)
+    {
+        using var client = CreateUnauthenticatedClient();
+        using var request = new HttpRequestMessage(method, path);
+        if (jsonBody is not null)
+        {
+            request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+        }
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        if ((int)response.StatusCode != 401)
+        {
+            throw new DeniedRequestSucceededException($"{method} {path} without an identity returned HTTP {(int)response.StatusCode}, expected 401.");
+        }
+
+        foreach (var marker in new[] { "North", "South", "Widget", "Gadget", "Gizmo", "under_score", "135.75", "\"rows\"" })
+        {
+            if (body.Contains(marker, StringComparison.Ordinal))
+            {
+                throw new DeniedRequestSucceededException($"{method} {path} without an identity leaks a seed value in the 401 body.");
+            }
+        }
+    }
+
+    // --- end WP-V2b unauthenticated ---
+    // --- end WP-V2b ---
+
     private static ChannelResult Checked(ChannelResult r, string? submittedSql)
     {
         ParityAssert.NoServerError(r, submittedSql);

@@ -84,56 +84,236 @@ public sealed partial class RobinScenarios
         }
     }
 
-    // ---------------------------------------------------------------------------------------------------------------------
-    // R66-R69. Paging [#39]
-    // ---------------------------------------------------------------------------------------------------------------------
+    // --- WP-V2b ---
+    private static readonly string[] EngineTextMarkers =
+        ["StackTrace", " at Autheris.", " at System.", " at HotChocolate.", "Exception:", "no such", "SQLite", "mismatched input", "extraneous input", "Antlr"];
 
-    private Task<ChannelResult> BigPage(string channel, int offset, int limit) => channel switch
+    /// <summary>SEC-R100-17: an error response carries no stack frame, parser text or engine text.</summary>
+    private static void NoStackOrEngineText(ChannelResult r)
     {
-        "GraphQl" => GqlList($"first: {limit}, offset: {offset}, orderBy: [{{ id: ASC }}]", "id", Big),
-        "Rest" => _robin.RestAsync(RestPath(Big, $"select=id&orderBy=id&limit={limit}&offset={offset}")),
-        _ => Sql($"SELECT id FROM parity_big ORDER BY id OFFSET {offset} LIMIT {limit}"),
-    };
-
-    [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    [InlineData("Rest")]
-    public Task Robin_39_LastPageOfBig(string channel) => Run(channel, "paging_last_page", async () =>
-        (await BigPage(channel, 900, 100)).IdsShouldBeInOrder(Range(901, 100)));
-
-    [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    [InlineData("Rest")]
-    public Task Robin_39_OffsetBeyondEndEmpty(string channel) => Run(channel, "paging_offset_beyond_end", async () =>
-        (await BigPage(channel, 1000, 100)).IdsShouldBe());
-
-    [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    [InlineData("Rest")]
-    public Task Robin_39_PagesAreDisjointAndComplete(string channel) => Run(channel, "paging_disjoint_complete", async () =>
-    {
-        var seen = new List<int>();
-        foreach (var offset in new[] { 0, 250, 500, 750 })
+        foreach (var marker in EngineTextMarkers)
         {
-            seen.AddRange(IdsOf(await BigPage(channel, offset, 250)));
+            r.RawBody.Contains(marker, StringComparison.Ordinal).ShouldBeFalse($"the response carries a stack frame or engine text ('{marker}').");
+        }
+    }
+
+    private static bool HasColumn(ChannelResult r, string column)
+    {
+        using var doc = JsonDocument.Parse(r.RawBody);
+        return doc.RootElement.ValueKind == JsonValueKind.Object
+               && doc.RootElement.TryGetProperty("columns", out var cols)
+               && cols.EnumerateArray().Any(c => string.Equals(c.GetString(), column, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The sorted set of property paths of a JSON body without any value (SEC-R100-13 body shape).</summary>
+    private static string Shape(string body)
+    {
+        var paths = new SortedSet<string>(StringComparer.Ordinal);
+        using var doc = JsonDocument.Parse(body);
+        Walk(doc.RootElement, string.Empty);
+        return string.Join("|", paths);
+
+        void Walk(JsonElement e, string path)
+        {
+            if (e.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in e.EnumerateObject())
+                {
+                    var child = path + "/" + p.Name;
+                    paths.Add(child);
+                    Walk(p.Value, child);
+                }
+            }
+            else if (e.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in e.EnumerateArray())
+                {
+                    Walk(item, path + "[]");
+                }
+            }
+        }
+    }
+
+    private static readonly string[] ExistenceStatements = ["does not exist", "not found", "no such", "unknown source", "unknown table", "unknown schema", "unknown catalog"];
+
+    private static void NoExistenceStatement(ChannelResult r)
+    {
+        foreach (var phrase in ExistenceStatements)
+        {
+            r.RawBody.Contains(phrase, StringComparison.OrdinalIgnoreCase).ShouldBeFalse($"the message states whether an object exists ('{phrase}', SEC-R100-13).");
+        }
+    }
+
+    private static JsonElement? GraphQlAlias(string body, string alias)
+    {
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.ValueKind == JsonValueKind.Object
+            && doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty(alias, out var value) && value.ValueKind != JsonValueKind.Null)
+        {
+            return value.Clone();
         }
 
-        seen.ShouldBe(Range(1, 1000).ToList());
-        seen.Distinct().Count().ShouldBe(1000);
+        return null;
+    }
+
+    private static List<int> AliasIds(string body, string alias) =>
+        GraphQlAlias(body, alias) is { ValueKind: JsonValueKind.Array } a
+            ? a.EnumerateArray().Select(item => item.GetProperty("id").GetInt32()).ToList()
+            : throw new XunitException($"alias '{alias}' carries no list: {RobinAssert.Snippet(body)}");
+
+    /// <summary>True when any value of the response data other than <c>id</c> equals a clear seed amount (as number or string), under any alias (SEC-R100-15).</summary>
+    private static bool AnyClearAmountOutsideId(string body)
+    {
+        var clear = ParitySeed.Sales.Where(s => s.Amount is not null).Select(s => s.Amount!.Value).ToHashSet();
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.TryGetProperty("data", out var data) && Scan(data);
+
+        bool Scan(JsonElement e)
+        {
+            switch (e.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    return e.EnumerateObject().Any(p => !string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase) && Scan(p.Value));
+                case JsonValueKind.Array:
+                    return e.EnumerateArray().Any(Scan);
+                case JsonValueKind.Number:
+                    return e.TryGetDecimal(out var n) && clear.Contains(n);
+                case JsonValueKind.String:
+                    return decimal.TryParse(e.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) && clear.Contains(s);
+                default:
+                    return false;
+            }
+        }
+    }
+
+    private async Task<string> WhereTypeNameAsync(string field)
+    {
+        var r = await _robin.GraphQlAsync("{ __type(name: \"Query\") { fields { name args { name type { name } } } } }", "__type");
+        r.Status.ShouldBe(200);
+        using var doc = JsonDocument.Parse(r.RawBody);
+        var fields = doc.RootElement.GetProperty("data").GetProperty("__type").GetProperty("fields");
+        foreach (var f in fields.EnumerateArray())
+        {
+            if (f.GetProperty("name").GetString() != field)
+            {
+                continue;
+            }
+
+            foreach (var arg in f.GetProperty("args").EnumerateArray())
+            {
+                if (arg.GetProperty("name").GetString() == "where" && arg.GetProperty("type").GetProperty("name").GetString() is { Length: > 0 } name)
+                {
+                    return name;
+                }
+            }
+        }
+
+        throw new XunitException($"no 'where' argument type found for {field}.");
+    }
+    // --- end WP-V2b ---
+
+    // ---------------------------------------------------------------------------------------------------------------------
+    // v2-18..v2-21. Malformed filters, IN list cap, GraphQL variables and directives, unmasked columns of a masked table
+    // ---------------------------------------------------------------------------------------------------------------------
+
+    [ParityTheory]
+    [InlineData("GraphQl", "unbalanced_document")]
+    [InlineData("GraphQl", "like_on_string_filter")]
+    [InlineData("Rest", "unbalanced_filter")]
+    [InlineData("Rest", "unknown_function")]
+    public Task Robin_Proactive_MalformedFilterStableCode(string channel, string variant) => Run(channel, "malformed_filter_stable_code", async () =>
+    {
+        var (r, code) = variant switch
+        {
+            "unbalanced_document" => (await _robin.GraphQlAsync("{ default_main_parity_sales(first: 1) { id }", "default_main_parity_sales"), "GRAPHQL_PARSE_FAILED"),
+            "like_on_string_filter" => (await GqlList("where: { region: { like: \"x\" } }, first: 1"), "GRAPHQL_VALIDATION_FAILED"),
+            "unbalanced_filter" => (await RestIds(Sales, "(region eq 'North'"), "INVALID_QUERY"),
+            _ => (await RestIds(Sales, "nope(region)"), "INVALID_QUERY"),
+        };
+        r.Rejected(code);
+        if (channel == "Rest")
+        {
+            r.Status.ShouldBe(400);
+        }
+
+        NoStackOrEngineText(r);
+    }, variant);
+
+    [ParityFact]
+    public Task Robin_128_InListOverCapStableCode() => Run("WebSql", "in_list_over_cap", async () =>
+    {
+        var sql = $"SELECT id FROM {Big} WHERE id IN (@ids) ORDER BY id";
+        (await Sql(sql, new { ids = Range(1, 1000) })).IdsShouldBeInOrder(Range(1, 1000));
+
+        // SEC-R100-17: one value above MaxListParameterValues is rejected; a 200 is a failure (DoS bound), never a known gap.
+        var over = await Sql(sql, new { ids = Range(1, 1001) });
+        if (!ParityAssert.IsError(over))
+        {
+            throw new DeniedRequestSucceededException("An IN list above MaxListParameterValues (1000) was accepted.");
+        }
+
+        over.Rejected("SQL_LIST_PARAM_TOO_LARGE").Status.ShouldBe(400);
+        NoStackOrEngineText(over);
     });
 
     [ParityTheory]
+    [InlineData("variable")]
+    [InlineData("include")]
+    [InlineData("skip")]
+    public Task Robin_Proactive_GraphQlVariablesAndDirectives(string variant) => Run("GraphQl", "variables_and_directives", async () =>
+    {
+        if (variant == "variable")
+        {
+            var whereType = await WhereTypeNameAsync("default_main_parity_sales");
+            var r = await _robin.GraphQlAsync(
+                "query($w: " + whereType + ") { default_main_parity_sales(where: $w, first: 100, orderBy: [{ id: ASC }]) { id } }",
+                "default_main_parity_sales",
+                new { w = new { region = new { eq = "North" } } });
+            r.IdsShouldBeInOrder(1, 2, 3, 4, 5, 6, 18);
+            return;
+        }
+
+        var directive = variant == "include" ? "@include(if: true)" : "@skip(if: true)";
+        var masked = await GqlList(AllRows, "id amount " + directive, Masked);
+        masked.Ok().Rows.Count.ShouldBe(18);
+        if (AnyClearAmountOutsideId(masked.RawBody))
+        {
+            throw new DeniedRequestSucceededException("A directive on a masked column returned a clear amount.");
+        }
+
+        NoClearAmountInRows(masked, "masked column with " + directive);
+        if (variant == "include")
+        {
+            masked.Rows.All(row => row.TryGetValue("amount", out var v) && v is null).ShouldBeTrue("an included masked amount is not null in every row");
+        }
+        else
+        {
+            masked.Rows.Any(row => row.ContainsKey("amount")).ShouldBeFalse("a skipped field is present in the rows");
+        }
+    }, variant);
+
+    [ParityTheory]
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
-    public Task Robin_39_OrderByDescPaging(string channel) => Run(channel, "paging_order_desc", async () =>
+    [InlineData("Rest")]
+    public Task Robin_116_UnmaskedColumnsOnMaskedTable(string channel) => Run(channel, "unmasked_columns_on_masked_table", async () =>
     {
-        var r = channel == "GraphQl"
-            ? await GqlList("first: 5, orderBy: [{ id: DESC }]", "id", Big)
-            : await Sql("SELECT id FROM parity_big ORDER BY id DESC LIMIT 5");
-        r.IdsShouldBeInOrder(1000, 999, 998, 997, 996);
+        var picked = channel switch
+        {
+            "GraphQl" => await GqlList("where: { id: { in: [1, 2] } }, " + AllRows, "id region product qty", Masked),
+            "Rest" => await _robin.RestAsync(RestPath(Masked, "select=id,region,product,qty&orderBy=id&limit=100&filter=" + Uri.EscapeDataString("id in (1, 2)"))),
+            _ => await Sql("SELECT id, region, product, qty FROM parity_masked WHERE id IN (1, 2) ORDER BY id"),
+        };
+        picked.RowsShouldBe(["id", "region", "product", "qty"], [[1, "North", "Widget", 10], [2, "North", "Widget", 5]], ordered: true);
+
+        var south = channel switch
+        {
+            "GraphQl" => await GqlList("where: { region: { eq: \"South\" } }, " + AllRows, "id", Masked),
+            "Rest" => await RestIds(Masked, "region eq 'South'"),
+            _ => await Sql("SELECT id FROM parity_masked WHERE region = 'South' ORDER BY id"),
+        };
+        south.IdsShouldBeInOrder(7, 8, 9, 10, 11, 12);
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -240,7 +420,7 @@ public sealed partial class RobinScenarios
 
         // A valid cursor of one table is not accepted on another table's route.
         var other = await _robin.PostJsonAsync(BulkPath(Sales), new { select = new[] { "id" }, limit = 400, cursor });
-        other.Result.Rejected();
+        other.Result.Rejected("INVALID_CURSOR").Status.ShouldBe(400);
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -269,7 +449,7 @@ public sealed partial class RobinScenarios
             return;
         }
 
-        // Observed: GraphQL places NULL amounts first, like WebSQL on SQLite.
+        // Channel parity: both channels push ORDER BY to the same SQLite source, NULLs first for ASC.
         IdsOf(await GqlList("first: 100, orderBy: [{ amount: ASC }, { id: ASC }]")).ShouldBe(ClearOrderNullsFirst.ToList());
     });
 
@@ -303,10 +483,17 @@ public sealed partial class RobinScenarios
     public Task Robin_131_FederatedInListParameter() => Run("WebSql", "federated_in_list", async () =>
         (await Sql($"SELECT a.id AS id {FederatedJoin} WHERE a.id IN (@ids) ORDER BY a.id", new { ids = new[] { 2, 4, 6, 8 } })).IdsShouldBe(2, 4));
 
-    [ParityFact]
-    public Task Robin_122_FederatedFilterPushdownSameResult() => Run("WebSql", "federated_pushdown", async () =>
-        (await Sql($"SELECT a.id AS id {FederatedJoin} WHERE b.product = 'Widget' ORDER BY a.id")).IdsShouldBe(1, 2));
-
+    [ParityTheory]
+    [InlineData("local")]
+    [InlineData("federated")]
+    public Task Robin_Proactive_JoinWithZeroMatches(string variant) => Run("WebSql", "join_zero_matches", async () =>
+    {
+        var r = await Sql(variant == "local"
+            ? "SELECT s.id AS id FROM parity_sales s JOIN parity_regions r ON s.region_id = r.id WHERE r.name = 'Nope'"
+            : "SELECT a.id AS id FROM default.main.parity_sales a JOIN second.main.parity_sales b ON a.id = b.id WHERE b.id > 4");
+        r.Ok().Rows.Count.ShouldBe(0);
+        HasColumn(r, "id").ShouldBeTrue("a join without matches must still describe its columns");
+    }, variant);
     [ParityFact]
     public Task Robin_123_FederatedSameSourceSubqueryPart() => Run("WebSql", "federated_same_source_part", async () =>
     {
@@ -314,58 +501,155 @@ public sealed partial class RobinScenarios
         r.RowsShouldBe(["id", "name"], [[1, "North"], [2, "North"], [3, "North"], [4, "North"]]);
     });
 
-    [ParityFact]
-    public Task Robin_124_FederatedKeySetJoin() => Run("WebSql", "federated_key_set", async () =>
-        (await Sql("SELECT a.id AS id FROM default.main.parity_sales a JOIN default.main.parity_regions r ON a.region_id = r.id JOIN second.main.parity_sales b ON a.id = b.id ORDER BY a.id"))
-        .IdsShouldBeInOrder(1, 2, 3, 4));
+    [ParityTheory]
+    [InlineData("join")]
+    [InlineData("single")]
+    public Task Robin_30_FederatedUnknownSourceSameCode(string variant) => Run("WebSql", "federated_unknown_source_same_code", async () =>
+    {
+        var (unknownSource, unknownTable) = variant == "join"
+            ? (await Sql("SELECT a.id AS id FROM default.main.parity_sales a JOIN nope.main.parity_sales b ON a.id = b.id"),
+               await Sql("SELECT a.id AS id FROM default.main.parity_sales a JOIN second.main.parity_nope b ON a.id = b.id"))
+            : (await Sql("SELECT id FROM nope.main.parity_sales"), await Sql("SELECT id FROM parity_nope"));
 
+        // SEC-R100-13: no existence oracle between an unknown source and an unknown table.
+        unknownSource.Code.ShouldBe(unknownTable.Code, $"existence oracle: unknown source '{unknownSource.Code}' vs unknown table '{unknownTable.Code}'");
+        unknownSource.Status.ShouldBe(unknownTable.Status);
+        foreach (var r in new[] { unknownSource, unknownTable })
+        {
+            r.Rejected("SQL_POLICY_DENIED").Status.ShouldBe(403);
+            r.Rows.Count.ShouldBe(0);
+            NoExistenceStatement(r);
+            NoStackOrEngineText(r);
+        }
+
+        unknownSource.Status.ShouldBe(unknownTable.Status);
+        unknownSource.Code.ShouldBe(unknownTable.Code);
+        Shape(unknownSource.RawBody).ShouldBe(Shape(unknownTable.RawBody));
+    }, variant);
     [ParityFact]
     public Task Robin_131_FederatedParameterNullSafe() => Run("WebSql", "federated_null_parameter", async () =>
         (await Sql($"SELECT a.id AS id {FederatedJoin} WHERE b.region = @r", new { r = (string?)null })).IdsShouldBe());
 
     // ---------------------------------------------------------------------------------------------------------------------
-    // R81, R87, R100. Sums over lists, years and scoped regions [proactive]
+    // v2-24..v2-27, v2-29. Subqueries, CTE gate, unauthenticated requests, scoped aliases, OData
     // ---------------------------------------------------------------------------------------------------------------------
 
     [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    public Task Robin_Proactive_SumAmountForProductList(string channel) => Run(channel, "sum_product_list", async () =>
+    [InlineData("scalar")]
+    [InlineData("correlated")]
+    public Task Robin_Proactive_ScalarAndCorrelatedSubquery(string variant) => Run("WebSql", "scalar_correlated_subquery", async () =>
     {
-        var r = channel == "GraphQl"
-            ? await GqlAggregate("where: { product: { in: [\"Widget\", \"Gizmo\"] } }, aggregates: [{ fn: SUM, column: amount, alias: \"total\" }]")
-            : await Sql("SELECT SUM(amount) AS total FROM parity_sales WHERE product IN ('Widget','Gizmo')");
-        r.RowsShouldBe(["total"], [[ParityExpected.SumAmountWidgetAndGizmo]]);
-    });
-
-    [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    public Task Robin_Proactive_SumAmountByYear(string channel) => Run(channel, "sum_by_year", async () =>
-    {
-        var expected = ParityExpected.SumAmountByYear.OrderBy(p => p.Key).Select(p => new object?[] { p.Key, p.Value }).ToArray();
-        if (channel == "WebSql")
+        if (variant == "scalar")
         {
-            (await Sql("SELECT strftime('%Y', sale_date) AS y, SUM(amount) AS total FROM parity_sales GROUP BY strftime('%Y', sale_date) ORDER BY y"))
-                .RowsShouldBe(["y", "total"], expected, ordered: true);
+            // AVG(amount) over the 15 non-null amounts = 1881.50 / 15 = 125.4333...
+            (await Sql("SELECT id FROM parity_sales WHERE amount > (SELECT AVG(amount) FROM parity_sales) ORDER BY id")).IdsShouldBeInOrder(3, 4, 8, 9, 12);
             return;
         }
 
-        (await GqlAggregate(
-            "timeBuckets: [{ column: sale_date, bucket: YEAR }], aggregates: [{ fn: SUM, column: amount, alias: \"total\" }], orderBy: [{ column: sale_date }]",
-            "sale_date")).RowsShouldBe(["sale_date", "total"], expected, ordered: true);
-    });
+        (await Sql("SELECT s.id AS id FROM parity_sales s WHERE EXISTS (SELECT 1 FROM parity_regions r WHERE r.id = s.region_id AND r.tz = 'UTC') ORDER BY s.id"))
+            .IdsShouldBeInOrder(7, 8, 9, 10, 11, 12, 13, 14, 15);
+    }, variant);
+
+    [ParityTheory]
+    [InlineData("cte")]
+    [InlineData("recursive")]
+    [InlineData("self_reference")]
+    public Task Robin_277_CteAndRecursiveGate(string variant) => Run("WebSql", "cte_and_recursive_gate", async () =>
+    {
+        if (variant == "cte")
+        {
+            (await Sql("WITH n AS (SELECT id FROM parity_sales WHERE region = 'North') SELECT id FROM n ORDER BY id")).IdsShouldBeInOrder(1, 2, 3, 4, 5, 6, 18);
+            return;
+        }
+
+        // The recursive gate is off in the parity host (SEC-R100-18): the rejection is a security cell.
+        var sql = variant == "recursive"
+            ? "WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM s WHERE x < 5) SELECT x FROM s"
+            : "WITH s(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM s WHERE x < 5) SELECT x FROM s";
+        var r = await Sql(sql);
+        if (!ParityAssert.IsError(r))
+        {
+            throw new DeniedRequestSucceededException("A recursive CTE ran although the gate is off.");
+        }
+
+        r.Rejected("SQL_CONSTRUCT_NOT_SUPPORTED").Status.ShouldBe(422);
+        r.Rows.Count.ShouldBe(0);
+    }, variant);
 
     [ParityTheory]
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
-    public Task Robin_Proactive_SumAmountScopedTwoRegions(string channel) => Run(channel, "sum_scoped_two_regions", async () =>
+    [InlineData("Rest")]
+    [InlineData("OData")]
+    public Task Robin_Proactive_UnauthenticatedRequestRejected(string channel) => Run(channel, "unauthenticated_rejected", () => channel switch
     {
-        var r = channel == "GraphQl"
-            ? await GqlAggregate("where: { region: { in: [\"North\", \"South\"] } }, aggregates: [{ fn: SUM, column: amount, alias: \"total\" }]", table: Scoped)
-            : await Sql("SELECT SUM(amount) AS total FROM parity_scoped WHERE region IN ('North','South')");
-        r.RowsShouldBe(["total"], [[ParityExpected.SumAmountNorthAndSouth]]);
+        "GraphQl" => _robin.AssertUnauthorizedAsync(HttpMethod.Post, "/graphql", "{\"query\":\"{ default_main_parity_sales(first: 1) { id } }\"}"),
+        "Rest" => _robin.AssertUnauthorizedAsync(HttpMethod.Get, RestPath(Sales, "select=id")),
+        "OData" => _robin.AssertUnauthorizedAsync(HttpMethod.Get, "/odata/default/main/parity_sales?$select=id"),
+        _ => _robin.AssertUnauthorizedAsync(HttpMethod.Post, "/api/v1/sql", "{\"sql\":\"SELECT id FROM parity_sales\"}"),
     });
+
+    [ParityTheory]
+    [InlineData("two_filtered")]
+    [InlineData("unfiltered_alias")]
+    [InlineData("single_unfiltered")]
+    public Task Robin_163_GraphQlAliasesOnScopedTable(string variant) => Run("GraphQl", "scoped_aliases", async () =>
+    {
+        const string north = "north: default_main_parity_scoped(where: { region: { eq: \"North\" } }, first: 100) { id }";
+        if (variant == "two_filtered")
+        {
+            var ok = await _robin.GraphQlAsync("{ " + north + " south: default_main_parity_scoped(where: { region: { eq: \"South\" } }, first: 100) { id } }", "north");
+            ok.Ok();
+            AliasIds(ok.RawBody, "north").Order().ToList().ShouldBe([1, 2, 3, 4, 5, 6, 18]);
+            AliasIds(ok.RawBody, "south").Order().ToList().ShouldBe([7, 8, 9, 10, 11, 12]);
+            return;
+        }
+
+        // SEC-R100-14: one alias without the required filter rejects the whole request.
+        var query = variant == "unfiltered_alias"
+            ? "{ " + north + " all: default_main_parity_scoped(first: 100) { id } }"
+            : "{ all: default_main_parity_scoped(first: 100) { id } }";
+        var r = await _robin.GraphQlAsync(query, "all");
+        if (GraphQlAlias(r.RawBody, "all") is not null)
+        {
+            throw new DeniedRequestSucceededException("An alias without the required filter column returned data.");
+        }
+
+        if (!ParityAssert.IsError(r))
+        {
+            throw new DeniedRequestSucceededException("A request with an unfiltered scoped alias succeeded without an error.");
+        }
+
+        r.Rejected("REQUIRED_FILTER_COLUMN_MISSING");
+        if (GraphQlAlias(r.RawBody, "north") is not null)
+        {
+            throw new XunitException("The filtered alias returned partial data although the request was rejected.");
+        }
+    }, variant);
+
+    [ParityTheory]
+    [InlineData("OData", "region_eq")]
+    [InlineData("OData", "amount_gt_top")]
+    [InlineData("Rest", "region_eq")]
+    [InlineData("Rest", "amount_gt_top")]
+    public Task Robin_Proactive_ODataFilterMatchesRest(string channel, string variant) => Run(channel, "odata_filter_matches_rest", async () =>
+    {
+        var byRegion = variant == "region_eq";
+        var r = channel == "OData"
+            ? await _robin.ODataAsync("/odata/default/main/parity_sales?$select=id&$orderby=id&$filter=" +
+                Uri.EscapeDataString(byRegion ? "region eq 'North'" : "amount gt 100") + (byRegion ? string.Empty : "&$top=3"))
+            : byRegion
+                ? await RestIds(Sales, "region eq 'North'")
+                : await _robin.RestAsync(RestPath(Sales, "select=id&orderBy=id&limit=3&filter=" + Uri.EscapeDataString("amount gt 100")));
+        if (byRegion)
+        {
+            r.IdsShouldBeInOrder(1, 2, 3, 4, 5, 6, 18);
+        }
+        else
+        {
+            r.IdsShouldBeInOrder(3, 4, 8);
+        }
+    }, variant);
 
     // ---------------------------------------------------------------------------------------------------------------------
     // R82-R83. Unknown objects give stable codes without an existence oracle [#30]
@@ -414,7 +698,13 @@ public sealed partial class RobinScenarios
             "Rest" => await _robin.RestAsync(RestPath(Sales, "select=nope")),
             _ => await Sql("SELECT nope FROM parity_sales"),
         };
-        r.Rejected(channel == "GraphQl" ? "GRAPHQL_VALIDATION_FAILED" : null);
+        // #312 (SEC-PG-10, SEC-X1-05): an unknown column is answered like a denied one (no column-name oracle), so W is SQL_POLICY_DENIED.
+        r.Rejected(channel switch { "GraphQl" => "GRAPHQL_VALIDATION_FAILED", "Rest" => "INVALID_QUERY", _ => "SQL_POLICY_DENIED" });
+        if (channel != "GraphQl")
+        {
+            r.Status.ShouldBe(channel == "Rest" ? 400 : 403);
+        }
+
         r.RawBody.Contains("no such column", StringComparison.OrdinalIgnoreCase).ShouldBeFalse("the response carries engine text (SEC-PAR-07)");
     });
 
@@ -424,6 +714,14 @@ public sealed partial class RobinScenarios
 
     private Task<RobinHttpResponse> Analyze(string sql) =>
         _robin.PostJsonAsync(AnalyzePath, new { queries = new[] { new { sqlQuery = sql, dataSource = "default" } } });
+
+    private static bool ContainsString(JsonElement e, string value) => e.ValueKind switch
+    {
+        JsonValueKind.String => string.Equals(e.GetString(), value, StringComparison.Ordinal),
+        JsonValueKind.Object => e.EnumerateObject().Any(p => ContainsString(p.Value, value)),
+        JsonValueKind.Array => e.EnumerateArray().Any(i => ContainsString(i, value)),
+        _ => false,
+    };
 
     private static void NoRowValuesOrStackFrames(string body)
     {
@@ -439,8 +737,8 @@ public sealed partial class RobinScenarios
         var r = await Analyze("SELECT id FROM default.main.parity_sales WHERE region = 'North'");
         r.Result.Ok();
         using var doc = JsonDocument.Parse(r.Body);
-        FindProperty(doc.RootElement, "isValid")?.ValueKind.ShouldBe(JsonValueKind.True);
-        FindProperty(doc.RootElement, "sourceDatabaseReadsExecuted")?.GetInt64().ShouldBe(0);
+        (FindProperty(doc.RootElement, "isValid") ?? throw new XunitException("isValid missing")).ValueKind.ShouldBe(JsonValueKind.True);
+        (FindProperty(doc.RootElement, "sourceDatabaseReadsExecuted") ?? throw new XunitException("sourceDatabaseReadsExecuted missing")).GetInt64().ShouldBe(0);
         NoRowValuesOrStackFrames(r.Body);
     });
 
@@ -449,19 +747,10 @@ public sealed partial class RobinScenarios
     {
         var r = await Analyze("SELEC id FRM parity_sales");
         NoRowValuesOrStackFrames(r.Body);
-        if (ParityAssert.IsError(r.Result))
-        {
-            r.Result.Rejected();
-            return;
-        }
-
         r.Result.Ok();
         using var doc = JsonDocument.Parse(r.Body);
-        FindProperty(doc.RootElement, "isValid")?.ValueKind.ShouldBe(JsonValueKind.False);
-        var diagnostics = new[] { "diagnostics", "errors", "issues", "messages" }
-            .Select(n => FindProperty(doc.RootElement, n))
-            .Any(e => e is { ValueKind: JsonValueKind.Array } a && a.GetArrayLength() > 0);
-        diagnostics.ShouldBeTrue("an invalid query is reported without a diagnostic");
+        (FindProperty(doc.RootElement, "isValid") ?? throw new XunitException("isValid missing")).ValueKind.ShouldBe(JsonValueKind.False);
+        ContainsString(doc.RootElement, "SYNTAX_ERROR").ShouldBeTrue("an invalid query is reported without a SYNTAX_ERROR diagnostic");
     });
 
     [ParityFact]
@@ -470,8 +759,8 @@ public sealed partial class RobinScenarios
         var r = await Analyze("SELECT id FROM parity_sales LIMIT 10");
         r.Result.Ok();
         using var doc = JsonDocument.Parse(r.Body);
-        FindProperty(doc.RootElement, "estimatedRows")?.GetInt64().ShouldBe(10);
-        FindProperty(doc.RootElement, "sourceDatabaseReadsExecuted")?.GetInt64().ShouldBe(0);
+        (FindProperty(doc.RootElement, "estimatedRows") ?? throw new XunitException("estimatedRows missing")).GetInt64().ShouldBe(10);
+        (FindProperty(doc.RootElement, "sourceDatabaseReadsExecuted") ?? throw new XunitException("sourceDatabaseReadsExecuted missing")).GetInt64().ShouldBe(0);
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -484,7 +773,7 @@ public sealed partial class RobinScenarios
     [InlineData("drop", "DROP TABLE parity_sales")]
     public Task Robin_Proactive_WriteStatementRejected(string variant, string sql) => Run("WebSql", "write_statement_rejected", async () =>
     {
-        // Observed stable rejection of a write by the gateway policy: 403 SQL_POLICY_VIOLATION.
+        // Lead decision 2026-10-23: a write is pinned to 403 SQL_POLICY_VIOLATION (security cell, never split, never a gap).
         var rejected = (await Sql(sql)).Rejected("SQL_POLICY_VIOLATION");
         rejected.Status.ShouldBe(403);
         (await Sql("SELECT COUNT(*) AS n FROM parity_sales")).RowsShouldBe(["n"], [[18]]);
@@ -492,10 +781,11 @@ public sealed partial class RobinScenarios
 
     [ParityTheory]
     [InlineData("select", "SELECT 1; SELECT 2", "SQL_SYNTAX_ERROR")]
-    [InlineData("write", "SELECT 1; DELETE FROM parity_sales", null)]
-    public Task Robin_Proactive_MultiStatementRejected(string variant, string sql, string? code) => Run("WebSql", "multi_statement_rejected", async () =>
+    [InlineData("write", "SELECT 1; DELETE FROM parity_sales", "SQL_SYNTAX_ERROR")]
+    public Task Robin_Proactive_MultiStatementRejected(string variant, string sql, string code) => Run("WebSql", "multi_statement_rejected", async () =>
     {
         var r = (await Sql(sql)).Rejected(code);
+        r.Status.ShouldBe(400);
         r.Rows.Count.ShouldBe(0);
         // The second statement did not run.
         (await Sql("SELECT COUNT(*) AS n FROM parity_sales")).RowsShouldBe(["n"], [[18]]);
@@ -513,7 +803,11 @@ public sealed partial class RobinScenarios
             "Rest" => await _robin.RestAsync(RestPath(Sales, "select=id&limit=-1")),
             _ => await Sql("SELECT id FROM parity_sales LIMIT -1"),
         };
-        r.Rejected();
+        r.Rejected(channel == "WebSql" ? "SQL_SYNTAX_ERROR" : "INVALID_QUERY");
+        if (channel != "GraphQl")
+        {
+            r.Status.ShouldBe(400);
+        }
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -553,19 +847,19 @@ public sealed partial class RobinScenarios
             "Rest" => await RestIds(Masked, "amount gt 100"),
             _ => await Sql("SELECT id FROM parity_masked WHERE amount > 100 ORDER BY id"),
         };
-        if (ParityAssert.IsError(r))
+        if (!ParityAssert.IsError(r))
         {
-            r.Rejected();
-            return;
+            throw new DeniedRequestSucceededException(IdsOf(r).Intersect(new[] { 3, 4, 8, 9, 12 }).Any()
+                ? "A filter on a masked column selected rows by their clear value."
+                : "A filter on a masked column was not rejected.");
         }
 
-        var ids = IdsOf(r);
-        if (ids.Intersect(new[] { 3, 4, 8, 9, 12 }).Any())
+        r.Rejected(channel switch { "WebSql" => "SQL_POLICY_VIOLATION", _ => "INVALID_QUERY" });
+        if (channel != "GraphQl")
         {
-            throw new DeniedRequestSucceededException("A filter on a masked column selected rows by their clear value.");
+            r.Status.ShouldBe(channel == "Rest" ? 400 : 403);
         }
 
-        ids.ShouldBeEmpty();
         ShouldNotLeakAmounts(r, "filter on masked column");
     });
 
@@ -577,16 +871,18 @@ public sealed partial class RobinScenarios
         var r = channel == "GraphQl"
             ? await GqlList("first: 100, orderBy: [{ amount: ASC }, { id: ASC }]", "id", Masked)
             : await Sql("SELECT id FROM parity_masked ORDER BY amount, id");
-        if (ParityAssert.IsError(r))
+        if (!ParityAssert.IsError(r))
         {
-            r.Rejected();
-            return;
+            var ids = IdsOf(r);
+            throw new DeniedRequestSucceededException(ids.SequenceEqual(ClearOrderNullsFirst) || ids.SequenceEqual(ClearOrderNullsLast)
+                ? "ORDER BY a masked column returned the clear order."
+                : "ORDER BY a masked column was not rejected.");
         }
 
-        var ids = IdsOf(r);
-        if (ids.SequenceEqual(ClearOrderNullsFirst) || ids.SequenceEqual(ClearOrderNullsLast))
+        r.Rejected(channel == "WebSql" ? "SQL_POLICY_VIOLATION" : "INVALID_QUERY");
+        if (channel == "WebSql")
         {
-            throw new DeniedRequestSucceededException("ORDER BY a masked column returned the clear order.");
+            r.Status.ShouldBe(403);
         }
 
         ShouldNotLeakAmounts(r, "order by masked column");
@@ -600,15 +896,19 @@ public sealed partial class RobinScenarios
         var r = channel == "GraphQl"
             ? await GqlAggregate("groupBy: [amount], aggregates: [{ fn: COUNT, alias: \"n\" }]", "amount", Masked)
             : await Sql("SELECT amount, COUNT(*) AS n FROM parity_masked GROUP BY amount");
-        if (ParityAssert.IsError(r))
+        if (!ParityAssert.IsError(r))
         {
-            r.Rejected();
-            return;
+            NoClearAmountInRows(r, "group by masked column");
+            throw new DeniedRequestSucceededException("GROUP BY a masked column was not rejected.");
         }
 
-        r.Ok();
-        NoClearAmountInRows(r, "group by masked column");
-        r.RowsShouldBe(["amount", "n"], [[null, 18]]);
+        r.Rejected("AGGREGATION_ON_MASKED_COLUMN");
+        if (channel == "WebSql")
+        {
+            r.Status.ShouldBe(403);
+        }
+
+        ShouldNotLeakAmounts(r, "group by masked column");
     });
 
     [ParityTheory]
@@ -626,23 +926,6 @@ public sealed partial class RobinScenarios
     // ---------------------------------------------------------------------------------------------------------------------
     // R96-R99. Required filter column [#163, #236, #221]
     // ---------------------------------------------------------------------------------------------------------------------
-
-    [ParityTheory]
-    [InlineData("WebSql")]
-    [InlineData("GraphQl")]
-    public Task Robin_163_RequiredFilterOnAggregate(string channel) => Run(channel, "required_filter_aggregate", async () =>
-    {
-        const string aggregates = "aggregates: [{ fn: COUNT, alias: \"n\" }, { fn: SUM, column: amount, alias: \"total\" }]";
-        var missing = channel == "GraphQl"
-            ? await GqlAggregate("groupBy: [product], " + aggregates, "product", Scoped)
-            : await Sql("SELECT product, COUNT(*) AS n, SUM(amount) AS total FROM parity_scoped GROUP BY product");
-        missing.Rejected("REQUIRED_FILTER_COLUMN_MISSING");
-
-        var satisfied = channel == "GraphQl"
-            ? await GqlAggregate("where: { region: { eq: \"North\" } }, groupBy: [product], " + aggregates, "product", Scoped)
-            : await Sql("SELECT product, COUNT(*) AS n, SUM(amount) AS total FROM parity_scoped WHERE region = 'North' GROUP BY product");
-        satisfied.RowsShouldBe(["product", "n", "total"], [["Widget", 4, 220.50m], ["Gadget", 2, 400.00m], ["Gizmo", 1, 15.25m]]);
-    });
 
     [ParityFact]
     public Task Robin_236_RequiredFilterRestOtherColumnNotEnough() => Run("Rest", "required_filter_other_column", async () =>
