@@ -69,6 +69,32 @@ public static partial class TreeSqlCompiler
     }
 
     /// <summary>
+    /// Runs the validation phase of <see cref="Compile"/> (column, filter and required-filter-column checks) without emitting SQL and
+    /// without consulting any secured source, so policy-independent client errors surface before row-policy support checks.
+    /// </summary>
+    public static void Validate(
+        TreeQueryNode root,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        DatabaseDialect dialect,
+        bool maskingDisabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(access);
+
+        if (!SupportsTreeCompile(dialect))
+        {
+            throw new NotSupportedException($"Dialect '{dialect}' does not support single-statement JSON queries.");
+        }
+
+        if (Depth(root) > MaxDepth)
+        {
+            throw new GatewayInvalidQueryException($"The query nests relations deeper than {MaxDepth} levels.");
+        }
+
+        _ = Prepare(root, new CompileContext(dialect, access, maskingDisabled), path: []);
+    }
+
+    /// <summary>
     /// Lists the selected columns that <see cref="Compile"/> masks for the caller (same decision, same column
     /// resolution), so that transports can report them (GraphQL <c>extensions.maskedFields</c>). Columns that are unknown
     /// or denied are skipped here; <see cref="Compile"/> rejects them.

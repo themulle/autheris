@@ -451,7 +451,16 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 access.Metadata,
                 _options.DataSources?.RequireTenantColumn == true,
                 _options.DataSources?.TenantColumnExemptTables);
-            TreeSecuredSource? securedSource = null;
+            treeAccess[tableId] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value);
+        }
+
+        // Policy-independent client errors (required filter columns, invalid filters) are reported with their stable code before any
+        // row-policy support check, and without touching the policy (SQLA-06 follow-up ordering).
+        TreeSqlCompiler.Validate(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
+
+        foreach (var tableId in sameSourceTables)
+        {
+            var access = resolved[tableId];
             if (TreeSqlCompiler.RowPolicyRequiresEnginePipeline(access.Decision)
                 && access.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy
                 && _securedSourceBuilder is not null)
@@ -462,10 +471,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
                 }
 
-                securedSource = await _securedSourceBuilder.BuildAsync(access, sourceName, dialect, ct).ConfigureAwait(false);
+                var securedSource = await _securedSourceBuilder.BuildAsync(access, sourceName, dialect, ct).ConfigureAwait(false);
+                treeAccess[tableId] = treeAccess[tableId] with { SecuredSource = securedSource };
             }
-
-            treeAccess[tableId] = new TreeTableAccess(access.Metadata, access.Decision, tenantColumn, tenantColumn == null ? null : access.Tenant.Value, securedSource);
         }
 
         var compiled = TreeSqlCompiler.Compile(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
