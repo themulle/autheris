@@ -112,7 +112,8 @@ public static class SubtreeCompiler
 
         // 2. Validate function allowlists for target dialect (V-4, SEC-DATA123-01)
         var dialect = subtree.Dialect;
-        var allowlist = SqlFunctionAllowlists.GetDefault(dialect);
+        // GAP-013 / SEC-PG-03: federated WebSQL translates the Trino date functions like single-source WebSQL (one behaviour per capability).
+        var allowlist = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.GetDefault(dialect));
         var functionsInSubtree = CollectFunctionCalls(subtree);
         foreach (var func in functionsInSubtree)
         {
@@ -177,7 +178,8 @@ public static class SubtreeCompiler
             new WebSqlOptions(),
             isDml: false,
             enforcedMaxRows: 0,
-            allowedFunctions: allowlist);
+            allowedFunctions: allowlist,
+            translateDateFunctions: true);
 
         var compiled = sqlEngine.Compile(canonicalSql.AsMemory(), compileRequest, ct);
 

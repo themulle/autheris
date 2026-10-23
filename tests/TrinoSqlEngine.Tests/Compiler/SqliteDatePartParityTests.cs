@@ -2,6 +2,7 @@ using System.Security;
 using Microsoft.Data.Sqlite;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
@@ -276,6 +277,29 @@ public sealed class SqliteDatePartParityTests
         Assert.Contains("CAST(\"TenantId\" AS BLOB)", compiled.Sql);
         Assert.Contains(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant && (string?)p.Value == "acme");
         Assert.Equal(new object?[] { 1L, 2L }, Run(compiled));
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void EmptyInList_ParameterHeavyOperand_StaysInsideTheParameterCap()
+    {
+        // SEC-PG-05: the operand appears twice in the folded form, so its bound literals count twice against the cap.
+        // 20000 literals fit once (cap 32766) but not twice: the stable limit rejection answers, never a provider error.
+        string args = string.Join(", ", Enumerable.Range(1, 20000));
+        Assert.Throws<SqlLimitExceededException>(() => Compile($"SELECT id FROM orders WHERE coalesce(id, {args}) IN ()"));
+        Assert.Throws<SqlLimitExceededException>(() => Compile($"SELECT id FROM orders WHERE coalesce(id, {args}) NOT IN ()"));
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void EmptyInList_SubqueryOperand_KeepsThePolicyInEveryCopy()
+    {
+        // SEC-PG-05: a scalar subquery operand is duplicated by the fold; both copies are governed (tenant predicate in each).
+        var compiled = Compile("SELECT id FROM orders WHERE (SELECT max(id) FROM orders) IN ()");
+
+        int tenantChecks = compiled.Sql.Split("CAST(\"TenantId\" AS BLOB)").Length - 1;
+        Assert.True(tenantChecks >= 3, compiled.Sql);   // outer table + both subquery copies
+        Assert.Empty(Run(compiled));
     }
 
     [Fact]
