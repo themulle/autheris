@@ -84,7 +84,7 @@ public static class ParityCell
     {
         writer ??= ParityResultsWriter.Default;
         var outcome = ParityOutcome.Pass;
-        var observations = ParityObservations.Begin();
+        using var observations = ParityObservations.Begin();
         try
         {
             await KnownGap.RunAsync(cell.GapId, body, cell.Aspect);
@@ -115,18 +115,30 @@ public static class ParityCell
 /// Observations made while a cell runs. A tolerated 501 (an unsupported capability answered with a stable code, D-9) is a 5xx and must stay
 /// visible: the cell records it and the report lists it. The holder is created by <see cref="ParityCell"/> so callees can fill it.
 /// </summary>
-public sealed class ParityObservations
+public sealed class ParityObservations : IDisposable
 {
     private static readonly AsyncLocal<ParityObservations?> Current = new();
 
     /// <summary>Code of a tolerated 501 seen by the running cell, or null.</summary>
     public string? Tolerated501 { get; private set; }
 
+    /// <summary>True while a cell holder is registered for the current async flow.</summary>
+    public static bool IsActive => Current.Value is not null;
+
     public static ParityObservations Begin()
     {
         var holder = new ParityObservations();
         Current.Value = holder;
         return holder;
+    }
+
+    /// <summary>Clears the holder so a later cell on the same flow never writes into a finished cell's observations.</summary>
+    public void Dispose()
+    {
+        if (ReferenceEquals(Current.Value, this))
+        {
+            Current.Value = null;
+        }
     }
 
     public static void RecordTolerated501(string code)

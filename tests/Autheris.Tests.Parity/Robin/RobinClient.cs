@@ -17,7 +17,7 @@ namespace Autheris.Tests.Parity.Robin;
 /// Every response passes the no-5xx/no-leak invariant (SEC-PAR-05, SEC-PAR-07) before a scenario looks at the rows, so a server
 /// error is a hard failure and never a known gap.
 /// </summary>
-public sealed class RobinClient(ParityHostFixture host)
+public sealed class RobinClient(IParityHost host)
 {
     public const string SalesRest = "/api/v1/data/default/main/" + ParitySeed.SalesTable;
 

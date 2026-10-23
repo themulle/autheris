@@ -488,4 +488,79 @@ public sealed partial class ParityIsolationArchitectureTests
         script.ShouldNotContain("eval(");
         RunReportSelfTest().ExitCode.ShouldBe(0);
     }
+
+    // ---------- WP4: the container dialect job keeps the SEC-PAR-01/02 invariants ----------
+
+    /// <summary>The text of one top-level job (from <c>  name:</c> to the next job); throws when the job is missing (fail closed).</summary>
+    internal static string JobBlock(string workflow, string job)
+    {
+        var start = workflow.IndexOf($"\n  {job}:\n", StringComparison.Ordinal);
+        if (start < 0)
+        {
+            throw new InvalidOperationException($"Job '{job}' not found in the workflow.");
+        }
+
+        var next = Regex.Match(workflow[(start + 1)..], @"\n  [a-z][a-z0-9\-]*:\n");
+        var body = workflow[(start + 1)..];
+        return next.Success && next.Index > job.Length ? body[..next.Index] : body;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ParityWorkflow_DialectJobIsContainerOnlyValidatedAndLeastPrivilege()
+    {
+        // SEC-PAR-01, SEC-PAR-02 for the WP4 job
+        var workflow = ReadWorkflow(NightlyWorkflow);
+        var sqlite = JobBlock(workflow, "parity-sqlite");
+        var dialects = JobBlock(workflow, "parity-dialects");
+
+        sqlite.ShouldContain("FILTER=\"Category=Parity&Dialect!=Container\"");
+        sqlite.ShouldNotContain("Dialect=Container");
+        dialects.ShouldContain("FILTER=\"Category=Parity&Dialect=Container\"");
+        dialects.ShouldNotContain("Dialect!=Container");
+
+        foreach (var job in new[] { sqlite, dialects })
+        {
+            job.ShouldContain("FILTER=\"$FILTER&($PARITY_FILTER_INPUT)\"");
+            job.ShouldContain("--filter \"$FILTER\"");
+            job.ShouldContain("^[A-Za-z0-9_.~=\\!\\&\\|\\(\\)]*$");
+            job.ShouldContain("^[0-9]{0,10}$");
+            job.ShouldContain("permissions:\n      contents: read");
+            job.ShouldContain("persist-credentials: false");
+            job.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
+            job.IndexOf("Validate inputs", StringComparison.Ordinal).ShouldBeLessThan(job.IndexOf("dotnet test", StringComparison.Ordinal));
+            job.ShouldNotContain("secrets.");
+            job.ShouldNotContain("eval ");
+            JoinedLines(job).Where(l => l.TrimStart().StartsWith("run:", StringComparison.Ordinal) && l.Contains("${{", StringComparison.Ordinal)).ShouldBeEmpty();
+        }
+
+        dialects.ShouldContain("parity-baseline-dialects.json");
+        dialects.ShouldContain("AUTHERIS_PARITY_RUN: '1'");
+        dialects.ShouldContain("retention-days: 14");
+        Regex.Count(workflow, @"^  parity-[a-z]+:\s*$", RegexOptions.Multiline).ShouldBe(2);
+    }
+
+    [Fact]
+    public void ParityWorkflow_JobBlockFailsClosedAndSplitsJobs()
+    {
+        const string sample = "jobs:\n  one:\n    a: 1\n  two:\n    b: 2\n";
+        JobBlock(sample, "one").ShouldContain("a: 1");
+        JobBlock(sample, "one").ShouldNotContain("b: 2");
+        JobBlock(sample, "two").ShouldContain("b: 2");
+        Should.Throw<InvalidOperationException>(() => JobBlock(sample, "three"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ParityProject_ContainerDialectsStayOutOfTheSqliteSelection()
+    {
+        // D-15: classes bound to a container host carry Dialect=Container, so the sqlite job filter excludes them
+        var root = FindRepoRoot();
+        var offenders = ParitySourceFiles(root)
+            .Where(f => File.ReadAllText(f).Contains("ParityPostgresHostFixture host", StringComparison.Ordinal))
+            .Where(f => !Path.GetFileName(f).StartsWith("ParityPostgresHostFixture", StringComparison.Ordinal))
+            .Where(f => !File.ReadAllText(f).Contains("[Trait(\"Dialect\", \"Container\")]", StringComparison.Ordinal))
+            .ToList();
+        offenders.ShouldBeEmpty();
+    }
 }
