@@ -141,6 +141,24 @@ public sealed class DbtOptions
 {
     public bool Enabled { get; init; } = true;
     public string WebhookSecret { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Issue #282: a dbt sync registers manifest models and sources that have no catalog entry yet, when their database resolves
+    /// to a configured SQL data source. false keeps the previous behaviour (update existing entries only).
+    /// </summary>
+    public bool CreateMissingTables { get; init; } = true;
+
+    /// <summary>
+    /// Issue #282 (SEC-282-2): newly registered tables are inactive (invisible) until an administrator activates them. true makes
+    /// them live without masks or consents; configuration only, never a request parameter.
+    /// </summary>
+    public bool ActivateNewTables { get; init; }
+
+    /// <summary>
+    /// Issue #282 (SEC-282-3): dbt database name to <c>DataSources.Connections</c> key. A database without an entry resolves to the
+    /// connection of the same name (case-insensitive); there is no wildcard and no default connection.
+    /// </summary>
+    public Dictionary<string, string> DatabaseMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class BackstageIntegrationOptions

@@ -108,6 +108,30 @@ public sealed record DbtSyncResult(
 {
     public IReadOnlyList<string> RejectedModels { get; init; } = RejectedModels ?? Array.Empty<string>();
     public IReadOnlyList<DbtSuppressedRelaxation> SuppressedRelaxations { get; init; } = SuppressedRelaxations ?? Array.Empty<DbtSuppressedRelaxation>();
+
+    /// <summary>Issue #282: qualified names of the catalog entries the sync created (in dry run: would create).</summary>
+    public IReadOnlyList<string> CreatedTables { get; init; } = Array.Empty<string>();
+
+    /// <summary>Issue #282: models and sources that were not registered, each with a fixed reason code (capped).</summary>
+    public IReadOnlyList<DbtSyncSkippedItem> SkippedItems { get; init; } = Array.Empty<DbtSyncSkippedItem>();
+
+    /// <summary>True when more items were skipped than <see cref="SkippedItems"/> lists.</summary>
+    public bool SkippedItemsTruncated { get; init; }
+}
+
+/// <summary>Issue #282: a manifest item that was not registered; <paramref name="Reason"/> is one of <see cref="DbtSyncSkipReasons"/>.</summary>
+public sealed record DbtSyncSkippedItem(string Name, string Kind, string Reason);
+
+/// <summary>Issue #282: fixed reason codes (no manifest free text).</summary>
+public static class DbtSyncSkipReasons
+{
+    public const string NoDataSourceMapping = "NO_DATA_SOURCE_MAPPING";
+    public const string DataSourceNotSql = "DATA_SOURCE_NOT_SQL";
+    public const string InvalidIdentifier = "INVALID_IDENTIFIER";
+    public const string CreationDisabled = "CREATION_DISABLED";
+    public const string Ineligible = "INELIGIBLE";
+    public const string Duplicate = "DUPLICATE";
+    public const string CreateFailed = "CREATE_FAILED";
 }
 
 public sealed record DbtContractBreakingChange(
