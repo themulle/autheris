@@ -123,6 +123,21 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task ApproveProfile_DraftChangedAfterReview_Conflict()
+    {
+        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_ptoctou"), new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
+        var profile = VirtualFilterModelTests.DavidProfile("profile_toctou", "filter_ptoctou");
+        await _adminService.SaveProfileAsync(profile, CreatorActor);
+        var reviewed = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Profiles.Single(p => p.Name == "profile_toctou"));
+
+        // The draft is relaxed after the reviewer read it.
+        await _adminService.SaveProfileAsync(profile with { Uncovered = UncoveredPolicy.Skip }, CreatorActor);
+
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => ApproveProfileAsync("profile_toctou", SupervisorActor, expectedHash: reviewed));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task ApproveFilter_HashCaseDiffers_Conflict()
     {
         await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_case"), CreatorActor);

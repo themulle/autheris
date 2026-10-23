@@ -24,8 +24,8 @@ public sealed class Gql02InvoiceMappingTests
 
     [Theory]
     [InlineData(12.5d)]
-    [InlineData(12.5)]
-    public void GQL_02_NonDecimalNumbers_AreConverted(double amount)
+    [InlineData(12.5f)]
+    public void GQL_02_NonDecimalNumbers_AreConverted(object amount)
     {
         var invoice = FinanceQuery.MapInvoice(new Dictionary<string, object?> { ["id"] = 7L, ["amount"] = amount });
 

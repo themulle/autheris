@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Autheris.Tests.Unit.Cdc;
 
 using System;
@@ -16,7 +18,7 @@ public sealed class CustomQueryPollerReadOnlyExt10Tests
 {
     private sealed class FakeNpgsqlConnection(List<string> log, bool failReadOnly = false) : DbConnection
     {
-        public override string ConnectionString { get; set; } = "Host=db;Database=x";
+        [AllowNull] public override string ConnectionString { get; set; } = "Host=db;Database=x";
         public override string Database => "x";
         public override string DataSource => "db";
         public override string ServerVersion => "16";
@@ -52,7 +54,7 @@ public sealed class CustomQueryPollerReadOnlyExt10Tests
 
     private sealed class FakeCommand(FakeNpgsqlConnection connection, List<string> log) : DbCommand
     {
-        public override string CommandText { get; set; } = string.Empty;
+        [AllowNull] public override string CommandText { get; set; } = string.Empty;
         public override int CommandTimeout { get; set; }
         public override CommandType CommandType { get; set; }
         public override bool DesignTimeVisible { get; set; }

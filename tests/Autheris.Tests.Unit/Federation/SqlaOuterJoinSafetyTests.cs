@@ -160,6 +160,31 @@ public sealed class SqlaOuterJoinSafetyTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void Subtree_TenantPredicate_BindsCallerTenantValue()
+    {
+        var sql = "SELECT o.id FROM pg.public.orders o JOIN pg.public.order_items oi ON o.id = oi.order_id";
+        var metadata = Engine.Analyze(sql.AsMemory());
+        var orderMeta = CreateTable("pg", "orders", ["id", "tenant_id"]);
+        var itemMeta = CreateTable("pg", "order_items", ["id", "order_id", "tenant_id"]);
+        var tables = new List<ResolvedSourceTable>
+        {
+            new(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "pg"),
+            new(metadata.ReferencedTables[1], itemMeta.Identifier, itemMeta, "pg")
+        };
+        var subtree = SubtreeGraphPartitioner.Partition(Parse(sql), tables, maxTablesPerSubtree: 12).Subtrees.Single();
+        var decisions = tables.ToDictionary(t => t.Metadata.Identifier, t => TableAccessDecision.Allowed(
+            t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+
+        var plan = SubtreeCompiler.Compile(
+            subtree, decisions, new CrossSourceOptions { Enabled = true }, Engine, PlannerTestIdentity.User, new TenantId("t-42"));
+
+        var tenantValues = plan.Compiled.Parameters.Select(p => p.Value as string).ToList();
+        tenantValues.ShouldContain("t-42");
+        tenantValues.ShouldNotContain("default");
+    }
+
+    [Fact]
     public void CoLocatedCompileOverload_DoesNotExist()
     {
         var overloads = typeof(SubtreeCompiler).GetMethods().Where(m => m.Name == "Compile" && m.GetParameters()[0].ParameterType == typeof(string));

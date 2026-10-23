@@ -416,7 +416,8 @@ public sealed class McpDatasetCatalogScopeLevelTests
     {
         var bypass = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
         var anonymous = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
-        var catalog = CreateCatalog(CreateTable() with { IsActive = false }, [], gatewayOptions: bypass);
+        var table = CreateTable();
+        var catalog = CreateCatalog(table with { Table = table.Table with { IsActive = false } }, [], gatewayOptions: bypass);
 
         await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => DescribeAsync(catalog, anonymous));
     }
