@@ -442,7 +442,7 @@
       "defect": "Legacy CAST(x AS date) on SQLite relies on numeric affinity and collapses each ISO date to its year, so GROUP BY CAST(created_at AS date) yields one row [2024, 8]; the AST renders date(x) and groups per day.",
       "justification": "The AST result is the correct per-day grouping (issue #298). The PolicyOracle reports zero violations on the AST path, so tenant filter and masks hold. Skipped only while that stays true.",
       "issue": null,
-      "reviewer": "@themulle (2026-10-23)",
+      "reviewer": "@themulle",
       "approval": "approved"
     },
     {
