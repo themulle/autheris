@@ -75,6 +75,26 @@ public sealed class ErrorSanitizingFilterEngineErrorTests
         errors.ShouldAllBe(e => e.Message == "A variable value is invalid." || e.Message == "The GraphQL request is invalid.");
     }
 
+    [Theory]
+    [InlineData("Development", "9223372036854775807")]
+    [InlineData("Production", "9223372036854775807")]
+    [InlineData("Development", "2147483648")]
+    [InlineData("Production", "2147483648")]
+    public async Task SEC_PG_12_IntVariableBeyondInt32_IsAFixedVariableError_InEveryEnvironment(string env, string literal)
+    {
+        var request = OperationRequest.FromSourceText("query($id: Int!) { count(id: $id) }", variableValues: System.Text.Json.JsonDocument.Parse("{\"id\":" + literal + "}"));
+
+        var errors = await ErrorsAsync(env, request);
+
+        errors.ShouldNotBeEmpty(literal);
+        foreach (var e in errors)
+        {
+            e.Code.ShouldBe("GRAPHQL_VARIABLE_INVALID", e.Code + "|" + e.Exception?.GetType().Name + "|" + string.Join(",", e.Extensions?.Keys ?? []));
+            e.Message.ShouldBe("A variable value is invalid.");
+            e.Extensions!.Keys.ShouldBe(["code"]);
+        }
+    }
+
     [Fact]
     public async Task Development_SyntaxError_GetsParseOrValidationCode()
     {

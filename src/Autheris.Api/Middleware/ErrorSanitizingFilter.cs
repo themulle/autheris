@@ -285,6 +285,14 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
                 return ("GRAPHQL_VARIABLE_INVALID", VariableMessage);
             }
 
+            // HotChocolate 16 reports a variable value its scalar cannot coerce (an Int beyond Int32, JSON number into Int) as a
+            // code-less error whose exception is a FormatException thrown below a HotChocolate scalar's CoerceInput* method. A FormatException
+            // thrown by application code (resolver, service) has another throw site and stays an internal fault.
+            if (ex is FormatException && error.Code == null && IsThrownByHotChocolate(ex))
+            {
+                return ("GRAPHQL_VARIABLE_INVALID", VariableMessage);
+            }
+
             // Provider layer: Microsoft.Data.Sqlite raises SqliteException (SQLITE_ERROR) for "LIKE or GLOB pattern too complex".
             if (ex is System.Data.Common.DbException && ex.Message.Contains("LIKE or GLOB", StringComparison.OrdinalIgnoreCase))
             {
@@ -316,6 +324,23 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         }
 
         return (null, null);
+    }
+
+    private static bool IsThrownByHotChocolate(Exception ex)
+    {
+        // The throw site is System.Text.Json (JsonElement.GetInt32), called from a HotChocolate scalar's input coercion.
+        foreach (var frame in new StackTrace(ex, false).GetFrames())
+        {
+            var method = frame.GetMethod();
+            if (method?.DeclaringType?.Assembly.GetName().Name is { } assembly
+                && assembly.StartsWith("HotChocolate", StringComparison.Ordinal)
+                && method.Name.Contains("CoerceInput", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsEngineOrMissingCode(string? code) =>
