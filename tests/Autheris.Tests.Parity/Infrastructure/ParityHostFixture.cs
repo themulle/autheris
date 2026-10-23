@@ -103,6 +103,15 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
         await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.SalesTable, "second", SalesColumns));
         await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.BigTable, "default", ("id", "integer"), ("grp", "varchar")));
 
+        // WP-R2: the bulk keyset route and the analyze endpoint need a declared key and a visible tier (Hidden tables answer 404 / UNKNOWN_TABLE for a reader).
+        var governance = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        foreach (var table in new[] { ParitySeed.SalesTable, ParitySeed.BigTable })
+        {
+            var id = new TableIdentifier("default", "main", table);
+            await governance.ReplaceTableKeyDefinitionAsync(id, ["id"], []);
+            await governance.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, new Sid("parity-seed"));
+        }
+
         var scoped = Metadata(ParitySeed.ScopedTable, "default", SalesColumns);
         await repo.UpsertTableMetadataAsync(scoped with { Table = scoped.Table with { RequiredFilterColumns = ["region"] } });
 

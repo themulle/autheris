@@ -16,6 +16,10 @@ public static class RobinKnownGaps
         ["Robin_Proactive_GroupByQuarter|GraphQl|"] = "PARITY-GAP-034",
         ["Robin_130_HourBucketBerlinWinterSummer|GraphQl|"] = "PARITY-GAP-035",
         // --- end WP-R1 ---
+        // --- WP-R2 ---
+        ["Robin_123_FederatedSameSourceSubqueryPart|WebSql|"] = "PARITY-GAP-050",
+        ["Robin_124_FederatedKeySetJoin|WebSql|"] = "PARITY-GAP-050",
+        // --- end WP-R2 ---
     };
 
     public static string? For(string caseMethod, string channel, string? variant) =>

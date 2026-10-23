@@ -217,6 +217,9 @@ Observed (Robin WP-R1, R41 `Robin_Proactive_GroupByQuarter`). Capability: GraphQ
 ### PARITY-GAP-035
 Observed (Robin WP-R1, R44 `Robin_130_HourBucketBerlinWinterSummer`). Capability: GraphQL `HOUR` time bucket with `timeZone`. Channel: GraphQL on a SQLite source. Input: `where: { id: { in: [1, 8] } }, timeBuckets: [{ column: sold_at, bucket: HOUR, timeZone: "Europe/Berlin" }]`. Expected: local hours 11 (winter, CET) and 17 (summer, CEST). Actual: 11 and 16: the summer-time offset is not applied to the hour bucket.
 <!-- WP-R1 end -->
+<!-- WP-R2 -->
+### PARITY-GAP-050
+Observed (Robin-100 WP-R2, R78 and R79). Capability: federated join chain. Channel: WebSQL. Input: a join of a default-source table to a default-source dimension table followed by a join to the `second` source (`a JOIN default.main.parity_regions r ON ... JOIN second.main.parity_sales b ON ...`). Expected: 200 with the four overlapping rows. Actual: 400 `SQL_SYNTAX_ERROR`. The same chain with the `second` join first and the default-source dimension join last returns 200 with the four rows.
 
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 
