@@ -119,6 +119,8 @@ Mandatory tests (`[Trait("Category","Security")]`, Architecture project): `Robin
 
 ## 4. Delivery result (2026-10-23, feat/robin-100)
 
+Superseded by rework v2 (sections 5-9). Final v2 state, local SQLite run (`Category=Parity&Dialect!=Container`): still 100 methods; 252 Robin cells: 232 pass, 16 known-gap cells (PARITY-GAP-030, 033, 034, 035, 050, 051, 052, 053, 054, 056, 057), 4 intentional red cells that are never gaps (federated unknown-source existence oracle x2, set-operation column mismatch 502, masked ROW_NUMBER wrong denial code). Channels: WebSql 118, GraphQl 95, Rest 35, OData 3, Export 1. `parity-baseline.json` regenerated (2314 pass cells; the cells of the replaced methods and of the R44/R45 WebSql variants are gone).
+
 - 100 distinct `Robin_*` methods (guarded by `RobinSuite_HasExactly100DistinctScenarios`, Architecture project). Local SQLite run (`Category=Parity&Dialect!=Container`): 228 Robin cells, 218 pass, 8 known-gap cells, 2 Pending (#157, #270), 0 fail. `parity-baseline.json` updated (138 new pass cells, none removed).
 - New known gaps (drafts in section 5 of the nightly parity plan): PARITY-GAP-030 (REST translator rejects OData `startswith`), 033 (REST `eq null` / `ne null` return zero rows), 034 (GraphQL QUARTER bucket `AGGREGATION_RESULT_TYPE_MISMATCH`), 035 (GraphQL HOUR bucket ignores the summer offset of `timeZone`), 050 (WebSQL federated join chain order gives `SQL_SYNTAX_ERROR`). Ids 031, 032, 051, 052 were test bugs and are unused.
 - Test-fixture fix: `ParityHostFixture.RegisterCatalogAsync` declares key `id` and Full visibility for `parity_sales` and `parity_big` (bulk route and analyze route need them); masked, scoped and second-source tables are unchanged.
