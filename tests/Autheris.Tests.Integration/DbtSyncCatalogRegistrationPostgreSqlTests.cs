@@ -55,7 +55,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
     {
         var client = host.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin,GOVERNANCE_ADMIN");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", "warehouse");
         return client;
     }
