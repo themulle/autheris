@@ -204,6 +204,26 @@ Observed (WP6). Capability: advertised SQL functions that WebSQL rejects. Channe
 
 Fixed 2026-10-23 on fix/parity-gaps (#311): left and right are removed from the allowlists (documented 400 SQL_SYNTAX_ERROR, LEFT/RIGHT are join keywords); extract works.
 
+<!-- WP-R1 begin -->
+### PARITY-GAP-030
+Observed (Robin WP-R1, R61 `Robin_Proactive_LikePrefix`). Capability: REST `startswith` filter function. Channel: REST on a SQLite source. Input: `GET /api/v1/data/default/main/parity_sales?select=id&filter=startswith(note,'emoji')&orderBy=id&limit=100`. Expected: 200 with the single row whose note starts with `emoji`, as on WebSQL and GraphQL. Actual: 400 `INVALID_QUERY`.
+
+### PARITY-GAP-031
+Observed (Robin WP-R1, R47 `Robin_36_TimestampFilterIso`). Capability: REST ISO-8601 timestamp literal in a filter. Channel: REST on a SQLite source. Input: `filter=sold_at ge 2025-01-01T00:00:00Z` on a TIMESTAMP column. Expected: 200 with the rows at or after that instant, as on WebSQL and GraphQL. Actual: 400 `INVALID_QUERY`.
+
+### PARITY-GAP-032
+Observed (Robin WP-R1, R48 `Robin_Proactive_DateEqualsSingleDay`). Capability: REST date literal equality. Channel: REST on a SQLite source. Input: `filter=sale_date eq 2024-02-29` on a DATE column. Expected: 200 with the one row of that day. Actual: 200 with zero rows (the date literal is bound as a timestamp and does not equal the stored date text).
+
+### PARITY-GAP-033
+Observed (Robin WP-R1, R49 `Robin_Proactive_IsNullAmount`, R50 `Robin_Proactive_IsNotNullRegion`, R55 `Robin_Proactive_NullBoolIsReturn`). Capability: REST null comparison in a filter. Channel: REST on a SQLite source. Input: `filter=amount eq null`, `filter=region ne null`, `filter=is_return eq null`. Expected: 200 with the rows where the column is NULL (or NOT NULL), as on WebSQL (`IS NULL`) and GraphQL (`isNull`). Actual: 200 with zero rows in all three cases.
+
+### PARITY-GAP-034
+Observed (Robin WP-R1, R41 `Robin_Proactive_GroupByQuarter`). Capability: GraphQL `QUARTER` time bucket. Channel: GraphQL on a SQLite source. Input: `timeBuckets: [{ column: sale_date, bucket: QUARTER }]` with a COUNT aggregate. Expected: 8 groups keyed by the first day of the quarter. Actual: HTTP 200 with GraphQL error `AGGREGATION_RESULT_TYPE_MISMATCH`, no data.
+
+### PARITY-GAP-035
+Observed (Robin WP-R1, R44 `Robin_130_HourBucketBerlinWinterSummer`). Capability: GraphQL `HOUR` time bucket with `timeZone`. Channel: GraphQL on a SQLite source. Input: `where: { id: { in: [1, 8] } }, timeBuckets: [{ column: sold_at, bucket: HOUR, timeZone: "Europe/Berlin" }]`. Expected: local hours 11 (winter, CET) and 17 (summer, CEST). Actual: 11 and 16: the summer-time offset is not applied to the hour bucket.
+<!-- WP-R1 end -->
+
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 
 These cases are a 5xx or leak internals. They are never a `KnownGap`: they live in the data row list `BoundaryKnownGapData` (kind `ObservedServerError`), are excluded from `Boundary_Case`/`Invariant_NoServerError`, and run in `Invariant_ObservedServerErrors`, where they fail hard until production is fixed. Owner decision needed (fix, or accept and document). Ids are `<slot>.<column>.<value id>`; `none` = no column.

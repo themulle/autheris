@@ -8,6 +8,16 @@ public static class RobinKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        // --- WP-R1 ---
+        ["Robin_Proactive_LikePrefix|Rest|"] = "PARITY-GAP-030",
+        ["Robin_36_TimestampFilterIso|Rest|"] = "PARITY-GAP-031",
+        ["Robin_Proactive_DateEqualsSingleDay|Rest|"] = "PARITY-GAP-032",
+        ["Robin_Proactive_IsNullAmount|Rest|"] = "PARITY-GAP-033",
+        ["Robin_Proactive_IsNotNullRegion|Rest|"] = "PARITY-GAP-033",
+        ["Robin_Proactive_NullBoolIsReturn|Rest|"] = "PARITY-GAP-033",
+        ["Robin_Proactive_GroupByQuarter|GraphQl|"] = "PARITY-GAP-034",
+        ["Robin_130_HourBucketBerlinWinterSummer|GraphQl|"] = "PARITY-GAP-035",
+        // --- end WP-R1 ---
     };
 
     public static string? For(string caseMethod, string channel, string? variant) =>
