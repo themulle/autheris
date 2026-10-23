@@ -74,3 +74,12 @@ Reviewer: csharp-security-expert, 2026-10-23. Verified: `TrustedDocumentsOnlyMid
 - `Admin_MissingScope_403`, `Admin_Unauthenticated_401`, `Admin_ReadScopeCannotWrite`, `Admin_NotMapped_WhenDisabled`, `Helm_DefaultIngress_DoesNotRoute_ApiAdmin`
 - `Registry_RepositoryThrows_Rejects_And_DoesNotServeStale`, `Registry_ConcurrentRefresh_SingleFlight`, `Registry_Retire_EffectiveLocallyImmediately`
 - `Admin_Put_OverBounds_400_And_BodySizeCap`, `Admin_Put_RetiredVersion_409`, `Admin_Audit_Failure_Surfaces_And_Cache_Invalidated`, `Audit_Payload_NoDocumentText_ListsCapped`
+
+## Changelog
+- 2026-10-23 (Phase 4, WP1+WP2): G-PLAN-REBASE verified; code facts hold (#286 `CONSUMER_APP_*` block present in all baselines; `ReadAsync`/`WriteAsync`/`OpenConnectionAsync` helpers as in the CallerAttribute partials). `GovernanceMigrationSecurityTests` runs `tools/migrations/upgrade_governance_v1_1_to_v1_2.sql` against the shape, so the new tables were synced there as #286 did.
+- Deviation: `AppIdentity`, `AllowedOrigin`, `TrustedDocumentHash` live in `Autheris.Application.Governance.TrustedDocuments` (not `Api/Middleware`) because the admin service in Application validates with the same functions; `Api/Middleware/AppIdentityHeader` (StringValues parsing) calls them.
+- Deviation: the repository is one shared `TrustedDocumentStore` (portable SQL, like `CallerAttributeStore`) behind three thin `*GovernanceRepository.TrustedDocuments.cs` partials. Method names carry a `TrustedDocument` prefix (the governance repositories implement many interfaces).
+- Deviation: `ReplaceTrustedDocumentVersionAsync` also takes `maxActiveVersions` and `at`, and throws `TrustedDocumentVersionLimitException` inside the transaction (race-free cap, SEC-281-8). `TrustedDocumentSetDelta` additionally carries `Unchanged` and `OriginsChanged`; `Created` means the version was new. A no-op PUT still bumps the generation (it is audited).
+- Deviation: `ITrustedDocumentAppRegistry` interface added for the middleware/endpoints; the snapshot answers `IsDocumentTrusted(AppIdentity, lowerCaseHash)` and `IsOriginAllowed(appId, normalizedOrigin)`. Refresh is double-checked under the semaphore (single flight); a failed check clears the snapshot.
+- Defect found by test: `$` in a .NET regex matches before a trailing `\n`; the identity regexes use `\A...\z` (a header `shop/1\n` must be rejected).
+- Not done in WP1/WP2 (WP3): DI registration of registry/admin service, middleware, validator, CORS, endpoints/policies, docs.

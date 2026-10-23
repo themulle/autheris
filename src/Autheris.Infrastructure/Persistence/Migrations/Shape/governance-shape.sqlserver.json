@@ -3081,6 +3081,135 @@
       "indexes": []
     },
     {
+      "name": "TRUSTED_DOCUMENT_APPS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_APP_ORIGINS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "origin",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "origin"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_APP_VERSIONS",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "status",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "updated_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "retired_at",
+          "type": "NVARCHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "version"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_HASHES",
+      "columns": [
+        {
+          "name": "app_id",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "version",
+          "type": "NVARCHAR",
+          "family": "string"
+        },
+        {
+          "name": "hash",
+          "type": "CHAR",
+          "family": "string"
+        }
+      ],
+      "primaryKey": [
+        "app_id",
+        "version",
+        "hash"
+      ],
+      "indexes": []
+    },
+    {
+      "name": "TRUSTED_DOCUMENT_GENERATION",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INT",
+          "family": "integer"
+        },
+        {
+          "name": "generation",
+          "type": "BIGINT",
+          "family": "integer"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "indexes": []
+    },
+    {
       "name": "VIRTUAL_FILTER_ACCESS_PROFILES",
       "columns": [
         {
