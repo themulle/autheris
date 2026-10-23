@@ -10,8 +10,6 @@ public static class RobinKnownGaps
     {
         // --- WP-R1 ---
         ["Robin_Proactive_LikePrefix|Rest|"] = "PARITY-GAP-030",
-        ["Robin_36_TimestampFilterIso|Rest|"] = "PARITY-GAP-031",
-        ["Robin_Proactive_DateEqualsSingleDay|Rest|"] = "PARITY-GAP-032",
         ["Robin_Proactive_IsNullAmount|Rest|"] = "PARITY-GAP-033",
         ["Robin_Proactive_IsNotNullRegion|Rest|"] = "PARITY-GAP-033",
         ["Robin_Proactive_NullBoolIsReturn|Rest|"] = "PARITY-GAP-033",

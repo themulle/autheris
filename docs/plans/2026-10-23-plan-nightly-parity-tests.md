@@ -206,16 +206,10 @@ Fixed 2026-10-23 on fix/parity-gaps (#311): left and right are removed from the 
 
 <!-- WP-R1 begin -->
 ### PARITY-GAP-030
-Observed (Robin WP-R1, R61 `Robin_Proactive_LikePrefix`). Capability: REST `startswith` filter function. Channel: REST on a SQLite source. Input: `GET /api/v1/data/default/main/parity_sales?select=id&filter=startswith(note,'emoji')&orderBy=id&limit=100`. Expected: 200 with the single row whose note starts with `emoji`, as on WebSQL and GraphQL. Actual: 400 `INVALID_QUERY`.
-
-### PARITY-GAP-031
-Observed (Robin WP-R1, R47 `Robin_36_TimestampFilterIso`). Capability: REST ISO-8601 timestamp literal in a filter. Channel: REST on a SQLite source. Input: `filter=sold_at ge 2025-01-01T00:00:00Z` on a TIMESTAMP column. Expected: 200 with the rows at or after that instant, as on WebSQL and GraphQL. Actual: 400 `INVALID_QUERY`.
-
-### PARITY-GAP-032
-Observed (Robin WP-R1, R48 `Robin_Proactive_DateEqualsSingleDay`). Capability: REST date literal equality. Channel: REST on a SQLite source. Input: `filter=sale_date eq 2024-02-29` on a DATE column. Expected: 200 with the one row of that day. Actual: 200 with zero rows (the date literal is bound as a timestamp and does not equal the stored date text).
+Observed (Robin WP-R1, R61 `Robin_Proactive_LikePrefix`). Capability: REST filter translator, OData `startswith` function syntax (the translator accepts `like`, which passes). Channel: REST on a SQLite source. Input: `GET /api/v1/data/default/main/parity_sales?select=id&filter=startswith(note,'emoji')&orderBy=id&limit=100`. Expected: 200 with the single row whose note starts with `emoji`, as on WebSQL and GraphQL. Actual: 400 `INVALID_QUERY`.
 
 ### PARITY-GAP-033
-Observed (Robin WP-R1, R49 `Robin_Proactive_IsNullAmount`, R50 `Robin_Proactive_IsNotNullRegion`, R55 `Robin_Proactive_NullBoolIsReturn`). Capability: REST null comparison in a filter. Channel: REST on a SQLite source. Input: `filter=amount eq null`, `filter=region ne null`, `filter=is_return eq null`. Expected: 200 with the rows where the column is NULL (or NOT NULL), as on WebSQL (`IS NULL`) and GraphQL (`isNull`). Actual: 200 with zero rows in all three cases.
+Observed (Robin WP-R1, R49 `Robin_Proactive_IsNullAmount`, R50 `Robin_Proactive_IsNotNullRegion`, R55 `Robin_Proactive_NullBoolIsReturn`). Capability: REST filter translator, `eq null` / `ne null` syntax (the translator accepts `is null` / `is not null`, which pass). Channel: REST on a SQLite source. Input: `filter=amount eq null`, `filter=region ne null`, `filter=is_return eq null`. Expected: 200 with the rows where the column is NULL (or NOT NULL), as on WebSQL (`IS NULL`) and GraphQL (`isNull`). Actual: 200 with zero rows in all three cases.
 
 ### PARITY-GAP-034
 Observed (Robin WP-R1, R41 `Robin_Proactive_GroupByQuarter`). Capability: GraphQL `QUARTER` time bucket. Channel: GraphQL on a SQLite source. Input: `timeBuckets: [{ column: sale_date, bucket: QUARTER }]` with a COUNT aggregate. Expected: 8 groups keyed by the first day of the quarter. Actual: HTTP 200 with GraphQL error `AGGREGATION_RESULT_TYPE_MISMATCH`, no data.

@@ -280,7 +280,7 @@ public sealed partial class RobinScenarios
         var r = await GqlAggregate(
             $"timeBuckets: [{{ column: sold_at, bucket: DAY, timeZone: \"Mars/Olympus\" }}], aggregates: [{Agg("COUNT", null, "n")}]",
             "sold_at");
-        r.Rejected();
+        r.Rejected("INVALID_QUERY");
     });
 
     // R47
@@ -289,7 +289,7 @@ public sealed partial class RobinScenarios
     [InlineData("GraphQl")]
     [InlineData("Rest")]
     public Task Robin_36_TimestampFilterIso(string channel) => Run(channel, "timestamp_filter", async () =>
-        (await IdsBy(channel, "sold_at >= '2025-01-01T00:00:00Z'", "sold_at: { gte: \"2025-01-01T00:00:00Z\" }", "sold_at ge 2025-01-01T00:00:00Z"))
+        (await IdsBy(channel, "sold_at >= '2025-01-01T00:00:00Z'", "sold_at: { gte: \"2025-01-01T00:00:00Z\" }", "sold_at ge '2025-01-01T00:00:00Z'"))
             .IdsShouldBe(11, 12, 13, 14, 15, 16, 17, 18));
 
     // R48
@@ -298,23 +298,25 @@ public sealed partial class RobinScenarios
     [InlineData("GraphQl")]
     [InlineData("Rest")]
     public Task Robin_Proactive_DateEqualsSingleDay(string channel) => Run(channel, "date_equals", async () =>
-        (await IdsBy(channel, "sale_date = '2024-02-29'", "sale_date: { eq: \"2024-02-29\" }", "sale_date eq 2024-02-29")).IdsShouldBe(5));
+        (await IdsBy(channel, "sale_date = '2024-02-29'", "sale_date: { eq: \"2024-02-29\" }", "sale_date eq '2024-02-29'")).IdsShouldBe(5));
 
     // R49
     [ParityTheory]
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
     [InlineData("Rest")]
-    public Task Robin_Proactive_IsNullAmount(string channel) => Run(channel, "is_null", async () =>
-        (await IdsBy(channel, "amount IS NULL", "amount: { isNull: true }", "amount eq null")).IdsShouldBe(13, 14, 15));
+    [InlineData("Rest", "translator")]
+    public Task Robin_Proactive_IsNullAmount(string channel, string variant = "") => Run(channel, "is_null", async () =>
+        (await IdsBy(channel, "amount IS NULL", "amount: { isNull: true }", variant == "translator" ? "amount is null" : "amount eq null")).IdsShouldBe(13, 14, 15), variant.Length == 0 ? null : variant);
 
     // R50
     [ParityTheory]
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
     [InlineData("Rest")]
-    public Task Robin_Proactive_IsNotNullRegion(string channel) => Run(channel, "is_not_null", async () =>
-        (await IdsBy(channel, "region IS NOT NULL", "region: { isNull: false }", "region ne null")).IdsShouldBe(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18));
+    [InlineData("Rest", "translator")]
+    public Task Robin_Proactive_IsNotNullRegion(string channel, string variant = "") => Run(channel, "is_not_null", async () =>
+        (await IdsBy(channel, "region IS NOT NULL", "region: { isNull: false }", variant == "translator" ? "region is not null" : "region ne null")).IdsShouldBe(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18), variant.Length == 0 ? null : variant);
 
     // R51
     [ParityTheory]
@@ -357,8 +359,9 @@ public sealed partial class RobinScenarios
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
     [InlineData("Rest")]
-    public Task Robin_Proactive_NullBoolIsReturn(string channel) => Run(channel, "null_boolean", async () =>
-        (await IdsBy(channel, "is_return IS NULL", "is_return: { isNull: true }", "is_return eq null")).IdsShouldBe(12, 13, 14, 15));
+    [InlineData("Rest", "translator")]
+    public Task Robin_Proactive_NullBoolIsReturn(string channel, string variant = "") => Run(channel, "null_boolean", async () =>
+        (await IdsBy(channel, "is_return IS NULL", "is_return: { isNull: true }", variant == "translator" ? "is_return is null" : "is_return eq null")).IdsShouldBe(12, 13, 14, 15), variant.Length == 0 ? null : variant);
 
     // R56
     [ParityTheory]
@@ -421,8 +424,9 @@ public sealed partial class RobinScenarios
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
     [InlineData("Rest")]
-    public Task Robin_Proactive_LikePrefix(string channel) => Run(channel, "like_prefix", async () =>
-        (await IdsBy(channel, "note LIKE 'emoji%'", "note: { startsWith: \"emoji\" }", "startswith(note,'emoji')")).IdsShouldBe(8));
+    [InlineData("Rest", "translator")]
+    public Task Robin_Proactive_LikePrefix(string channel, string variant = "") => Run(channel, "like_prefix", async () =>
+        (await IdsBy(channel, "note LIKE 'emoji%'", "note: { startsWith: \"emoji\" }", variant == "translator" ? "note like 'emoji%'" : "startswith(note,'emoji')")).IdsShouldBe(8), variant.Length == 0 ? null : variant);
 
     // R62
     [ParityTheory]
