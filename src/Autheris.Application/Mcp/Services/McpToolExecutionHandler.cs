@@ -294,21 +294,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase)
                 )).ToList();
 
-                var relations = new List<McpTableRelation>();
-                foreach (var col in detail.Columns)
-                {
-                    if (col.Name.EndsWith("_id", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(col.Name, "id", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(col.Name, "tenant_id", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var entityName = col.Name[..^3];
-                        var targetTable = entityName.EndsWith("s", StringComparison.OrdinalIgnoreCase) ? entityName : entityName + "s";
-                        relations.Add(new McpTableRelation(
-                            TargetTable: $"{detail.Domain}.{targetTable}",
-                            FromColumn: col.Name,
-                            ToColumn: "id"));
-                    }
-                }
+                // MCP-05: no relations are guessed from column names (target existence, visibility and key are unknown);
+                // only declared relations may be emitted, and none are available on this path.
+                IReadOnlyList<McpTableRelation> relations = [];
 
                 briefSchemas.Add(new McpTableBriefSchema(
                     Dataset: detail.DatasetId,

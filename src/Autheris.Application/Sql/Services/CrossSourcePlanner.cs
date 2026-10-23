@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Services;
 
 using System;
+using System.Security.Claims;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
@@ -42,6 +43,8 @@ public interface ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
+        ClaimsPrincipal user,
+        TenantId tenantId,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
         SqlStatement? statement = null,
         FederatedParameterContract? parameters = null);
@@ -85,24 +88,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             VirtualFilterErrorCodes.EnforcementIncomplete);
     }
 
-    public CrossSourcePlan Plan(
-        string rawSql,
-        SqlQueryMetadata metadata,
-        IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
-        CrossSourceOptions options) =>
-        Plan(rawSql, metadata, tables, decisions, options, null, null, null);
-
-    public CrossSourcePlan Plan(
-        string rawSql,
-        SqlQueryMetadata metadata,
-        IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
-        CrossSourceOptions options,
-        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans,
-        SqlStatement? statement) =>
-        Plan(rawSql, metadata, tables, decisions, options, virtualFilterPlans, statement, null);
-
     /// <summary>
     /// Plans the staging requests and the DuckDB query. <paramref name="virtualFilterPlans"/> (WI-6) are attached to the
     /// staging request of their table; the user query is never rewritten for Virtual Filters. <paramref name="statement"/>
@@ -114,11 +99,14 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
+        ClaimsPrincipal user,
+        TenantId tenantId,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
         SqlStatement? statement = null,
         FederatedParameterContract? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
+        ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(decisions);
@@ -154,20 +142,9 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             {
                 foreach (var reqCol in t.Metadata.RequiredFilterColumns)
                 {
-                    if (t.Metadata.TenantColumnName != null &&
-                        string.Equals(t.Metadata.TenantColumnName, reqCol, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (dec.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rls &&
-                        rls.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
-                    {
-                        continue;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(dec.CombinedRowFilterSql) &&
-                        dec.CombinedRowFilterSql.Contains(reqCol, StringComparison.OrdinalIgnoreCase))
+                    // MISC-04: shared whole-identifier rule (no substring matching on the row filter text).
+                    if (Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+                            reqCol, t.Metadata, dec, clientFilterColumns: null, tenantColumnCounts: true))
                     {
                         continue;
                     }
@@ -300,7 +277,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         foreach (var st in partitionResult.Subtrees)
         {
-            var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine);
+            var plan = SubtreeCompiler.Compile(st, decisions, options, _sqlEngine, user, tenantId);
             subtreePlans.Add(plan);
         }
 
@@ -444,7 +421,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                         dec,
                         t.Metadata.Dialect,
                         vfPlan,
-                        options.PredicatePushdown);
+                        options.PredicatePushdown,
+                        parameters?.ClientValues);
 
                     if (evalResult.IsPushable)
                     {
@@ -454,12 +432,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
                 if (pushableConjuncts.Count > 0)
                 {
-                    pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata);
+                    try
+                    {
+                        pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.Build(pushableConjuncts, t.Metadata, parameters?.ClientValues);
+                    }
+                    catch (Autheris.Application.Sql.Federation.Pushdown.PushdownRejectedException)
+                    {
+                        // SQLA-09: an unresolvable parameter means nothing is pushed for this table; DuckDB evaluates the filter after staging.
+                        pushdownFilter = null;
+                    }
                 }
             }
             else if (options.PredicatePushdown.Enabled && parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
-                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, out paramAudit);
+                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, plannedTables, out paramAudit);
             }
 
             KeySetPlanInfo? keySetPlanInfo = null;
@@ -690,10 +676,49 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
             if (effectiveQualifier != null)
             {
-                return new ColumnReference(new SqlQualifiedName([new SqlIdentifier(effectiveQualifier, false), colName]));
+                return new ColumnReference(new SqlQualifiedName([new SqlIdentifier(effectiveQualifier, false), StagedSubtreeColumn(qualifierParts, rawQualifier, colName)]));
             }
 
             return node;
+        }
+
+        /// <summary>
+        /// SQLA-17: a subtree stages a column that two members share as "&lt;alias&gt;_&lt;column&gt;"; a reference to a member's column must name that
+        /// staged column. Any other column keeps its name.
+        /// </summary>
+        private SqlIdentifier StagedSubtreeColumn(List<string> qualifierParts, string rawQualifier, SqlIdentifier column)
+        {
+            if (_subtrees == null || qualifierParts.Count == 0)
+            {
+                return column;
+            }
+
+            foreach (var st in _subtrees)
+            {
+                if (st.ProjectedColumns.Contains(column.Value, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;   // staged under its own name: not ambiguous
+                }
+
+                foreach (var member in st.MemberTables)
+                {
+                    var memberQualifier = member.Target.Alias ?? member.Target.TableName;
+                    bool matches = string.Equals(rawQualifier, member.Target.FullName, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(qualifierParts[^1], memberQualifier, StringComparison.OrdinalIgnoreCase);
+                    if (!matches)
+                    {
+                        continue;
+                    }
+
+                    var staged = $"{memberQualifier}_{column.Value}";
+                    if (st.ProjectedColumns.Contains(staged, StringComparer.OrdinalIgnoreCase))
+                    {
+                        return new SqlIdentifier(staged, false);
+                    }
+                }
+            }
+
+            return column;
         }
 
         public override SqlNode VisitWildcardSelectItem(WildcardSelectItem node)

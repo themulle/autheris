@@ -43,7 +43,8 @@ public sealed record GovernedSqlQueryRequest(
     string? DataSourceName = null,
     SqlRowLimit? RowLimit = null,
     string? Transport = null,
-    bool PlannedTableRead = false)
+    bool PlannedTableRead = false,
+    int? TimeoutSeconds = null)
 {
     /// <summary>
     /// Issue #280: parameters whose names the gateway generated for a planned read (internal; never from client input). The setter is

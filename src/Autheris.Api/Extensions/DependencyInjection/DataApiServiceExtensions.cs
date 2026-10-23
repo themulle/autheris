@@ -24,7 +24,7 @@ public static class DataApiServiceExtensions
         services.AddScoped<IGovernedDataQueryService, GovernedDataQueryService>();
         services.TryAddSingleton<Autheris.Application.Data.Relations.ICrossSourceRowReader, Autheris.Application.Data.Relations.GovernedCrossSourceRowReader>();
         services.TryAddScoped<Autheris.Application.Data.Relations.ICrossSourceRelationResolver, Autheris.Application.Data.Relations.CrossSourceRelationResolver>();
-        services.TryAddSingleton<Autheris.Application.Data.Changes.IChangeVersionProvider, Autheris.Application.Data.Changes.InMemoryChangeVersionStore>();
+        services.TryAddSingleton<Autheris.Application.Data.Changes.IChangeVersionProvider, Autheris.Application.Data.Changes.NoChangeLogVersionProvider>();
         services.TryAddScoped<Autheris.Application.Data.Changes.IGovernedChangeDetectionService, Autheris.Application.Data.Changes.GovernedChangeDetectionService>();
         services.TryAddSingleton<IKeysetCursorEncoder, KeysetCursorEncoder>();
         services.AddHostedService<VirtualSystemTablesHostedService>();

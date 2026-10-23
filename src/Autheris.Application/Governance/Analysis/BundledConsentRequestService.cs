@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
@@ -28,6 +29,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     private readonly IGrantPolicy _grantPolicy;
+    private readonly IConsentMaterializationGuard? _materializationGuard;
 
     public BundledConsentRequestService(
         ITableMetadataRepository metadataRepository,
@@ -35,8 +37,10 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         IAuditLogRepository auditLogRepository,
         IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
-        IGrantPolicy? grantPolicy = null)
+        IGrantPolicy? grantPolicy = null,
+        IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -50,8 +54,10 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         IConsentRepository consentRepository,
         IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
-        IGrantPolicy? grantPolicy = null)
+        IGrantPolicy? grantPolicy = null,
+        IConsentMaterializationGuard? materializationGuard = null)
     {
+        _materializationGuard = materializationGuard;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -141,6 +147,19 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             if (!bucket.Datasets.Contains(canonicalDataset, StringComparer.OrdinalIgnoreCase))
             {
                 bucket.Datasets.Add(canonicalDataset);
+            }
+        }
+
+        // GOV-12: a table that cannot carry consents (caller attribute source, A-10) is refused for the whole bundle before any request
+        // is stored, so no partial bundle remains.
+        if (_materializationGuard != null)
+        {
+            foreach (var bucket in itemsByOwner.Values)
+            {
+                foreach (var (table, _) in bucket.Items)
+                {
+                    await _materializationGuard.EnsureMayMaterializeAsync(tenantId, table.Identifier, Array.Empty<ConsentRowFilter>(), ct).ConfigureAwait(false);
+                }
             }
         }
 

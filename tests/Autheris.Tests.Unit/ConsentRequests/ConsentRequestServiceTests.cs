@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -154,5 +155,22 @@ public sealed class ConsentRequestServiceTests
         result.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
         result.ItsmTicketReference.ShouldBe(reference);
         await approvals.Received(1).UpdateConsentRequestTicketIdAsync(created[0].Id, "INC1", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateRequest_OnAttributeSource_Refused()
+    {
+        // GOV-12: the request is refused at creation (no request stored) for a table that cannot carry consents.
+        var (metadata, approvals, created) = Repositories();
+        var guard = Substitute.For<IConsentMaterializationGuard>();
+        guard.EnsureMayMaterializeAsync(Arg.Any<TenantId>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask>(_ => throw new ConsentOnAttributeSourceException());
+        var service = new ConsentRequestService(metadata, approvals, materializationGuard: guard);
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
+            service.SubmitAsync(Command(Principal("tenant-a"), "tenant-a")));
+
+        ex.Code.ShouldBe("CONSENT_ON_ATTRIBUTE_SOURCE");
+        created.ShouldBeEmpty();
     }
 }

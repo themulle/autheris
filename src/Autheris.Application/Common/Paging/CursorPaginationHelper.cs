@@ -69,7 +69,7 @@ public static class CursorPaginationHelper
             }
 
             var offsetStr = raw[CursorPrefix.Length..];
-            if (!int.TryParse(offsetStr, out var offset) || offset < 0)
+            if (!int.TryParse(offsetStr, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var offset))
             {
                 throw new ArgumentException("Invalid cursor offset value.", nameof(cursor));
             }
@@ -110,13 +110,8 @@ public static class CursorPaginationHelper
         var startOffset = 0;
         if (!string.IsNullOrWhiteSpace(after))
         {
-            // The 'after' cursor points to the item *after* which to begin
-            startOffset = DecodeCursor(after) + 1;
-        }
-
-        if (startOffset > source.Count)
-        {
-            startOffset = source.Count;
+            // The 'after' cursor points to the item *after* which to begin. MISC-15: long arithmetic, so int.MaxValue cannot wrap.
+            startOffset = (int)Math.Min((long)DecodeCursor(after) + 1, source.Count);
         }
 
         var availableItems = source.Count - startOffset;

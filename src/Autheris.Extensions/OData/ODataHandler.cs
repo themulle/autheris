@@ -170,6 +170,26 @@ public sealed partial class ODataHandler(
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
+    /// <summary>
+    /// EXT-02: the access decision depends on the whole principal, so the key is a fingerprint of tenant, SID, group SIDs, roles and
+    /// token scopes (not the SID alone). A principal without a SID is never cached (no shared "empty SID" key).
+    /// </summary>
+    internal static string? BuildAuthorizedTablesCacheKey(ClaimsPrincipal principal)
+    {
+        var sid = principal.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            return null;
+        }
+
+        var groups = string.Join(',', principal.GetGroupSids().Select(g => g.Value).OrderBy(x => x, StringComparer.Ordinal));
+        var roles = string.Join(',', principal.GetUserRoles().OrderBy(x => x, StringComparer.Ordinal));
+        var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(x => x, StringComparer.Ordinal));
+        var fingerprint = $"{principal.GetTenantId().Value}\n{sid}\ng:{groups}\nr:{roles}\ns:{scopes}";
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprint))).ToLowerInvariant();
+        return $"odata:tables:{principal.GetTenantId().Value}:{hash}";
+    }
+
     private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
         if (principal?.Identity?.IsAuthenticated != true)
@@ -179,9 +199,8 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null)
         {
-            var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "ANONYMOUS";
-            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{sid}";
-            if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
+            var cacheKey = BuildAuthorizedTablesCacheKey(principal);
+            if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
             {
                 return (cachedTables, true);
             }
@@ -242,9 +261,11 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null && complete)
         {
-            var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "ANONYMOUS";
-            var cacheKey = $"odata:tables:{principal.GetTenantId().Value}:{sid}";
-            SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
+            var cacheKey = BuildAuthorizedTablesCacheKey(principal);
+            if (cacheKey != null)
+            {
+                SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
+            }
         }
 
         return (authorizedTables, complete);
@@ -336,7 +357,8 @@ public sealed partial class ODataHandler(
         }
 
         // Safe limit handling: default top 100, max 1000
-        var effectiveTop = top.HasValue ? Math.Clamp(top.Value, 1, 1000) : 100;
+        // EXT-19: $top=0 is the standard count probe and returns no rows.
+        var effectiveTop = top.HasValue ? Math.Clamp(top.Value, 0, 1000) : 100;
         var effectiveSkip = skip.HasValue ? Math.Max(0, skip.Value) : 0;
 
         IReadOnlyList<string>? requestedFields = null;
@@ -525,14 +547,18 @@ public sealed partial class ODataHandler(
         }
 
         string? nextLink = null;
-        if (unordered && rows.Count > effectiveTop)
+        if (unordered && effectiveTop > 0 && rows.Count > effectiveTop)
         {
             // Issue #94 (D-10): without an orderable clear column the pages cannot be positioned deterministically. Refuse
             // instead of returning a page that the next one may duplicate or skip. The text names no column.
             return Error(400, "InvalidQueryOption", Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
         }
 
-        if (rows.Count > effectiveTop)
+        if (effectiveTop == 0)
+        {
+            rows = [];
+        }
+        else if (rows.Count > effectiveTop)
         {
             nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, filter, includeCount);
             rows = rows.Take(effectiveTop).ToList();

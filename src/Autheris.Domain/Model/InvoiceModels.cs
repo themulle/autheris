@@ -2,9 +2,9 @@ namespace Autheris.Domain.Model;
 
 public class InvoiceRecord
 {
-    public string Id { get; init; } = string.Empty;
-    public decimal Amount { get; init; }
-    public string Vendor { get; init; } = string.Empty;
+    public string? Id { get; init; }
+    public decimal? Amount { get; init; }
+    public string? Vendor { get; init; }
     public string? Email { get; init; }
 }
 

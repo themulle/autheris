@@ -26,6 +26,13 @@ internal sealed class IdentityStore(
     IdentityStoreDialect dialect,
     Func<bool, CancellationToken, Task<IdentityStoreScope>> open)
 {
+    private SqlDialect Sql => dialect switch
+    {
+        IdentityStoreDialect.Sqlite => SqlDialect.Sqlite,
+        IdentityStoreDialect.PostgreSql => SqlDialect.PostgreSql,
+        _ => SqlDialect.SqlServer
+    };
+
     public async Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
     {
         await using var scope = await open(false, ct).ConfigureAwait(false);
@@ -119,10 +126,10 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, external_id, user_n
         AddParam(cmd, "@userName", user.UserName);
         AddParam(cmd, "@email", (object?)user.Email ?? DBNull.Value);
         AddParam(cmd, "@displayName", (object?)user.DisplayName ?? DBNull.Value);
-        AddParam(cmd, "@active", user.Active ? 1 : 0);
-        AddParam(cmd, "@deactivatedAt", (object?)user.DeactivatedAt?.ToString("O") ?? DBNull.Value);
-        AddParam(cmd, "@createdAt", createdAt.ToString("O"));
-        AddParam(cmd, "@updatedAt", updatedAt.ToString("O"));
+        AddParam(cmd, "@active", DialectValueCodec.Bool(Sql, user.Active));
+        AddParam(cmd, "@deactivatedAt", DialectValueCodec.Ts(Sql, user.DeactivatedAt));
+        AddParam(cmd, "@createdAt", DialectValueCodec.Ts(Sql, createdAt));
+        AddParam(cmd, "@updatedAt", DialectValueCodec.Ts(Sql, updatedAt));
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -136,9 +143,9 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, external_id, user_n
         AddParam(cmd, "@tenantId", tenantId.Value);
         AddParam(cmd, "@realmId", realmId);
         AddParam(cmd, "@userKey", userKey);
-        AddParam(cmd, "@active", 0);
-        AddParam(cmd, "@deactivatedAt", now.ToString("O"));
-        AddParam(cmd, "@updatedAt", now.ToString("O"));
+        AddParam(cmd, "@active", DialectValueCodec.Bool(Sql, false));
+        AddParam(cmd, "@deactivatedAt", DialectValueCodec.Ts(Sql, now));
+        AddParam(cmd, "@updatedAt", DialectValueCodec.Ts(Sql, now));
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -146,13 +153,30 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, external_id, user_n
     public async Task DeleteUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
-        await using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
-        AddParam(cmd, "@tenantId", tenantId.Value);
-        AddParam(cmd, "@realmId", realmId);
-        AddParam(cmd, "@userKey", userKey);
+        await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        // PERS-07: the memberships go with the user in one transaction (a locked, deleted user keeps its IDENTITY_LOCKS row).
+        await using (var members = scope.Connection.CreateCommand())
+        {
+            members.Transaction = tx;
+            members.CommandText = "DELETE FROM IDENTITY_GROUP_MEMBERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
+            AddParam(members, "@tenantId", tenantId.Value);
+            AddParam(members, "@realmId", realmId);
+            AddParam(members, "@userKey", userKey);
+            await members.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await using (var cmd = scope.Connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
+            AddParam(cmd, "@tenantId", tenantId.Value);
+            AddParam(cmd, "@realmId", realmId);
+            AddParam(cmd, "@userKey", userKey);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<ScimUser>> ListUsersAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default)
@@ -160,7 +184,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, external_id, user_n
         await using var scope = await open(false, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
         int offset = Math.Max(0, startIndex - 1);
-        cmd.CommandText = "SELECT user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId LIMIT @count OFFSET @offset";
+        cmd.CommandText = "SELECT user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY user_key LIMIT @count OFFSET @offset";
         if (dialect == IdentityStoreDialect.SqlServer)
         {
             cmd.CommandText = "SELECT user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at FROM dbo.IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY user_key OFFSET @offset ROWS FETCH NEXT @count ROWS ONLY";
@@ -259,22 +283,58 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, group_id, external_id, displa
         AddParam(cmd, "@groupId", group.Id ?? group.ExternalId ?? Guid.NewGuid().ToString("N"));
         AddParam(cmd, "@externalId", group.ExternalId ?? group.Id ?? "");
         AddParam(cmd, "@displayName", group.DisplayName);
-        AddParam(cmd, "@createdAt", createdAt.ToString("O"));
-        AddParam(cmd, "@updatedAt", updatedAt.ToString("O"));
+        AddParam(cmd, "@createdAt", DialectValueCodec.Ts(Sql, createdAt));
+        AddParam(cmd, "@updatedAt", DialectValueCodec.Ts(Sql, updatedAt));
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default)
+    /// <summary>
+    /// PERS-07: deletes the group and its memberships in one transaction and returns the user keys that were members, so the caller can
+    /// invalidate their cached role resolution.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default)
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
-        await using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId AND group_id = @groupId";
-        AddParam(cmd, "@tenantId", tenantId.Value);
-        AddParam(cmd, "@realmId", realmId);
-        AddParam(cmd, "@groupId", groupId);
+        await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        var memberKeys = new List<string>();
+        await using (var select = scope.Connection.CreateCommand())
+        {
+            select.Transaction = tx;
+            select.CommandText = "SELECT user_key FROM IDENTITY_GROUP_MEMBERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND group_id = @groupId";
+            AddParam(select, "@tenantId", tenantId.Value);
+            AddParam(select, "@realmId", realmId);
+            AddParam(select, "@groupId", groupId);
+            await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                memberKeys.Add(reader.GetString(0));
+            }
+        }
+
+        await using (var members = scope.Connection.CreateCommand())
+        {
+            members.Transaction = tx;
+            members.CommandText = "DELETE FROM IDENTITY_GROUP_MEMBERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND group_id = @groupId";
+            AddParam(members, "@tenantId", tenantId.Value);
+            AddParam(members, "@realmId", realmId);
+            AddParam(members, "@groupId", groupId);
+            await members.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await using (var cmd = scope.Connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId AND group_id = @groupId";
+            AddParam(cmd, "@tenantId", tenantId.Value);
+            AddParam(cmd, "@realmId", realmId);
+            AddParam(cmd, "@groupId", groupId);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return memberKeys;
     }
 
     public async Task<IReadOnlyList<ScimGroup>> ListGroupsAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default)
@@ -282,7 +342,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, group_id, external_id, displa
         await using var scope = await open(false, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
         int offset = Math.Max(0, startIndex - 1);
-        cmd.CommandText = "SELECT group_id, external_id, display_name, created_at, updated_at FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId LIMIT @count OFFSET @offset";
+        cmd.CommandText = "SELECT group_id, external_id, display_name, created_at, updated_at FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY group_id LIMIT @count OFFSET @offset";
         if (dialect == IdentityStoreDialect.SqlServer)
         {
             cmd.CommandText = "SELECT group_id, external_id, display_name, created_at, updated_at FROM dbo.IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId ORDER BY group_id OFFSET @offset ROWS FETCH NEXT @count ROWS ONLY";
@@ -306,7 +366,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, group_id, external_id, displa
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
-        var now = DateTimeOffset.UtcNow.ToString("O");
+        var now = DialectValueCodec.Ts(Sql, DateTimeOffset.UtcNow);
         if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = "INSERT INTO IDENTITY_GROUP_MEMBERS (tenant_id, realm_id, group_id, user_key, created_at) VALUES (@tenantId, @realmId, @groupId, @userKey, @createdAt) ON CONFLICT DO NOTHING";
@@ -343,7 +403,14 @@ INSERT INTO dbo.IDENTITY_GROUP_MEMBERS (tenant_id, realm_id, group_id, user_key,
     {
         await using var scope = await open(false, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = "SELECT group_id FROM IDENTITY_GROUP_MEMBERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
+        // PERS-07: an orphan membership (its group no longer exists) never resolves to a group.
+        cmd.CommandText = @"SELECT m.group_id FROM IDENTITY_GROUP_MEMBERS m
+INNER JOIN IDENTITY_GROUPS g ON g.tenant_id = m.tenant_id AND g.realm_id = m.realm_id AND g.group_id = m.group_id
+WHERE m.tenant_id = @tenantId AND m.realm_id = @realmId AND m.user_key = @userKey";
+        if (dialect == IdentityStoreDialect.SqlServer)
+        {
+            cmd.CommandText = cmd.CommandText.Replace("IDENTITY_GROUP_MEMBERS m", "dbo.IDENTITY_GROUP_MEMBERS m").Replace("IDENTITY_GROUPS g", "dbo.IDENTITY_GROUPS g");
+        }
         AddParam(cmd, "@tenantId", tenantId.Value);
         AddParam(cmd, "@realmId", realmId);
         AddParam(cmd, "@userKey", userKey);
@@ -407,7 +474,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
         AddParam(cmd, "@userKey", lockEntry.UserKey);
         AddParam(cmd, "@reason", lockEntry.Reason);
         AddParam(cmd, "@source", lockEntry.Source);
-        AddParam(cmd, "@lockedAt", lockEntry.LockedAt.ToString("O"));
+        AddParam(cmd, "@lockedAt", DialectValueCodec.Ts(Sql, lockEntry.LockedAt));
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -443,7 +510,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
                 reader.GetString(2),
                 reader.GetString(3),
                 reader.GetString(4),
-                DateTimeOffset.Parse(reader.GetString(5))
+                DialectValueCodec.ReadRequiredTs(Sql, reader, 5)
             ));
         }
         return list;
@@ -461,28 +528,28 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    private static ScimUser ReadUser(DbDataReader reader)
+    private ScimUser ReadUser(DbDataReader reader)
     {
         var userKey = reader.GetString(0);
         var externalId = reader.GetString(1);
         var userName = reader.GetString(2);
         var email = reader.IsDBNull(3) ? null : reader.GetString(3);
         var displayName = reader.IsDBNull(4) ? null : reader.GetString(4);
-        var active = reader.GetInt32(5) != 0;
-        var deactivatedAt = reader.IsDBNull(6) ? (DateTimeOffset?)null : DateTimeOffset.Parse(reader.GetString(6));
-        var createdAt = DateTimeOffset.Parse(reader.GetString(7));
-        var updatedAt = DateTimeOffset.Parse(reader.GetString(8));
+        var active = DialectValueCodec.ReadBool(Sql, reader, 5);
+        var deactivatedAt = DialectValueCodec.ReadTs(Sql, reader, 6);
+        var createdAt = DialectValueCodec.ReadRequiredTs(Sql, reader, 7);
+        var updatedAt = DialectValueCodec.ReadRequiredTs(Sql, reader, 8);
 
         return new ScimUser(userKey, externalId, userName, displayName, email, active, deactivatedAt, createdAt, updatedAt);
     }
 
-    private static ScimGroup ReadGroup(DbDataReader reader)
+    private ScimGroup ReadGroup(DbDataReader reader)
     {
         var groupId = reader.GetString(0);
         var externalId = reader.GetString(1);
         var displayName = reader.GetString(2);
-        var createdAt = DateTimeOffset.Parse(reader.GetString(3));
-        var updatedAt = DateTimeOffset.Parse(reader.GetString(4));
+        var createdAt = DialectValueCodec.ReadRequiredTs(Sql, reader, 3);
+        var updatedAt = DialectValueCodec.ReadRequiredTs(Sql, reader, 4);
 
         return new ScimGroup(groupId, externalId, displayName, null, createdAt, updatedAt);
     }

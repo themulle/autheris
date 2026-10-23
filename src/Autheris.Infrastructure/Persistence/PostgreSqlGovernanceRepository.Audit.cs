@@ -537,7 +537,14 @@ public partial class PostgreSqlGovernanceRepository
                     // SR-L-07: same monotonic check as the batch path; replicas sharing one anchor store must never move it backwards.
                     var anchor = CreateSignedAnchor(state.LastSeq, state.LastHash);
                     var current = TryLoadVerifiedAnchor(out var anchorInvalid);
-                    if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                    if (anchorInvalid)
+                    {
+                        // PERS-18: an invalid stored anchor faults the write: the chain is latched and the Tier-A event is not acknowledged.
+                        FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+                        throw new InvalidOperationException("The stored audit chain anchor is invalid.");
+                    }
+
+                    if (current == null || current.Sequence < anchor.Sequence)
                     {
                         _auditAnchorStore.Save(anchor);
                     }
@@ -657,7 +664,7 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
                 entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
@@ -762,7 +769,7 @@ public partial class PostgreSqlGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), entry.EventType, entry.ActorSid.Value, entry.TargetTable,
                 entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
@@ -788,7 +795,14 @@ public partial class PostgreSqlGovernanceRepository
             {
                 // Monotonic: replicas sharing one anchor store must never move the anchor backwards.
                 var current = TryLoadVerifiedAnchor(out var anchorInvalid);
-                if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                if (anchorInvalid)
+                {
+                    // PERS-18: an invalid stored anchor faults the write: the chain is latched and the Tier-A event is not acknowledged.
+                    FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+                    throw new InvalidOperationException("The stored audit chain anchor is invalid.");
+                }
+
+                if (current == null || current.Sequence < anchor.Sequence)
                 {
                     _auditAnchorStore.Save(anchor);
                 }
@@ -871,7 +885,7 @@ public partial class PostgreSqlGovernanceRepository
         if (since != null)
         {
             whereClauses.Add("occurred_at >= @since");
-            cmd.Parameters.AddWithValue("@since", since.Value.ToString("O"));
+            cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since.Value));
         }
         if (tenantId != null)
         {
@@ -946,7 +960,7 @@ public partial class PostgreSqlGovernanceRepository
         if (query.Since is { } since)
         {
             where.Add("occurred_at >= @since");
-            cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+            cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since));
         }
 
         if (query.BeforeSequence is { } before)
@@ -1018,6 +1032,8 @@ public partial class PostgreSqlGovernanceRepository
         AuditChainAnchor? anchor = TryLoadVerifiedAnchor(out bool anchorInvalid);
         if (anchorInvalid)
         {
+            // PERS-18: an invalid stored anchor latches the violation (as on SQLite) instead of only failing this verification.
+            FlagAuditChainViolation("External audit chain anchor has an invalid signature or format.");
             return false;
         }
 
@@ -1152,8 +1168,8 @@ public partial class PostgreSqlGovernanceRepository
         cmd.CommandText = @"SELECT MIN(rowid), MAX(rowid)
                             FROM AUDIT_LOG_ENTRIES
                             WHERE occurred_at >= @from AND occurred_at < @to";
-        cmd.Parameters.AddWithValue("@from", windowFrom.ToString("O"));
-        cmd.Parameters.AddWithValue("@to", windowTo.ToString("O"));
+        cmd.Parameters.AddWithValue("@from", AuditTimestamp.ToStorage(windowFrom));
+        cmd.Parameters.AddWithValue("@to", AuditTimestamp.ToStorage(windowTo));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false) || reader.IsDBNull(0) || reader.IsDBNull(1))
@@ -1274,7 +1290,7 @@ public partial class PostgreSqlGovernanceRepository
             sequence,
             id,
             prevHash,
-            occurredAt,
+            occurredAt.ToUniversalTime(),
             eventType,
             actorSid,
             targetTable,

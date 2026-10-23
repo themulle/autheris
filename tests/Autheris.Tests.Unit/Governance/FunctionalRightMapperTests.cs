@@ -391,6 +391,24 @@ public sealed class FunctionalRightMapperTests
         emptyCall.ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData("otherTenant:ClusterAdmin")]
+    [InlineData(":GovernanceAdmin")]
+    public async Task FunctionalRightMapper_GetRightsForCallerAsync_TenantPrefixedLegacyRole_IsNotMapped_GOV13(string role)
+    {
+        var tenantId = new TenantId("tenant-1");
+        var claims = new[] { new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role) };
+        var principal = new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(claims, "TestAuth"));
+        _repository.GetApprovedMappingsForGroupsAndRolesAsync(
+            tenantId, "workforce-entra", Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var rights = await _sut.GetRightsForCallerAsync(principal, tenantId, "workforce-entra");
+
+        rights.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task FunctionalRightMapper_GetRightsForCallerAsync_SupportsAllGroupClaimTypes()
     {

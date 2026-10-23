@@ -95,7 +95,7 @@ public sealed class SqlFilterCompilerCallerAttributeTests
     [InlineData("from conf.client client where target.client_id = client.client_id and client.dept = '{{caller.dept}}'", "literal")]
     [InlineData("from conf.client client where target.client_id = client.client_id and client.dept = '__autheris_caller__dept'", "reserved")]
     [InlineData("from conf.client client where target.client_id = client.client_id and client.dept = {{caller.dept}} and client.x = {{caller.dept}} + 1", "top-level")]
-    [InlineData("from conf.client client join conf.client c2 on c2.dept = {{caller.dept}} where target.client_id = client.client_id", "top-level")]
+    [InlineData("from conf.client c1 join conf.client c2 on c2.dept = {{caller.dept}} where target.client_id = c1.client_id", "top-level")]
     public void ST_129_05_ForbiddenPositionsAndSpellings_AreRefusedAtValidate(string sql, string reason)
     {
         var ex = Should.Throw<Exception>(() => Validate(sql));

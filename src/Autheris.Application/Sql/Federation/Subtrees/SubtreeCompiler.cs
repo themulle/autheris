@@ -24,13 +24,6 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 
-public sealed record CoLocatedSubtreePlan(
-    string GroupName,
-    IReadOnlyList<string> Databases,
-    IReadOnlyList<ResolvedSourceTable> Tables,
-    string CompiledSql,
-    bool EmitThreePartNames);
-
 /// <summary>
 /// Issue #123 (WP-123-2, SEC-DATA123-01..03) / Issue #132 (WP-132-3, SEC-DATA132-02, SEC-DATA132-04):
 /// Compiles same-source AST subtrees and co-located SQL Server subtrees strictly via governed compilation,
@@ -83,68 +76,23 @@ public static class SubtreeCompiler
         }
     }
 
-    /// <summary>
-    /// Issue #132 (PLAN-DATA-132, WP-132-3, SEC-DATA132-02, SEC-DATA132-04):
-    /// Compiles a co-located multi-table statement for execution on a co-located SQL Server instance.
-    /// </summary>
-    public static CoLocatedSubtreePlan Compile(
-        string coLocationGroup,
-        IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
-        SqlStatement statement,
-        ISqlEngine? sqlEngine = null)
-    {
-        ArgumentNullException.ThrowIfNull(coLocationGroup);
-        ArgumentNullException.ThrowIfNull(tables);
-        ArgumentNullException.ThrowIfNull(decisions);
-        ArgumentNullException.ThrowIfNull(statement);
-
-        // 1. Verify cross-database policy isolation (SEC-DATA132-04)
-        ValidatePolicyIsolation(tables, decisions);
-
-        // 2. Identify distinct physical databases
-        var databases = tables
-            .Select(t => t.Metadata.Table.PhysicalDatabaseName ?? t.Metadata.Identifier.Domain)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        bool multiDatabase = databases.Count > 1;
-
-        // 3. Post-compile table reference assertion (SEC-DATA132-02, SEC-ADG-02)
-        var authorizedTargets = tables.Select(t => (
-            Database: (string?)(t.Metadata.Table.PhysicalDatabaseName ?? t.Metadata.Identifier.Domain),
-            Schema: (string?)t.Metadata.Identifier.Schema,
-            Table: t.Metadata.Identifier.TableName)).ToList();
-
-        PostCompileTableTargetAssertionVisitor.AssertValid(statement, authorizedTargets);
-
-        // 4. Emit SQL via SQL Server dialect generator
-        var context = new SqlEmitterContext(TargetSqlDialect.SqlServer)
-        {
-            EmitThreePartNames = multiDatabase
-        };
-
-        var generator = new SqlServerDialectGenerator();
-        var sql = generator.GenerateSql(statement, context);
-
-        return new CoLocatedSubtreePlan(
-            GroupName: coLocationGroup,
-            Databases: databases,
-            Tables: tables,
-            CompiledSql: sql,
-            EmitThreePartNames: multiDatabase);
-    }
-
     public static SubtreeExecutionPlan Compile(
         SourceSubtree subtree,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         ISqlEngine sqlEngine,
-        ClaimsPrincipal? user = null,
-        TenantId? tenantId = null,
+        ClaimsPrincipal user,
+        TenantId tenantId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(subtree);
+        ArgumentNullException.ThrowIfNull(user);
+        // SQLA-14: the subtree tenant predicate binds the caller's tenant; there is no "default" tenant fallback.
+        if (string.IsNullOrWhiteSpace(tenantId.Value))
+        {
+            throw new ArgumentException("A subtree can only be compiled for a tenant.", nameof(tenantId));
+        }
+
         ArgumentNullException.ThrowIfNull(decisions);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sqlEngine);
@@ -220,7 +168,7 @@ public static class SubtreeCompiler
             RowFilters = new SubtreeNoOpRowPolicyProvider(entries),
             Masks = new SubtreeNoOpMaskProvider(),
             Catalog = inMemoryCatalog,
-            Tenant = new TenantBinding("__autheris_tenant", tenantId?.Value ?? "default", SqlParameterType.String)
+            Tenant = new TenantBinding("__autheris_tenant", tenantId.Value, SqlParameterType.String)
         };
 
         var compileRequest = CompileRequestFactory.Create(

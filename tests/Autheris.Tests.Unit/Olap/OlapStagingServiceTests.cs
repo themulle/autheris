@@ -47,10 +47,10 @@ public sealed class OlapStagingServiceTests
         ICrossDomainAccessResolver Resolver,
         IAutherisConnectorRegistry Registry);
 
-    private static Fixture Create(TableAccessDecision decision, Microsoft.Extensions.Logging.ILogger<OlapStagingService>? logger = null)
+    private static Fixture Create(TableAccessDecision decision, Microsoft.Extensions.Logging.ILogger<OlapStagingService>? logger = null, TableMetadata? metadata = null)
     {
         var meta = Substitute.For<ITableMetadataRepository>();
-        meta.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Meta);
+        meta.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(metadata ?? Meta);
         var resolver = Substitute.For<ICrossDomainAccessResolver>();
         resolver.ResolveAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(decision);
@@ -166,5 +166,65 @@ public sealed class OlapStagingServiceTests
         outcome.StatusCode.ShouldBeGreaterThanOrEqualTo(400);
         logs.Where(l => l.Level >= Microsoft.Extensions.Logging.LogLevel.Information).ShouldAllBe(l => !l.Message.Contains(sentinel));
         logs.ShouldContain(l => l.Level >= Microsoft.Extensions.Logging.LogLevel.Warning && l.Message.Contains(nameof(InvalidOperationException)));
+    }
+
+    private static TableMetadata RegionRequired() => new()
+    {
+        Identifier = Orders,
+        Table = new Table { SourceName = "sales", SchemaName = "public", TableName = "orders", IsActive = true, RequiredFilterColumns = ["region"] },
+        Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "region", DataType = "varchar" }]
+    };
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Olap_RequiredFilterColumn_NotInRls_Returns400RequiredFilterMissing()
+    {
+        var decision = TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+        var f = Create(decision, metadata: RegionRequired());
+
+        var outcome = await f.Sut.ExecuteAsync(User(), Caller(), Command("sales.public.orders"), isDevelopment: false, "trace-1", CancellationToken.None);
+
+        outcome.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        outcome.ErrorCode.ShouldBe("REQUIRED_FILTER_COLUMN_MISSING");
+        outcome.Result.ShouldBeNull();
+        await f.Engine.DidNotReceiveWithAnyArgs().ExecuteOlapQueryAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Olap_CrossSource_RequiredFilterColumn_NotInRls_Returns400()
+    {
+        var decision = TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+        var f = Create(decision, metadata: RegionRequired());
+
+        var outcome = await f.Sut.ExecuteAsync(
+            User(), Caller(), Command("sales.public.orders", "sales.public.orders_b"), isDevelopment: false, "trace-1", CancellationToken.None);
+
+        outcome.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        outcome.ErrorCode.ShouldBe("REQUIRED_FILTER_COLUMN_MISSING");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Olap_RequiredFilterColumn_LongerIdentifierInRowFilter_DoesNotSatisfy()
+    {
+        var decision = TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "region_code = 'EU'", hasUnconstrainedColumnAllow: true);
+        var f = Create(decision, metadata: RegionRequired());
+
+        var outcome = await f.Sut.ExecuteAsync(User(), Caller(), Command("sales.public.orders"), isDevelopment: false, "trace-1", CancellationToken.None);
+
+        outcome.ErrorCode.ShouldBe("REQUIRED_FILTER_COLUMN_MISSING");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Olap_RequiredFilterColumn_SatisfiedByRowFilter_PassesTheRule()
+    {
+        var decision = TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "region = 'EU'", hasUnconstrainedColumnAllow: true);
+        var f = Create(decision, metadata: RegionRequired());
+
+        var outcome = await f.Sut.ExecuteAsync(User(), Caller(), Command("sales.public.orders"), isDevelopment: false, "trace-1", CancellationToken.None);
+
+        outcome.ErrorCode.ShouldNotBe("REQUIRED_FILTER_COLUMN_MISSING");
     }
 }

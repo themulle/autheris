@@ -124,6 +124,15 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
 
         EnsurePrimaryKeyColumnsClear(metadata, decision);
 
+        // VF-11: on a scoped table (tenant column or row-level filter) a removal is only disclosed with a pre-image proving that the caller could see
+        // the row. A provider without pre-images cannot serve it, and it is refused before any change is read (never a silent drop of removals).
+        if (IsScopedTable(metadata, decision) && !_versionProvider.ProvidesPreImages)
+        {
+            throw new GatewaySecurityException(
+                $"Table '{request.Table}' does not support change tracking for scoped tables with this provider.",
+                ChangeDetectionErrorCodes.ChangeTrackingNotSupported);
+        }
+
         var currentVersion = await _versionProvider.GetCurrentVersionAsync(request.Table, ct).ConfigureAwait(false)
             ?? throw new GatewaySecurityException(
                 $"Table '{request.Table}' does not support change tracking.",
@@ -151,11 +160,24 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             request.TenantId,
             minValidVersion);
 
-        var rawChanges = await _versionProvider.GetChangesBetweenAsync(
+        // VF-13: at most MaxChangesPerCall changes are materialized. The provider is asked for the cap plus one; on an overflow the call is cut at the
+        // last complete version (the records of one version are never split), HasMore is set and the cursor is issued at that version.
+        int cap = Math.Max(1, _options.MaxChangesPerCall);
+        var fetched = await _versionProvider.GetChangesBetweenAsync(
             request.Table,
             cursorPayload.SyncVersion,
             currentVersion,
+            cap + 1,
             ct).ConfigureAwait(false);
+
+        var rawChanges = fetched;
+        long effectiveVersion = currentVersion;
+        bool hasMore = false;
+        if (fetched.Count > cap)
+        {
+            (rawChanges, effectiveVersion) = CutAtLastCompleteVersion(fetched, cap, request.Table);
+            hasMore = true;
+        }
 
         var pkColumns = metadata.PrimaryKeyColumns;
         var knownKeySet = BuildKnownKeySet(request.KnownKeys, pkColumns);
@@ -222,7 +244,7 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
                 }
 
                 // RLS-exit transition: the row still exists in the table, but an update moved it out of the caller's RLS scope!
-                if (ShouldDiscloseRemovedKey(pk, earliestPreImage, knownKeySet, metadata, decision, request.TenantId, isRlsExit: true))
+                if (ShouldDiscloseRemovedKey(pk, earliestPreImage, knownKeySet, metadata, decision, request.TenantId))
                 {
                     removed.Add(BuildPrimaryKeyDictionary(pk, pkColumns));
                 }
@@ -231,13 +253,13 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             }
 
             // Physical delete in the underlying data source
-            if (ShouldDiscloseRemovedKey(pk, earliestPreImage, knownKeySet, metadata, decision, request.TenantId, isRlsExit: false))
+            if (ShouldDiscloseRemovedKey(pk, earliestPreImage, knownKeySet, metadata, decision, request.TenantId))
             {
                 removed.Add(BuildPrimaryKeyDictionary(pk, pkColumns));
             }
         }
 
-        var nextCursor = IssueCursor(request.Table, request.User, request.TenantId, currentVersion);
+        var nextCursor = IssueCursor(request.Table, request.User, request.TenantId, effectiveVersion);
 
         var actorSid = request.User.GetUserSid() ?? new Sid(request.User.Identity?.Name ?? "anonymous");
         await GovernedQueryStages.RecordTableReadAsync(
@@ -250,7 +272,8 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             {
                 ["path"] = "changes_since",
                 ["since_version"] = cursorPayload.SyncVersion,
-                ["sync_version"] = currentVersion,
+                ["sync_version"] = effectiveVersion,
+                ["has_more"] = hasMore,
                 ["upserted_count"] = upserted.Count,
                 ["removed_count"] = removed.Count
             },
@@ -259,9 +282,9 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
         return new ChangesSinceResponse(
             Dataset: request.Table.ToString(),
             NextCursor: nextCursor,
-            SyncVersion: currentVersion,
+            SyncVersion: effectiveVersion,
             Upserted: upserted,
             Removed: removed,
-            HasMore: false);
+            HasMore: hasMore);
     }
 }

@@ -49,7 +49,22 @@ public sealed class SchemaRegistryService : ISchemaRegistryService
         }
         else
         {
-            diff = _linter.Compare(latest.Sdl, request.Sdl);
+            try
+            {
+                diff = _linter.Compare(latest.Sdl, request.Sdl);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // MISC-16: a baseline or target that cannot be compared is a validation failure, never a 500.
+                _logger.LogWarning(ex, "Schema comparison failed for service '{Service}'.", request.ServiceName);
+                return new SchemaRegistrationResponse
+                {
+                    Success = false,
+                    Message = $"Schema comparison failed: {(ex is SchemaCompareException ? ex.Message : "the stored or submitted schema could not be compared.")}",
+                    Diff = SchemaDiffResult.Empty,
+                    ErrorCode = SchemaCompareException.ErrorCode
+                };
+            }
         }
 
         if (diff.HasBreakingChanges && !request.ForceIfBreaking)
@@ -126,7 +141,15 @@ public sealed class SchemaRegistryService : ISchemaRegistryService
             return SchemaDiffResult.Empty;
         }
 
-        return _linter.Compare(latest.Sdl, targetSdl);
+        try
+        {
+            return _linter.Compare(latest.Sdl, targetSdl);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Schema comparison failed for service '{Service}'.", serviceName);
+            return SchemaDiffResult.FromChanges([SchemaChange.Breaking(SchemaCompareException.ErrorCode, serviceName, "The stored or submitted schema could not be compared.")]);
+        }
     }
 
     public Task<RegisteredSchema?> GetLatestSchemaAsync(string serviceName, CancellationToken cancellationToken = default)

@@ -199,4 +199,31 @@ p, S-1-5-21-HACKER, default, *, read, System.IO.File.ReadAllText('/etc/passwd') 
         var afterRemove = await sunsettingService.GetRulesAsync();
         afterRemove.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task PolicySimulation_UsesProductionObjectMatcher_DotsAreLiteral_GOV11()
+    {
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var bob = new Sid("S-1-5-21-BOB");
+        auditRepo.QueryAuditLogsAsync(
+            Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<AuditLogEntry>
+            {
+                new() { Id = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow, ActorSid = bob, TargetTable = "finance.dbo_hr.salaries", EventType = "read", Decision = "ALLOW" },
+                new() { Id = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow, ActorSid = bob, TargetTable = "finance.dbo.payroll", EventType = "read", Decision = "ALLOW" }
+            });
+        var service = new PolicySimulationService(auditRepo);
+
+        // keyMatch2 would treat the dots as wildcards and deny finance.dbo_hr.salaries too; production denies only below "finance.dbo.".
+        var request = new PolicySimulationRequest(
+            DraftPolicyCsv: "p, *, tenant1, *, read, true, allow\np, *, tenant1, finance.dbo.*, read, true, deny",
+            Tenant: new TenantId("tenant1"),
+            Limit: 100);
+
+        var result = await service.SimulateAsync(request, new TenantId("tenant1"));
+
+        result.NewlyDeniedCount.ShouldBe(1);
+        result.Differences.ShouldContain(d => d.TargetTable == "finance.dbo.payroll" && d.SimulatedDecision == "DENY");
+        result.Differences.ShouldNotContain(d => d.TargetTable == "finance.dbo_hr.salaries");
+    }
 }

@@ -22,6 +22,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
     private readonly ITableMetadataRepository? _tableMetadataRepo;
     private readonly IConsumerAggregationRepository? _consumerAggregationRepo;
     private readonly ILogger<LineageImpactAnalyzerService> _logger;
+    private readonly int _maxGdprAuditEvents;
 
     public LineageImpactAnalyzerService(
         IConsentRepository consentRepo,
@@ -30,8 +31,10 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         IAuditLogRepository auditRepo,
         ITableMetadataRepository tableMetadataRepo,
         ILogger<LineageImpactAnalyzerService> logger,
-        IConsumerAggregationRepository? consumerAggregationRepo = null)
+        IConsumerAggregationRepository? consumerAggregationRepo = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GdprReportOptions>? gdprReportOptions = null)
     {
+        _maxGdprAuditEvents = gdprReportOptions?.Value?.MaxAuditEvents ?? new Autheris.Domain.Options.GdprReportOptions().MaxAuditEvents;
         _consentRepo = consentRepo ?? throw new ArgumentNullException(nameof(consentRepo));
         _ownershipRepo = ownershipRepo ?? throw new ArgumentNullException(nameof(ownershipRepo));
         _graphStore = graphStore ?? throw new ArgumentNullException(nameof(graphStore));
@@ -46,7 +49,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         IDataOwnershipRepository ownershipRepo,
         ILineageGraphStore graphStore,
         ILogger<LineageImpactAnalyzerService> logger)
-        : this(consentRepo, ownershipRepo, graphStore, null!, null!, logger, null)
+        : this(consentRepo, ownershipRepo, graphStore, null!, null!, logger, null, null)
     {
     }
 
@@ -399,7 +402,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             {
                 // General Tier: Non-privileged caller
                 // Personal SIDs suppressed, query names suppressed, k-anonymity (k=3) cell folding applied
-                var (folded, suppressed) = ConsumerFolding.Fold(summaries, actorCounts, minActors: 3);
+                var (folded, suppressed) = ConsumerFolding.Fold(summaries, minActors: 3);
                 applicationUsages = folded;
                 suppressedSmallGroups = suppressed;
             }
@@ -453,23 +456,44 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         var sw = Stopwatch.StartNew();
         using var activity = GatewayDiagnostics.Source.StartActivity("Lineage.GetGdprDisclosureReport");
 
+        // MISC-11: the audit log carries no data-subject keys, so "who read rows about the subject" cannot be answered from it. The report is
+        // honest table-level evidence: the readers of the table that holds the subject's data. Without a table the scope is unresolved.
+        if (!table.HasValue)
+        {
+            throw new GdprSubjectScopeUnresolvedException();
+        }
+
         var window = Math.Clamp(timeWindowDays, 1, 3650);
         var since = DateTimeOffset.UtcNow.AddDays(-window);
-        var targetTableStr = table?.ToString();
+        var targetTableStr = table.Value.ToString();
+        var incompletenessReasons = new List<string>();
 
-        // 1. Query Audit Logs
-        var auditLogs = _auditRepo != null
-            ? await _auditRepo.QueryAuditLogsAsync(
+        // 1. Query Audit Logs by table only (the subject is never used as the actor filter); one extra row detects a cap hit.
+        IReadOnlyList<AuditLogEntry> auditLogs;
+        if (_auditRepo != null)
+        {
+            auditLogs = await _auditRepo.QueryAuditLogsAsync(
                 targetTable: targetTableStr,
-                actorSid: subjectSid,
+                actorSid: null,
                 since: since,
-                limit: 5000,
+                limit: _maxGdprAuditEvents + 1,
                 tenantId: callerContext?.TenantId,
-                ct: ct).ConfigureAwait(false)
-            : Array.Empty<AuditLogEntry>();
+                ct: ct).ConfigureAwait(false);
+            if (auditLogs.Count > _maxGdprAuditEvents)
+            {
+                auditLogs = auditLogs.Take(_maxGdprAuditEvents).ToList();
+                incompletenessReasons.Add($"The audit event cap of {_maxGdprAuditEvents} was reached; older recipients may be missing.");
+            }
+        }
+        else
+        {
+            auditLogs = Array.Empty<AuditLogEntry>();
+            incompletenessReasons.Add("The audit log is not available.");
+        }
 
         var allowedLogs = auditLogs
             .Where(a => string.Equals(a.Decision, "ALLOW", StringComparison.OrdinalIgnoreCase))
+            .Where(a => subjectSid is not { } subject || !string.Equals(a.ActorSid.Value, subject.Value, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         // 2. Determine Data Sensitivity Categories
@@ -571,7 +595,10 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             allowedLogs.Count,
             recipients,
             sensitivityCategories.ToList(),
-            "Art. 15(1)(c) GDPR (DSGVO): Information about the recipients or categories of recipients to whom the personal data have been or will be disclosed.");
+            "Art. 15(1)(c) GDPR (DSGVO): Information about the recipients or categories of recipients to whom the personal data have been or will be disclosed.",
+            IsComplete: incompletenessReasons.Count == 0,
+            EvidenceLevel: "TableLevel",
+            IncompletenessReasons: incompletenessReasons);
     }
 
     public sealed class LineagePathNode(string nodeId, LineagePathNode? parent)

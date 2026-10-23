@@ -149,18 +149,17 @@ public sealed class TableConsumersDualTierSecurityTests
         var summaries = new List<ConsumerAppDailySummary>
         {
             new("app-large", "2026-10-18", 500, 20000, 500, new RejectionBreakdown(1, 0, 0, 0), ["v1"], ["Q1"], DistinctActors: 10),
-            new("app-niche-1", "2026-10-18", 20, 100, 20, new RejectionBreakdown(0, 1, 0, 0), ["v1"], ["Q2"], DistinctActors: 1),
+            new("app-niche-1", "2026-10-18", 20, 100, 20, new RejectionBreakdown(0, 1, 0, 0), ["v1"], ["Q2"], DistinctActors: 1)
+            {
+                ActorKeys = new HashSet<string> { "h1" }
+            },
             new("app-niche-2", "2026-10-18", 30, 150, 30, new RejectionBreakdown(0, 0, 1, 0), ["v2"], ["Q3"], DistinctActors: 2)
+            {
+                ActorKeys = new HashSet<string> { "h2", "h3" }
+            }
         };
 
-        var actorCounts = new Dictionary<string, int>
-        {
-            ["app-large"] = 10,
-            ["app-niche-1"] = 1,
-            ["app-niche-2"] = 2
-        };
-
-        var (results, suppressed) = ConsumerFolding.Fold(summaries, actorCounts, minActors: 3);
+        var (results, suppressed) = ConsumerFolding.Fold(summaries, minActors: 3);
 
         // app-large has 10 actors (>= 3) -> kept
         results.ShouldContain(r => r.Application == "app-large" && r.Calls == 500);
@@ -187,14 +186,12 @@ public sealed class TableConsumersDualTierSecurityTests
         var summaries = new List<ConsumerAppDailySummary>
         {
             new("app-single-user", "2026-10-18", 50, 1000, 50, new RejectionBreakdown(2, 0, 0, 0), ["v1"], ["Q1"], DistinctActors: 1)
+            {
+                ActorKeys = new HashSet<string> { "h1" }
+            }
         };
 
-        var actorCounts = new Dictionary<string, int>
-        {
-            ["app-single-user"] = 1
-        };
-
-        var (results, suppressed) = ConsumerFolding.Fold(summaries, actorCounts, minActors: 3);
+        var (results, suppressed) = ConsumerFolding.Fold(summaries, minActors: 3);
 
         // app-single-user must be folded into Other / Aggregated
         results.ShouldNotContain(r => r.Application == "app-single-user");

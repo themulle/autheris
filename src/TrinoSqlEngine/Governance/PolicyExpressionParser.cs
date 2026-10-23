@@ -480,11 +480,21 @@ public sealed class PolicyExpressionParser : IPolicyExpressionParser
             }
 
             var operand = (Expression)Visit(node.Operand);
-            Expression pattern = node.Pattern is LiteralExpression { Type: LiteralType.String, Value: { } p }
-                ? NewLiteralParameter(p.ToString() ?? string.Empty, SqlParameterType.String, isLikePattern: true)
-                : (Expression)Visit(node.Pattern);
+            var pattern = ShapeLikePattern(node.Pattern);
             return node with { Operand = operand, Pattern = pattern };
         }
+
+        /// <summary>
+        /// SQLE-09: a policy LIKE pattern is a literal, a declared parameter or a || chain of those. String literals are admin-authored
+        /// patterns (wildcards intentional); declared parameters stay escaped when bound. Anything else is rejected.
+        /// </summary>
+        private Expression ShapeLikePattern(Expression pattern) => pattern switch
+        {
+            LiteralExpression { Type: LiteralType.String, Value: { } p } => NewLiteralParameter(p.ToString() ?? string.Empty, SqlParameterType.String, isLikePattern: true),
+            ParameterReference => (Expression)Visit(pattern),
+            BinaryExpression { Operator: BinaryOperator.Concat } b => b with { Left = ShapeLikePattern(b.Left), Right = ShapeLikePattern(b.Right) },
+            _ => throw Reject("LIKE pattern in policy predicates may only combine literals and parameters with ||.")
+        };
 
         public override SqlNode VisitParameterReference(ParameterReference node)
         {

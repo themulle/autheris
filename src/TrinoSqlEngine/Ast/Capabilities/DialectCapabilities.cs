@@ -135,10 +135,11 @@ public sealed record DialectCapabilities(
     int? MaxCompoundSelectTerms = null,
     int? MaxExpressionDepth = null,
     bool LikeIsCaseInsensitive = false,
-    bool SupportsTimeZoneConversion = false)
+    bool SupportsTimeZoneConversion = false,
+    bool IntersectBindsTighter = false)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
-    public const string TableVersion = "cap-6";
+    public const string TableVersion = "cap-7";
 }
 
 /// <summary>

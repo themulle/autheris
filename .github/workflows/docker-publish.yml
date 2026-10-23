@@ -20,11 +20,14 @@ jobs:
   build-and-push:
     name: Build, Scan & Push Container to GHCR
     if: >-
-      github.event_name != 'workflow_run' ||
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
+      (github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       github.event.workflow_run.head_branch == 'main')
+       github.event.workflow_run.head_branch == 'main'))
+    # MISC-01: release publishing runs in a protected environment (required reviewers configured in the repository settings).
+    environment: release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -129,13 +132,12 @@ jobs:
               echo "Error: Invalid docker tag '$INPUT_TAG'" >&2
               exit 1
             fi
-            TAGS+=("${IMAGE}:${INPUT_TAG}")
+            # MISC-01: a manual dispatch can never overwrite release tags or :latest; releases come from pushed v* tags only.
             if [ "$INPUT_TAG" = "latest" ] || [[ "$INPUT_TAG" =~ ^v[0-9] ]]; then
-              TAGS+=("${IMAGE}:getting-started")
-              if [[ "$INPUT_TAG" =~ ^v[0-9] ]]; then
-                TAGS+=("${IMAGE}:latest")
-              fi
+              echo "Error: tag '$INPUT_TAG' is reserved for tag-triggered releases" >&2
+              exit 1
             fi
+            TAGS+=("${IMAGE}:${INPUT_TAG}")
           elif [ "$REF_TYPE" = "tag" ]; then
             TAGS+=("${IMAGE}:${REF_NAME}")
             TAGS+=("${IMAGE}:latest")

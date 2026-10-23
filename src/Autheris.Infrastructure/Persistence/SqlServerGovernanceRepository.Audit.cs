@@ -551,7 +551,14 @@ public partial class SqlServerGovernanceRepository
                     // SR-L-07: same monotonic check as the batch path; replicas sharing one anchor store must never move it backwards.
                     var anchor = CreateSignedAnchor(state.LastSeq, state.LastHash);
                     var current = TryLoadVerifiedAnchor(out var anchorInvalid);
-                    if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                    if (anchorInvalid)
+                    {
+                        // PERS-18: an invalid stored anchor faults the write: the chain is latched and the Tier-A event is not acknowledged.
+                        FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+                        throw new InvalidOperationException("The stored audit chain anchor is invalid.");
+                    }
+
+                    if (current == null || current.Sequence < anchor.Sequence)
                     {
                         _auditAnchorStore.Save(anchor);
                     }
@@ -699,7 +706,7 @@ public partial class SqlServerGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), eventType, actorSid, targetTable,
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), eventType, actorSid, targetTable,
                 targetColumn, decision, traceId, detailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
@@ -822,7 +829,7 @@ public partial class SqlServerGovernanceRepository
 
             entry.PrevHash = currentPrevHash;
             entry.EntryHash = entryHash;
-            rows.Add(new AuditInsertRow(entry.Id.ToString(), entry.OccurredAt.ToString("O"), eventType, actorSid, targetTable,
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), eventType, actorSid, targetTable,
                 targetColumn, decision, traceId, detailsJson, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
             lastEntryHash = entryHash;
         }
@@ -848,7 +855,14 @@ public partial class SqlServerGovernanceRepository
             {
                 // Monotonic: replicas sharing one anchor store must never move the anchor backwards.
                 var current = TryLoadVerifiedAnchor(out var anchorInvalid);
-                if (!anchorInvalid && (current == null || current.Sequence < anchor.Sequence))
+                if (anchorInvalid)
+                {
+                    // PERS-18: an invalid stored anchor faults the write: the chain is latched and the Tier-A event is not acknowledged.
+                    FlagAuditChainViolation("Stored audit chain anchor is invalid; Tier-A writes are refused (fail-closed).");
+                    throw new InvalidOperationException("The stored audit chain anchor is invalid.");
+                }
+
+                if (current == null || current.Sequence < anchor.Sequence)
                 {
                     _auditAnchorStore.Save(anchor);
                 }
@@ -930,7 +944,7 @@ public partial class SqlServerGovernanceRepository
         if (since != null)
         {
             whereClauses.Add("occurred_at >= @since");
-            cmd.Parameters.Add("@since", SqlDbType.NVarChar, 64).Value = since.Value.ToString("O");
+            cmd.Parameters.Add("@since", SqlDbType.NVarChar, 64).Value = AuditTimestamp.ToStorage(since.Value);
         }
         if (tenantId != null)
         {
@@ -1004,7 +1018,7 @@ public partial class SqlServerGovernanceRepository
         if (query.Since is { } since)
         {
             where.Add("occurred_at >= @since");
-            cmd.Parameters.Add("@since", SqlDbType.NVarChar, 64).Value = since.ToString("O");
+            cmd.Parameters.Add("@since", SqlDbType.NVarChar, 64).Value = AuditTimestamp.ToStorage(since);
         }
 
         if (query.BeforeSequence is { } before)
@@ -1075,6 +1089,8 @@ public partial class SqlServerGovernanceRepository
         AuditChainAnchor? anchor = TryLoadVerifiedAnchor(out bool anchorInvalid);
         if (anchorInvalid)
         {
+            // PERS-18: an invalid stored anchor latches the violation (as on SQLite) instead of only failing this verification.
+            FlagAuditChainViolation("External audit chain anchor has an invalid signature or format.");
             return false;
         }
 
@@ -1209,8 +1225,8 @@ public partial class SqlServerGovernanceRepository
         cmd.CommandText = @"SELECT MIN(rowid), MAX(rowid)
                             FROM AUDIT_LOG_ENTRIES
                             WHERE occurred_at >= @from AND occurred_at < @to";
-        cmd.Parameters.Add("@from", SqlDbType.NVarChar, 64).Value = windowFrom.ToString("O");
-        cmd.Parameters.Add("@to", SqlDbType.NVarChar, 64).Value = windowTo.ToString("O");
+        cmd.Parameters.Add("@from", SqlDbType.NVarChar, 64).Value = AuditTimestamp.ToStorage(windowFrom);
+        cmd.Parameters.Add("@to", SqlDbType.NVarChar, 64).Value = AuditTimestamp.ToStorage(windowTo);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false) || reader.IsDBNull(0) || reader.IsDBNull(1))
@@ -1330,7 +1346,7 @@ public partial class SqlServerGovernanceRepository
             sequence,
             id,
             prevHash,
-            occurredAt,
+            occurredAt.ToUniversalTime(),
             eventType,
             actorSid,
             targetTable,

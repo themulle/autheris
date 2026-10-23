@@ -33,7 +33,8 @@ public sealed class InProcessChannelEventBus : IEventBus, IAsyncDisposable
     private static bool IsInvalidationChannel(string channel)
     {
         if (string.IsNullOrEmpty(channel)) return false;
-        return channel.Contains("invalidate", StringComparison.OrdinalIgnoreCase)
+        // INF-02: "invalidat" also matches the default "consent:invalidations" channel.
+        return channel.Contains("invalidat", StringComparison.OrdinalIgnoreCase)
             || channel.Contains("epoch", StringComparison.OrdinalIgnoreCase);
     }
 

@@ -14,7 +14,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Issue #75: Resolves explicit cross-data-source <see cref="TableRelation"/> navigations via gateway-level
-/// batched key lookup (<c>DataLoader</c> pattern) and bounded cross-source filter key pushdown.
+/// batched key lookup (<c>DataLoader</c> pattern).
 /// </summary>
 /// <remarks>Not used by the GraphQL path; replaced by WP-FED-06.</remarks>
 public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationResolver
@@ -142,13 +142,23 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
             throw new GatewayForbiddenException($"Access to target table '{relation.ChildTableIdentifier}' is denied.");
         }
 
-        ValidateJoinKeysClear(relation, parentMetadata, parentDecision, childMetadata, childDecision);
-
-        if (!string.IsNullOrWhiteSpace(request.TargetFilterSql))
+        // VF-02: a child with an active Virtual Filter cannot be enforced on this path (the filter is a subquery that the in-memory evaluation
+        // cannot run); the request is refused instead of returning wrong rows.
+        if (childDecision.MandatoryRowPredicateSql != null)
         {
-            var referenced = DataApiFilterTranslator.ExtractReferencedColumns(request.TargetFilterSql, childMetadata);
-            ValidateFilterColumnsClear(referenced, childMetadata, childDecision);
+            await RecordTargetAuditAsync(
+                request.TenantId,
+                request.User,
+                relation,
+                childMetadata.Identifier,
+                allowed: false,
+                batchesExecuted: 0,
+                rowsMaterialized: 0,
+                ct).ConfigureAwait(false);
+            Autheris.Application.Services.InMemoryRowFilterEvaluator.EnsureInMemoryFilterIsEnforceable(childDecision);
         }
+
+        ValidateJoinKeysClear(relation, parentMetadata, parentDecision, childMetadata, childDecision);
 
         // Extract distinct non-null join keys from the parent page
         var parentKeysByIndex = new CompositeKey?[request.ParentRows.Count];
@@ -168,6 +178,7 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
         }
 
         var columnsToProject = ResolveProjectedColumns(request.SelectColumns, childMetadata, childDecision);
+        var readColumns = ResolveReadColumns(columnsToProject, relation.JoinKeysChild, childMetadata, childDecision);
         int batchSize = ResolveEffectiveBatchSize(childMetadata, relation.JoinKeysChild.Count);
 
         var groupedByTargetKey = new Dictionary<CompositeKey, List<IReadOnlyDictionary<string, object?>>>();
@@ -181,14 +192,18 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
             batchesExecuted++;
 
             var rawRows = await _rowReader.ReadRowsByKeysAsync(
-                childMetadata,
-                relation.JoinKeysChild,
-                batch,
+                new CrossSourceKeyReadRequest(
+                    childMetadata,
+                    relation.JoinKeysChild,
+                    readColumns,
+                    batch,
+                    request.TenantId,
+                    UserSidOf(request.User)),
                 ct).ConfigureAwait(false);
 
             foreach (var rawRow in rawRows)
             {
-                if (!PassesTargetGovernance(rawRow, childMetadata, childDecision, request.TenantId, request.TargetFilterSql))
+                if (!PassesTargetGovernance(rawRow, childMetadata, childDecision, request.TenantId))
                 {
                     continue;
                 }
@@ -254,119 +269,6 @@ public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationRe
             OneToManyByParentIndex: oneToManyResults,
             BatchesExecuted: batchesExecuted,
             TargetRowsMaterialized: totalMaterialized,
-            QueryCost: queryCost);
-    }
-
-    public async Task<CrossSourceFilterKeySetResult> ResolveCrossSourceFilterKeysAsync(
-        CrossSourceFilterPushdownRequest request,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(request.Relation);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetFilterSql);
-        ArgumentNullException.ThrowIfNull(request.User);
-
-        var relation = request.Relation;
-        var parentMetadata = await RequireTableMetadataAsync(relation.ParentTableIdentifier, ct).ConfigureAwait(false);
-        var childMetadata = await RequireTableMetadataAsync(relation.ChildTableIdentifier, ct).ConfigureAwait(false);
-
-        ValidateCrossSourceOptIn(relation, parentMetadata, childMetadata);
-
-        var parentDecision = request.ParentDecision ?? await EvaluateTableDecisionAsync(
-            relation.ParentTableIdentifier,
-            parentMetadata,
-            request.User,
-            request.TenantId,
-            request.ClientIp,
-            relation.JoinKeysParent,
-            ct).ConfigureAwait(false);
-
-        if (!parentDecision.IsAllowed)
-        {
-            throw new GatewayForbiddenException($"Access to parent table '{relation.ParentTableIdentifier}' is denied.");
-        }
-
-        var childDecision = await EvaluateTableDecisionAsync(
-            relation.ChildTableIdentifier,
-            childMetadata,
-            request.User,
-            request.TenantId,
-            request.ClientIp,
-            relation.JoinKeysChild,
-            ct).ConfigureAwait(false);
-
-        if (!childDecision.IsAllowed)
-        {
-            await RecordTargetAuditAsync(
-                request.TenantId,
-                request.User,
-                relation,
-                childMetadata.Identifier,
-                allowed: false,
-                batchesExecuted: 0,
-                rowsMaterialized: 0,
-                ct).ConfigureAwait(false);
-            throw new GatewayForbiddenException($"Access to target table '{relation.ChildTableIdentifier}' is denied.");
-        }
-
-        ValidateJoinKeysClear(relation, parentMetadata, parentDecision, childMetadata, childDecision);
-
-        var referencedCols = request.ReferencedTargetColumns is { Count: > 0 }
-            ? request.ReferencedTargetColumns
-            : DataApiFilterTranslator.ExtractReferencedColumns(request.TargetFilterSql, childMetadata);
-        ValidateFilterColumnsClear(referencedCols, childMetadata, childDecision);
-
-        int maxKeys = Math.Max(1, _options.MaxCrossSourceFilterKeys);
-        var candidateRows = await _rowReader.ReadRowsForFilterAsync(
-            childMetadata,
-            request.TargetFilterSql,
-            maxRows: 0,
-            ct).ConfigureAwait(false);
-
-        var distinctKeys = new List<CompositeKey>();
-        var seenKeys = new HashSet<CompositeKey>();
-
-        foreach (var rawRow in candidateRows)
-        {
-            if (!PassesTargetGovernance(rawRow, childMetadata, childDecision, request.TenantId, request.TargetFilterSql))
-            {
-                continue;
-            }
-
-            if (!TryExtractKey(rawRow, relation.JoinKeysChild, out var targetKey))
-            {
-                continue;
-            }
-
-            if (seenKeys.Add(targetKey))
-            {
-                distinctKeys.Add(targetKey);
-                if (distinctKeys.Count > maxKeys)
-                {
-                    throw new CrossSourceRelationException(
-                        CrossSourceRelationErrorCodes.CrossSourceFilterKeySetExceeded,
-                        $"Cross-source filter on relation '{relation.RelationName}' matched more than the maximum allowed {maxKeys} distinct join keys.");
-                }
-            }
-        }
-
-        await RecordTargetAuditAsync(
-            request.TenantId,
-            request.User,
-            relation,
-            childMetadata.Identifier,
-            allowed: true,
-            batchesExecuted: 1,
-            rowsMaterialized: distinctKeys.Count,
-            ct).ConfigureAwait(false);
-
-        var (predicateSql, parameters) = BuildParentInPredicate(relation.JoinKeysParent, distinctKeys);
-        double queryCost = _options.CostPerBatch + (distinctKeys.Count * _options.CostPerRow);
-
-        return new CrossSourceFilterKeySetResult(
-            MatchingKeys: distinctKeys,
-            ParentWherePredicateSql: predicateSql,
-            Parameters: parameters,
             QueryCost: queryCost);
     }
 }

@@ -139,7 +139,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
         var configuredHashes = _options.Value.Plugins.TrustedPluginHashes;
 
         var manifestPath = Path.Combine(fullDirectoryPath, "manifest.json");
-        Dictionary<string, string>? manifest = File.Exists(manifestPath) ? LoadManifest(manifestPath) : null;
+        Dictionary<string, string>? manifest = File.Exists(manifestPath) ? LoadManifestFailClosed(manifestPath) : null;
 
         PluginTrustList? trustList = null;
         if (configuredHashes != null && configuredHashes.Count > 0)
@@ -191,7 +191,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
                     assembly = alc.LoadFromStream(assemblyStream);
                 }
 
-                var candidateTypes = assembly.GetTypes()
+                var candidateTypes = GetLoadableTypes(assembly, dllFile)
                     .Where(t => !t.IsAbstract && !t.IsInterface &&
                                 (typeof(IPluginRoleProvider).IsAssignableFrom(t) ||
                                  typeof(IPluginCallerAttributeProvider).IsAssignableFrom(t) ||
@@ -253,6 +253,11 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
                     }
                 }
             }
+            catch (BadImageFormatException)
+            {
+                // EXT-18: native libraries and resource assemblies share the plugin directory; they are not auth plugins.
+                _logger.LogDebug("Skipping '{DllPath}': not a loadable .NET assembly.", dllFile);
+            }
             catch (Exception ex) when (ex is not SecurityException)
             {
                 _logger.LogError(ex, "Failed to load auth plugin assembly from '{DllPath}'.", dllFile);
@@ -261,6 +266,20 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
         }
 
         return loadedCount;
+    }
+
+    /// <summary>EXT-18: a dependency that cannot be resolved hides only its own types, not the whole assembly.</summary>
+    private IEnumerable<Type> GetLoadableTypes(Assembly assembly, string dllFile)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            _logger.LogWarning(ex, "Some types of '{DllPath}' could not be loaded; continuing with the loadable ones.", dllFile);
+            return ex.Types.OfType<Type>();
+        }
     }
 
     public async ValueTask<PluginRoleEnrichmentExecutionResult> EnrichRolesAsync(
@@ -447,16 +466,19 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
         }
     }
 
-    private static Dictionary<string, string>? LoadManifest(string manifestPath)
+    /// <summary>
+    /// EXT-18: same manifest formats as the data-source plugin host (including <c>{"plugins":[{file,sha256}]}</c>); a manifest that
+    /// cannot be parsed is fatal (fail closed) instead of silently skipping the integrity check.
+    /// </summary>
+    private static Dictionary<string, string> LoadManifestFailClosed(string manifestPath)
     {
         try
         {
-            var json = File.ReadAllText(manifestPath);
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return PluginManager.LoadManifest(manifestPath);
         }
-        catch
+        catch (Exception ex) when (ex is not SecurityException)
         {
-            return null;
+            throw new SecurityException($"Security error: the plugin manifest '{manifestPath}' could not be parsed ({ex.GetType().Name}).", ex);
         }
     }
 

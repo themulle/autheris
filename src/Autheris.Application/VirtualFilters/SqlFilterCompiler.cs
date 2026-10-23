@@ -214,6 +214,8 @@ public static partial class SqlFilterCompiler
         {
             throw Reject(filter, "virtual filter definition must contain a WHERE predicate.");
         }
+        RejectNestedQueries(select, filter);
+        RejectDuplicateQualifiers(spec, filter);
         ValidateAstPredicates(spec.Where, filter);
         RequireTenantBinding(filter, tenanted, spec.Where);
         if (callerNames.Count > 0)
@@ -287,6 +289,94 @@ public static partial class SqlFilterCompiler
         }
     }
 
+    /// <summary>
+    /// VF-01: the definition is one flat query. Any nested select (EXISTS, IN (SELECT ...), scalar subquery, derived table, LATERAL, CTE) is rejected,
+    /// because an inner alias can shadow the outer one and make a tenant conjunct refer to the wrong table.
+    /// </summary>
+    private static void RejectNestedQueries(SelectStatement select, VirtualFilter filter)
+    {
+        var detector = new NestedQueryDetector();
+        detector.Visit(select);
+        if (detector.Found)
+        {
+            throw Reject(filter, "subqueries, derived tables, LATERAL sources and WITH clauses are not allowed in a definition.");
+        }
+    }
+
+    private sealed class NestedQueryDetector : SqlAstRewriter
+    {
+        private int _depth;
+
+        public bool Found { get; private set; }
+
+        public override SqlNode VisitSelectStatement(SelectStatement node)
+        {
+            if (_depth > 0)
+            {
+                Found = true;
+                return node;
+            }
+
+            _depth++;
+            try
+            {
+                return base.VisitSelectStatement(node);
+            }
+            finally
+            {
+                _depth--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// VF-01: the effective qualifier (alias, else table name) of every FROM source is unique, and no alias equals the bare name of another source,
+    /// so a qualified column reference always names exactly one table.
+    /// </summary>
+    private static void RejectDuplicateQualifiers(QuerySpecification spec, VirtualFilter filter)
+    {
+        var leaves = new List<NamedTableSource>();
+        if (spec.From != null && !CollectNamedSources(spec.From, leaves))
+        {
+            throw Reject(filter, "only plain table references are allowed in the FROM clause.");
+        }
+
+        var qualifiers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var leaf in leaves)
+        {
+            if (!qualifiers.Add(leaf.Alias?.Value ?? leaf.Name.Parts[^1].Value))
+            {
+                throw Reject(filter, "every table of the definition needs a distinct alias (or name).");
+            }
+        }
+
+        for (int i = 0; i < leaves.Count; i++)
+        {
+            if (leaves[i].Alias is not { } alias) continue;
+            for (int j = 0; j < leaves.Count; j++)
+            {
+                if (i != j && string.Equals(alias.Value, leaves[j].Name.Parts[^1].Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw Reject(filter, "an alias must not equal the name of another table of the definition.");
+                }
+            }
+        }
+    }
+
+    private static bool CollectNamedSources(TableSource source, List<NamedTableSource> leaves)
+    {
+        switch (source)
+        {
+            case NamedTableSource named:
+                leaves.Add(named);
+                return true;
+            case JoinedTableSource joined:
+                return CollectNamedSources(joined.Left, leaves) && CollectNamedSources(joined.Right, leaves);
+            default:
+                return false;
+        }
+    }
+
     private static bool IsTenantBound(Expression expression, string qualifier, string column) => expression switch
     {
         ParenthesizedExpression p => IsTenantBound(p.Expression, qualifier, column),
@@ -348,6 +438,9 @@ public static partial class SqlFilterCompiler
 
             try
             {
+                // VF-01: a stored definition with a nested query or ambiguous qualifiers is denied at compile, never skipped.
+                RejectNestedQueries((SelectStatement)ast, filter);
+                RejectDuplicateQualifiers(spec, filter);
                 RequireTenantBinding(filter, tenanted, spec.Where);
             }
             catch (ArgumentException ex)

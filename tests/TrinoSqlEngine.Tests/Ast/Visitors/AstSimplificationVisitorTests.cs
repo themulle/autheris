@@ -284,4 +284,25 @@ public sealed class AstSimplificationVisitorTests
         Assert.Contains("\"id\" = ", compiled.Sql);
         Assert.DoesNotContain("1 = 1", compiled.Sql);
     }
+
+    [Fact]
+    public void EmptyStringPredicates_AreNotFolded()
+    {
+        // SQLE-07: on Oracle the empty string IS NULL, so these must reach the database unchanged.
+        var isNull = GenerateSql(SimplifySql("SELECT id FROM orders WHERE '' IS NULL"), TargetSqlDialect.Oracle);
+        Assert.DoesNotContain("1 = 0", isNull);
+        Assert.DoesNotContain("1 = 1", isNull);
+
+        var equal = GenerateSql(SimplifySql("SELECT id FROM orders WHERE '' = ''"), TargetSqlDialect.Oracle);
+        Assert.DoesNotContain("1 = 1", equal);
+    }
+
+    [Fact]
+    public void DelimitedIdentifiers_DifferingInCase_AreNotDeduplicated()
+    {
+        // SQLE-07: "Status" and "status" are distinct columns on PostgreSQL.
+        var sql = GenerateSql(SimplifySql("SELECT id FROM orders WHERE \"Status\" = 'a' AND \"status\" = 'a'"));
+        Assert.Contains("\"Status\"", sql);
+        Assert.Contains("\"status\"", sql);
+    }
 }

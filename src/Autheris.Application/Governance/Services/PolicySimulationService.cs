@@ -5,11 +5,8 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Casbin;
-using Casbin.Model;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
@@ -20,11 +17,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
-public sealed partial class PolicySimulationService : IPolicySimulationService
+public sealed class PolicySimulationService : IPolicySimulationService
 {
-    [GeneratedRegex(@"'([^']{2,})'")]
-    private static partial Regex SubRuleQuoteRegex();
-
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ILogger<PolicySimulationService> _logger;
     private readonly string _modelText;
@@ -77,7 +71,9 @@ public sealed partial class PolicySimulationService : IPolicySimulationService
         var limit = request.Limit <= 0 ? 500 : Math.Min(request.Limit, 10000);
         var tenantStr = effectiveTenant.Value;
 
-        var enforcer = CreateSimulationEnforcer(request.DraftPolicyCsv, tenantStr);
+        // GOV-11: the draft is evaluated with the production matcher, not with a Casbin enforcer over keyMatch2.
+        var (draftRules, draftGrouping) = ParseDraftPolicy(request.DraftPolicyCsv, tenantStr);
+        var allDraftRules = draftRules.Values.SelectMany(r => r).ToList();
 
         var auditEntries = await _auditLogRepository.QueryAuditLogsAsync(
             targetTable: request.TargetTable,
@@ -124,7 +120,7 @@ public sealed partial class PolicySimulationService : IPolicySimulationService
                 Tenant: effectiveTenant,
                 TargetTable: targetTableId,
                 RequestedColumns: Array.Empty<string>(),
-                ClientIp: IPAddress.Loopback,
+                ClientIp: IPAddress.None,
                 Timestamp: entry.OccurredAt,
                 PurposeId: null,
                 Attributes: new Dictionary<string, object?>
@@ -137,7 +133,7 @@ public sealed partial class PolicySimulationService : IPolicySimulationService
             bool isAllowed = false;
             try
             {
-                isAllowed = enforcer.Enforce(actor, tenantStr, table, action, evalContext);
+                isAllowed = CasbinEnforcementService.EvaluateDraftAccess(allDraftRules, draftGrouping, evalContext, table, action);
             }
             catch (Exception ex)
             {
@@ -217,30 +213,6 @@ public sealed partial class PolicySimulationService : IPolicySimulationService
             Differences: differences,
             SimulatedAt: DateTimeOffset.UtcNow
         );
-    }
-
-    private Enforcer CreateSimulationEnforcer(string policyCsv, string defaultTenant)
-    {
-        var (parsedRules, parsedGrouping) = ParseDraftPolicy(policyCsv, defaultTenant);
-
-        var model = DefaultModel.CreateFromText(_modelText);
-        var enforcer = new Enforcer(model);
-
-        foreach (var tenantRules in parsedRules.Values)
-        {
-            foreach (var rule in tenantRules)
-            {
-                var normalizedSubRule = SubRuleQuoteRegex().Replace(rule.SubRule, "\"$1\"");
-                enforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
-            }
-        }
-
-        foreach (var g in parsedGrouping)
-        {
-            enforcer.AddGroupingPolicy(g.User, g.Role);
-        }
-
-        return enforcer;
     }
 
     private (ImmutableDictionary<string, ImmutableArray<CasbinEnforcementService.CasbinRuleMetadata>> Rules, ImmutableArray<CasbinEnforcementService.GroupingRule> Grouping) ParseDraftPolicy(

@@ -19,9 +19,6 @@ using Autheris.Domain.Security;
 
 public sealed partial class SemanticMetricQueryService
 {
-    /// <summary>The production resolver with its secure default (restricted <c>Agent.Read</c>), used when none was injected.</summary>
-    private static readonly IConsentResolutionService FallbackResolver = new ConsentResolutionService();
-
     private async Task<(TableAccessDecision Decision, bool HasMetricConsent)> ResolveMetricAndTableDecisionAsync(
         ClaimsPrincipal principal,
         Sid userSid,
@@ -76,10 +73,12 @@ public sealed partial class SemanticMetricQueryService
             return (tableDecision, false);
         }
 
-        // If table access was denied by an explicit DENY consent, fail closed immediately.
-        if (tableDecision != null && tableDecision.DeniedReasons.Any(r => r.Contains("Explicit Deny", StringComparison.OrdinalIgnoreCase)))
+        // MISC-06: a metric consent can only cure a missing table consent. Any other denial (DENY consent, ReBAC, Casbin, contract,
+        // virtual filter, plugin, profile source) is final; the kind is typed, never matched on reason text. Without a PDP there is no
+        // authoritative pipeline to re-evaluate through, so the denial stands.
+        if (_pdp == null || tableDecision is not { DenialKind: TableAccessDenialKind.ConsentMissing })
         {
-            return (tableDecision, false);
+            return (tableDecision ?? TableAccessDecision.Denied(table, "No policy decision point available for metric access (fail-closed)."), false);
         }
 
         // 2. Check metric-scoped consents (e.g. "metric:<metricName>") for every requested metric
@@ -155,20 +154,10 @@ public sealed partial class SemanticMetricQueryService
                     })
                     .ToList();
 
-                var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
-
-                // REQ-GOV-143 (D-7): without an injected resolver the production resolver (secure default list) decides, with the claims scope
-                // set, instead of a copy of the rule logic that knew neither row filters nor the restricted-scope clearance.
-                var resolver = _resolutionService ?? FallbackResolver;
-                var metricDecision = resolver.ResolveAccess(
-                    userSid,
-                    groupSids,
-                    roles,
-                    table,
-                    projectedConsents,
-                    tableMetadata.Dialect,
-                    allSids.Count > 1 ? allSids : null,
-                    scopes.Count > 0 ? scopes : null);
+                // MISC-06: the projected metric consents join the repository consents inside the full PDP pipeline (ReBAC, contract,
+                // Casbin incl. Restrict, hooks, virtual filters, profiles), so virtual-filter predicates and row filters still apply.
+                var secCtx = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
+                var metricDecision = await _pdp.EvaluateAccessAsync(table, tableMetadata, secCtx, requestedColumns: null, projectedConsents, ct).ConfigureAwait(false);
 
                 if (metricDecision is { IsAllowed: true })
                 {

@@ -156,7 +156,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
 
-        var (duckDbResult, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
+        var (duckDbResult, _, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
         using var dataTable = ConvertToDataTable(duckDbResult);
         using var reader = dataTable.CreateDataReader();
@@ -171,7 +171,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var (duckDbResult, plan) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
+        var (duckDbResult, plan, truncated) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
         var rows = new List<IReadOnlyDictionary<string, object?>>(duckDbResult.Rows.Count);
         foreach (var row in duckDbResult.Rows)
@@ -183,13 +183,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             }
             rows.Add(dict);
         }
-
-        int maxResultRows = _options.Value.DuckDbOlap?.MaxResultRows > 0 ? _options.Value.DuckDbOlap.MaxResultRows : 50000;
-        int effectiveMaxRows = request.RowLimit != null
-            ? (int)Math.Min((long)maxResultRows, request.RowLimit.Effective(null))
-            : maxResultRows;
-
-        bool truncated = duckDbResult.TotalRowCount >= effectiveMaxRows;
 
         return new GovernedSqlResult(
             request.Sql,
@@ -237,10 +230,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
-        _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions);
+        _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId);
     }
 
-    private async Task<(OlapQueryResult Result, CrossSourcePlan Plan)> ExecuteFederatedInternalAsync(
+    private async Task<(OlapQueryResult Result, CrossSourcePlan Plan, bool Truncated)> ExecuteFederatedInternalAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -338,7 +331,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // (single policy decision point: the decisions). Without a planner a table with applied Virtual Filters is denied.
             var statement = ParseStatement(sqlForAnalysis);
             var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, keySourceReads, timeoutCts.Token).ConfigureAwait(false);
-            var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement, parameterContract);
+            var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId, vfPlans, statement, parameterContract);
 
             // Start Audit (fail-closed, INV-17)
             await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, parameterContract, plan.Compiled.Parameters.Length, ct).ConfigureAwait(false);
@@ -359,17 +352,26 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
             // Execute in DuckDB
             int maxResultRows = _options.Value.DuckDbOlap?.MaxResultRows > 0 ? _options.Value.DuckDbOlap.MaxResultRows : 50000;
-            int effectiveMaxRows = request.RowLimit != null
-                ? (int)Math.Min((long)maxResultRows, request.RowLimit.Effective(null))
-                : maxResultRows;
+            // SQLA-08: the same limit as the single-source path (explicit LIMIT, else the WebSQL default), bounded by the OLAP result cap;
+            // one probe row beyond it tells a truncated result from an exact-size one.
+            var rowLimit = request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
+            int effectiveMaxRows = (int)Math.Min((long)maxResultRows, rowLimit.Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null));
 
             var duckDbResult = await _duckDbEngine.ExecuteGeneratedAsync(
                 new GeneratedOlapQuery(plan.GeneratedDuckDbSql, plan.Compiled.Parameters, Compiled: plan.Compiled, ClientValues: parameterContract.ClientValues),
                 stagedSources,
-                effectiveMaxRows,
+                (int)Math.Min((long)effectiveMaxRows + 1, int.MaxValue),
                 timeoutCts.Token).ConfigureAwait(false);
 
-            return (duckDbResult, plan);
+            // The engine bounds its result at MaxResultRows: a result that fills that bound is reported as truncated (fail safe).
+            bool truncated = duckDbResult.Rows.Count > effectiveMaxRows
+                || (effectiveMaxRows >= maxResultRows && duckDbResult.Rows.Count >= maxResultRows);
+            if (duckDbResult.Rows.Count > effectiveMaxRows)
+            {
+                duckDbResult = duckDbResult with { Rows = duckDbResult.Rows.Take(effectiveMaxRows).ToList(), TotalRowCount = effectiveMaxRows };
+            }
+
+            return (duckDbResult, plan, truncated);
         }
         catch (Exception ex)
         {

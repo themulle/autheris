@@ -311,11 +311,33 @@ public sealed class Wave2MarketFeaturesTests
     [Fact]
     public async Task AiDataGuardrailService_ExecutesGetGoldenQueriesTool()
     {
+        // MCP-15: visibility cannot be evaluated without a consent repository, so the tool is only open with the explicit auth bypass.
+        var options = Options.Create(new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } });
+        var result = await CallGoldenQueriesAsync(options);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("golden_customers_active", result.ContentJson);
+        Assert.Contains("GetActiveCustomers", result.ContentJson);
+    }
+
+    [Fact]
+    public async Task AiDataGuardrailService_GetGoldenQueries_WithoutConsentRepository_FailsClosed_Mcp15()
+    {
+        // MCP-15: no consent repository and no bypass -> no golden queries are disclosed.
+        var result = await CallGoldenQueriesAsync(Options.Create(new GatewayOptions()));
+
+        Assert.True(result.IsSuccess);
+        Assert.DoesNotContain("golden_customers_active", result.ContentJson);
+        Assert.DoesNotContain("GetActiveCustomers", result.ContentJson);
+    }
+
+    private static async Task<McpToolCallResult> CallGoldenQueriesAsync(IOptions<GatewayOptions> options)
+    {
         var toolRegistry = new McpToolRegistry();
         var goldenService = new GoldenQueryService(Options.Create(new GatewayOptions()), NullLogger<GoldenQueryService>.Instance);
         var guardrail = new AiDataGuardrailService(
             toolRegistry,
-            Options.Create(new GatewayOptions()),
+            options,
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, goldenQueryService: goldenService);
 
@@ -325,11 +347,7 @@ public sealed class Wave2MarketFeaturesTests
             ArgumentsJson: """{ "domain": "finance", "tableName": "customers" }""",
             SessionId: sessionContext.SessionId);
 
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, sessionContext);
-
-        Assert.True(result.IsSuccess);
-        Assert.Contains("golden_customers_active", result.ContentJson);
-        Assert.Contains("GetActiveCustomers", result.ContentJson);
+        return await guardrail.ExecuteToolWithGuardrailAsync(request, sessionContext);
     }
 
     // =========================================================================

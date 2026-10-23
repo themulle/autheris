@@ -90,17 +90,21 @@ public static class GatewayMcpServer
     internal static async ValueTask<ListResourcesResult> ListResourcesAsync(RequestContext<ListResourcesRequestParams> context, CancellationToken ct)
     {
         var switches = context.Services!.GetService<IReadPathSwitches>();
-        var resources = FilterResources(NativeResourceList(), switches);
+        var cursor = context.Params?.Cursor;
+        // The native resources are listed on the first page only; semantic resources follow in pages of descriptors (MCP-14).
+        var resources = string.IsNullOrEmpty(cursor) ? FilterResources(NativeResourceList(), switches) : new List<Resource>();
+        string? nextCursor = null;
 
         var compiler = context.Services!.GetService<ISemanticMcpCompiler>();
         if (compiler != null)
         {
             var principal = McpProtocolHandler.BuildPrincipalFromSession(Caller(context.Services!));
-            var semanticResources = await compiler.GetSemanticResourcesAsync(null, principal, ct).ConfigureAwait(false);
-            resources.AddRange(semanticResources.Select(r => new Resource { Uri = r.Uri, Name = r.Name, Description = r.Description, MimeType = r.MimeType }));
+            var page = await compiler.ListSemanticResourceUrisAsync(principal, cursor, ct: ct).ConfigureAwait(false);
+            resources.AddRange(page.Items.Select(r => new Resource { Uri = r.Uri, Name = r.Name, Description = r.Description, MimeType = r.MimeType }));
+            nextCursor = page.NextCursor;
         }
 
-        return new ListResourcesResult { Resources = resources };
+        return new ListResourcesResult { Resources = resources, NextCursor = nextCursor };
     }
 
     internal static List<Resource> NativeResourceList() =>
@@ -228,8 +232,7 @@ public static class GatewayMcpServer
             async token =>
             {
                 var principal = McpProtocolHandler.BuildPrincipalFromSession(session);
-                var resources = await compiler.GetSemanticResourcesAsync(null, principal, token).ConfigureAwait(false);
-                resource = resources.FirstOrDefault(r => string.Equals(r.Uri, uri, StringComparison.OrdinalIgnoreCase))
+                resource = await compiler.ReadSemanticResourceAsync(principal, uri, token).ConfigureAwait(false)
                     ?? throw new McpResourceNotFoundException(uri);
                 return resource.Text;
             },

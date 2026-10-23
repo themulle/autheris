@@ -79,11 +79,14 @@ public static class SchemaRegistryEndpoints
                 Success = response.Success,
                 Message = response.Message,
                 Schema = response.Schema == null ? null : UnscopeSchema(response.Schema, tenantId),
-                Diff = response.Diff
+                Diff = response.Diff,
+                ErrorCode = response.ErrorCode
             };
             return response.Success
                 ? Results.Ok(publicResponse)
-                : Results.BadRequest(publicResponse);
+                : string.Equals(response.ErrorCode, "SCHEMA_COMPARE_FAILED", StringComparison.Ordinal)
+                    ? Results.Json(publicResponse, statusCode: StatusCodes.Status422UnprocessableEntity)
+                    : Results.BadRequest(publicResponse);
         }).RequireAuthorization()
           .WithRequestBodyLimit(MaxSchemaPayloadBytes) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);

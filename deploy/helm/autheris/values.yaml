@@ -67,6 +67,9 @@ ingress:
       hosts:
         - gateway.corp.local
 
+# MISC-05: OLAP budget = 50% of the memory limit (1024 MB at 2048Mi). Defaults need
+# MaxConcurrentQueries(2) x (MaxMemory 256MB + 3 x MaxTotalStagedBytes 64MB) = 896 MB, which fits.
+# Raise Gateway__DuckDbOlap__MemoryBudgetBytes (or the limit) before raising the OLAP limits.
 resources:
   limits:
     cpu: 2000m

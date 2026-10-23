@@ -1102,7 +1102,7 @@
       "Group": "operator",
       "Sql": "SELECT +a AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CASE WHEN NOT (\"A\") THEN 1 ELSE 0 END AS \"R\" FROM \"T\"",
+      "Expected": "SELECT \"A\" AS \"R\" FROM \"T\"",
       "Parameters": []
     },
     {
@@ -1530,8 +1530,23 @@
       "Group": "operator",
       "Sql": "SELECT ROW(1, 'a') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT () AS \"R\" FROM \"T\"",
-      "Parameters": []
+      "Expected": "SELECT (:p1, :p2) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        },
+        {
+          "Marker": ":p2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "a"
+        }
+      ]
     },
     {
       "Id": "operator-043",
@@ -4790,9 +4805,9 @@
       "Id": "source-026",
       "Group": "source",
       "Sql": "SELECT a FROM t1 AS x (c1, c2)",
-      "Outcome": "ok",
-      "Expected": "SELECT \"A\" FROM \"T1\" \"X\"",
-      "Parameters": []
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "source-027",

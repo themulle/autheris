@@ -264,6 +264,20 @@ internal static class SecurityProbes
             Assert.DoesNotContain(second.Parameters, p => p.Origin == ParameterOrigin.Policy && Equals(p.Value, "EU"));
         });
 
+        Add("Cache_Rebind_EscapesLikePolicyValue", "cache-rebind", () =>
+        {
+            // SQLE-10: the template of a policy LIKE keeps the escape flag; a hit escapes the value of the current request.
+            var statement = new SelectStatement(null,
+                new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
+                    new NamedTableSource(new SqlQualifiedName("t"), null),
+                    new LikeExpression(new ColumnReference(new SqlQualifiedName("n")), new PolicyParameterExpression("pat", SqlParameterType.String)), null, null), null, null);
+            var template = CompiledSqlTemplate.From("key",
+                TrinoSqlEngine.Tests.Compiler.CompilerTestHelpers.GenerateSqlServer(statement, new Dictionary<string, PolicyValue> { ["pat"] = new("a", SqlParameterType.String) }),
+                ImmutableArray<TableDependency>.Empty);
+            var hit = template.Rebind(new Dictionary<string, PolicyValue> { ["pat"] = new("50%_", SqlParameterType.String) });
+            Assert.Equal("50\\%\\_", Assert.Single(hit.Parameters).Value);
+        });
+
         Add("Cache_KeyContainsTheTargetDialect", "cache-key", () =>
         {
             // PostgreSQL and DuckDB share one catalog shape, so only the key (not the table fingerprint) can tell them apart.

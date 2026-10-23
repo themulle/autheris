@@ -108,7 +108,7 @@ public sealed partial class VirtualFilterAdministrationService
                     UpdatedAt = DateTimeOffset.UtcNow
                 };
 
-                await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [toStore] }, ct).ConfigureAwait(false);
+                await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [toStore] }, snapshot.Generation, ct).ConfigureAwait(false);
                 await AuditAsync(profile.TenantId, actor, "ACCESS_PROFILE_PENDING_APPROVAL",
                     $"access_profile:{profile.Name}", new { name = profile.Name, status = "DraftPendingApproval", before = existing.ComputeDefinitionHash(), draft = draft.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
                 return toStore;
@@ -129,7 +129,7 @@ public sealed partial class VirtualFilterAdministrationService
                 DeletionRequestedBy = null
             };
 
-            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [pending] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [pending] }, snapshot.Generation, ct).ConfigureAwait(false);
             var action = existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED";
             await AuditAsync(profile.TenantId, actor, "ACCESS_PROFILE_PENDING_APPROVAL",
                 $"access_profile:{profile.Name}", new { name = profile.Name, status = pending.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
@@ -150,19 +150,24 @@ public sealed partial class VirtualFilterAdministrationService
             DeletionRequestedBy = null
         };
 
-        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [direct] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
         var evt = existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED";
         await AuditAsync(profile.TenantId, actor, evt,
             $"access_profile:{profile.Name}", new { name = profile.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         return direct;
     }
 
-    public Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct) =>
-        ApproveProfileAsync(tenantId, name, actor, expectedHash: null, ct);
+    /// <summary>VF-05: the hash an approval compares (see <see cref="PendingHash(VirtualFilter)"/>).</summary>
+    public static string PendingHash(VirtualFilterAccessProfile profile) =>
+        profile.PendingDeletion
+            ? profile.ComputeDefinitionHash()
+            : (profile.Draft?.ComputeDefinitionHash() ?? profile.ComputeDefinitionHash());
 
-    public async Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string? expectedHash = null, CancellationToken ct = default)
+    /// <summary>VF-05: approval is bound to the reviewed definition; there is no hash-less approval.</summary>
+    public async Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string expectedHash, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedHash);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
@@ -181,18 +186,16 @@ public sealed partial class VirtualFilterAdministrationService
             throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own profile.");
         }
 
-        string pendingHash = existing.PendingDeletion
-            ? existing.ComputeDefinitionHash()
-            : (existing.Draft?.ComputeDefinitionHash() ?? existing.ComputeDefinitionHash());
+        string pendingHash = PendingHash(existing);
 
-        if (expectedHash != null && !string.Equals(expectedHash, pendingHash, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
         {
             throw new VirtualFilterConflictException($"Hash mismatch for access profile '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
         }
 
         if (existing.PendingDeletion)
         {
-            await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
             await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash(), approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
             return existing with { Status = FilterApprovalStatus.Rejected, PendingDeletion = false };
         }
@@ -209,7 +212,7 @@ public sealed partial class VirtualFilterAdministrationService
                 PendingDeletion = false,
                 DeletionRequestedBy = null
             };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [promoted] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [promoted] }, snapshot.Generation, ct).ConfigureAwait(false);
             await AuditAsync(tenantId, actor, "ACCESS_PROFILE_APPROVED", $"access_profile:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
             return promoted;
         }
@@ -221,7 +224,7 @@ public sealed partial class VirtualFilterAdministrationService
             ApprovedAt = DateTimeOffset.UtcNow
         };
 
-        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [approved] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [approved] }, snapshot.Generation, ct).ConfigureAwait(false);
         await AuditAsync(tenantId, actor, "ACCESS_PROFILE_APPROVED",
             $"access_profile:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
         return approved;
@@ -243,12 +246,12 @@ public sealed partial class VirtualFilterAdministrationService
                 UpdatedBy = actor.Sid.Value,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [pendingDeletion] }, ct).ConfigureAwait(false);
+            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [pendingDeletion] }, snapshot.Generation, ct).ConfigureAwait(false);
             await AuditAsync(tenantId, actor, "ACCESS_PROFILE_PENDING_DELETION", $"access_profile:{name}", new { name }, ct).ConfigureAwait(false);
             return;
         }
 
-        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
         await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 

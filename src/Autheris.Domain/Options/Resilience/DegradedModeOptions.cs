@@ -44,4 +44,11 @@ public sealed class TrafficShadowingOptions
     public int ChannelCapacity { get; init; } = 5000;
     public int TimeoutMs { get; init; } = 3000;
     public bool StripPiiHeaders { get; init; } = true;
+
+    /// <summary>MISC-14: static route segments kept in a shadowed path; every other segment (ids, keys, names) becomes <c>_</c>.</summary>
+    public static readonly IReadOnlyList<string> DefaultAllowedPathSegments =
+        ["api", "v1", "v2", "graphql", "sql", "websql", "odata", "query", "statement", "olap", "metrics"];
+
+    /// <summary>MISC-14: allowlist of path segments kept in the shadowed path (default: the static segments of the shadowable routes).</summary>
+    public IReadOnlyList<string> AllowedPathSegments { get; init; } = DefaultAllowedPathSegments;
 }

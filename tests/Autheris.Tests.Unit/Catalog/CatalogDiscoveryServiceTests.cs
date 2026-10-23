@@ -309,10 +309,11 @@ public sealed class CatalogDiscoveryServiceTests
             RelatedJoinPaths: [],
             SuggestedGraphQlField: "crm_customers");
 
-        _searchEngine.Search(
+        _searchEngine.SearchAsync(
             Arg.Is<CatalogSearchQuery>(q => q.QueryText == "cust" && q.DomainFilter == "crm"),
-            Arg.Any<Func<TableIdentifier, bool>>())
-            .Returns([hit]);
+            Arg.Any<Func<TableIdentifier, bool>>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>([hit]));
 
         // Act
         var results = await service.SearchCatalogAsync("cust", "crm", context);
@@ -374,8 +375,8 @@ public sealed class CatalogDiscoveryServiceTests
             SuggestedGraphQlField: "sales_orders");
 
         var query = new CatalogSearchQuery("orders", "sales", 10, CatalogSearchMode.Hybrid);
-        _searchEngine.Search(query, Arg.Any<Func<TableIdentifier, bool>>())
-            .Returns([hit]);
+        _searchEngine.SearchAsync(query, Arg.Any<Func<TableIdentifier, bool>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>([hit]));
 
         // Act
         var results = await service.SearchCatalogDetailedAsync(query, context);

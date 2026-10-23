@@ -521,7 +521,10 @@ public sealed class Mutation
         var approveFingerprint = IdempotencyFingerprint(
             ResolveMutationTenantId(httpContextAccessor, approvePrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(approvePrincipal)).Value,
             requestId,
-            validatedDescription ?? string.Empty);
+            validatedDescription ?? string.Empty,
+            // GQL-06: a retry with the same key but different restrictions must not replay the earlier result.
+            rowFilter == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(rowFilter),
+            columnMasking == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(columnMasking));
         var existing = await TryGetIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
@@ -1017,16 +1020,20 @@ public sealed class Mutation
                 .Build());
         }
 
-        var roles = principal.GetUserRoles();
-        if (!roles.Contains("GovernanceAdmin") && !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+        // GQL-08: the reload is a cluster-wide side effect, so a tenant-scoped GovernanceAdmin may not trigger it.
+        if (!Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Only governance or cluster administrators may reload the schema.")
+                .SetMessage("Only cluster administrators may reload the schema.")
                 .Build());
         }
 
-        await eventBus.PublishAsync("schema:reload", DateTimeOffset.UtcNow.ToString("O"), ct);
+        // GQL-09: publish on the channel the catalog snapshot / GraphQL type module actually listen to ("schema:reload" had no subscriber).
+        await eventBus.PublishAsync(
+            Autheris.Application.Catalog.ICatalogVersionProvider.CatalogChangedEventChannel,
+            new Autheris.Application.Catalog.CatalogChangedEvent(0, 0, DateTimeOffset.UtcNow),
+            ct);
 
         // Review E-10: schema reloads change what the gateway exposes and belong in the audit chain.
         TenantId reloadTenant;

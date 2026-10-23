@@ -65,7 +65,8 @@ public sealed class NoisyCacheKeyTests
         TableFilterClause? where = null,
         string fingerprint = "fp",
         TableIdentifier? table = null,
-        IReadOnlyList<AggregateSelection>? aggregates = null) =>
+        IReadOnlyList<AggregateSelection>? aggregates = null,
+        IReadOnlyList<TimeBucketSpecification>? timeBuckets = null) =>
         NoisyCacheKey.Build(
             new TenantId(tenant),
             new Sid(sid),
@@ -78,7 +79,33 @@ public sealed class NoisyCacheKeyTests
             2,
             SmallGroupStrategy.Suppress,
             "20261018",
-            fingerprint);
+            fingerprint,
+            timeBuckets);
+
+    [Fact]
+    public void Build_DifferentTimeBucketInterval_DifferentKey() =>
+        Key(timeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day)])
+            .ShouldNotBe(Key(timeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Month)]));
+
+    [Fact]
+    public void Build_DifferentTimeZone_DifferentKey() =>
+        Key(timeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day, "UTC")])
+            .ShouldNotBe(Key(timeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day, "Europe/Berlin")]));
+
+    [Fact]
+    public void Build_TimeBucketColumnChange_DifferentKey() =>
+        Key(timeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day)])
+            .ShouldNotBe(Key(timeBuckets: [new TimeBucketSpecification("shipped_at", TimeBucketInterval.Day)]));
+
+    [Fact]
+    public void Build_NullEmptyAndNonEmptyTimeBuckets_AllDiffer()
+    {
+        var none = Key(timeBuckets: null);
+        var empty = Key(timeBuckets: []);
+        var one = Key(timeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day)]);
+
+        new[] { none, empty, one }.Distinct().Count().ShouldBe(3);
+    }
 
     [Fact]
     public void NoisyCacheKey_SameInputs_SameKey() =>
@@ -258,7 +285,7 @@ public sealed class NoisyCacheKeyTests
         GroupBy: ["department"],
         Aggregates: [new AggregateSelection(AggregateFunction.Count, null, "cnt")],
         Limit: limit,
-        PreEvaluatedDecision: Decision());
+        PreEvaluatedDecision: Decision().AsPdpEvaluated());
 
     private static long Cnt(AggregationResult r) => Convert.ToInt64(r.Groups.Single().Aggregates["cnt"]);
 

@@ -246,7 +246,12 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         ct.ThrowIfCancellationRequested();
         var db = _multiplexer.GetDatabase();
         var value = now.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
-        await db.StringSetAsync((RedisKey)BuildKey(key), value, ttl, When.Always).ConfigureAwait(false);
+        // INF-10: keep the latest revocation time and the longest retention (mirrors the in-memory layer); a later,
+        // shorter revocation must not shorten the TTL of an earlier, longer one.
+        await db.ScriptEvaluateAsync(
+            KeepLongestRevocationScript,
+            [(RedisKey)BuildKey(key)],
+            [(RedisValue)value, (RedisValue)((long)ttl.TotalMilliseconds).ToString(CultureInfo.InvariantCulture)]).ConfigureAwait(false);
 
         try
         {
@@ -259,4 +264,17 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
             _logger.LogWarning(ex, "Failed to publish token revocation event to Redis cluster.");
         }
     }
+
+    internal const string KeepLongestRevocationScript = @"
+local cur = redis.call('GET', KEYS[1])
+local val = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+if cur then
+  local c = tonumber(cur)
+  if c and c > val then val = c end
+  local p = redis.call('PTTL', KEYS[1])
+  if p > ttl then ttl = p end
+end
+redis.call('SET', KEYS[1], string.format('%.0f', val), 'PX', string.format('%.0f', ttl))
+return 1";
 }
