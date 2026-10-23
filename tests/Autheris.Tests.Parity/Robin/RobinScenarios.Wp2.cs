@@ -270,8 +270,8 @@ public sealed partial class RobinScenarios
             return;
         }
 
-        var ids = IdsOf(await GqlList("first: 100, orderBy: [{ amount: ASC }, { id: ASC }]"));
-        (ids.SequenceEqual(ClearOrderNullsFirst) || ids.SequenceEqual(ClearOrderNullsLast)).ShouldBeTrue("GraphQL null placement is neither nulls-first nor nulls-last: " + string.Join(",", ids));
+        // Observed: GraphQL places NULL amounts first, like WebSQL on SQLite.
+        IdsOf(await GqlList("first: 100, orderBy: [{ amount: ASC }, { id: ASC }]")).ShouldBe(ClearOrderNullsFirst.ToList());
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -485,19 +485,22 @@ public sealed partial class RobinScenarios
     [InlineData("drop", "DROP TABLE parity_sales")]
     public Task Robin_Proactive_WriteStatementRejected(string variant, string sql) => Run("WebSql", "write_statement_rejected", async () =>
     {
-        // Observed stable code of the gateway policy is SQL_POLICY_VIOLATION (403); both codes are public catalogue codes of a rejected write.
-        var rejected = (await Sql(sql)).Rejected();
-        new[] { "SQL_STATEMENT_NOT_PERMITTED", "SQL_POLICY_VIOLATION" }.ShouldContain(rejected.Code!);
+        // Observed stable rejection of a write by the gateway policy: 403 SQL_POLICY_VIOLATION.
+        var rejected = (await Sql(sql)).Rejected("SQL_POLICY_VIOLATION");
+        rejected.Status.ShouldBe(403);
         (await Sql("SELECT COUNT(*) AS n FROM parity_sales")).RowsShouldBe(["n"], [[18]]);
     }, variant);
 
-    [ParityFact]
-    public Task Robin_Proactive_MultiStatementRejected() => Run("WebSql", "multi_statement_rejected", async () =>
+    [ParityTheory]
+    [InlineData("select", "SELECT 1; SELECT 2", "SQL_SYNTAX_ERROR")]
+    [InlineData("write", "SELECT 1; DELETE FROM parity_sales", null)]
+    public Task Robin_Proactive_MultiStatementRejected(string variant, string sql, string? code) => Run("WebSql", "multi_statement_rejected", async () =>
     {
-        var r = (await Sql("SELECT 1; SELECT 2")).Rejected();
-        new[] { "SQL_SYNTAX_ERROR", "SQL_STATEMENT_NOT_PERMITTED" }.ShouldContain(r.Code!);
+        var r = (await Sql(sql)).Rejected(code);
         r.Rows.Count.ShouldBe(0);
-    });
+        // The second statement did not run.
+        (await Sql("SELECT COUNT(*) AS n FROM parity_sales")).RowsShouldBe(["n"], [[18]]);
+    }, variant);
 
     [ParityTheory]
     [InlineData("WebSql")]

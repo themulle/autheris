@@ -20,6 +20,7 @@ public static class ParityErrorCodes
         typeof(GovernedSqlErrorCodes),
         typeof(McpErrorCodes),
         typeof(VirtualFilterErrorCodes),
+        typeof(Autheris.Domain.Model.InvalidCursorException), // WP-R2: bulk keyset cursor (INVALID_CURSOR)
     ];
 
     /// <summary>WebSQL <c>error</c> tokens, accepted as codes when a body has no fine-grained <c>code</c>.</summary>

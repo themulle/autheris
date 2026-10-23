@@ -80,8 +80,8 @@ Input: [`2026-10-23-req-robin-100-scenarios.md`](2026-10-23-req-robin-100-scenar
 | R85 | 79_AnalyzeInvalidSqlStableCode | W | analyze `SELEC id FRM parity_sales` | 200 with `isValid` false and at least one diagnostic, or a 4xx `Rejected()`; no stack frames |
 | R86 | 175_AnalyzeReportsRowEstimate | W | analyze `SELECT id FROM parity_sales LIMIT 10` | `costEstimate.estimatedRows` 10, reads 0 |
 | R87 | Proactive_SumAmountByYear | W,G | W `strftime('%Y',sale_date)` SUM; G bucket YEAR | 2023 150.50, 2024 1405.25, 2025 325.75 |
-| R88 | Proactive_WriteStatementRejected | W | variants `UPDATE parity_sales SET qty=0`, `DELETE FROM parity_sales`, `DROP TABLE parity_sales` | `Rejected("SQL_STATEMENT_NOT_PERMITTED")`; a follow-up COUNT(*) is still 18 |
-| R89 | Proactive_MultiStatementRejected | W | `SELECT 1; SELECT 2` | `Rejected()` with code in {SQL_SYNTAX_ERROR, SQL_STATEMENT_NOT_PERMITTED} |
+| R88 | Proactive_WriteStatementRejected | W | variants `UPDATE parity_sales SET qty=0`, `DELETE FROM parity_sales`, `DROP TABLE parity_sales` | `Rejected("SQL_POLICY_VIOLATION")` with HTTP 403 (observed stable code of the gateway policy, 2026-10-23); a follow-up COUNT(*) is still 18 |
+| R89 | Proactive_MultiStatementRejected | W | `SELECT 1; SELECT 2`; `SELECT 1; DELETE FROM parity_sales` | 400 `SQL_SYNTAX_ERROR` for the first; a stable 4xx for the second; zero rows and a follow-up `COUNT(*)` of 18 for both |
 | R90 | Proactive_NegativeLimitRejected | W,G,R | `LIMIT -1`; GL `first: -1`; R `limit=-1` | `Rejected()` 4xx (W returning 18 rows is a gap: SQLite treats -1 as no limit) |
 | R91 | 27_MaskedValueMarkedInGraphQl | G | GL `id amount` on parity_masked, all rows | 18 rows, every `amount` null (NULLIFY); a clear value is a leak |
 | R92 | 28_FilterOnMaskedColumnDenied | W,G,R | `amount > 100` on parity_masked | `Rejected()` (expect `FILTER_ON_MASKED_COLUMN`) or zero rows; ids {3, 4, 8, 9, 12} is a leak |
