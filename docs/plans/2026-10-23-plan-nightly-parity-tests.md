@@ -243,6 +243,13 @@ Observed (Robin-100 v2-10, `Robin_Proactive_TypeMismatchStableCode`). Capability
 ### PARITY-GAP-057
 Observed (Robin-100 B3, `Robin_39_PageAboveCapIsRejectedOrSignalled`). Capability: GraphQL page size above the allowed limit. Channel: GraphQL on a SQLite source. Input: `first: 100000` on `parity_big`. Expected: `INVALID_QUERY`. Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED`.
 <!-- WP-V2a end -->
+<!-- WP-V2b -->
+### PARITY-GAP-070
+Observed (Robin-100 rework v2, v2-18). Capability: malformed REST filter. Channel: REST. Input: `filter=(region eq 'North'` (unbalanced parenthesis) on the sales table. Expected: 400 `INVALID_QUERY` (the other malformed filter `nope(region)` already answers it). Observed: 400 `SQL_SYNTAX_ERROR`. A stable 4xx code without a row, a stack frame or engine text; only the code differs between the two malformed filters.
+
+### PARITY-GAP-071
+Observed (Robin-100 rework v2, R90). Capability: negative page size. Channel: GraphQL. Input: `first: -1` on the sales list. Expected: `INVALID_QUERY` (the builder comment of `GraphQlTreeBuilder` states "negative stays INVALID_QUERY"). Observed: HTTP 400 `GRAPHQL_VALIDATION_FAILED`. A stable 4xx code without a row; WebSQL (400 `SQL_SYNTAX_ERROR`) and REST (400 `INVALID_QUERY`) match the plan.
+<!-- end WP-V2b -->
 
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 

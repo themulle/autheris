@@ -17,7 +17,6 @@ public static class RobinKnownGaps
         // --- end WP-R1 ---
         // --- WP-R2 ---
         ["Robin_123_FederatedSameSourceSubqueryPart|WebSql|"] = "PARITY-GAP-050",
-        ["Robin_124_FederatedKeySetJoin|WebSql|"] = "PARITY-GAP-050",
         // --- end WP-R2 ---
         // --- WP-V2a ---
         ["Robin_Proactive_NotInWithNullIsEmpty|GraphQl|"] = "PARITY-GAP-051",
@@ -30,6 +29,10 @@ public static class RobinKnownGaps
         ["Robin_Proactive_TypeMismatchStableCode|Rest|dangling_filter"] = "PARITY-GAP-056",
         ["Robin_39_PageAboveCapIsRejectedOrSignalled|GraphQl|"] = "PARITY-GAP-057",
         // --- end WP-V2a ---
+        // --- WP-V2b ---
+        ["Robin_Proactive_MalformedFilterStableCode|Rest|unbalanced_filter"] = "PARITY-GAP-070",
+        ["Robin_Proactive_NegativeLimitRejected|GraphQl|"] = "PARITY-GAP-071",
+        // --- end WP-V2b ---
     };
 
     public static string? For(string caseMethod, string channel, string? variant) =>

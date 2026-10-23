@@ -222,3 +222,12 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - v2-17 `offset_over` REST answers 200 with zero rows (gap 054); WebSQL answers 200 with zero rows as expected; GraphQL answers 400 `INVALID_QUERY`. Note: a 200 for a request the plan expects rejected sits in section 5.3 item 9 only as "another stable code"; it is registered as a functional gap for the lead's decision.
 - New gap ids 051-057 (drafts in the nightly parity plan, section 5). Gap key `Robin_Proactive_NullBoolIsReturn|Rest|` removed (method deleted). Guard: `Robin100V2aSecurityTests` (closed list, security variants, masked-leak scan).
 <!-- WP-V2a end -->
+<!-- WP-V2b -->
+## 8. WP-V2b result notes (2026-10-23)
+
+- 2026-10-23 plan correction (R83 W, also the v2-04 `unknown_group_column` W code): an unknown column on WebSQL answers 403 `SQL_POLICY_DENIED`, not `SQL_POLICY_VIOLATION` (`DmlConstraintViolationException`, #312 / SEC-PG-10 / SEC-X1-05: an unknown identifier is answered like a denied column, no column-name oracle). `Robin_30_UnknownColumnStableCode` pins `SQL_POLICY_DENIED`.
+- 2026-10-23 correction: `GraphQlAliasesOnScopedTable` cannot take a gap for partial `north` data through key alone: `Robin100_NoKnownGapForDeniedOrLeakCells` matches the name part `scope` (`...OnScopedTable`); that cell is red-by-design if the product ever returns partial data (hard failure to report, not a gap).
+- 2026-10-23 gaps: 070 (v2-18 REST unbalanced filter, observed `SQL_SYNTAX_ERROR`), 071 (R90 GraphQL `first: -1`, observed `GRAPHQL_VALIDATION_FAILED`, HTTP 400). The plan's 070 (R88 code cell) is void; GraphQL R90 replaces the candidate "073 R90 W".
+- 2026-10-23 hard failure (SEC-R100-13, security cell, never a gap): `Robin_30_FederatedUnknownSourceSameCode` (variants `join`, `single`) is red. An unknown source (`nope.main.parity_sales`) answers 403 `SQL_POLICY_VIOLATION` (generic `SecurityException` row in `SqlCompilerErrorMapper`), an unknown table of a known source answers 403 `SQL_POLICY_DENIED`: the two are distinguishable (source existence oracle). The product must map an unknown source to `SQL_POLICY_DENIED` like SEC-X1-05.
+- 2026-10-23 host notes: `RobinClient.AssertUnauthorizedAsync` is the only user of `CreateUnauthenticatedClient()` (SEC-R100-12); `Robin100_PostJsonAsyncUsesAuthenticatedHostClient` strips exactly the marked `// --- WP-V2b unauthenticated ---` region before its checks. GraphQL validation errors answer HTTP 400 (not 200) in the parity host.
+<!-- end WP-V2b -->
