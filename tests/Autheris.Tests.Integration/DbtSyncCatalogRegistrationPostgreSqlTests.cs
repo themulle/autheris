@@ -47,6 +47,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-dbt282-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         builder.UseSetting("Gateway:DataSources:Connections:warehouse:Provider", "PostgreSql");
         builder.UseSetting("Gateway:DataSources:Connections:warehouse:ConnectionString", _fixture.ConnectionString);
+        builder.UseSetting("Gateway:DataSources:Connections:warehouse:DefaultSchema", "public");
         builder.UseSetting("Gateway:Dbt:CreateMissingTables", "true");
     });
 
