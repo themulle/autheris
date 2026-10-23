@@ -26,6 +26,8 @@ public static class ParityHostSettings
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "1000000");
         // k-anonymity: governed aggregations hide groups below the minimum group size (default 5). Lifted here so that exact group
         // results of the 18-row seed can be asserted; the suppression itself is out of scope of the parity suite.
+        // A floor of 1 needs the explicit opt-in (MISC-10, AnalyticsOptionsValidator); test host only.
+        b.UseSetting("Analytics:Privacy:AllowDisabled", "true");
         b.UseSetting("Analytics:Privacy:DefaultMinGroupSize", "1");
         b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={governancePath}");
