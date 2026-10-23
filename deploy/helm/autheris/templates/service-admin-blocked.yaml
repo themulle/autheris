@@ -1,5 +1,5 @@
 {{- if and .Values.ingress.enabled .Values.ingress.blockAdminPath }}
-# Intentionally without a pod match: no endpoints, so ingress requests to /api/admin never reach a pod (see ingress).
+# Intentionally without a pod match: no endpoints, so requests routed here by the ingress deny rule reach no pod.
 apiVersion: v1
 kind: Service
 metadata:
