@@ -16,6 +16,15 @@ using System.Collections.Generic;
 /// </summary>
 public static class SqlFunctionAllowlists
 {
+    // Common (ANSI/Trino) functions that SQLite cannot execute and that no generator rule maps: advertising them made the provider
+    // answer 502 SQL_PROVIDER_ERROR. Without an entry the compiler rejects the call (fail closed, 4xx) before the database sees it.
+    // Declared before the allowlist properties: static initializers run in textual order.
+    private static readonly string[] SqliteUnsupportedCommonFunctions =
+    [
+        "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp", "greatest", "least",
+        "lpad", "rpad", "reverse", "char_length", "character_length",
+    ];
+
     private static readonly string[] CommonFunctions =
     [
         // Aggregates
@@ -177,7 +186,7 @@ public static class SqlFunctionAllowlists
     public static IReadOnlySet<string> SqlServer { get; } = Create(CommonFunctions, SqlServerFunctions);
 
     /// <summary>SQLite allowlist (ANSI + SQLite date/string/aggregate functions).</summary>
-    public static IReadOnlySet<string> Sqlite { get; } = Create(CommonFunctions, SqliteFunctions);
+    public static IReadOnlySet<string> Sqlite { get; } = Create(CommonFunctions, SqliteFunctions, except: SqliteUnsupportedCommonFunctions);
 
     /// <summary>Oracle allowlist (ANSI + Oracle date/string/null-handling functions).</summary>
     public static IReadOnlySet<string> Oracle { get; } = Create(CommonFunctions, OracleFunctions);
@@ -263,7 +272,11 @@ public static class SqlFunctionAllowlists
     /// <summary>Functions whose arguments are checked by a dedicated governed validator that policy predicates do not run (REQ-SQL-130).</summary>
     private static readonly string[] GovernedOnlyFunctions = ["convert_timezone"];
 
-    private static FrozenSet<string> Create(params string[][] groups)
+    private static FrozenSet<string> Create(params string[][] groups) => Create(groups, except: []);
+
+    private static FrozenSet<string> Create(string[] first, string[] second, string[] except) => Create([first, second], except);
+
+    private static FrozenSet<string> Create(string[][] groups, string[] except)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in groups)
@@ -276,6 +289,11 @@ public static class SqlFunctionAllowlists
                     result.Add(name);
                 }
             }
+        }
+
+        foreach (var name in except)
+        {
+            result.Remove(name);
         }
 
         return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
