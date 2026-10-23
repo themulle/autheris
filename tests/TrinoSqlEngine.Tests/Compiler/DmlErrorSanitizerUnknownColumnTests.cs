@@ -89,6 +89,28 @@ public class DmlErrorSanitizerUnknownColumnTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void UnknownColumn_IdenticalToDeniedColumn_PerDialect()
+    {
+        var cases = new (TargetSqlDialect Dialect, Exception Error)[]
+        {
+            (TargetSqlDialect.Sqlite, new SqliteLikeException(1, Leaky)),
+            (TargetSqlDialect.PostgreSql, new SqlStateException("42703", "column x does not exist")),
+            (TargetSqlDialect.SqlServer, new NumberedException(207, "Invalid column name 'x'.")),
+            (TargetSqlDialect.Oracle, new NumberedException(904, "ORA-00904")),
+            (TargetSqlDialect.DuckDb, new PlainException("Binder Error: Referenced column \"x\" not found in FROM clause!"))
+        };
+        foreach (var (dialect, error) in cases)
+        {
+            var unknown = DmlErrorSanitizer.Map(dialect, error);
+            var denied = new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, dialect);
+            Assert.Equal(denied.Code, unknown.Code);
+            Assert.Equal(denied.Message, unknown.Message);
+            Assert.Equal(denied.GetType(), unknown.GetType());
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void SEC_PG_10_UnknownColumn_IsByteIdenticalToTheDeniedAnswer()
     {
         var unknown = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(1, Leaky));

@@ -89,7 +89,7 @@ public sealed class WebSqlRequestValidationTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SEC_PG_11_Messages_AreFixed_AndLeakNoParserTextPathOrType()
+    public async Task Messages_AreFixedText()
     {
         var (_, invalid, rawInvalid) = await PostAsync("{\"sql\":123,\"secret\":");
         var (_, otherInvalid, _) = await PostAsync("{\"sql\":\"select 1\",\"parameters\":\"x\"}");

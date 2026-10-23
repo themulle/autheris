@@ -186,4 +186,33 @@ public sealed class SqlCompilerErrorMapperTests
             mapping.Title.ShouldNotBe(GovernedSqlErrorCodes.FixedMessage("UNKNOWN_CODE"), mapping.Code);
         }
     }
+
+    [Fact]
+    public void FunctionUnsupportedDialect_Is422()
+    {
+        SqlCompilerErrorMapper.TryMap(new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect), out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(422);
+        mapping.Code.ShouldBe("SQL_FUNCTION_UNSUPPORTED_DIALECT");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FunctionUnsupportedDialect_FixedMessage()
+    {
+        // SEC-PG-11: the message is the fixed text of the code, whatever the exception carried.
+        var error = new InvalidOperationException(HostileMarker, new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect));
+        SqlCompilerErrorMapper.TryMap(error, out var mapping).ShouldBeTrue();
+        mapping.Title.ShouldBe("The function is not supported for this data source dialect.");
+        mapping.Title.ShouldNotContain(HostileMarker);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void OtherParseCanceled_StaysSyntaxError()
+    {
+        // SEC-PG-08: only the typed literal cause is SQL_LITERAL_NOT_PERMITTED; every other parse rejection keeps the fail-closed default.
+        SqlCompilerErrorMapper.TryMap(new ParseCanceledException("line 1:1: Square brackets are not permitted", new InvalidOperationException()), out var mapping).ShouldBeTrue();
+        mapping.Code.ShouldBe("SQL_SYNTAX_ERROR");
+        mapping.Status.ShouldBe(400);
+    }
 }

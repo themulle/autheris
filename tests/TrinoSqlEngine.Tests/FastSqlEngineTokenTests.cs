@@ -37,7 +37,7 @@ public class FastSqlEngineTokenTests
     [Theory]
     [MemberData(nameof(Literals))]
     [Trait("Category", "Security")]
-    public void SEC_PG_08_MessagesAreFixed_AndNeverEchoTheLiteral(TargetSqlDialect dialect, string sql)
+    public void LiteralTokenMessage_DoesNotEchoLiteral(TargetSqlDialect dialect, string sql)
     {
         var ex = Reject(dialect, sql);
         foreach (var text in new[] { ex.Message, ex.InnerException!.Message })
@@ -57,10 +57,23 @@ public class FastSqlEngineTokenTests
     [InlineData(TargetSqlDialect.Sqlite, "SELECT x FROM orders /* a /* b */")]
     [InlineData(TargetSqlDialect.PostgreSql, "SELECT $$x$$ FROM orders")]
     [Trait("Category", "Security")]
-    public void SEC_PG_08_OtherRejections_StayRejected_AndAreNotLiteralRejections(TargetSqlDialect dialect, string sql)
+    public void OtherParseCanceled_StaysSyntaxError(TargetSqlDialect dialect, string sql)
     {
         var ex = Assert.ThrowsAny<ParseCanceledException>(() => new ProbeEnv(dialect).Compile(sql));
         Assert.IsNotType<LiteralTokenRejectedException>(ex.InnerException);
+    }
+
+    [Theory]
+    [MemberData(nameof(Literals))]
+    [InlineData(TargetSqlDialect.Sqlite, "SELECT [id] FROM orders")]
+    [InlineData(TargetSqlDialect.Sqlite, "SELECT '[' || x || ']' FROM orders")]
+    [InlineData(TargetSqlDialect.SqlServer, "SELECT 'a/*b' FROM orders")]
+    [InlineData(TargetSqlDialect.PostgreSql, "SELECT E'a' FROM orders")]
+    [Trait("Category", "Security")]
+    public void LiteralTokenRejected_RegressionCorpusStillRejected(TargetSqlDialect dialect, string sql)
+    {
+        // SEC-PG-08: the typed rejection is the same ParseCanceledException as before; nothing rejected before compiles now.
+        Assert.Throws<ParseCanceledException>(() => new ProbeEnv(dialect).Compile(sql));
     }
 
     [Fact]

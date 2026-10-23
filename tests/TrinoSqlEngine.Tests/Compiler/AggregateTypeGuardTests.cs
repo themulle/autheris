@@ -96,6 +96,26 @@ public class AggregateTypeGuardTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void UnknownType_FailsClosed()
+    {
+        // SEC-PG-09: a listed column whose type the guard cannot classify (or the catalog does not state) is rejected for every function.
+        foreach (var function in new[] { "SUM", "AVG", "MIN", "MAX" })
+        {
+            Assert.Throws<AggregateTypeInvalidException>(() => Run($"SELECT {function}(weird) FROM orders"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SumOverDeniedColumn_ReturnsDeniedNotTypeError()
+    {
+        // A denied column is not in the catalog list the compiler hands the visitor: the guard stays silent, so the denied answer is the only one.
+        Run("SELECT SUM(salary) FROM orders");
+        Run("SELECT AVG(o.salary) FROM orders o");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void SEC_PG_09_UnknownColumn_DoesNotDiscloseAType()
     {
         // The column is not in the catalog (unknown or denied): the guard stays silent, the executor answers the denied code.
@@ -112,7 +132,7 @@ public class AggregateTypeGuardTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void SEC_PG_09_Message_NamesNeitherTheTypeNorTheArguments()
+    public void Message_HasNoTypeName()
     {
         var ex = Assert.Throws<AggregateTypeInvalidException>(() => Run("SELECT SUM(email) FROM orders"));
         Assert.Equal(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.AggregationInvalidFunctionForType), ex.Message);
