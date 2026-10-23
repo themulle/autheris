@@ -23,6 +23,8 @@ public static class SqlFunctionAllowlists
     [
         "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp", "greatest", "least",
         "lpad", "rpad", "reverse", "char_length", "character_length",
+        // GAP-019: SQLite has no time zone database; GraphQL timeBuckets with timeZone is the supported path.
+        "convert_timezone",
     ];
 
     private static readonly string[] CommonFunctions =
@@ -36,7 +38,7 @@ public static class SqlFunctionAllowlists
         "coalesce", "nullif", "greatest", "least",
         // String
         "lower", "upper", "trim", "ltrim", "rtrim", "substring", "substr", "concat", "length", "char_length",
-        "character_length", "octet_length", "replace", "position", "lpad", "rpad", "reverse", "left", "right",
+        "character_length", "octet_length", "replace", "position", "lpad", "rpad", "reverse",
         // Math
         "abs", "round", "floor", "ceil", "ceiling", "mod", "power", "sqrt", "exp", "ln", "log", "log10", "sign",
         // Date / time and conversion helpers
@@ -97,6 +99,26 @@ public static class SqlFunctionAllowlists
     // option they are only listed where the dialect has the native function of the same name (its default allowlist).
     private static readonly string[] TrinoDateFunctions = ["date_add", "date_trunc", "now"];
 
+    // GAP-013: part functions that the builder folds into EXTRACT under TranslateTrinoDateFunctions (year(x) .. second(x), date_part).
+    // Like TrinoDateFunctions they exist only with the option, unless the dialect has the native function of that name.
+    private static readonly string[] TrinoDatePartFunctions = ["year", "quarter", "month", "day", "hour", "minute", "second", "date_part"];
+
+    /// <summary>
+    /// SEC-PG-03: the allowlist of a governed request that sets <c>TranslateTrinoDateFunctions</c>: <paramref name="allowed"/> plus
+    /// the date functions the builder translates (<c>date_add</c>, <c>date_trunc</c>, <c>now</c>, the part functions); nothing else is added.
+    /// </summary>
+    public static IReadOnlySet<string> WithDateTranslation(IReadOnlySet<string> allowed)
+    {
+        ArgumentNullException.ThrowIfNull(allowed);
+        var result = new HashSet<string>(allowed, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in TrinoDateFunctions.Concat(TrinoDatePartFunctions))
+        {
+            if (!SqlFunctionPolicy.IsDeniedByDefault(name)) result.Add(name);
+        }
+
+        return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Trino function names that a dialect generator rewrites to a native form (CR-ADG-02: a name is listed only where the dialect
     /// has a rule, otherwise the call would reach the database unchanged and fail at execution).
@@ -128,7 +150,7 @@ public static class SqlFunctionAllowlists
     internal static IReadOnlySet<string> CompilerNames(TargetSqlDialect dialect)
     {
         var names = new HashSet<string>(GetDefault(dialect), StringComparer.OrdinalIgnoreCase);
-        foreach (var name in TrinoSpecialForms.Concat(TrinoDateFunctions).Concat(RewrittenFunctions(dialect)))
+        foreach (var name in TrinoSpecialForms.Concat(TrinoDateFunctions).Concat(TrinoDatePartFunctions).Concat(RewrittenFunctions(dialect)))
         {
             if (!SqlFunctionPolicy.IsDeniedByDefault(name)) names.Add(name);
         }
@@ -153,7 +175,7 @@ public static class SqlFunctionAllowlists
 
         var native = GetDefault(dialect);
         var result = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
-        foreach (var name in TrinoDateFunctions)
+        foreach (var name in TrinoDateFunctions.Concat(TrinoDatePartFunctions))
         {
             if (!native.Contains(name)) result.Remove(name);
         }
