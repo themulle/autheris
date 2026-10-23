@@ -149,7 +149,7 @@ public static class ParityMatrix
             "filter_is_null",
             new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IS NULL ORDER BY id"), Ids(r => r.Region is null)),
             new Supported(ListGql("where: { region: { isNull: true } }, "), Ids(r => r.Region is null)),
-            new Pending("inexpressible: the REST filter grammar has no IS NULL operator; `region eq null` is SQL equality and returns no rows (see PARITY-GAP-009)"));
+            new Pending("inexpressible: the REST filter grammar has no IS NULL operator; `region eq null` is SQL equality and returns no rows (PARITY-GAP-009 is resolved: `eq: null` is three-valued logic)"));
 
         // ---- order and paging ----
         var newest = new ExpectedSpec(["id"], ParityOracle.Rows.OrderByDescending(r => r.SaleDate, StringComparer.Ordinal).ThenBy(r => r.Id).Take(5).Select(r => new object?[] { r.Id }).ToArray(), true);

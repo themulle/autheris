@@ -237,15 +237,8 @@ public sealed class RobinScenarios(ParityHostFixture host) : ParityTestBase
                 "query($ids: [Int!]) { default_main_parity_sales(where: { id: { in: $ids } }, " + AllRows + ") { id } }",
                 "default_main_parity_sales",
                 new { ids = Array.Empty<int>() });
-        // An empty list matches nothing (200, zero rows); a documented stable 4xx is the only accepted alternative.
-        if (ParityAssert.IsError(r))
-        {
-            r.Rejected();
-        }
-        else
-        {
-            r.IdsShouldBe();
-        }
+        // An empty list matches nothing: 200 with zero rows on every channel.
+        r.IdsShouldBe();
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
@@ -266,14 +259,10 @@ public sealed class RobinScenarios(ParityHostFixture host) : ParityTestBase
             return;
         }
 
-        var r = channel == "WebSql"
-            ? await Sql(
-                "SELECT CAST(convert_timezone('UTC', 'Europe/Berlin', CAST(sold_at AS timestamp)) AS date) AS d, COUNT(*) AS n FROM parity_sales WHERE id IN (6, 10) " +
-                "GROUP BY CAST(convert_timezone('UTC', 'Europe/Berlin', CAST(sold_at AS timestamp)) AS date) ORDER BY d")
-            : await GqlAggregate(
-                "where: { id: { in: [6, 10] } }, timeBuckets: [{ column: sold_at, bucket: DAY, timeZone: \"Europe/Berlin\" }], aggregates: [{ fn: COUNT, alias: \"n\" }], orderBy: [{ column: sold_at }]",
-                "sold_at");
-        r.RowsShouldBe([channel == "WebSql" ? "d" : "sold_at", "n"], [["2024-03-31", 1], ["2025-01-01", 1]], ordered: true);
+        var r = await GqlAggregate(
+            "where: { id: { in: [6, 10] } }, timeBuckets: [{ column: sold_at, bucket: DAY, timeZone: \"Europe/Berlin\" }], aggregates: [{ fn: COUNT, alias: \"n\" }], orderBy: [{ column: sold_at }]",
+            "sold_at");
+        r.RowsShouldBe(["sold_at", "n"], [["2024-03-31", 1], ["2025-01-01", 1]], ordered: true);
     });
 
     // ---------------------------------------------------------------------------------------------------------------------
