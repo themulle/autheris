@@ -529,7 +529,7 @@ With `GraphQL:AppScopedTrustedDocuments:Enabled=true` an operator registers, per
 - Multi-instance coherence: a write is effective on the instance that handled it before the call returns; other instances pick it up within `CacheRefreshSeconds` (default 5 s), so a retired version can stay usable on other instances for up to that interval. If the store cannot be read, requests with the app header are rejected.
 - Apps are gateway-wide (not tenant-scoped). Allowed origins are app-level: a PUT for any version replaces the origins of all versions of that app.
 
-The admin API is mapped only while the feature is enabled and is meant to be reached from inside the cluster (the Helm chart has no dedicated `/api/admin` rule, but its default catch-all `/` path forwards it, so block `/api/admin` at your public ingress). It requires the `ClusterAdmin` role plus a delegated scope; every change is audited (`TRUSTED_DOCUMENTS_REPLACED`, `TRUSTED_DOCUMENTS_RETIRED`):
+The admin API is mapped only while the feature is enabled and is meant to be reached from inside the cluster (the Helm chart's default ingress blocks the `/api/admin` prefix via `ingress.blockAdminPath: true`, which routes it to an endpoint-less Service so the controller answers 503; set it to `false` only to publish the admin API deliberately. Matching is by case-sensitive path prefix in most controllers, so also block `/api/admin` case-insensitively at your public edge). It requires the `ClusterAdmin` role plus a delegated scope; every change is audited (`TRUSTED_DOCUMENTS_REPLACED`, `TRUSTED_DOCUMENTS_RETIRED`):
 
 | Method and path | Scope | Result |
 | :--- | :--- | :--- |

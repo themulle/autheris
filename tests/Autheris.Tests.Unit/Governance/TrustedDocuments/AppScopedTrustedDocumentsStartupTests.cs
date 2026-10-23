@@ -58,7 +58,7 @@ public sealed class AppScopedTrustedDocumentsStartupTests
     }
 
     [Fact]
-    public void Helm_DefaultIngress_DoesNotRoute_ApiAdmin()
+    public void Helm_DefaultIngress_DeniesApiAdmin_ToEndpointlessService()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "Autheris.sln")))
@@ -68,9 +68,19 @@ public sealed class AppScopedTrustedDocumentsStartupTests
 
         root.ShouldNotBeNull();
         var chart = Path.Combine(root!.FullName, "deploy", "helm", "autheris");
-        foreach (var file in Directory.EnumerateFiles(chart, "*.yaml", SearchOption.AllDirectories))
+        File.ReadAllText(Path.Combine(chart, "values.yaml")).ShouldContain("blockAdminPath: true");
+
+        var ingress = File.ReadAllText(Path.Combine(chart, "templates", "ingress-traefik.yaml"));
+        ingress.ShouldContain("if $.Values.ingress.blockAdminPath");
+        ingress.ShouldContain("-admin-blocked");
+
+        // The only chart file that may mention /api/admin is the guarded ingress deny rule; the target Service has no pod match.
+        foreach (var file in Directory.EnumerateFiles(chart, "*.yaml", SearchOption.AllDirectories)
+                     .Where(f => Path.GetFileName(f) != "ingress-traefik.yaml"))
         {
             File.ReadAllText(file).ShouldNotContain("/api/admin", Case.Insensitive, $"{Path.GetFileName(file)} must not route /api/admin (SEC-281-6)");
         }
+
+        File.ReadAllText(Path.Combine(chart, "templates", "service-admin-blocked.yaml")).ShouldNotContain("selector");
     }
 }

@@ -53,6 +53,12 @@ service:
 
 ingress:
   enabled: true
+  # Opt-out deny rule for the cluster-internal admin API (the admin path prefix, e.g. its trusted-documents API).
+  # When true (default) the ingress routes the admin prefix to an endpoint-less Service, so the controller
+  # answers 503 instead of forwarding it through the catch-all "/" path. Matching is by path prefix and case
+  # sensitive in most controllers; also enforce the block at your edge (WAF / controller) and keep NetworkPolicy on.
+  # Set to false only if the admin API is intentionally published (not recommended).
+  blockAdminPath: true
   className: "traefik"
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
