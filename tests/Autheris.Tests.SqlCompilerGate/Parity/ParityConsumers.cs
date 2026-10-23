@@ -47,7 +47,7 @@ internal static class ParityData
 {
     public const string Source = "gate";
 
-    private static string DataType(ColumnDef c) => c.Kind switch
+    internal static string DataTypeOf(ColumnDef c) => c.Kind switch
     {
         ColumnKind.Whole => "bigint",
         ColumnKind.Fixed => "decimal",
@@ -55,16 +55,18 @@ internal static class ParityData
         _ => "text"
     };
 
-    public static TableMetadata OrdersMetadata(ParityContext ctx) => new()
+    public static TableMetadata OrdersMetadata(ParityContext ctx) => MetadataOf(ctx, "orders");
+
+    public static TableMetadata MetadataOf(ParityContext ctx, string table) => new()
     {
-        Identifier = new TableIdentifier(Source, ctx.Schema, "orders"),
+        Identifier = new TableIdentifier(Source, ctx.Schema, table),
         Table = new Table
         {
-            SourceName = Source, SchemaName = ctx.Schema, TableName = "orders", SourceType = ctx.Database.ToString(),
+            SourceName = Source, SchemaName = ctx.Schema, TableName = table, SourceType = ctx.Database.ToString(),
             DataSourceType = DataSourceType.Sql, IsActive = true
         },
         PrimaryKeyColumns = ["id"],
-        Columns = [.. GateModel.Table("orders").Columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = DataType(c) })]
+        Columns = [.. GateModel.Table(table).Columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = DataTypeOf(c) })]
     };
 
     public static TableAccessDecision Decision(ParityContext ctx, FilterText filter)
@@ -125,9 +127,24 @@ public sealed class TreeSqlCompilerConsumer : IParityConsumer
     public async Task<EngineOutcome> RunAsync(ParityEnv env, FilterText filter)
     {
         var metadata = ParityData.OrdersMetadata(env.Context);
+        var decision = ParityData.TreeDecision(env.Context, filter);
+        TreeSecuredSource? secured = null;
+        if (filter.Typed is { } typed && Autheris.Application.Sql.Policy.PolicyPredicateSubqueryDetector.ContainsSubquery(typed.Expression))
+        {
+            // SQLA-06 follow-up: a typed predicate with a subquery runs through the engine pipeline (the secured source); anything else is refused.
+            try
+            {
+                secured = await new GateTreeSources(env.Context).BuildAsync(metadata, decision, GateModel.TenantA);
+            }
+            catch (Exception ex) when (ex is SecurityException or InvalidOperationException or ArgumentException or Autheris.Domain.Exceptions.GatewaySecurityException)
+            {
+                return ParityData.Refused(ex);
+            }
+        }
+
         var access = new Dictionary<TableIdentifier, TreeTableAccess>
         {
-            [metadata.Identifier] = new(metadata, ParityData.TreeDecision(env.Context, filter), GateModel.TenantColumn, GateModel.TenantA)
+            [metadata.Identifier] = new(metadata, decision, GateModel.TenantColumn, GateModel.TenantA, secured)
         };
         var root = new TreeQueryNode(metadata.Identifier, ["id"]) { OrderBy = [new TreeOrder("id")], Limit = 5000 };
         CompiledTreeQuery compiled;
