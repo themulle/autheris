@@ -164,7 +164,7 @@ public sealed class AggregationColumnUnavailableException : GatewaySecurityExcep
 public sealed class AggregationFilterRejectedException : GatewaySecurityException
 {
     public const string ErrorCodeConst = "AGG_NEGATED_FILTER_REJECTED";
-    public const string FixedMessage = "The aggregation filter negates or isolates a column that is not a grouping column and is rejected by the privacy policy (RestrictNegatedFilters).";
+    public const string FixedMessage = "The aggregation filter is rejected by the privacy policy.";
 
     public AggregationFilterRejectedException()
         : base(FixedMessage, ErrorCodeConst)

@@ -23,6 +23,12 @@ internal sealed record AstSecurityVisitorOptions
     /// <summary>Names of the cataloged columns of a table (normalized name), or null when the table is not in the catalog.</summary>
     public required Func<string, IReadOnlyList<string>?> TableColumns { get; init; }
 
+    /// <summary>
+    /// Catalog data type of a column of a table (normalized table name, column name), or null when unknown. Null (no lookup) switches the
+    /// aggregate type guard off; the compiler always sets it (#310, SEC-PG-09).
+    /// </summary>
+    public Func<string, string, string?>? ColumnDataType { get; init; }
+
     public IReadOnlySet<string> TablesWithMaskedColumns { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Clamps or injects a row cap on the root read (0 = disabled).</summary>
