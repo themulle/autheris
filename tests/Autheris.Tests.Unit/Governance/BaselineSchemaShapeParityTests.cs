@@ -47,6 +47,46 @@ public sealed class BaselineSchemaShapeParityTests
         }
     }
 
+    private static readonly string[] ConsumerAppTables =
+        ["CONSUMER_APP_DAILY", "CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_QUERYNAME_DAILY"];
+
+    [Fact]
+    public void BaselineSchema_Sqlite_ContainsConsumerAppTables()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+
+        new SqliteBaselineSchema(connection, null).Apply();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table'";
+        using var reader = cmd.ExecuteReader();
+        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            tables.Add(reader.GetString(0));
+        }
+
+        foreach (var table in ConsumerAppTables)
+        {
+            tables.ShouldContain(table);
+        }
+    }
+
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public void BaselineSchema_ServerEngines_ContainConsumerAppTables(string engine)
+    {
+        // The server baselines are applied by the CI integration tests; here the verified shape (which the baseline must equal) lists the tables.
+        var shape = Autheris.Infrastructure.Persistence.Migrations.Shape.GovernanceSchemaShapeLoader.LoadEmbedded(engine);
+
+        foreach (var table in ConsumerAppTables)
+        {
+            shape.Tables.Select(t => t.Name.ToUpperInvariant()).ShouldContain(table);
+        }
+    }
+
     [Fact]
     public void BaselineSchema_PostgreSql_ContainsAll10Wave2Tables()
     {
