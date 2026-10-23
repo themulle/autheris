@@ -26,25 +26,20 @@ public sealed class GraphQlEnumerationShieldMiddleware
         "INVALID_QUERY"
     };
 
-    /// <summary>Validation errors with these codes do not depend on the catalog and keep their own message.</summary>
-    private static readonly HashSet<string> NeutralValidationCodes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // QueryCostAnalyzerRule: depends on the document shape and configured budgets only, never on field existence.
-        "QUERY_TOO_COMPLEX"
-    };
+    internal const string ComplexCode = "QUERY_TOO_COMPLEX";
 
-    /// <summary>Stable code of the execution depth rule; its message is fixed and carries no schema detail.</summary>
+    /// <summary>Stable code of the execution depth rule.</summary>
     internal const string DepthCode = "QUERY_TOO_DEEP";
 
     /// <summary>
-    /// HotChocolate's max-execution-depth rule reports a code-less error with these extension keys; the depth depends on the
-    /// document shape only, so it is told apart by the keys and not by message text.
+    /// HotChocolate's max-execution-depth rule reports a code-less error with the <c>detectedExecutionDepth</c> extension; it is
+    /// told apart by that key, not by message text.
     /// </summary>
     private static bool IsDepthError(IError error) =>
         error.Code is null && error.Extensions is { } extensions && extensions.ContainsKey("detectedExecutionDepth");
 
-    private static bool IsNeutral(IError error) =>
-        IsDepthError(error) || (error.Code is not null && NeutralValidationCodes.Contains(error.Code));
+    private static bool IsStructuralLimitError(IError error) =>
+        IsDepthError(error) || string.Equals(error.Code, ComplexCode, StringComparison.OrdinalIgnoreCase);
 
     private readonly RequestDelegate _next;
 
@@ -70,23 +65,35 @@ public sealed class GraphQlEnumerationShieldMiddleware
         // SEC-PG-12 (#294): an invalid document answers the same single error in every environment (stable classified code,
         // fixed message, no locations, path or extensions), whether or not the named field or type exists. Denied tables and
         // columns (resolver errors) get that same error outside Development; Development keeps their detail for debugging.
+        //
+        // Cost and depth violations depend on the document and on schema-dependent cost values, so outside Development they stay
+        // inside the single shielded error (an over-limit document must not reveal whether a candidate field exists). Development
+        // alone passes them as QUERY_TOO_COMPLEX / QUERY_TOO_DEEP with fixed messages (no numbers, hint or extensions), and a
+        // structural-limit error wins over other errors of the same document.
+        if (validationFailed && isDevelopment && errors.Any(IsStructuralLimitError))
+        {
+            var limits = new List<IError>();
+            if (errors.Any(IsDepthError))
+            {
+                limits.Add(ErrorBuilder.New().SetMessage(ErrorSanitizingFilter.DepthMessage).SetCode(DepthCode).Build());
+            }
+
+            if (errors.Any(e => !IsDepthError(e) && IsStructuralLimitError(e)))
+            {
+                limits.Add(ErrorBuilder.New().SetMessage(ErrorSanitizingFilter.ComplexMessage).SetCode(ComplexCode).Build());
+            }
+
+            var data = result.ContextData;
+            await result.DisposeAsync().ConfigureAwait(false);
+            context.Result = new OperationResult(limits.ToImmutableList()) { ContextData = data };
+            return;
+        }
+
         bool mustShield = validationFailed
-            ? errors.Any(e => !IsNeutral(e))
-            : !isDevelopment && errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code));
+            || (!isDevelopment && errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code)));
 
         if (!mustShield)
         {
-            if (validationFailed && errors.Any(IsDepthError))
-            {
-                // Depth and cost violations keep a stable code; the engine text and its depth numbers are replaced by a fixed message.
-                var rewritten = errors.Select(e => IsDepthError(e)
-                    ? ErrorBuilder.New().SetMessage(ErrorSanitizingFilter.DepthMessage).SetCode(DepthCode).Build()
-                    : e).ToImmutableList();
-                var data = result.ContextData;
-                await result.DisposeAsync().ConfigureAwait(false);
-                context.Result = new OperationResult(rewritten) { ContextData = data };
-            }
-
             return;
         }
 

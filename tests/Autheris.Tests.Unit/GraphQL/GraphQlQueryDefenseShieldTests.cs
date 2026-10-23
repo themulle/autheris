@@ -63,25 +63,23 @@ public sealed class GraphQlQueryDefenseShieldTests
         return result.ToJson();
     }
 
-    [Theory]
-    [InlineData("Development")]
-    [InlineData("Production")]
-    public async Task SecPg12Defense_CostRuleError_KeepsItsStableCode(string environment)
+    [Fact]
+    public async Task SecPg12Defense_Development_CostRuleError_HasStableCodeFixedMessageAndNoExtensions()
     {
-        var executor = await CreateExecutorAsync(environment);
+        var executor = await CreateExecutorAsync("Development");
 
         var json = await RunAsync(executor, "{ a b c }");
 
         json.ShouldContain("QUERY_TOO_COMPLEX");
+        json.ShouldContain(ErrorSanitizingFilter.ComplexMessage);
         json.ShouldNotContain("GRAPHQL_VALIDATION_FAILED");
+        AssertNoLimitDetail(json);
     }
 
-    [Theory]
-    [InlineData("Development")]
-    [InlineData("Production")]
-    public async Task SecPg12Defense_DepthRuleError_HasStableCodeAndFixedMessageNamingDepth(string environment)
+    [Fact]
+    public async Task SecPg12Defense_Development_DepthRuleError_HasStableCodeAndFixedMessageNamingDepth()
     {
-        var executor = await CreateExecutorAsync(environment);
+        var executor = await CreateExecutorAsync("Development");
 
         var json = await RunAsync(executor, "{ root { child { child { child { id } } } } }");
 
@@ -89,17 +87,50 @@ public sealed class GraphQlQueryDefenseShieldTests
         json.ShouldContain(ErrorSanitizingFilter.DepthMessage);
         json.ShouldContain("depth");
         json.ShouldNotContain("GRAPHQL_VALIDATION_FAILED");
-        json.ShouldNotContain("\"locations\"");
+        AssertNoLimitDetail(json);
     }
 
     [Fact]
-    public async Task SecPg12Defense_UnknownFieldNextToCostError_StillShieldsToValidationFailure()
+    public async Task SecPg12Defense_Development_StructuralLimitWinsOverUnknownField()
     {
-        var executor = await CreateExecutorAsync("Production");
+        var executor = await CreateExecutorAsync("Development");
 
         var json = await RunAsync(executor, "{ a b c salaries }");
 
-        json.ShouldContain("GRAPHQL_VALIDATION_FAILED");
+        json.ShouldContain("QUERY_TOO_COMPLEX");
         json.ShouldNotContain("salaries");
+        AssertNoLimitDetail(json);
+    }
+
+    [Fact]
+    public async Task SecPg12Defense_Production_OverLimitDocuments_AreByteIdenticalForExistingAndMissingFields()
+    {
+        var executor = await CreateExecutorAsync("Production");
+
+        // a..c exist, "salaries" and "nope" do not; every over-limit document must answer the same body.
+        var existing = await RunAsync(executor, "{ a b c root { id } }");
+        var missing = await RunAsync(executor, "{ a b c nope }");
+        var other = await RunAsync(executor, "{ a b c salaries }");
+        var deepExisting = await RunAsync(executor, "{ root { child { child { child { id } } } } }");
+        var deepMissing = await RunAsync(executor, "{ root { child { child { child { nope } } } } }");
+
+        existing.ShouldContain("GRAPHQL_VALIDATION_FAILED");
+        missing.ShouldBe(existing);
+        other.ShouldBe(existing);
+        deepMissing.ShouldBe(deepExisting);
+        deepExisting.ShouldBe(existing);
+        existing.ShouldNotContain("QUERY_TOO_COMPLEX");
+        existing.ShouldNotContain("QUERY_TOO_DEEP");
+        AssertNoLimitDetail(existing);
+    }
+
+    private static void AssertNoLimitDetail(string json)
+    {
+        json.ShouldNotContain("calculatedCost");
+        json.ShouldNotContain("maxAllowedCost");
+        json.ShouldNotContain("maxRootFields");
+        json.ShouldNotContain("hint");
+        json.ShouldNotContain("budget");
+        json.ShouldNotContain("ExecutionDepth");
     }
 }

@@ -129,6 +129,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
 
     internal const string ValidationCode = "GRAPHQL_VALIDATION_FAILED";
     internal const string ValidationMessage = "The GraphQL request is invalid.";
+    internal const string ComplexMessage = "The query exceeds the allowed complexity.";
     internal const string DepthMessage = "The query exceeds the maximum allowed execution depth.";
     private const string VariableMessage = "A variable value is invalid.";
     private const string ParseMessage = "The GraphQL document could not be parsed.";
