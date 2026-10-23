@@ -60,7 +60,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
     }
 
     [Fact]
-    public async Task Sequence_SyncGovernanceConsents_YieldsQueryableTablesWithMasksAndConsents()
+    public async Task Sequence_SyncApplyConsentsActivate_RegistersInactiveThenKeepsActivationOnResync()
     {
         using var host = CreateHost();
         var client = Client(host);
@@ -84,7 +84,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
             created.Columns.Select(c => c.ColumnName).ShouldBe(["id", "email"], ignoreOrder: true);
         }
 
-        // 2. Consent manifest (with a column mask) applies to the registered table.
+        // 2. A consent manifest (with a column mask rule) applies to the registered table; the response reports one applied policy.
         const string consents = """
         {
           "version": "v1",
@@ -96,6 +96,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         """;
         var apply = await client.PostAsync("/api/v1/governance/consents/apply", new StringContent(consents, Encoding.UTF8, "application/json"));
         apply.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await apply.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("applied").GetInt32().ShouldBe(1);
 
         // 3. The administrator activates the table (existing governance path), and a second sync keeps it active.
         using (var scope = host.Services.CreateScope())

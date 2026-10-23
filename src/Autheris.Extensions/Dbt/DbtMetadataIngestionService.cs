@@ -336,9 +336,30 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         var models = new List<DbtModelDefinition>();
         var rejectedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        var creation = new CatalogCreationRun();
+
         foreach (var m in allModels)
         {
-            var tid = m.ToTableIdentifier();
+            TableIdentifier tid;
+            try
+            {
+                tid = m.ToTableIdentifier();
+            }
+            catch (ArgumentException)
+            {
+                // REQ-282-10: a name the identifier type refuses (dot, control character) skips this item, never the whole sync.
+                var badName = DbtIdentifierSanitizer.ForLog($"{m.Database}.{m.Schema}.{m.Name}");
+                var badKind = string.Equals(m.Materialization, "source", StringComparison.OrdinalIgnoreCase) ? "source" : "model";
+                creation.SkippedTotal++;
+                if (creation.Skipped.Count < MaxSkippedItemsReported)
+                {
+                    creation.Skipped.Add(new DbtSyncSkippedItem(badName, badKind, DbtSyncSkipReasons.InvalidIdentifier));
+                }
+
+                _logger.LogWarning("dbt sync skipped {Kind} '{Name}': {Reason}", badKind, badName, DbtSyncSkipReasons.InvalidIdentifier);
+                continue;
+            }
+
             if (IsTenantAllowed(tid, caller))
             {
                 models.Add(m);
@@ -397,8 +418,6 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 }
             }
         }
-
-        var creation = new CatalogCreationRun();
 
         foreach (var model in models)
         {
@@ -860,6 +879,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
         catch (TableMetadataUnavailableException)
         {
+            _logger.LogWarning("dbt sync could not register {Kind} '{Name}': stored metadata is unavailable.", kind, displayName);
             Skip(DbtSyncSkipReasons.CreateFailed);
             return null;
         }

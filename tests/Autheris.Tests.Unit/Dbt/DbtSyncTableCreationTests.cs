@@ -553,4 +553,18 @@ public sealed class DbtSyncTableCreationTests
         name.Length.ShouldBeLessThanOrEqualTo(128);
         DbtIdentifierSanitizer.ForLog("evil\u0001\u001bname\r\nforged").Any(char.IsControl).ShouldBeFalse();
     }
+
+    [Theory]
+    [InlineData("my.orders")]
+    [InlineData("or\u0001ders")]
+    public async Task Sync_DottedOrControlCharName_SkipsItemAndContinues(string name)
+    {
+        var h = new Harness(Options());
+        var result = await Sync(h.Service, Manifest(Model(name), Model("fine")));
+
+        result.Success.ShouldBeTrue();
+        result.CreatedTables.ShouldBe(["warehouse.public.fine"]);
+        result.SkippedItems.Single().Reason.ShouldBe(DbtSyncSkipReasons.InvalidIdentifier);
+        result.SkippedItems.Single().Name.Any(char.IsControl).ShouldBeFalse();
+    }
 }
