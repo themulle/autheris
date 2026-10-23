@@ -85,6 +85,7 @@ Candidates from code reading; each is confirmed (or deleted) by the first run of
 
 ### PARITY-GAP-001
 Capability: request validation. Channel: WebSQL. Input: `POST /api/v1/sql` with an empty body, `{`, `[]`, `{"sql":123}`, `{"sql":null}`, `{"sql":""}`, `{"sql":"   "}`, `null`, `{"sql":"SELECT 1","parameters":5}`. Observed: HTTP 400 with `{"error":"Invalid JSON payload."}` or `{"error":"Missing 'sql' query parameter in request body."}`; no `code`, and the `error` field holds the human message instead of a token (the governed-SQL errors, by contrast, carry `error` token plus stable `SQL_*` code). Expected: every 4xx carries a stable `code` (for example `INVALID_JSON`, `MISSING_REQUIRED_FIELD` from `ApiErrorCodes`). Issue draft: "WebSQL request-validation 400s have no stable error code". Found by: WP2 boundary sweep (`raw.*` cases). Earlier candidate wording (generic `BadRequest` for all WebSQL errors) is refuted: governed-SQL failures already return `SQL_SYNTAX_ERROR`, `SQL_POLICY_DENIED`, `SQL_CONSTRUCT_NOT_SUPPORTED`, `SQL_PROVIDER_ERROR`.
+- Robin-100 (2026-10-23), hard failures kept red, never `KnownGap`: `Robin_30_FederatedUnknownSourceSameCode` (existence oracle: an unknown federated source answers `SQL_POLICY_VIOLATION` while a known but unreachable one answers `SQL_POLICY_DENIED`; draft issue: "Federated unknown source must answer the same 403 `SQL_POLICY_DENIED` as a denied one (no source-existence oracle)") and `Robin_Proactive_SetOperations|WebSql|mismatch` (502 `SQL_PROVIDER_ERROR` for a column-count mismatch in UNION; draft issue: "UNION/INTERSECT/EXCEPT with mismatching column counts must be a 4xx stable code, not a provider 502").
 
 Fixed 2026-10-23 on fix/parity-gaps (#293): WebSQL request-validation 4xx bodies carry a stable code with a fixed message.
 
@@ -234,22 +235,12 @@ Observed (Robin-100 v2-15, `Robin_319_EmptyLogicalMembers`, issue #319). Capabil
 ### PARITY-GAP-054
 Observed (Robin-100 v2-17, `Robin_302_OffsetBoundaryAndFirstZero`, issue #302). Capability: row offset above the cap. Channel: REST on a SQLite source. Input: `offset=10001&limit=10` on `parity_big`. Expected: 400 `INVALID_QUERY`, as on GraphQL. Actual: HTTP 200 with zero rows.
 
-### PARITY-GAP-055
-Observed (Robin-100 v2-04, `Robin_Proactive_AggregateErrorsStableCode`). Capability: stable code for an unknown GROUP BY column. Channel: WebSQL on a SQLite source. Input: `SELECT COUNT(*) AS n FROM parity_sales GROUP BY nope`. Expected: 403 `SQL_POLICY_VIOLATION` (the code of an unknown select column). Actual: 403 `SQL_POLICY_DENIED`.
-
 ### PARITY-GAP-056
-Observed (Robin-100 v2-10, `Robin_Proactive_TypeMismatchStableCode`). Capability: stable code for a malformed REST filter. Channel: REST on a SQLite source. Input: `filter=region eq` (dangling operator). Expected: 400 `INVALID_QUERY`. Actual: 400 `SQL_SYNTAX_ERROR`.
+Observed (Robin-100 v2-10 `Robin_Proactive_TypeMismatchStableCode` and v2-18 `Robin_Proactive_MalformedFilterStableCode`). Capability: stable code for a malformed REST filter (same root cause, cf. #313). Channel: REST on a SQLite source. Input: `filter=region eq` (dangling operator) and `filter=(region eq 'North'` (unbalanced parenthesis). Expected: 400 `INVALID_QUERY` (as for `nope(region)` and for REST paging). Actual: 400 `SQL_SYNTAX_ERROR`.
 
 ### PARITY-GAP-057
-Observed (Robin-100 B3, `Robin_39_PageAboveCapIsRejectedOrSignalled`). Capability: GraphQL page size above the allowed limit. Channel: GraphQL on a SQLite source. Input: `first: 100000` on `parity_big`. Expected: `INVALID_QUERY`. Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED`.
+Observed (Robin-100 B3, `Robin_39_PageAboveCapIsRejectedOrSignalled`). Capability: GraphQL page size above the allowed limit. Channel: GraphQL on a SQLite source. Input: `first: 100000` on `parity_big` (v2 B3) and `first: -1` on the sales list (R90, `Robin_Proactive_NegativeLimitRejected`). Expected: `INVALID_QUERY` (`GraphQlTreeBuilder`: "The page size must be between 0 and MaxAllowedLimit"; REST answers `INVALID_QUERY`). Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED` (the sanitizer maps both to the generic validation code, so GRAPHQL_VALIDATION_FAILED is not the designed code for page-size violations; it is only the designed code for type/schema errors such as `first: "10"`).
 <!-- WP-V2a end -->
-<!-- WP-V2b -->
-### PARITY-GAP-070
-Observed (Robin-100 rework v2, v2-18). Capability: malformed REST filter. Channel: REST. Input: `filter=(region eq 'North'` (unbalanced parenthesis) on the sales table. Expected: 400 `INVALID_QUERY` (the other malformed filter `nope(region)` already answers it). Observed: 400 `SQL_SYNTAX_ERROR`. A stable 4xx code without a row, a stack frame or engine text; only the code differs between the two malformed filters.
-
-### PARITY-GAP-071
-Observed (Robin-100 rework v2, R90). Capability: negative page size. Channel: GraphQL. Input: `first: -1` on the sales list. Expected: `INVALID_QUERY` (the builder comment of `GraphQlTreeBuilder` states "negative stays INVALID_QUERY"). Observed: HTTP 400 `GRAPHQL_VALIDATION_FAILED`. A stable 4xx code without a row; WebSQL (400 `SQL_SYNTAX_ERROR`) and REST (400 `INVALID_QUERY`) match the plan.
-<!-- end WP-V2b -->
 
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 

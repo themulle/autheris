@@ -332,7 +332,7 @@ public sealed partial class RobinScenarios
             ("GraphQl", "sum_string") => (await GqlAggregate($"aggregates: [{Agg("SUM", "product", "t")}]"), "AGGREGATION_INVALID_FUNCTION_FOR_TYPE"),
             ("WebSql", "unknown_function") => (await Sql("SELECT NOPE_FN(amount) AS t FROM parity_sales"), "SQL_POLICY_VIOLATION"),
             ("GraphQl", "unknown_function") => (await GqlAggregate($"aggregates: [{Agg("NOPE", "amount", "t")}]"), "GRAPHQL_VALIDATION_FAILED"),
-            ("WebSql", _) => (await Sql("SELECT COUNT(*) AS n FROM parity_sales GROUP BY nope"), "SQL_POLICY_VIOLATION"),
+            ("WebSql", _) => (await Sql("SELECT COUNT(*) AS n FROM parity_sales GROUP BY nope"), "SQL_POLICY_DENIED"),
             _ => (await GqlAggregate($"groupBy: [nope], aggregates: [{count}]"), "GRAPHQL_VALIDATION_FAILED"),
         };
         Denied(r, "aggregate misuse", code);
@@ -474,10 +474,10 @@ public sealed partial class RobinScenarios
                 throw new DeniedRequestSucceededException("a window over a masked column was answered instead of rejected.");
             }
 
-            // Both are 403 mappings of the mask guards: the aggregation guard (window argument) and the generic masked-reference guard (window ORDER BY).
-            denied.Rejected();
+            // Designed guard order (AstSecurityVisitor.MaskGuards.EnsureNoMaskedColumnsInAggregatesAndGrouping): a window function is checked
+            // as an aggregation scope, so a masked ORDER BY column answers AGGREGATION_ON_MASKED_COLUMN (403).
+            denied.Rejected("AGGREGATION_ON_MASKED_COLUMN");
             denied.Status.ShouldBe(403);
-            new[] { "AGGREGATION_ON_MASKED_COLUMN", "SQL_POLICY_VIOLATION" }.ShouldContain(denied.Code);
             return;
         }
 

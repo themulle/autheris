@@ -162,31 +162,6 @@ public sealed partial class RobinScenarios
             ? a.EnumerateArray().Select(item => item.GetProperty("id").GetInt32()).ToList()
             : throw new XunitException($"alias '{alias}' carries no list: {RobinAssert.Snippet(body)}");
 
-    /// <summary>True when any value of the response data other than <c>id</c> equals a clear seed amount (as number or string), under any alias (SEC-R100-15).</summary>
-    private static bool AnyClearAmountOutsideId(string body)
-    {
-        var clear = ParitySeed.Sales.Where(s => s.Amount is not null).Select(s => s.Amount!.Value).ToHashSet();
-        using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.TryGetProperty("data", out var data) && Scan(data);
-
-        bool Scan(JsonElement e)
-        {
-            switch (e.ValueKind)
-            {
-                case JsonValueKind.Object:
-                    return e.EnumerateObject().Any(p => !string.Equals(p.Name, "id", StringComparison.OrdinalIgnoreCase) && Scan(p.Value));
-                case JsonValueKind.Array:
-                    return e.EnumerateArray().Any(Scan);
-                case JsonValueKind.Number:
-                    return e.TryGetDecimal(out var n) && clear.Contains(n);
-                case JsonValueKind.String:
-                    return decimal.TryParse(e.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) && clear.Contains(s);
-                default:
-                    return false;
-            }
-        }
-    }
-
     private async Task<string> WhereTypeNameAsync(string field)
     {
         var r = await _robin.GraphQlAsync("{ __type(name: \"Query\") { fields { name args { name type { name } } } } }", "__type");
@@ -277,11 +252,7 @@ public sealed partial class RobinScenarios
         var directive = variant == "include" ? "@include(if: true)" : "@skip(if: true)";
         var masked = await GqlList(AllRows, "id amount " + directive, Masked);
         masked.Ok().Rows.Count.ShouldBe(18);
-        if (AnyClearAmountOutsideId(masked.RawBody))
-        {
-            throw new DeniedRequestSucceededException("A directive on a masked column returned a clear amount.");
-        }
-
+        RobinMaskedLeakScan.AssertNoClearAmount(masked.RawBody, ["amount"]);
         NoClearAmountInRows(masked, "masked column with " + directive);
         if (variant == "include")
         {

@@ -25,13 +25,12 @@ public static class RobinKnownGaps
         ["Robin_318_IntVariablesFirstOffset|GraphQl|zero"] = "PARITY-GAP-052",
         ["Robin_319_EmptyLogicalMembers|GraphQl|or_empty_member"] = "PARITY-GAP-053",
         ["Robin_302_OffsetBoundaryAndFirstZero|Rest|offset_over"] = "PARITY-GAP-054",
-        ["Robin_Proactive_AggregateErrorsStableCode|WebSql|unknown_group_column"] = "PARITY-GAP-055",
         ["Robin_Proactive_TypeMismatchStableCode|Rest|dangling_filter"] = "PARITY-GAP-056",
         ["Robin_39_PageAboveCapIsRejectedOrSignalled|GraphQl|"] = "PARITY-GAP-057",
+        ["Robin_Proactive_NegativeLimitRejected|GraphQl|"] = "PARITY-GAP-057",
         // --- end WP-V2a ---
         // --- WP-V2b ---
-        ["Robin_Proactive_MalformedFilterStableCode|Rest|unbalanced_filter"] = "PARITY-GAP-070",
-        ["Robin_Proactive_NegativeLimitRejected|GraphQl|"] = "PARITY-GAP-071",
+        ["Robin_Proactive_MalformedFilterStableCode|Rest|unbalanced_filter"] = "PARITY-GAP-056",
         // --- end WP-V2b ---
     };
 

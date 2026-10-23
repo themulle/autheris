@@ -231,3 +231,14 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - 2026-10-23 hard failure (SEC-R100-13, security cell, never a gap): `Robin_30_FederatedUnknownSourceSameCode` (variants `join`, `single`) is red. An unknown source (`nope.main.parity_sales`) answers 403 `SQL_POLICY_VIOLATION` (generic `SecurityException` row in `SqlCompilerErrorMapper`), an unknown table of a known source answers 403 `SQL_POLICY_DENIED`: the two are distinguishable (source existence oracle). The product must map an unknown source to `SQL_POLICY_DENIED` like SEC-X1-05.
 - 2026-10-23 host notes: `RobinClient.AssertUnauthorizedAsync` is the only user of `CreateUnauthenticatedClient()` (SEC-R100-12); `Robin100_PostJsonAsyncUsesAuthenticatedHostClient` strips exactly the marked `// --- WP-V2b unauthenticated ---` region before its checks. GraphQL validation errors answer HTTP 400 (not 200) in the parity host.
 <!-- end WP-V2b -->
+
+## 9. Merge fix-up decisions (2026-10-23)
+
+- Merged tree compiled with -warnaserror without changes (no duplicate helper names across the partials).
+- PARITY-GAP-055 removed: WebSQL `GROUP BY <unknown column>` pins 403 `SQL_POLICY_DENIED` (no-column-oracle contract, #312, as the R83 correction).
+- PARITY-GAP-056 now covers both REST malformed-filter cells (`dangling_filter`, `unbalanced_filter`; REST contract `INVALID_QUERY`, #313). PARITY-GAP-070 removed.
+- PARITY-GAP-057 now covers both GraphQL page-size cells (`first: 100000`, `first: -1`). `GRAPHQL_VALIDATION_FAILED` is the designed code for type/schema errors (`first: "10"`), while `GraphQlTreeBuilder` designs `INVALID_QUERY` for the page-size range ("The page size must be between 0 and MaxAllowedLimit"). PARITY-GAP-071 removed. `PageAboveCap` asserts the pinned `INVALID_QUERY` through `Rejected(code)`.
+- v2-12 masked window pins `AGGREGATION_ON_MASKED_COLUMN` (403): `AstSecurityVisitor.MaskGuards.EnsureNoMaskedColumnsInAggregatesAndGrouping` treats a window function as an aggregation scope. The cell asserts the designed code and stays a security cell (never a gap).
+- Hard failures kept red, never gaps: `Robin_30_FederatedUnknownSourceSameCode` and `Robin_Proactive_SetOperations|WebSql|mismatch` (listed in the nightly plan under "Observed server errors and leaks").
+- PARITY-GAP-054 (REST offset above cap answers 200 with zero rows) is accepted as a functional gap.
+- Final gap keys: 030, 033, 034, 035, 050, 051, 052, 053, 054, 056, 057 (no security cell keyed).
