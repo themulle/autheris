@@ -703,7 +703,7 @@ public sealed class CutoverArchitectureTests
     {
         var graph = BuildCallGraph(ProductionAssemblies);
         graph.Targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
-            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler" }, ignoreOrder: true);
+            .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Federation.Subtrees.SubtreeCompiler", "Autheris.Application.Sql.Tree.TreeSecuredSourceBuilder" }, ignoreOrder: true);
         graph.Targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
             .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor", "Autheris.Application.Olap.DuckDbOlapEngine" }, ignoreOrder: true);
     }
