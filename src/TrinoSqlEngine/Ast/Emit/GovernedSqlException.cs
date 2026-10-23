@@ -51,6 +51,12 @@ public static class GovernedSqlErrorCodes
     public const string FunctionUnsupportedDialect = "SQL_FUNCTION_UNSUPPORTED_DIALECT";
     public const string TimeZoneUnavailable = "SQL_TIMEZONE_UNAVAILABLE";
 
+    /// <summary>#296: a string literal contains a sequence the lexer hardening rejects (a documented 400, not a syntax error).</summary>
+    public const string LiteralNotPermitted = "SQL_LITERAL_NOT_PERMITTED";
+
+    /// <summary>#310: an aggregate function was applied to a column type it does not accept (400).</summary>
+    public const string AggregationInvalidFunctionForType = "AGGREGATION_INVALID_FUNCTION_FOR_TYPE";
+
     // Issue #132 (PLAN-DATA-132, SEC-DATA132-01): AST rejection of client three-part/four-part physical database names.
     public const string InvalidIdentifierQualification = "INVALID_IDENTIFIER_QUALIFICATION";
 
@@ -89,6 +95,8 @@ public static class GovernedSqlErrorCodes
         TimeZoneUnavailable => "Time zone conversion is temporarily unavailable.",
         RequiredFilterColumnMissing => "A required filter column was not constrained by the query or an active row policy.",
         InvalidIdentifierQualification => "Database-qualified or server-qualified object names are not permitted.",
+        LiteralNotPermitted => "A string literal contains a character sequence that is not permitted; pass the value as a parameter.",
+        AggregationInvalidFunctionForType => "The aggregate function is not valid for the type of its argument.",
         _ => "The statement could not be executed."
     };
 }

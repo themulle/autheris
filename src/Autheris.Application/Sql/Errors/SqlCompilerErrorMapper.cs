@@ -13,6 +13,7 @@ using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Security;
+using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
@@ -105,7 +106,11 @@ public static class SqlCompilerErrorMapper
         // A parser time budget overrun and parser-slot exhaustion are ParseCanceledExceptions with a TimeoutException cause (FastSqlEngine):
         // a limit, not a syntax error. This row precedes the syntax row, which would otherwise match first.
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
+        // #296 (SEC-PG-08): matched by type only, before the generic syntax row. Any other ParseCanceledException stays a syntax error.
+        e => e is LiteralTokenRejectedException ? Of(400, GovernedSqlErrorCodes.LiteralNotPermitted) : null,
         e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
+        // #310 (SEC-PG-09): a caller mistake (an aggregate over a type it does not accept), not a policy refusal.
+        e => e is AggregateTypeInvalidException ? Of(400, GovernedSqlErrorCodes.AggregationInvalidFunctionForType) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
         // REQ-SQL-128: a caller mistake with a list parameter. The code is stable, the message fixed, no count or name. The row precedes
         // the generic SecurityException row (403), which a wrapped list error must never reach.
@@ -149,7 +154,8 @@ public static class SqlCompilerErrorMapper
     {
         GovernedSqlErrorCodes.TimeZoneInvalid => Of(400, code),
         GovernedSqlErrorCodes.TimeZoneArgument => Of(422, code),
-        GovernedSqlErrorCodes.FunctionUnsupportedDialect => Of(501, code),
+        // GAP-002 (#308): a function the dialect cannot offer is a request the caller can change, not a missing gateway feature (422, was 501).
+        GovernedSqlErrorCodes.FunctionUnsupportedDialect => Of(422, code),
         GovernedSqlErrorCodes.TimeZoneUnavailable => Of(503, code),
         // An unknown code is a gateway defect: fail closed.
         _ => Of(500, GovernedSqlErrorCodes.CompilerInvariant)
@@ -167,6 +173,8 @@ public static class SqlCompilerErrorMapper
         // compile-time limits (422), with the fixed message and no limit kind.
         GovernedSqlErrorCodes.LimitExceeded => Of(422, code),
         GovernedSqlErrorCodes.ProviderError => Of(502, code),
+        // #312 (SEC-PG-10): the executor classified an unknown identifier by provider code; it answers exactly like a denied column.
+        GovernedSqlErrorCodes.PolicyDenied => Of(403, code),
         GovernedSqlErrorCodes.CheckedExecutionRequired => Of(500, code),
         // An unknown governed code is a gateway defect: fail closed.
         _ => Of(500, GovernedSqlErrorCodes.CompilerInvariant)
