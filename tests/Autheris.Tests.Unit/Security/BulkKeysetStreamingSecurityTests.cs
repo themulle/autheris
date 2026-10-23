@@ -239,10 +239,13 @@ public sealed class BulkKeysetStreamingSecurityTests
         var request = firstPage with { Cursor = cursor };
         var planned = planner.PlanKeysetStream(request, metadata, decision, "tenant_A", "user-readonly");
 
-        // SQL must contain BOTH cursor seek AND mandatory RLS policy conjoined with AND
-        planned.Sql.ShouldContain("(\"id\" > @cursor_0)");
-        planned.Sql.ShouldContain("(\"tenant_id\" = 'tenant_A')");
-        planned.Sql.ShouldContain("WHERE (\"id\" > @cursor_0) AND (\"tenant_id\" = 'tenant_A')");
+        // VF-06: the planner no longer splices policy text. The cursor seek is a plain AND-conjunct (never an OR that could relax a
+        // filter) and the tenant predicate is applied by the governed rewriter; that guarantee is proven end to end against real rows
+        // in BulkKeysetPlannedReadTenantSecurityTests.T_SEC_DATA178_06b_KeysetPlannedRead_TenantPredicateAppliedByRewriter.
+        planned.Sql.ShouldContain("WHERE (\"id\" > @cursor_0) ORDER BY");
+        planned.Sql.ShouldNotContain(" OR ", Case.Insensitive);
+        planned.Sql.ShouldNotContain("tenant_A");
+        planned.Sql.ShouldNotContain("= '");
     }
 
     // -----------------------------------------------------------------------------------------
