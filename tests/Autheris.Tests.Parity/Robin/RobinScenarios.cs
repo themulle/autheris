@@ -258,6 +258,14 @@ public sealed class RobinScenarios(ParityHostFixture host) : ParityTestBase
     public Task Robin_130_TimeZoneConversionGroupByLocalDay(string channel) => Run(channel, "time_zone_group_by_day", async () =>
     {
         // Row 10 is 2024-12-31T23:30:00Z (Berlin 2025-01-01 00:30); row 6 is 2024-03-31T00:30:00Z (Berlin 01:30, same day).
+        if (channel == "WebSql")
+        {
+            // convert_timezone is not advertised on SQLite (PARITY-GAP-019 resolved by removal): a documented fail-closed rejection.
+            (await Sql("SELECT CAST(convert_timezone('UTC', 'Europe/Berlin', CAST(sold_at AS timestamp)) AS date) AS d FROM parity_sales WHERE id IN (6, 10)"))
+                .Rejected("SQL_POLICY_VIOLATION");
+            return;
+        }
+
         var r = channel == "WebSql"
             ? await Sql(
                 "SELECT CAST(convert_timezone('UTC', 'Europe/Berlin', CAST(sold_at AS timestamp)) AS date) AS d, COUNT(*) AS n FROM parity_sales WHERE id IN (6, 10) " +

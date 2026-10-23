@@ -72,8 +72,11 @@ public sealed class SpecFunctionTests(ParityHostFixture host) : ParityTestBase
             var result = WebSqlChannel.Parse((int)response.StatusCode, body);
 
             ParityAssert.NoServerError(result, sig.Sql);
-            result.Status.ShouldBe(SpecKnownGaps.UnsupportedFunctionStatus, Snip(body));
-            result.Code.ShouldBe(SpecKnownGaps.UnsupportedFunctionCode, Snip(body));
+            var (status, code) = SpecKnownGaps.UnsupportedFunctionOverrides.TryGetValue(name, out var o)
+                ? o
+                : (SpecKnownGaps.UnsupportedFunctionStatus, SpecKnownGaps.UnsupportedFunctionCode);
+            result.Status.ShouldBe(status, Snip(body));
+            result.Code.ShouldBe(code, Snip(body));
         });
 
     private async Task CallAsync(string name)

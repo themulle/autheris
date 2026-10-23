@@ -101,26 +101,42 @@ Capability: string equality/LIKE with a literal operand. Channels: WebSQL and RE
 ### PARITY-GAP-006
 Capability: typed date literal. Channel: WebSQL. Input: `SELECT id FROM parity_sales WHERE sale_date = DATE '2024-02-29'` (same for `TIMESTAMP '...'`). Observed: HTTP 422 `SQL_CONSTRUCT_NOT_SUPPORTED`. Expected: the ANSI typed literal is accepted and matches row 5, or the limitation is documented. Issue draft: "WebSQL does not support DATE/TIMESTAMP typed literals".
 
+Fixed 2026-10-23 on fix/parity-gaps (#297): DATE and TIMESTAMP typed literals are accepted; on SQLite the value is bound and compared as ISO text.
+
 ### PARITY-GAP-007
 Capability: date comparison via cast. Channel: WebSQL on SQLite. Input: `SELECT id FROM parity_sales WHERE sale_date = CAST('2024-02-29' AS DATE) ORDER BY id` (column holds ISO text). Observed: HTTP 200 with zero rows; `sale_date = '2024-02-29'` returns row 5. Expected: row 5 (the cast yields a date comparable to the column). Issue draft: "WebSQL CAST(... AS DATE) comparison on a SQLite text date column returns no rows".
+
+Fixed 2026-10-23 on fix/parity-gaps (#298): CAST(text AS DATE) compares as a calendar date on a text date column.
 
 ### PARITY-GAP-008
 Capability: filter equality on a DATE column. Channel: GraphQL (`default_main_parity_sales(where: { sale_date: { eq: "2024-02-29" } })`, variable and literal). Input: `2024-02-29`, `2024-03-31`, `2024-12-31`. Observed: HTTP 200 with an empty list; the same filter via WebSQL and REST returns rows 5, 6 and 10 (the column type maps to `AutherisDateTimeFilter`). Expected: the same rows on every channel. Issue draft: "GraphQL date equality on a DATE column returns no rows". 6 sweep cells.
 
+Fixed 2026-10-23 on fix/parity-gaps (#299): a GraphQL date column compares as a calendar date on every channel.
+
 ### PARITY-GAP-009
 Capability: equality with null. Channel: GraphQL. Input: `{ eq: null }` and variable `null` on any column. Observed: HTTP 200 with `errors[0].extensions.code = INVALID_QUERY` ("cannot be null"), `data: null`; WebSQL (`= NULL`) and REST accept it and return zero rows. Expected: one documented behaviour on all channels (zero rows per SQL three-valued logic, or a stable 4xx everywhere). Issue draft: "GraphQL rejects eq: null while WebSQL/REST accept it". 16 sweep cells.
+
+Fixed 2026-10-23 on fix/parity-gaps (#300): eq: null is a three-valued-logic comparison (zero rows) on every channel.
 
 ### PARITY-GAP-010
 Capability: paging parameters. Channel: REST. Input: `limit=-1`, `offset=-1`, `limit=0`. Observed: HTTP 200; negative values are ignored (default page of 50 rows from offset 0) and `limit=0` returns the default page instead of zero rows. Expected: negative values rejected with a stable 4xx, `limit=0` returns zero rows. Issue draft: "REST silently ignores negative limit/offset and treats limit=0 as default". 3 sweep cells.
 
+Fixed 2026-10-23 on fix/parity-gaps (#301, limit=0 part only): limit=0 returns zero rows; negative limit/offset still open (WP-E).
+
 ### PARITY-GAP-011
 Capability: paging. Channel: GraphQL. Input: `first: 0`. Observed: HTTP 400 `QUERY_TOO_COMPLEX` (cost 110000: the list is costed as unbounded). Expected: zero rows, as `LIMIT 0` on WebSQL. Issue draft: "GraphQL first: 0 is costed as an unbounded list". 1 sweep cell.
+
+Fixed 2026-10-23 on fix/parity-gaps (#302): first: 0 returns zero rows.
 
 ### PARITY-GAP-012
 Capability: range filter on a DATE column. Channel: GraphQL (`default_main_parity_sales(where: { sale_date: { gte, lt, lte } })`). Input: `gte: "2024-02-29", lt: "2024-03-31"` and `gte: "2024-02-29", lte: "2024-03-31"`. Observed: HTTP 200 with only row 6 (2024-03-31) for both; row 5 (2024-02-29) is missing. The literal behaves like `2024-02-29 00:00:00` compared as text with the stored `2024-02-29` (same root cause as PARITY-GAP-008). Expected: rows 5 (half-open) and 5, 6 (inclusive), as WebSQL returns. Issue draft: "GraphQL gte/lt/lte on a DATE column is off at the boundary day". Found by: Robin `Robin_Proactive_DateRangeBoundsAndLeapDay`, 2 cells.
 
+Fixed 2026-10-23 on fix/parity-gaps (#303): GraphQL date range filters compare as calendar dates.
+
 ### PARITY-GAP-013
 Capability: group by a date part in WebSQL (Robin user report). Channel: WebSQL on a SQLite source. Input: `SELECT EXTRACT(YEAR FROM sale_date) ... GROUP BY EXTRACT(YEAR FROM sale_date)`, `year(sale_date)`, `date_trunc('year', sale_date)`, `EXTRACT(MONTH ...)`. Observed: `EXTRACT` HTTP 422 `SQL_CONSTRUCT_NOT_SUPPORTED`; `year()`, `date_part()`, `date_trunc()` HTTP 403 `SQL_POLICY_VIOLATION` ("rejected by the gateway security policy", no hint that the function is not allowlisted for the dialect). Only `strftime('%Y', sale_date)` works. Expected: the standard `EXTRACT`/`year()` or a documented portable date-part function groups by year on every dialect, and a rejection names the reason with a specific code. GraphQL `timeBuckets` already works. Issue draft: "WebSQL has no portable date-part grouping on SQLite (EXTRACT 422, year/date_trunc 403)". 5 cells (`Robin_Proactive_GroupByYearWebSql` x3, `Robin_Proactive_GroupByYearAndMonthWebSql`, `Robin_112_DashboardRevenuePerRegionAndMonth`).
+
+Fixed 2026-10-23 on fix/parity-gaps (#304): EXTRACT, year/month/day..., date_part and date_trunc work on SQLite in bound mode.
 
 ### PARITY-GAP-014
 Capability: required filter column (#163), bulk export. Channel: `POST /api/v1/export/arrow?table=default.main.parity_scoped` without the required filter. Observed: HTTP 400 ProblemDetails (`title` "A required filter column was not constrained ...") without a `code` member. Expected: stable `code` `REQUIRED_FILTER_COLUMN_MISSING` as on WebSQL, GraphQL list and REST. Issue draft: "Arrow export required-filter 400 has no stable code". 1 cell.
@@ -140,14 +156,20 @@ Capability: federated join projection. Channel: WebSQL, same setup as PARITY-GAP
 ### PARITY-GAP-019
 Capability: time zone conversion before grouping by local day (#130). Channel: WebSQL on a SQLite source. Input: `SELECT CAST(convert_timezone('UTC','Europe/Berlin', CAST(sold_at AS timestamp)) AS date) d, COUNT(*) ... GROUP BY ...`. Observed: HTTP 501 `SQL_FUNCTION_UNSUPPORTED_DIALECT` (a 5xx, tolerated by D-9 as Unsupported). GraphQL `timeBuckets` with `timeZone` returns the right local days. Expected: same days as GraphQL, or a documented 4xx; verify on PostgreSQL/SQL Server in the dialect job (WP4). Issue draft: "convert_timezone unsupported on SQLite sources (501)". 1 cell.
 
+Fixed 2026-10-23 on fix/parity-gaps (#308): convert_timezone is no longer advertised on SQLite: documented 403 SQL_POLICY_VIOLATION.
+
 ### PARITY-GAP-020
 Capability: empty `IN` list. Channel: WebSQL. Input: `SELECT id FROM parity_sales WHERE region IN () ORDER BY id`. Observed: HTTP 400 `SQL_SYNTAX_ERROR` "Invalid SQL syntax." (stable code, but the message does not name the construct); GraphQL `region: { in: [] }` answers HTTP 200 with zero rows. Expected: either the same zero rows on both channels (an empty list matches nothing) or a rejection whose message names the empty `IN` list. Issue draft: "WebSQL empty IN () is a generic syntax error while GraphQL returns zero rows". 1 cell (`filter_in_empty`, WebSQL; the cell asserts the documented rejection with a message naming `IN`, so the gap closes when either side is aligned and the matrix is updated).
+
+Fixed 2026-10-23 on fix/parity-gaps (#309): empty IN () yields zero rows (NOT IN () all rows) on every channel.
 
 ### PARITY-GAP-021
 Capability: aggregate function invalid for the column type. Channel: WebSQL on a SQLite source. Input: `SELECT SUM(product) AS v FROM parity_sales` (0), `AVG(sale_date)` (2024.33), `SUM(is_return)` (3), `MIN(is_return)`, `SUM(sold_at)`, `AVG(sold_at)`, `AVG`/`SUM` over text, date, timestamp and boolean columns, also grouped and filtered. Observed: HTTP 200 with a value made by SQLite type coercion. GraphQL answers every one of these with a stable HTTP 200 `errors[0].extensions.code = AGGREGATION_INVALID_FUNCTION_FOR_TYPE` ("The aggregate function is not valid for the column type."). Expected: the same stable 4xx on both channels (and not a provider error on the other dialects, which is checked by the dialect job). Issue draft: "WebSQL accepts SUM/AVG over non-numeric columns on SQLite while GraphQL rejects them". 17 cells (3 matrix cells `agg_sum_text`, `agg_avg_date`, `agg_sum_bool`; 14 pairwise cells of the default seed).
 
 ### PARITY-GAP-022
 Observed (WP6). Capability: advertised SQL functions that WebSQL rejects. Channel: WebSQL on a SQLite source. Input: `SELECT LEFT(product, 3) AS v FROM parity_sales WHERE id = 1`, `SELECT RIGHT(product, 3) ...`, `SELECT EXTRACT(YEAR FROM sold_at) AS v ...`; all three names are in `SqlFunctionAllowlists.Sqlite`. Observed: `left`/`right` HTTP 400 `SQL_SYNTAX_ERROR` ("Invalid SQL syntax."), `extract` HTTP 422 `SQL_CONSTRUCT_NOT_SUPPORTED`. Expected: an advertised function is callable once (`Widget` -> `Wid`/`get`, `2023`), or it is removed from the allowlist. `extract` likely shares the root cause of PARITY-GAP-013 (EXTRACT is not supported on SQLite). Issue draft: "SQLite allowlist advertises left, right and extract but WebSQL rejects them".
+
+Fixed 2026-10-23 on fix/parity-gaps (#311): left and right are removed from the allowlists (documented 400 SQL_SYNTAX_ERROR, LEFT/RIGHT are join keywords); extract works.
 
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)
 
@@ -170,6 +192,8 @@ MCP channel driver. The 36 MCP cells of the capability x channel matrix are `Pen
 Mutations and subscriptions of the GraphQL schema are not swept by block F (WP6): a mutation changes the shared seed and a subscription needs a transport. The sweep reports their count (9 mutations, 1 subscription on the parity host). Work: call each mutation against an isolated copy of the seed (own host fixture per mutation class) with generated minimal values and assert success or a stable 4xx; drive the subscription over the websocket transport.
 
 ## 6. Changelog
+
+- 2026-10-23 (WP-Z part 1, fix/parity-gaps): KnownGap entries removed or converted for GAP-006/007/008/009/011/012/013/019/020/022 and the limit=0 part of GAP-010 (negative limit/offset stays gapped, WP-E); 6 sweep groups and 5 matrix/robin/spec lists shrunk, `raw.none.in_empty_list` and the matrix `filter_in_empty` WebSQL/REST cells now assert zero rows, `convert_timezone`/`left`/`right` join the expected-unsupported spec cells (advertised SQLite functions 65 -> 62), `Robin_130` WebSQL expects the 403 rejection. Parity run: 1879 passed, 369 skipped, 48 failed (only the `Invariant_ObservedServerErrors` baseline); baseline updated.
 
 - 2026-10-23 (owner decision, SQLite function sweep): the 13 functions that SQLite cannot execute (`stddev`, `stddev_pop`, `stddev_samp`, `variance`, `var_pop`, `var_samp`, `greatest`, `least`, `lpad`, `rpad`, `reverse`, `char_length`, `character_length`) are removed from `SqlFunctionAllowlists.Sqlite` only (the other dialects keep them). A call is now rejected at compile time with 403 `SQL_POLICY_VIOLATION` instead of a 502 `SQL_PROVIDER_ERROR`. The 13 observed-server-error cells (`Spec_ObservedServerErrors`, hard failing) are replaced by expected-unsupported cells `Spec_UnsupportedFunction` (`SpecKnownGaps.UnsupportedFunctions`, 403 `SQL_POLICY_VIOLATION`); `parity-baseline.json` gained the 13 `spec.WebSql.function-unsupported.*` pass cells. Advertised SQLite functions: 78 - 13 = 65. The section 5 entry for these 13 is removed (it was not a PARITY-GAP id; PARITY-GAP-022 stays: `left`, `right`, `extract`).
 - 2026-10-23 (WP6 follow-up and WP5 review fixes): (a) `Spec_Function` no longer accepts a 4xx; `left`, `right`, `extract` are KnownGaps on the new PARITY-GAP-022. (b) `AllowEntry` gained a predicate over the product answer; `graphql_rejects_type_invalid_aggregate` allows only an error answer (GraphQL answers HTTP 200 with `errors[]`, so "4xx" is `IsError` and status < 500) with code `AGGREGATION_INVALID_FUNCTION_FOR_TYPE`. (c) `ResultComparer`: a numeric text matches a number only when the reference is the number; the date-part rule needs the case flag `DateGrouping` and matches only the first instant of the period (`2024-03` = `2024-03-01T00:00:00Z`, not `2024-03-15`); doubles beyond the decimal range no longer overflow; unordered rows are matched tolerance-aware instead of by a rounded sort key. (d) The three PostgreSQL `group_date_*` WebSQL cells are Pending with the reason `inexpressible: the request text uses SQLite strftime ...` (validated by the PendingReasons rule); they are not a product gap, so the earlier PARITY-GAP-013 reference in that comment was wrong. (e) `MatrixKnownGaps.For` takes a dialect and returns gaps for SQLite only.

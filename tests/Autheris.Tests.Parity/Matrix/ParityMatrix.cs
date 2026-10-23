@@ -142,9 +142,9 @@ public static class ParityMatrix
         Filter("filter_in_list", r => r.Region is "North" or "Empty", " WHERE region IN ('North', 'Empty')", "region: { in: [\"North\", \"Empty\"] }", "region in ('North','Empty')");
         Cap(
             "filter_in_empty",
-            new Unsupported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IN () ORDER BY id"), "SQL_SYNTAX_ERROR", @"\bIN\b"),
+            new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IN () ORDER BY id"), Ids(_ => false)),
             new Supported(ListGql("where: { region: { in: [] } }, "), Ids(_ => false)),
-            new Unsupported(RestList("region in ()"), "SQL_SYNTAX_ERROR"));
+            new Supported(RestList("region in ()"), Ids(_ => false)));
         Cap(
             "filter_is_null",
             new Supported(new SqlRequest($"SELECT id FROM {Sales} WHERE region IS NULL ORDER BY id"), Ids(r => r.Region is null)),

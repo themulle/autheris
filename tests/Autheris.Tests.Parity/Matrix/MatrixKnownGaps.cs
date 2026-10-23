@@ -9,10 +9,6 @@ public static class MatrixKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["filter_eq_date|GraphQl"] = "PARITY-GAP-008",
-        ["filter_range_date|GraphQl"] = "PARITY-GAP-012",
-        ["group_date_part_standard_sql|WebSql"] = "PARITY-GAP-013",
-        ["filter_in_empty|WebSql"] = "PARITY-GAP-020",
         ["agg_sum_text|WebSql"] = "PARITY-GAP-021",
         ["agg_avg_date|WebSql"] = "PARITY-GAP-021",
         ["agg_sum_bool|WebSql"] = "PARITY-GAP-021",

@@ -46,7 +46,7 @@ public static class BoundaryRaw
             new("unknown_table", Sql("SELECT id FROM nope_table"), Expectation.Rejected),
             new("dml_delete", Sql("DELETE FROM parity_sales"), Expectation.Rejected),
             new("dml_drop", Sql("DROP TABLE parity_sales"), Expectation.Rejected),
-            new("in_empty_list", Sql($"{IdsSelect} WHERE region IN ()"), Expectation.Rejected),
+            new("in_empty_list", Sql($"{IdsSelect} WHERE region IN () ORDER BY id"), Expectation.Ok, []),
             new("missing_parameter", Sql($"{IdsSelect} WHERE qty = @missing"), Expectation.Rejected),
             new("param_object", Sql($"{IdsSelect} WHERE qty = @p", new { p = new { a = 1 } }), Expectation.Rejected),
             new("param_array", Sql($"{IdsSelect} WHERE qty = @p", new { p = new[] { 1, 2 } }), Expectation.Rejected),

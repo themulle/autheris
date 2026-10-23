@@ -52,9 +52,8 @@ public static class DifferentialCorpus
         foreach (var c in PairwiseModel.Cases().Where(x => x.Dialect == PairwiseModel.Sqlite))
         {
             var (sql, parameters) = PairwiseExecutor.RenderWebSql(c);
-            // WebSQL rejects an empty IN list (PARITY-GAP-020); SQLite answers it with zero rows.
             yield return new DifferentialCase(
-                $"pairwise.{c.Id}", "pairwise", "WebSql", sql, parameters, new SqlRequest(sql, parameters), false, null, c.Filter == "in_empty" ? "PARITY-GAP-020" : null, DateGrouping: IsDateGrouping(c.Grouping));
+                $"pairwise.{c.Id}", "pairwise", "WebSql", sql, parameters, new SqlRequest(sql, parameters), false, null, null, DateGrouping: IsDateGrouping(c.Grouping));
 
             if (c.Grouping == "expression")
             {

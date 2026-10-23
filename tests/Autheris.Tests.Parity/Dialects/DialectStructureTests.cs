@@ -54,7 +54,7 @@ public sealed class DialectStructureTests : ParityTestBase
     [Fact]
     public void Dialect_MatrixGapsAreSqliteOnly()
     {
-        Matrix.MatrixKnownGaps.For("group_date_part_standard_sql", Matrix.MatrixChannel.WebSql).ShouldBe("PARITY-GAP-013");
-        Matrix.MatrixKnownGaps.For("group_date_part_standard_sql", Matrix.MatrixChannel.WebSql, "postgres").ShouldBeNull();
+        Matrix.MatrixKnownGaps.For("agg_sum_text", Matrix.MatrixChannel.WebSql).ShouldBe("PARITY-GAP-021");
+        Matrix.MatrixKnownGaps.For("agg_sum_text", Matrix.MatrixChannel.WebSql, "postgres").ShouldBeNull();
     }
 }

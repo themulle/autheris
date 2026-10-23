@@ -209,8 +209,6 @@ internal static class BoundaryKnownGapData
             eq.sale_date.int.neg_one
             eq.sale_date.int.one
             eq.sale_date.int.zero
-            in.qty.in.with_null
-            in.region.in.with_null
             offset.none.page.offset_nan
             param.amount.dec.exponent_string
             param.amount.dec.nan_string
@@ -294,51 +292,10 @@ internal static class BoundaryKnownGapData
             like.note.str.sql_drop
             like.note.str.sql_union
             """)),
-        // WebSQL DATE and TIMESTAMP typed literals are unsupported (SQL_CONSTRUCT_NOT_SUPPORTED)
-        (BoundaryClass.Gap, "PARITY-GAP-006", "WebSql", Split("""
-            raw.none.date_literal
-            """)),
-        // WebSQL CAST(text AS DATE) comparison returns the wrong result on a text date column
-        (BoundaryClass.Gap, "PARITY-GAP-007", "WebSql", Split("""
-            raw.none.cast_date
-            """)),
-        // GraphQL eq on a DATE column with an ISO date returns no rows
-        (BoundaryClass.Gap, "PARITY-GAP-008", "GraphQl", Split("""
-            eq.sale_date.date.dst_2024_03_31
-            eq.sale_date.date.leap_2024_02_29
-            eq.sale_date.date.year_end
-            param.sale_date.date.dst_2024_03_31
-            param.sale_date.date.leap_2024_02_29
-            param.sale_date.date.year_end
-            """)),
-        // GraphQL eq with null is rejected (INVALID_QUERY) while WebSQL/REST accept it
-        (BoundaryClass.Gap, "PARITY-GAP-009", "GraphQl", Split("""
-            eq.amount.null.any
-            eq.id.null.any
-            eq.is_return.null.any
-            eq.note.null.any
-            eq.qty.null.any
-            eq.region.null.any
-            eq.sale_date.null.any
-            eq.sold_at.null.any
-            param.amount.null.any
-            param.id.null.any
-            param.is_return.null.any
-            param.note.null.any
-            param.qty.null.any
-            param.region.null.any
-            param.sale_date.null.any
-            param.sold_at.null.any
-            """)),
-        // REST accepts a negative limit or offset and treats limit=0 as the default page
+        // REST accepts a negative limit or offset
         (BoundaryClass.Gap, "PARITY-GAP-010", "Rest", Split("""
-            limit.none.page.size_0
             limit.none.page.size_neg_1
             offset.none.page.offset_neg_1
-            """)),
-        // GraphQL first: 0 is costed as an unbounded list and rejected as QUERY_TOO_COMPLEX
-        (BoundaryClass.Gap, "PARITY-GAP-011", "GraphQl", Split("""
-            limit.none.page.size_0
             """)),
         // Observed 5xx or leak (SEC-PAR-05): never a KnownGap
         (BoundaryClass.ObservedServerError, null, "GraphQl", Split("""
