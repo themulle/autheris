@@ -5,7 +5,7 @@ Method: parallel static audit by area-scoped agents. Each finding is appended
 immediately after discovery. Findings are unverified until fixed/tested;
 severity is the auditor's estimate.
 
-Status marker: "[RESOLVED]" or "[RESOLVED <sha>]" at the end of a heading = fixed (2026-10-22). Not marked = open or only partially fixed (e.g. GOV-01/06/07, PERS-04, SQLA-14, VF-05, MCP-07/13); MISC-01/02 need the owner to create the protected "release" environment.
+Status marker: "[RESOLVED]" or "[RESOLVED <sha>]" at the end of a heading = fixed; "[PARTIAL <sha>]" = partly fixed (2026-10-23, branch fix/security-impl-all). All HIGH and MEDIUM code findings are resolved and were re-verified against the code on 2026-10-23. Not marked = open. Owner actions: OPS-01 (rotate the GitHub PAT, use a credential helper), MISC-01/02 (create the protected "release" environment), PERS-04 residual decision (ExtendConsentExpiryAsync still accepts already-expired consents, see plan-security-pers).
 
 Entry format:
 [<AREA>-<NN>] <SEVERITY: CRITICAL|HIGH|MEDIUM|LOW> | <bug|security> | <short title>
@@ -99,7 +99,7 @@ Entry format:
              (or carry it alongside), and treat a denied/masked join/id column as "relation not resolvable" (fail closed, like
              RELATION_KEY_MASKED in the catalog path).
 
-[GQL-02] LOW | bug | finance.invoicesWithItems fabricates values for masked/denied/non-decimal columns
+[GQL-02] LOW | bug | finance.invoicesWithItems fabricates values for masked/denied/non-decimal columns  [RESOLVED 91cd0127]
   Location : src/Autheris.GraphQL/Types/QueryTypes.cs:789-795
   Problem  : Missing or masked values are replaced by invented data: Id -> Guid.NewGuid(), Amount -> 1500.00m whenever the value is
              not a boxed decimal (masked string, double, long from SQLite/Trino), Vendor -> "Vendor Alpha". The client cannot tell a
@@ -107,7 +107,7 @@ Entry format:
   Scenario : amount is masked ("****") or the connector returns double; the API answers amount: 1500.00 for every invoice.
   Fix hint : Map nullable fields (decimal?/string?) and return null for masked/denied/unparsable values; never synthesize ids.
 
-[EXT-02] LOW | security | OData authorized-tables cache keyed only by tenant+SID (ignores roles/groups/consents; null SID collides)
+[EXT-02] LOW | security | OData authorized-tables cache keyed only by tenant+SID (ignores roles/groups/consents; null SID collides)  [RESOLVED a79ac587]
   Location : src/Autheris.Extensions/OData/ODataHandler.cs:139-143, :199-203
   Problem  : The list of authorized (column-filtered) tables is cached 60 s under "odata:tables:{tenant}:{sid}". The access
              decision (CheckTableAccessAsync) depends on the full principal (roles, group SIDs, ABAC claims, plugin role
@@ -194,7 +194,7 @@ Entry format:
              before any epoch is trusted, keep the local bump as a floor in _highestSeenRedisEpoch (so Redis values <= floor are
              treated as rollback), and/or propagate the failure to the revoke caller (retry / outbox).
 
-[INF-02] LOW | bug | In-process event bus never treats the default consent invalidation channel as an invalidation channel
+[INF-02] LOW | bug | In-process event bus never treats the default consent invalidation channel as an invalidation channel  [RESOLVED 1ae4bb4b]
   Location : src/Autheris.Infrastructure/Messaging/InProcessChannelEventBus.cs:35-40 (default channel "consent:invalidations",
              Cache/ConsentCacheService.cs:73, Cache/EpochValidationService.cs:71)
   Problem  : IsInvalidationChannel matches "invalidate" or "epoch"; "consent:invalidations" contains neither ("invalidat-ions"),
@@ -212,7 +212,7 @@ Entry format:
   Scenario : GET /api/v1/governance/audit?since=2026-10-21T12:00:00+02:00 (bound directly into AuditLogPageQuery.Since, GovernanceEndpoints.Audit.cs:98). An entry at 10:30Z (=12:30+02:00) is stored as "2026-10-21T10:30:00...+00:00" < "2026-10-21T12:00:00...+02:00" and is silently omitted; with negative offsets extra rows from before "since" are returned. Auditors/compliance exports and PolicySimulation/Lineage impact analysis get incomplete or wrong audit evidence. Same defect for WORM chain range on PG/MSSQL if a non-UTC window is passed.
   Fix hint : Normalize every time parameter with .ToUniversalTime().ToString("O") (one shared helper), or store occurred_at as a native timestamptz/datetimeoffset/ticks column and bind typed parameters.
 
-[GQL-03] LOW | security | Demo root fields finance.invoices / hr.employees accept unbounded and negative 'after' offsets
+[GQL-03] LOW | security | Demo root fields finance.invoices / hr.employees accept unbounded and negative 'after' offsets  [RESOLVED 91cd0127]
   Location : src/Autheris.GraphQL/Types/QueryTypes.cs:738-765, 803-830 (offset forwarded unchecked to GatewayExecutionService.cs:192-193)
   Problem  : Query.GetTableAsync bounds 'after' to GraphQL.MaxAllowedOffset (SR-M-17), but the demo resolvers pass 'after' straight
              through; ExecutePageCoreAsync only clamps 'first', never the offset. Negative values produce invalid SQL (OFFSET -1 ->
@@ -238,7 +238,7 @@ Entry format:
              tokens never carry them), and/or require "scp" for user (non-app) tokens; drop the nonce heuristic as the only
              guard. Add a regression test with a signed ID token without nonce but with roles.
 
-[INF-03] LOW | security | L1 consent cache key is ambiguous for table components containing ':' (no table check on L1 hit)
+[INF-03] LOW | security | L1 consent cache key is ambiguous for table components containing ':' (no table check on L1 hit)  [RESOLVED 1ae4bb4b]
   Location : src/Autheris.Infrastructure/Cache/ConsentCacheService.cs:521-526 (L1 hit at 126-128 / 270-284)
   Problem  : BuildCacheKey escapes SID and context hash but joins domain/schema/table raw with ':'. TableIdentifier only forbids
              '.', NUL, CR, LF, so ':' is legal in every component. The L2 path re-checks MatchesTable, the L1 path does not.
@@ -313,7 +313,7 @@ Entry format:
   Fix hint : Persist proposed restrictions with the step (or reject rowFilter/columnMasking on non-final steps with a clear
              error), and on the final step merge restrictions so the resulting consent is the intersection of all approvals.
 
-[GQL-06] LOW | bug | Atomic approval path drops the consent description and idempotency fingerprint ignores filters
+[GQL-06] LOW | bug | Atomic approval path drops the consent description and idempotency fingerprint ignores filters  [RESOLVED a7b92e47]
   Location : src/Autheris.GraphQL/Types/MutationTypes.cs:521-524, 700-716
   Problem  : (a) The Consent built for ExecuteAtomicApprovalWithConsentAsync has no Description = validatedDescription (the
              step path sets it at line 760) although the payload echoes it back as stored. (b) The approve idempotency
@@ -350,7 +350,7 @@ Entry format:
   Fix hint : Resolve the KEK from IKeyVaultSecretProvider (fail closed when absent), never keep plaintext at rest (use DuckDB
              native encryption or decrypt to tmpfs only), and delete/shred the plaintext after sealing.
 
-[EXT-03] LOW | bug | AzureBlobStorageProvider.OpenReadStreamAsync leaks the HttpResponseMessage/connection on 404 and error responses
+[EXT-03] LOW | bug | AzureBlobStorageProvider.OpenReadStreamAsync leaks the HttpResponseMessage/connection on 404 and error responses  [RESOLVED e7d04ddc]
   Location : src/Autheris.Extensions/Lakehouse/Services/AzureBlobStorageProvider.cs:81-96
   Problem  : The response is obtained with ResponseHeadersRead and never disposed when the status is 404
              (FileNotFoundException) or when EnsureSuccessStatusCode() throws. The S3 provider received this fix
@@ -411,7 +411,7 @@ Entry format:
   Fix hint : Reject column aliases on named tables (or wrap the secured subquery with them: the SecureTyped subquery can carry
              ColumnAliases in catalog order) and emit LATERAL column aliases in GenerateTableSource.
 
-[EXT-04] LOW | security | Iceberg manifest containment widens to the parent directory when the table directory name contains a dot
+[EXT-04] LOW | security | Iceberg manifest containment widens to the parent directory when the table directory name contains a dot  [RESOLVED 361a867f]
   Location : src/Autheris.Extensions/Lakehouse/Services/IcebergMetadataReader.cs:470-489 (GetUriTableDirectory), :491-503 (GetTableDirectory)
   Problem  : The trust-anchor prefix is derived heuristically: if the LAST path segment contains '.', it is assumed to be a
              file name and stripped (local variant: Path.HasExtension). A configured table location that is a directory
@@ -466,7 +466,7 @@ Entry format:
   Fix hint : Mirror syncOpenMetadata: ClusterAdminPolicy.IsCanonicalClusterAdmin or tenant-restricted GovernanceAdmin, drop
              DeveloperAdmin, pass restrictToTenant to the sync service, and write a required audit event.
 
-[GQL-08] LOW | security | reloadSchema can be triggered by any tenant's GovernanceAdmin (cluster-wide side effect)
+[GQL-08] LOW | security | reloadSchema can be triggered by any tenant's GovernanceAdmin (cluster-wide side effect)  [RESOLVED f1bf2008]
   Location : src/Autheris.GraphQL/Types/MutationTypes.cs:1000-1009
   Problem  : A tenant-scoped GovernanceAdmin publishes the global "schema:reload" event; there is no throttle. Every reload
              rebuilds the Hot Chocolate schema for all tenants (request executor eviction, warm-up, in-flight subscription
@@ -502,7 +502,7 @@ Entry format:
              fails without re-exchange; conversely a single 403 forces a token-exchange storm for all users.
   Fix hint : Pass the delegation context / assertion hash to the eviction and use the client id of the active auth mode.
 
-[GOV-01] MEDIUM | security | Recertification auto-revoke marks items Revoked before deactivating the asset; failures/unknown keys leave access active forever
+[GOV-01] MEDIUM | security | Recertification auto-revoke marks items Revoked before deactivating the asset; failures/unknown keys leave access active forever  [RESOLVED 5bbd74e3]
   Location : src/Autheris.Application/Governance/Recertification/RecertificationService.cs:171-181, 213-246 (also RevokeItemAsync:160-163)
   Problem  : ExecuteAutoRevocationCycleAsync first persists Decision=Revoked (actor SYSTEM_AUTO_REVOKE) and only then calls
              DeactivateUnderlyingAssetAsync. (a) If deactivation throws (transient DB error, epoch store down), the item is already
@@ -534,7 +534,7 @@ Entry format:
              now <= Deadline; reject principals without an immutable SID instead of falling back to a constant; compare
              normalized identifiers.
 
-[GOV-03] LOW | security | Tenant-scoped /recert/cycle runs auto-revocation for every tenant
+[GOV-03] LOW | security | Tenant-scoped /recert/cycle runs auto-revocation for every tenant  [RESOLVED e5c5a52e]
   Location : src/Autheris.Application/Governance/Recertification/RecertificationService.cs:166-168 (caller RecertificationEndpoints.cs:96-103)
   Problem  : ExecuteAutoRevocationCycleAsync takes no tenant and GetPendingItemsPastDeadlineAsync returns past-deadline items of
              all tenants. The endpoint is mounted under /tenants/{tenantId}/ with a tenant-route match, but the work is cluster-wide.
@@ -542,7 +542,7 @@ Entry format:
              time of their choosing; tenant isolation of admin actions is broken.
   Fix hint : Add a TenantId parameter and filter items by tenant for the endpoint; keep the all-tenant variant for the hosted service only.
 
-[PERS-03] HIGH | security | SQLite ExecuteAtomicApprovalWithConsentAsync skips four-eyes, same-approver and SoD re-checks (single approver can self-complete a four-eyes request)
+[PERS-03] HIGH | security | SQLite ExecuteAtomicApprovalWithConsentAsync skips four-eyes, same-approver and SoD re-checks (single approver can self-complete a four-eyes request)  [RESOLVED 5bbd74e3]
   Location : src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs:1433-1504 (compare PostgreSqlGovernanceRepository.Consent.cs:1411-1443, SqlServerGovernanceRepository.Consent.cs:~1446-1476)
   Problem  : The PostgreSQL/SQL Server implementations re-check, under the row lock, separation of duties (EnsureApproverIsNotRequesterAsync), "approver already approved a step" (ReadLockedApprovalStateAsync.SameApprover) and that this step really completes the four-eyes requirement (StatusAfterApproval == APPROVED, else FourEyesNotSatisfied). The SQLite implementation only checks EnsureApprovableStatus and then unconditionally inserts the step (with the caller-supplied StepNumber), sets status APPROVED and creates the consent. The GraphQL caller (MutationTypes.cs:~684-742) explicitly relies on "The repository re-checks separation of duties and the four-eyes requirement under the row lock" and has no same-approver check of its own.
   Scenario : Four-eyes (RESTRICTED/flagged) table on the SQLite provider. Owner A approves step 1 without restrictions -> status PENDING_SECOND_APPROVAL. A calls approveConsentRequest again and supplies a rowFilter/columnMasking: GraphQL sees firstStepRecorded => isFinalStep and calls ExecuteAtomicApprovalWithConsentAsync; SQLite accepts the second approval by the same person and activates the consent -> four-eyes bypassed. Also when tableMeta is unavailable (requiresFourEyes computed false in GraphQL) a first approval with restrictions jumps PENDING -> APPROVED directly. Duplicate (consent_request_id, step_number) is also possible because StepNumber is taken from the caller.
@@ -553,7 +553,7 @@ Entry format:
   Note: GQL-04, GQL-05 and GQL-06(a) were addressed concurrently by commit 5bbd74e3 (four-eyes in atomic approval); GQL-06(b)
   (idempotency fingerprint without rowFilter/columnMasking) is still open on HEAD.
 
-[GQL-09] LOW | bug | reloadSchema mutation is a no-op but reports success and audits SCHEMA_RELOAD/ALLOW
+[GQL-09] LOW | bug | reloadSchema mutation is a no-op but reports success and audits SCHEMA_RELOAD/ALLOW  [RESOLVED f1bf2008]
   Location : src/Autheris.GraphQL/Types/MutationTypes.cs (ReloadSchemaAsync, eventBus.PublishAsync("schema:reload", ...))
   Problem  : Nothing subscribes to "schema:reload" (the catalog type module refreshes via its own timer and
              ICatalogVersionProvider.CatalogChangedEventChannel). The mutation returns true and writes an audit record that a
@@ -674,7 +674,7 @@ Entry format:
   Fix hint : Size defaults so MaxConcurrentQueries*MaxMemory + staging budget < container limit (e.g. MaxMemory=256MB), derive the
              DuckDB limit from the cgroup memory limit at start-up, and fail validation when the product exceeds a configured budget.
 
-[PERS-04] MEDIUM | bug | PG/MSSQL GetExpiringConsentsAsync returns every already-expired consent (unbounded, provider divergence) -> endless recertification tickets
+[PERS-04] MEDIUM | bug | PG/MSSQL GetExpiringConsentsAsync returns every already-expired consent (unbounded, provider divergence) -> endless recertification tickets  [RESOLVED c3620e37]
   Location : src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs:848; SqlServerGovernanceRepository.Consent.cs:883 (SQLite correct: SqliteGovernanceRepository.Consent.cs:1839-1841)
   Problem  : SQLite filters "is_revoked = 0 AND valid_to > @now AND valid_to <= @threshold"; PostgreSQL and SQL Server only filter "is_revoked = 0 AND valid_to <= @threshold" and have no row limit. Expired consents are never revoked (expiry is read-time), so the result set contains every consent that ever expired, growing without bound, and each is fully hydrated (HydrateConsentsBatchAsync).
   Scenario : ConsentRecertificationWorkflowService.ScanAndTriggerExpiringConsentRecertificationsAsync (Workflows/ConsentRecertificationWorkflowService.cs:65) enqueues an ITSM "ConsentRecertificationRequired" ticket per returned consent, de-duplicated only for 24h in memory -> every expired consent (months/years old) produces a new ticket every day forever ("expires in 1 hours" because of Math.Max(1, ...)), flooding the ITSM system; owners following these tickets call ExtendConsentExpiryAsync, which only refuses revoked consents, resurrecting long-expired access. Scan time and memory grow linearly with history.
@@ -755,7 +755,7 @@ Entry format:
   Fix hint : Use "cdc:subs:{tenant}:{sid}" for the per-subject cluster limit and a separate, larger per-tenant cap; track leases
              with per-instance keys/heartbeats (e.g. sorted set with expiry) instead of a bare INCR/DECR counter.
 
-[SQLA-03] LOW | bug | SqlDataMaskingProvider HMAC master key: unsynchronized lazy init + permanent negative caching
+[SQLA-03] LOW | bug | SqlDataMaskingProvider HMAC master key: unsynchronized lazy init + permanent negative caching  [RESOLVED 0fd06f35]
   Location : src/Autheris.Application/Sql/Masking/SqlDataMaskingProvider.cs:453-480 (GetMasterHmacKey)
   Problem  : The provider is a singleton (GatewayGovernanceServiceExtensions.cs:193). _masterHmacKeyResolved is set to true
              BEFORE the secret is fetched and both fields are plain (non-volatile, no lock). A concurrent request that
@@ -768,7 +768,7 @@ Entry format:
   Fix hint : Use Lazy<byte[]?> / LazyInitializer with a lock, set the flag only after a successful fetch, and retry
              failures with a back-off instead of caching null forever.
 
-[SQLA-04] LOW | bug | Row limit "+1 probe" overflows when MaxAllowedRows = 0 and the client sends LIMIT near long.MaxValue
+[SQLA-04] LOW | bug | Row limit "+1 probe" overflows when MaxAllowedRows = 0 and the client sends LIMIT near long.MaxValue  [RESOLVED 49a77656]
   Location : src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs:604-608; src/Autheris.Application/Sql/SqlRowLimit.cs:29-34
   Problem  : SqlRowLimit.Effective returns the client's explicit LIMIT unchanged when MaxAllowedRows <= 0 ("no bound").
              The rewriter then computes enforcedMaxRows = maxRows + 1 in unchecked long arithmetic. LIMIT
@@ -781,7 +781,7 @@ Entry format:
   Fix hint : Saturate (maxRows == long.MaxValue ? maxRows : maxRows + 1) and keep a hard internal cap for buffered paths
              even when MaxAllowedRows is 0.
 
-[SQLA-05] LOW | bug | Declarative SQL endpoint `-- @timeout` header is parsed but never enforced
+[SQLA-05] LOW | bug | Declarative SQL endpoint `-- @timeout` header is parsed but never enforced  [RESOLVED e2a88a01]
   Location : src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs:232-233,342; src/Autheris.Application/SqlEndpoints/Services/SqlEndpointExecutionService.cs:89-96
   Problem  : SqlEndpointDefinition.TimeoutSeconds is read from the file header but ExecuteEndpointAsync never passes it on;
              GovernedSqlExecutor always uses WebSql.ExecutionTimeoutSeconds (grep: no consumer of the endpoint value).
@@ -805,7 +805,7 @@ Entry format:
              reveals more (larger keep_prefix/suffix, more decimals, different token domain/mode/replacement) as a relaxation;
              clamp keep_prefix/suffix to a small maximum.
 
-[SQLE-06] LOW | bug | Oracle date_add: unchecked long multiplication (year*12, week*7) wraps to a small, valid amount
+[SQLE-06] LOW | bug | Oracle date_add: unchecked long multiplication (year*12, week*7) wraps to a small, valid amount  [RESOLVED 47ed0cb0]
   Location : src/TrinoSqlEngine/Ast/Generators/OracleDialectGenerator.cs:248 (`amount * 12`) and :254 (`amount * 7`);
              same pattern in SqlDialectGeneratorBase.Functions.cs:418 (ANSI fallback)
   Problem  : The amount of date_add is any BIGINT literal (SqlAstBuilder.IntegerArgument) and is multiplied in unchecked C#
@@ -816,7 +816,7 @@ Entry format:
   Fix hint : Use checked arithmetic (checked(amount * 12)) and map OverflowException to a typed AstBuildException, or bound
              the amount range in the builder.
 
-[SQLE-07] LOW | bug | Simplifier folds string literals and de-duplicates predicates with semantics that differ per dialect
+[SQLE-07] LOW | bug | Simplifier folds string literals and de-duplicates predicates with semantics that differ per dialect  [RESOLVED 9f8c80f2]
   Location : src/TrinoSqlEngine/Ast/Visitors/AstSimplificationVisitor.cs:232-248 (SimplifyIsNull/IsNotNull),
              :350-351 (StructuralEquals: ColumnReference compared OrdinalIgnoreCase); LiteralComparison.cs:52-55
   Problem  : (a) `'' IS NULL` folds to FALSE and `'' = ''` folds to TRUE, but on Oracle the empty string IS NULL, so the
@@ -924,7 +924,7 @@ Entry format:
   Fix hint : Return all parsed entries of 'dataset' + 'datasets' from TargetTables (a list) so the ABAC loop covers each one; cap the batch
              (e.g. 20) and reject larger requests with InvalidParams.
 
-[MCP-05] LOW | bug | get_table_schema / find_relevant_tables return fabricated join relations and a hard-coded AccessStatus "GRANTED"
+[MCP-05] LOW | bug | get_table_schema / find_relevant_tables return fabricated join relations and a hard-coded AccessStatus "GRANTED"  [RESOLVED 97c28013]
   Location : src/Autheris.Application/Mcp/Services/McpToolExecutionHandler.cs:282-304, src/Autheris.Domain/Model/McpDatasetModels.cs:800-807 (AccessStatus = "GRANTED" default), :221-224 / :187,197 (domain.table ids)
   Problem  : Relations are guessed from column names (customer_id -> "<domain>.customers"/"id") without checking that the target table exists,
              is visible, or that the key really is 'id'; the declared FK metadata used by the search engine is ignored. Target ids are emitted
@@ -946,7 +946,7 @@ Entry format:
              (names, addresses, clear columns) that are then sent to the model provider.
   Fix hint : Read Bool("synthetic") in ExecuteDatasetToolAsync and call SampleRowsAsync(principal, dataset, count, synthetic, ct); add a test.
 
-[INF-10] LOW | security | Redis token revocation: a later revocation with a shorter "until" shortens the TTL and drops an earlier, longer revocation cluster-wide
+[INF-10] LOW | security | Redis token revocation: a later revocation with a shorter "until" shortens the TTL and drops an earlier, longer revocation cluster-wide  [RESOLVED 9fedeea4]
   Location : src/Autheris.Infrastructure/Security/RedisTokenRevocationService.cs:249-262
   Problem  : RevokeAsync does SET key=now EX (until-now) with When.Always. The in-memory layer deliberately keeps "the latest
              revocation time and the longest retention" (InMemoryTokenRevocationService.cs:79-84), but Redis keeps only the last
@@ -960,7 +960,7 @@ Entry format:
   GET /api/v1/catalog/datasets/{dataset}/sample-rows?synthetic=true (QueryAnalysisAndProfilingEndpoints.cs:170-188), which calls the same
   McpDatasetCatalog.SampleRowsAsync(..., synthetic:true) guard and SyntheticSampleRowGenerator.
 
-[MCP-07] MEDIUM | security | Catalog search query-embedding cache is unbounded and computed synchronously (memory / thread-pool DoS)
+[MCP-07] MEDIUM | security | Catalog search query-embedding cache is unbounded and computed synchronously (memory / thread-pool DoS)  [RESOLVED b1b5dc82]
   Location : src/Autheris.Application/Catalog/Search/CatalogSearchEngine.cs:29, :338-348 (GetOrComputeQueryEmbedding); src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs:68-80
   Problem  : Every distinct query text of search_catalog / find_relevant_tables / REST /catalog/search (mode hybrid or semantic) is embedded
              and stored forever in a ConcurrentDictionary keyed by SHA-256(text) - no size cap, no TTL, no eviction. The engine is a
@@ -1047,7 +1047,7 @@ Entry format:
              and - more importantly - run the injection detector (and delimiter stripping / spotlighting) over string fields of tool
              results and resource texts before they are returned; flag suspicious catalog texts at ingestion time.
 
-[MCP-10] LOW | security | MCP PII scrubber misses most IBANs, lowercase IBANs and JSON-escaped e-mail local parts
+[MCP-10] LOW | security | MCP PII scrubber misses most IBANs, lowercase IBANs and JSON-escaped e-mail local parts  [RESOLVED 51d50e84]
   Location : src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs:57-59 (EmailRegex, IbanRegex), Helpers.cs:337-346
   Problem  : IbanRegex only matches an all-digit BBAN in upper case ([A-Z]{2}[0-9]{2}(?:[ ]?[0-9]{4}){3,7}...). IBANs with letters in the
              BBAN (GB82 WEST 1234 5698 7654 32, NL91ABNA0417164300, FR76 ... with RIB key letters, IT, IE, PT with letters, MT, ...) and
@@ -1112,7 +1112,7 @@ Entry format:
   Fix hint : Run DataSourceAllowlistGuard.EnsureAllowed on the effective source (Table.SourceName ?? Domain, after
              DataSourceMappings) in the router and in staging, and apply the same "default"-fallback rule as the rewriter.
 
-[SQLA-08] LOW | bug | Federated (DuckDB) path ignores the client's explicit LIMIT, uses 50 000 rows when no RowLimit is set, and misreports truncation
+[SQLA-08] LOW | bug | Federated (DuckDB) path ignores the client's explicit LIMIT, uses 50 000 rows when no RowLimit is set, and misreports truncation  [RESOLVED bcac6894]
   Location : src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs:187-192 and :356-359
   Problem  : effectiveMaxRows = min(DuckDbOlap.MaxResultRows, request.RowLimit.Effective(null)) - Effective(null) always
              returns the DEFAULT limit, so an explicit LIMIT between DefaultMaxRows and MaxAllowedRows is cut to
@@ -1172,7 +1172,7 @@ Entry format:
              drop or implement the column tuples; reject grant.Principal matching any identifier of the admin (as
              DeclarativeConsentApplyService.CollectActorIdentifiers does) and require an independent approver for sensitive classes.
 
-[GOV-05] LOW | security | Global Casbin policy file: short-form "p, sub, obj, act, deny" lines are silently re-parsed as a tenant-scoped ALLOW (deny vanishes)
+[GOV-05] LOW | security | Global Casbin policy file: short-form "p, sub, obj, act, deny" lines are silently re-parsed as a tenant-scoped ALLOW (deny vanishes)  [RESOLVED 22feea2e]
   Location : src/Autheris.Application/Governance/CasbinEnforcementService.SubjectAttributes.cs:255-315
   Problem  : The tenant-less short format (p, sub, obj, act, [eft], [subRule]) is only recognised when defaultTenant != null
              (tenant policy files). The production loader uses the global file (GatewaySecurityServiceExtensions -> 
@@ -1202,7 +1202,7 @@ Entry format:
   Fix hint : Never apply URI/alias/config/env fallbacks to refs in the "datasource:" namespace (resolve them only from the
              server-managed store, fail closed otherwise); persist datasource secrets; restrict URI parsing to https vault URIs.
 
-[PERS-08] LOW | bug | SCIM ListUsers/ListGroups page with LIMIT/OFFSET but no ORDER BY on SQLite/PostgreSQL (non-deterministic paging)
+[PERS-08] LOW | bug | SCIM ListUsers/ListGroups page with LIMIT/OFFSET but no ORDER BY on SQLite/PostgreSQL (non-deterministic paging)  [RESOLVED ec317ccd]
   Location : src/Autheris.Infrastructure/Persistence/IdentityStore.cs:163 (users), :285 (groups); SQL Server variants (166, 288) do ORDER BY
   Problem  : Without ORDER BY the row order of a LIMIT/OFFSET query is undefined (PostgreSQL may return a different order per execution, e.g. after updates/vacuum or parallel scans), so consecutive SCIM pages can repeat or skip rows. The "filter" parameter is also accepted but silently ignored, returning unfiltered results.
   Scenario : An IdP reconciliation job walks /scim/v2/Users?startIndex=1..N; users skipped between pages are never reconciled/deprovisioned, duplicated users cause spurious updates; a filter=userName eq "x" query returns the first page of all users instead of the match.
@@ -1220,7 +1220,7 @@ Entry format:
   Fix hint : Resolve each fragment once (memoise per fragment name: tables + success flag), keep a visited set for cycle detection, cap the
              total visited selections (e.g. 10,000) and collect into a HashSet instead of a List.
 
-[MCP-12] LOW | security | HitL approver ownership check fails open when the ticket lookup returns null; pending list is node-local
+[MCP-12] LOW | security | HitL approver ownership check fails open when the ticket lookup returns null; pending list is node-local  [RESOLVED 9b6be421]
   Location : src/Autheris.Api/Endpoints/HitLEndpoints.cs:209-236 (EnsureTableApproverAsync), src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs:743-785 (GetTicketAsync swallows cluster errors -> null), :657-707, :787-798
   Problem  : EnsureTableApproverAsync returns null ("allowed, let the service decide") when GetTicketAsync yields null. GetTicketAsync
              converts any cluster-state exception into null, while the subsequent ApproveStepUpRequestAsync -> GetEntryForApproverAsync does
@@ -1251,7 +1251,7 @@ Entry format:
              pattern, mark such parameters for EscapeLike) and always append ESCAPE '\' when the pattern contains a policy
              parameter; apply the SQLite case-insensitivity gate to any pattern that contains a policy parameter.
 
-[GQL-13] LOW | bug | Schema sunsetting (hard block / 426) bypassed via named fragments, root fields and relation aliases
+[GQL-13] LOW | bug | Schema sunsetting (hard block / 426) bypassed via named fragments, root fields and relation aliases  [PARTIAL 33a400e2]
   Location : src/Autheris.GraphQL/Interceptors/SchemaSunsettingExecutionMiddleware.cs:143-178
   Problem  : ExtractReferencedFields walks FieldNode and InlineFragmentNode only; FragmentSpreadNode is ignored, so any field
              selected through a named fragment is never evaluated. The "table" key is the parent FIELD name (not the GraphQL
@@ -1276,7 +1276,7 @@ Entry format:
              columns to be group-by dimensions) or remove the setting so operators do not rely on it; document that k-anonymity
              without noise does not resist differencing.
 
-[MISC-10] LOW | security | Analytics k-anonymity floor can be disabled without AllowDisabled; per-table/dataset overrides unvalidated
+[MISC-10] LOW | security | Analytics k-anonymity floor can be disabled without AllowDisabled; per-table/dataset overrides unvalidated  [RESOLVED 392e17e7]
   Location : src/Autheris.Application/Data/Services/AnalyticsOptionsValidator.cs:46-51 ;
              src/Autheris.Application/Analytics/GovernedAggregationService.Buckets.cs:416-438
   Problem  : `DefaultMinGroupSize < minAllowed && DefaultMinGroupSize != 1` exempts exactly the value 1 (= suppression off), so the
@@ -1344,7 +1344,7 @@ Entry format:
   Fix hint : Canonicalize the subject form in one place (store and evaluate the same representation), and classify any tuple
              whose subject is an individual principal (bare SID, user:, sp:) as an individual grant; reject unknown forms.
 
-[MCP-13] MEDIUM | security | MCP native resource reads (catalog summary, dataset schema, datasources, my-access) bypass the guardrail pipeline (ABAC, per-tool audit, token budget, PII scrub)
+[MCP-13] MEDIUM | security | MCP native resource reads (catalog summary, dataset schema, datasources, my-access) bypass the guardrail pipeline (ABAC, per-tool audit, token budget, PII scrub)  [RESOLVED 1a33be7d]
   Location : src/Autheris.Api/Mcp/GatewayMcpServer.cs:149-157 (ReadNativeResourceAsync called directly), src/Autheris.Application/Mcp/Services/McpResourceProvider.cs:47-150
   Problem  : Only autheris://datasets/{id} is routed through CallGuardedToolAsync ("so guardrails, ABAC and audit apply to resource reads as
              well"). autheris://catalog/datasets/{id}/schema returns the column list, types, sensitivity, masking state and PII flags of any
@@ -1372,7 +1372,7 @@ Entry format:
   Fix hint : Use ICatalogVisibilityService (with ReBAC) for resources, golden queries and the four-eyes pre-check; generate resources lazily
              (list only URIs, paginate with cursor, render one resource on read), cache per visibility memo key.
 
-[MCP-15] LOW | security | Golden queries are matched by (domain, tableName) only - schema and tenant ignored; get_golden_queries fails open without a consent repository
+[MCP-15] LOW | security | Golden queries are matched by (domain, tableName) only - schema and tenant ignored; get_golden_queries fails open without a consent repository  [PARTIAL 0860f18c]
   Location : src/Autheris.Application/Mcp/Services/GoldenQueryService.cs:53-77, src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs:417-446, src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs:~507 (describe_dataset examples), SemanticMcpCompiler.cs:~234
   Problem  : GoldenQuery has no schema or tenant. describe_dataset(sales.public.orders) and examples://sales/orders attach goldens registered
              for any sales.<schema>.orders; get_golden_queries filters by visible (domain, table) pairs, so a consent on sales.public.orders
@@ -1475,7 +1475,7 @@ Entry format:
   Fix hint : Sign with the audit HMAC/anchor signer (or a detached signature) over the exact rendered content, paginate all
              recipients (or state "n more omitted" and include them in an attachment), and drop the tamper-evidence claim until then.
 
-[INF-12] LOW | security | Log redaction is key-name based and lets exception messages, IPs and principal names through ({Message}, {ErrorMessage}, {Ip}, {Principal})
+[INF-12] LOW | security | Log redaction is key-name based and lets exception messages, IPs and principal names through ({Message}, {ErrorMessage}, {Ip}, {Principal})  [PARTIAL 41f42ed3]
   Location : src/Autheris.Infrastructure/Telemetry/LogRedactionProcessor.cs:76-110 (IsSensitiveKey); examples:
              src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs:112, Infrastructure/RateLimiting/RedisRateLimiterService.cs
              (LogWarning ... {Ip}), Caching/TableCache/Governance/GovernedTableCacheExecutionService.cs:96 ({Principal})
@@ -1497,7 +1497,7 @@ Entry format:
   Scenario : (a) Admin updates a Permit policy for group "analysts" scoped to "sales.*" and submits the same selector twice (or a value > 256 chars) -> grantees are inserted, the first selector insert succeeds or the duplicate violates PK (tenant_id, policy_id, selector_type, selector_value) and throws -> policy is left with grantees and no/partial selectors; with none left it permits "analysts" on ALL tables permanently. (b) During every normal update/delete there is a window in which concurrent ScopedAccessPolicyEngine evaluations (other replicas, no lock) read a policy whose selectors are already deleted but grantees present -> transient tenant-wide Permit. (c) Delete leaves orphaned grantees/selectors if it fails after the first statement.
   Fix hint : Wrap each create/update/delete (policy row + grantees + selectors) in one transaction on the same connection; de-duplicate selectors before insert; and make "no selectors" mean "matches nothing" (fail closed) in the engine.
 
-[VF-05] MEDIUM | security | Virtual filter / access profile approval does not bind the reviewed definition (hash optional) - TOCTOU on four-eyes
+[VF-05] MEDIUM | security | Virtual filter / access profile approval does not bind the reviewed definition (hash optional) - TOCTOU on four-eyes  [RESOLVED 8ef26e17]
   Location : src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.cs:263-294 (ApproveFilterAsync),
              VirtualFilterAdministrationService.Evaluation.cs:160-191 (ApproveProfileAsync),
              src/Autheris.Api/Endpoints/VirtualFilterEndpoints.Crud.cs:57,93 (hash read from optional query string)
@@ -1510,7 +1510,7 @@ Entry format:
   Fix hint : Require expected_hash on every approve (reject when missing) and return the pending hash from the read API;
              optionally reject approval when the draft changed after the approval request was opened.
 
-[VF-06] LOW | bug | Keyset bulk stream splices policy text (CombinedRowFilterSql + MandatoryRowPredicateSql) into client SQL
+[VF-06] LOW | bug | Keyset bulk stream splices policy text (CombinedRowFilterSql + MandatoryRowPredicateSql) into client SQL  [RESOLVED 9fef0cf7]
   Location : src/Autheris.Application/Data/Services/GovernedTableReadPlanner.Keyset.cs:123-138, 175-182, 248-256
   Problem  : Unlike Plan()/PlanAggregate (which never splice policy text: "the rewriter's own decision is the only one that
              restricts rows"), PlanKeysetStream appends decision.CombinedRowFilterSql AND decision.MandatoryRowPredicateSql
@@ -1527,7 +1527,7 @@ Entry format:
   Fix hint : Do not splice policy text or parameters; let the governed rewriter apply the row policy once (as Plan does).
              Match required columns against parsed predicate column references and ignore tautological nodes.
 
-[VF-07] LOW | bug | PathLookupConnector keeps at most one row per requested key (silently drops rows)
+[VF-07] LOW | bug | PathLookupConnector keeps at most one row per requested key (silently drops rows)  [RESOLVED 3f5d1ca4]
   Location : src/Autheris.Application/VirtualFilters/Federation/PathLookupConnector.cs:96-106, 161-167
   Problem  : For each requested key only the first upstream row whose key equals it is kept (results[index] is set once).
              The pushdown key field (HttpEndpointDescriptor.PrimaryKeyField) is the VF key column; nothing verifies it is
@@ -1538,7 +1538,7 @@ Entry format:
   Fix hint : Keep every row whose key equals the requested key (dedupe by full row identity, not by key), or require the
              path-lookup key to be declared unique.
 
-[VF-08] LOW | security | Virtual filter resolution memo ignores catalog changes (tenant columns, table columns, source type)
+[VF-08] LOW | security | Virtual filter resolution memo ignores catalog changes (tenant columns, table columns, source type)  [RESOLVED 3a30dfb0]
   Location : src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs:237-262; VirtualFilterMemoKey.cs
   Problem  : The outcome (including the SR-L-11 tenant binding computed by LoadTenantContextAsync and the column / data
              source checks of Check()) is memoized per VF snapshot generation and caller tuple only, in a size-bounded
@@ -1549,7 +1549,7 @@ Entry format:
              without the tenant restriction (cross-tenant evaluation of the filter) until someone edits a virtual filter.
   Fix hint : Include the catalog generation (or a hash of the used catalog entries) in VirtualFilterMemoKey, or add a TTL.
 
-[VF-09] LOW | security | Federation context signature does not cover the query string
+[VF-09] LOW | security | Federation context signature does not cover the query string  [RESOLVED d58feb40]
   Location : src/Autheris.Application/Federation/Services/SubgraphContextPropagationService.cs (signature block,
              pathStr = request.RequestUri?.AbsolutePath)
   Problem  : The v2 canonical form binds method, AbsolutePath and body hash but not the query component. GraphQL GET
@@ -1559,7 +1559,7 @@ Entry format:
              signed GET request; the subgraph accepts it as gateway-attested for the original subject/tenant.
   Fix hint : Sign PathAndQuery (canonicalized) instead of AbsolutePath, and bump the signature version.
 
-[VF-10] LOW | security | Sync safety limit (MaxRemovals sliding window) is per process and ignores definition weakening
+[VF-10] LOW | security | Sync safety limit (MaxRemovals sliding window) is per process and ignores definition weakening  [PARTIAL 8db719d9]
   Location : src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.Seeding.cs:64-72, 124-164
   Problem  : Relaxations are counted in the in-memory _removalHistory of one instance; restarts or a multi-instance
              deployment reset/split the window. Only removed bindings, Deny->Skip, scope changes and deletions count; a
@@ -1602,7 +1602,7 @@ Entry format:
   Fix hint : When sourceRows is empty but nextVector != vector, persist the vector (watermark-only append / UpdateWatermarkVector)
              under the same fencing token; add a test with a batch made entirely of duplicates.
 
-[EXT-10] LOW | security | Custom-query CDC poller "read-only enforcement" (SEC-CDC101-03) is a no-op on PostgreSQL and absent for SQL Server/others
+[EXT-10] LOW | security | Custom-query CDC poller "read-only enforcement" (SEC-CDC101-03) is a no-op on PostgreSQL and absent for SQL Server/others  [RESOLVED dfc7bc3f]
   Location : src/Autheris.Extensions/Cdc/CustomQuery/CustomQueryPollerService.cs:340-368 (EnforceReadOnlySemanticsAsync), :125-130
   Problem  : For PostgreSQL the code runs "SET TRANSACTION READ ONLY;" on the connection without an open transaction; PostgreSQL
              answers with a WARNING ("SET TRANSACTION can only be used in transaction blocks") and nothing is changed, and any error
@@ -1629,7 +1629,7 @@ Entry format:
   Fix hint : Return false when the qualifier does not identify the target (alias, table name or full name); for unqualified
              columns require that no other staged table has that column; respect SqlConjunctSplitter's AllowedTableSources.
 
-[SQLA-13] LOW | bug | Parameter pushdown: TrinoSqlFactory numbers markers differently from the bound parameters (cross-bound values)
+[SQLA-13] LOW | bug | Parameter pushdown: TrinoSqlFactory numbers markers differently from the bound parameters (cross-bound values)  [RESOLVED 3c4a8acd]
   Location : src/Autheris.Application/Sql/Federation/Optimization/PushedClauseBuilder.cs:104-156 vs :176-212
   Problem  : BuildClause skips a candidate (without consuming an index) when the scalar value is null, the list is empty or
              longer than effectiveMax, and binds the next candidate as @p_pd_<k>_0. The TrinoSqlFactory re-derives markers
@@ -1679,7 +1679,7 @@ Entry format:
   GOV-01 is fixed on that branch. GOV-02 and GOV-03 are still open there (CertifyItemAsync and the tenant-less cycle are unchanged;
   RecertificationStore.UpdateItemDecisionAsync updates without any decision/state predicate).
 
-[GOV-06] MEDIUM | security | Only ONE access profile is applied per table: row filters of every other matched profile are silently dropped
+[GOV-06] MEDIUM | security | Only ONE access profile is applied per table: row filters of every other matched profile are silently dropped  [RESOLVED c65345fe]
   Location : src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs:246-251 (used by TableAccessPolicy.cs:287,308-333)
   Problem  : ResolveActiveAccessProfileAsync orders all active matching profiles (Strict < Default < Unmasked, ties by ProfileId
              ordinal) and returns FirstOrDefault(). ApplyProfileToDecision then applies only that profile's masking mode AND its
@@ -1692,7 +1692,7 @@ Entry format:
   Fix hint : Apply the most restrictive masking mode but AND the row filters (typed policies) of ALL active matched profiles; fail
              closed if any one of them cannot be parsed.
 
-[GOV-07] MEDIUM | security | Bulk consent accepts undefined numeric maskingMode; the profile ranks as Strict but restricts nothing and overrides real Strict profiles (four-eyes check removal widens it)
+[GOV-07] MEDIUM | security | Bulk consent accepts undefined numeric maskingMode; the profile ranks as Strict but restricts nothing and overrides real Strict profiles (four-eyes check removal widens it)  [RESOLVED c65345fe]
   Location : src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs:137,159,229-244 (caller of GOV area code: Domain AccessProfileAssignmentRules.Rank/Order,
              src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs:190-196,249-251)
   Problem  : Enum.TryParse<MaskingPolicyMode>("7") succeeds with an undefined value (no Enum.IsDefined check, unlike subjectType).
@@ -1741,7 +1741,7 @@ Entry format:
              cursor) proves the key was visible to this caller; treat knownKeys at most as a filter, never as authorization.
              Require a non-null tenant value equal (ordinal) to the caller's tenant.
 
-[VF-12] LOW | bug | Several read paths scope HMAC pseudonyms with key id "default" instead of the configured DataMasking:HmacKeyId
+[VF-12] LOW | bug | Several read paths scope HMAC pseudonyms with key id "default" instead of the configured DataMasking:HmacKeyId  [RESOLVED 5eb7b00a]
   Location : src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.Cursors.cs:357,
              src/Autheris.Application/Data/Relations/CrossSourceRelationResolver.Helpers.cs:289
              (also src/Autheris.Api/Endpoints/TableStreamEndpoints.cs:425,547)
@@ -1753,7 +1753,7 @@ Entry format:
              cross-source tree relation: nothing matches; a rotated/retired default key keeps being used on these paths.
   Fix hint : Pass the configured DataMasking:HmacKeyId everywhere (single helper), and fail closed when no key id is set.
 
-[API-05] LOW | security | Password verification derives only as many bytes as the stored hash contains (truncated hash = brute-forceable password)
+[API-05] LOW | security | Password verification derives only as many bytes as the stored hash contains (truncated hash = brute-forceable password)  [RESOLVED 8a43b948]
   Location : src/Autheris.Api/Security/PasswordHasher.cs:178-182,212-222 ; src/Autheris.Api/Extensions/DependencyInjection/GatewayStartupValidator.cs:477-491
   Problem  : VerifyArgon2id/VerifyPbkdf2 compute the hash with outputLength = expectedHash.Length taken from the configured string and
              compare with FixedTimeEquals. Neither the verifier nor the startup validator (only checks prefix, part count and PBKDF2
@@ -1806,7 +1806,7 @@ Entry format:
   Fix hint : Fail closed (ChangeTrackingNotSupported) unless a provider with a real change log is registered; enforce
              MaxChangesPerCall with HasMore and a cursor at the last delivered version.
 
-[SQLA-14] MEDIUM | bug | Same-source subtree pushdown compiles the tenant predicate for tenant "default" instead of the caller's tenant
+[SQLA-14] MEDIUM | bug | Same-source subtree pushdown compiles the tenant predicate for tenant "default" instead of the caller's tenant  [RESOLVED 1e1fbc08]
   Location : src/Autheris.Application/Sql/Services/CrossSourcePlanner.cs:303 (SubtreeCompiler.Compile(st, decisions, options,
              _sqlEngine) - no user/tenantId); src/Autheris.Application/Sql/Federation/Subtrees/SubtreeCompiler.cs:218-224
              (Tenant = new TenantBinding("__autheris_tenant", tenantId?.Value ?? "default", ...))
@@ -1839,7 +1839,7 @@ Entry format:
              returned value exceeds the limit, decrement/reset only on success); fail closed when the shared counter is
              unavailable; accept only the enrolled algorithm (store it with the secret); consider per-user concurrency 1.
 
-[MCP-16] LOW | security | Column value profiles publish real observed values (5 samples + string min/max) without the release flag that gates value lists
+[MCP-16] LOW | security | Column value profiles publish real observed values (5 samples + string min/max) without the release flag that gates value lists  [RESOLVED e21ff313]
   Location : src/Autheris.Application/Catalog/Profiling/ColumnValueProfileService.cs:150-155 (observedAllowed = first 5 distinct values), :255-256, :281-288; consumed by McpDatasetCatalog.DescribeDatasetAsync (canViewProfile incl. tier-Full catalog viewers without consent)
   Problem  : For a low-cardinality column, observed values are only published when IsValueListReleased (option or column meta
              release_value_list=true). For a high-cardinality column (>20 distinct) the first five ordinal-sorted REAL values are always
@@ -1852,7 +1852,7 @@ Entry format:
   Fix hint : Gate SampleValues and string Min/Max behind the same IsValueListReleased decision (or a dedicated release_sample_values flag),
              and never publish string extremes by default.
 
-[MCP-17] LOW | bug | MCP auth-bypass FindVisibleAsync now serves inactive datasets; procedure describe hard-codes AccessStatus "GRANTED"
+[MCP-17] LOW | bug | MCP auth-bypass FindVisibleAsync now serves inactive datasets; procedure describe hard-codes AccessStatus "GRANTED"  [RESOLVED 9b6be421]
   Location : src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs:1262-1268 (changed in 4fc44053 from GetAllTablesAsync to GetTableMetadataAsync), :667-670 vs :721
   Problem  : (a) The repository's single-row read does not filter is_active (see SEC-CAT138-07 comment in CatalogVisibilityService.cs:126),
              so with Mcp auth bypass enabled describe_dataset / sample_rows now resolve quarantined/inactive tables that the previous
@@ -1943,7 +1943,7 @@ Entry format:
   Fix hint : Distinguish "KEK id unknown / AES-GCM unwrap failed" from infrastructure failures (separate exception/code), require
              a successful KEK resolution of at least the active KEK before discarding, and fail the resync otherwise.
 
-[SQLA-15] LOW | bug | Declarative SQL endpoint defaults are not coerced to the declared type (guid/date/double defaults bound as strings)
+[SQLA-15] LOW | bug | Declarative SQL endpoint defaults are not coerced to the declared type (guid/date/double defaults bound as strings)  [RESOLVED f5ebf185]
   Location : src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs:587-601 (ParseScalarDefault);
              src/Autheris.Application/SqlEndpoints/Services/SqlEndpointExecutionService.cs:74-77
   Problem  : ParseScalarDefault only converts int/long/decimal/bool (int/long with the current culture); every other declared
@@ -1964,7 +1964,7 @@ Entry format:
   Scenario : An admin fetches table metadata, adds column "iban_copy" by duplicating the JSON of column "iban" incl. its maskingRule.id, and PUTs it back. Processing "iban" first deletes+reinserts the rule id for iban; "iban_copy" then hits ON CONFLICT DO NOTHING -> iban_copy is unmasked. If iban_copy is processed first it takes the id and "iban" itself ends up unmasked. No error, no audit difference.
   Fix hint : Always generate a new rule id on insert (ignore client ids) or upsert by table_column_id (unique index on COLUMN_MASKING_RULES.table_column_id); never use DO NOTHING / NOT EXISTS for security rules - fail the transaction if the row was not written (check affected rows == 1).
 
-[INF-14] LOW | bug | CDC retention binary search treats a missing offset as "expired" and purges recent events below a gap
+[INF-14] LOW | bug | CDC retention binary search treats a missing offset as "expired" and purges recent events below a gap  [RESOLVED 4a797dff]
   Location : src/Autheris.Application/Streaming/Services/CdcStreamRetentionService.cs:136-153 (FirstOffsetAtOrAfterAsync)
   Problem  : The search assumes dense, time-ordered offsets and maps "no event at mid" to "older than cutoff" (lo = mid + 1).
              Offsets are not dense after CdcStreamAdminService.DiscardUnreadableAsync (or any partial purge/import), and
@@ -1992,7 +1992,7 @@ Entry format:
              JoinKeysParent/JoinKeysChild exchanged, cardinality inverted) before creating
              the request; add a test for a reverse-stored cross-source relation.
 
-[EXT-12] LOW | bug | OpenMetadata webhook registers the event id as processed before processing; a failed event's retry is dropped as duplicate
+[EXT-12] LOW | bug | OpenMetadata webhook registers the event id as processed before processing; a failed event's retry is dropped as duplicate  [RESOLVED d166b4ef]
   Location : src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs:616-640 (TryAdd + cluster IncrementAsync), :657-698
   Problem  : The event id is stored in ProcessedWebhookEvents and in the cluster dedup counter (15 min TTL) before the table fetch,
              merge/upsert or SyncPermissionsAsync run. If any of these throws or returns Success=false (OM API timeout, DB
@@ -2045,7 +2045,7 @@ Entry format:
   Fix hint : Build CallerSecurityContext with ClusterAdminPolicy.IsCanonicalClusterAdmin(principal) (and the shared role evaluator
              for GovernanceAdmin/PrivacyAdmin), like the mutations do.
 
-[API-06] LOW | bug | Several guard middlewares are never registered in the pipeline (admin IP allowlist, diagnostics auth, governance readiness 503)
+[API-06] LOW | bug | Several guard middlewares are never registered in the pipeline (admin IP allowlist, diagnostics auth, governance readiness 503)  [RESOLVED d43b4b79]
   Location : src/Autheris.Api/Middleware/AdminIpAllowlistMiddleware.cs:13 ; src/Autheris.Api/Middleware/DiagnosticsEndpointAuthMiddleware.cs:12 ;
              src/Autheris.Api/Middleware/GovernanceReadinessGateMiddleware.cs:12 ; src/Autheris.Api/Middleware/TenantResolutionMiddleware.cs ;
              src/Autheris.Api/Extensions/GatewayApplicationBuilderExtensions.cs:20-116 ; src/Autheris.Api/Middleware/GatewayExceptionHandler.cs:125-144
@@ -2063,7 +2063,7 @@ Entry format:
              Gateway:Hosting:AdminAllowedIps list) or delete them; at minimum map GovernanceStoreNotReadyException to 503 in
              GatewayExceptionHandler.Map.
 
-[SQLA-17] LOW | bug | Subtree staging projection: disambiguated aliases and ORDER BY columns are not reflected in the DuckDB query
+[SQLA-17] LOW | bug | Subtree staging projection: disambiguated aliases and ORDER BY columns are not reflected in the DuckDB query  [RESOLVED fba4e033]
   Location : src/Autheris.Application/Sql/Federation/Subtrees/SubtreeGraphPartitioner.cs:376-420 (DetermineProjectedItems);
              src/Autheris.Application/Sql/Services/CrossSourcePlanner.cs:662-697 (FederationAstRewriter.VisitColumnReference)
   Problem  : When two member tables expose the same column name the staging column is renamed to "<alias>_<col>", but the
@@ -2075,7 +2075,7 @@ Entry format:
   Fix hint : Rewrite qualified references to the disambiguated staging column names and include ORDER BY expressions when
              collecting the projection; add planner tests for both cases.
 
-[SQLE-13] LOW | security | Allow-listed padding/replication functions take an unbounded length (database memory DoS)
+[SQLE-13] LOW | security | Allow-listed padding/replication functions take an unbounded length (database memory DoS)  [RESOLVED e25fdf64]
   Location : src/TrinoSqlEngine/SqlFunctionAllowlists.cs:19 (CommonFunctions: "lpad", "rpad"), :37 (SqlServer: "replicate");
              src/TrinoSqlEngine/SqlFunctionPolicy.cs:9-75 (DefaultDeniedFunctions denies zeroblob/randomblob, not these)
   Problem  : SEC-X1-10 removed printf/format because of their unbounded padding width and denies zeroblob/randomblob, but lpad
@@ -2088,7 +2088,7 @@ Entry format:
   Fix hint : Deny lpad/rpad/replicate by default or require the length argument to be an integer literal below a small bound
              (e.g. 4000) in the builder.
 
-[EXT-13] LOW | bug | ITSM webhook: failed deliveries are released only from the local replay cache, the cluster dedup counter blocks every retry
+[EXT-13] LOW | bug | ITSM webhook: failed deliveries are released only from the local replay cache, the cluster dedup counter blocks every retry  [RESOLVED 44fc9114]
   Location : src/Autheris.Extensions/Itsm/ItsmWebhookHandler.cs:262-299 (cluster IncrementAsync "itsm:dedup:{key}"), :301-311 (finally)
   Problem  : Each replay key is registered locally and incremented in the cluster state before ProcessStatusChangeAsync runs. When
              processing fails or returns false (DB failover, request not yet visible, SoD check transiently failing), the finally
@@ -2120,7 +2120,7 @@ Entry format:
              isAdmin or role consents from request-supplied claims (resolve the target's roles server side, or compute admin from
              the caller only when not impersonating); match roles exactly (no Contains, no generic "admin").
 
-[EXT-14] LOW | bug | ITSM approval: approve step and consent activation are separate writes; a failed activation is never retried (request stuck APPROVED without consent)
+[EXT-14] LOW | bug | ITSM approval: approve step and consent activation are separate writes; a failed activation is never retried (request stuck APPROVED without consent)  [RESOLVED 44fc9114]
   Location : src/Autheris.Extensions/Itsm/ItsmWebhookHandler.cs:397-422 (ApproveConsentRequestStepAsync then ActivateConsentAsync), :357-361
   Problem  : After ApproveConsentRequestStepAsync commits status APPROVED, ActivateConsentAsync runs as a second, independent call.
              If it throws, the webhook fails and the replay keys are released, but the retry finds the request no longer in
@@ -2144,7 +2144,7 @@ Entry format:
   Fix hint : Redact all literal tokens with a real lexer (GraphQL parser / SQL tokenizer) rather than context regexes, redact or
              template path segments (or allowlist only parameterless paths), and default-deny bodies that cannot be parsed.
 
-[SQLA-18] LOW | bug | Trino wire encoding drops days and sign of TimeSpan values (PostgreSQL intervals) and announces them as time(3)
+[SQLA-18] LOW | bug | Trino wire encoding drops days and sign of TimeSpan values (PostgreSQL intervals) and announces them as time(3)  [RESOLVED 954196f8]
   Location : src/Autheris.Application/Sql/TrinoColumnTypes.cs:93 (TimeSpan -> Time) and :117 (ts.ToString(@"hh\:mm\:ss\.fff"))
   Problem  : Every TimeSpan column is typed time(3) and formatted with the hours component only; TimeSpan.Days and a negative
              sign are silently discarded (custom format "hh" is 0-23 and has no sign).
@@ -2153,7 +2153,7 @@ Entry format:
   Fix hint : Map TimeSpan values outside [0, 24h) to an interval/varchar type and format with the full "c" format (or
              Trino's "interval day to second" encoding).
 
-[API-07] LOW | bug | Valid SCIM provisioning calls are charged against the anonymous pre-auth IP budget (SCIM throttled to ~100 req/min per source IP)
+[API-07] LOW | bug | Valid SCIM provisioning calls are charged against the anonymous pre-auth IP budget (SCIM throttled to ~100 req/min per source IP)  [RESOLVED 49cbdb42]
   Location : src/Autheris.Api/Middleware/RateLimitingMiddleware.cs:56-65,226-259 ; src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs:416-421 ;
              src/Autheris.Api/Security/GatewayPolicies.cs (Scim policy, AddAuthenticationSchemes(Scim))
   Problem  : SCIM clients authenticate with "Authorization: Bearer <scim-secret>". PreAuthIpRateLimitingMiddleware exempts the request
@@ -2169,13 +2169,13 @@ Entry format:
              authenticates it, or exempt the SCIM route group from UnauthenticatedBearerIpRateLimitingMiddleware and give it its own
              per-client limiter.
 
-[PERS-15] LOW | security | Generated NTLM_USER_FILE (plaintext password) falls back to a predictable /tmp directory with best-effort permissions; password newlines not rejected
+[PERS-15] LOW | security | Generated NTLM_USER_FILE (plaintext password) falls back to a predictable /tmp directory with best-effort permissions; password newlines not rejected  [RESOLVED af124911]
   Location : src/Autheris.Infrastructure/Persistence/SqlServerWindowsAuthConfigurator.cs:333-393, 747-767 (ResolveWritableGssDirectory -> Path.GetTempPath()/autheris-gss-{pid}), 807-843 (permission setters swallow all errors)
   Problem  : Without a configured GSS state dir and without /app/data, the file holding "DOMAIN:USER:PASSWORD" is written to /tmp/autheris-gss-<pid>. Directory.CreateDirectory accepts an already existing directory (or a symlink to one) owned by another local user, and TrySetUnixDirectoryPermissions silently ignores the failure to chmod it; the owner of that directory can then delete/replace the credential file (credential substitution, the gateway authenticates as an attacker-chosen account) or redirect it via a symlinked directory. Separately, domain/username are checked for ':'/CR/LF but the password is not, so a password containing '\n' injects extra credential lines into the file.
   Scenario : Shared host / sidecar with another uid: attacker pre-creates /tmp/autheris-gss-1 (pid 1 in containers is predictable) before the gateway starts; the gateway writes its NTLM file there and the attacker swaps it.
   Fix hint : Never fall back to /tmp - require a configured private state directory (fail closed), verify ownership (uid) and 0700 mode of the directory and refuse to continue when chmod/ownership checks fail, open with O_NOFOLLOW semantics; reject CR/LF in the password.
 
-[GOV-11] LOW | bug | Casbin policy simulation uses a different matcher than enforcement (keyMatch2 regex, loopback IP, no groups) -> wrong what-if results
+[GOV-11] LOW | bug | Casbin policy simulation uses a different matcher than enforcement (keyMatch2 regex, loopback IP, no groups) -> wrong what-if results  [RESOLVED a45ce202]
   Location : src/Autheris.Application/Governance/Services/PolicySimulationService.cs:118-140, 222-235 (model: CasbinEnforcementService.cs:151-166;
              production matcher: CasbinEnforcementService.Masking.cs:202-312, Columns.cs:474-545)
   Problem  : Production decisions never call the Casbin Enforcer: ComputeDecision uses MatchObjectPattern (dots literal,
@@ -2191,7 +2191,7 @@ Entry format:
   Fix hint : Run the simulation through the same evaluator (build a temporary PolicySnapshot and call ComputeDecision), use
              IPAddress.None and the recorded group SIDs, or at least use a custom matcher function identical to MatchObjectPattern.
 
-[MISC-15] LOW | bug | Relay cursor `after` = int.MaxValue overflows the offset and crashes pagination (500 instead of 400)
+[MISC-15] LOW | bug | Relay cursor `after` = int.MaxValue overflows the offset and crashes pagination (500 instead of 400)  [RESOLVED ac30d2b6]
   Location : src/Autheris.Application/Common/Paging/CursorPaginationHelper.cs:72, 114-125
   Problem  : DecodeCursor accepts any non-negative int, and ApplyPagination computes `DecodeCursor(after) + 1` unchecked. For
              offset 2147483647 the start offset wraps to int.MinValue, the `startOffset > source.Count` clamp is skipped,
@@ -2202,7 +2202,7 @@ Entry format:
   Fix hint : Reject offsets >= source.Count (or >= int.MaxValue) in DecodeCursor/ApplyPagination with ArgumentException, use
              checked arithmetic, and parse with NumberStyles.None + InvariantCulture.
 
-[SQLE-14] LOW | bug | Builder silently drops or rewrites several accepted constructs instead of rejecting them (wrong results)
+[SQLE-14] LOW | bug | Builder silently drops or rewrites several accepted constructs instead of rejecting them (wrong results)  [RESOLVED 113f9377]
   Location : src/TrinoSqlEngine/Ast/Builder/SqlAstBuilder.cs:550-563 (VisitSelectAll), :1315-1326 (VisitFunctionCall named
              arguments), :1469-1475 (VisitRowConstructor field names)
   Problem  : Contrary to the builder's "reject, never silently drop" rule (Wunsch 4):
@@ -2219,7 +2219,7 @@ Entry format:
   Fix hint : Throw Unsupported(...) for a non-column `.*` base, for `.* AS (...)`, for NamedArgumentContext and for field
              constructors (or implement them faithfully).
 
-[EXT-15] LOW | bug | Backstage export: table entity names omit the domain/tenant, so same-named tables collide (duplicate entities, wrong owner/sensitivity served)
+[EXT-15] LOW | bug | Backstage export: table entity names omit the domain/tenant, so same-named tables collide (duplicate entities, wrong owner/sensitivity served)  [RESOLVED a5b4cacf]
   Location : src/Autheris.Extensions/Backstage/BackstageCatalogExportService.cs:262 (SanitizeEntityName($"data-{schema}-{table}")),
              :394-402 (ExportEntityByNameAsync -> FirstOrDefault)
   Problem  : Tables are exported as "data-<schema>-<table>" without Identifier.Domain; SanitizeEntityName additionally folds case and
@@ -2231,7 +2231,7 @@ Entry format:
   Fix hint : Include the domain (and a short hash of the exact identifier) in the entity name and annotations; detect and report
              collisions instead of emitting duplicates.
 
-[SQLA-19] LOW | security | Single-source WebSQL skips Virtual Filters under consent bypass without consent services (federated path enforces them)
+[SQLA-19] LOW | security | Single-source WebSQL skips Virtual Filters under consent bypass without consent services (federated path enforces them)  [RESOLVED 2ac96e8e]
   Location : src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs:496-500 (consentBypassed && no consent services ->
              TableAccessDecision.Allowed(..., rowFilterSql: null) + typed masks only); compare
              src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs:425-433 and :465-469 (WithVirtualFiltersAsync,
@@ -2264,7 +2264,7 @@ Entry format:
   Fix hint : Store secondary indexes (sets per object#relation and per user) and read only the needed members (HMGET/SSCAN), add
              a bounded per-request memo, and escape/length-prefix the field components.
 
-[SQLA-20] LOW | security | Ungoverned co-located SubtreeCompiler.Compile overload and CoLocationVerificationService are dead but public
+[SQLA-20] LOW | security | Ungoverned co-located SubtreeCompiler.Compile overload and CoLocationVerificationService are dead but public  [RESOLVED 0b196a63]
   Location : src/Autheris.Application/Sql/Services/SubtreeCompiler.cs (co-located Compile overload); CoLocationVerificationService
              (only production caller of SubtreeCompiler is CrossSourcePlanner.cs:303, which uses the governed overload)
   Problem  : The co-located overload emits source SQL without the governed AST pass (no tenant filter, row policy or masking).
@@ -2282,7 +2282,7 @@ Entry format:
   Scenario : MSSQL: IdP sends SCIM DELETE /Users/{id}; ScimService.DeleteUserAsync calls GetUserAsync first (ScimService.cs:150) -> InvalidCastException -> HTTP 500 before DeprovisionAndLockSubjectAsync runs: the user is not locked, tokens are not revoked. JIT provisioning / SCIM GET/PATCH of existing users and every scoped access-policy evaluation (GetPoliciesAsync -> ReadPolicy) also fail. PostgreSQL: SCIM provisioning, lock entries (AddLockAsync used by deprovisioning), policies, functional rights and recert campaigns cannot be written at all, so deprovisioning locks are never persisted.
   Fix hint : Introduce dialect-aware binding/reading (as AccessProfileStore.Ts/ReadTs): bool for BOOLEAN/BIT, DateTimeOffset (UTC) for TIMESTAMPTZ, reader.GetBoolean / GetFieldValue<DateTimeOffset> per dialect; add Testcontainers round-trip tests for PG and MSSQL for each store.
 
-[EXT-16] LOW | security | OpenMetadata webhook path skips the database-collision rejection of the full sync (table of database B merged into catalog entry of database A)
+[EXT-16] LOW | security | OpenMetadata webhook path skips the database-collision rejection of the full sync (table of database B merged into catalog entry of database A)  [RESOLVED cdcb99e1]
   Location : src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs:660-694 (webhook: TryResolve -> Merge -> Upsert) vs
              :115-123 (full sync: RejectDatabaseCollisions); identity rule OpenMetadataTableIdentity.cs TryResolve (domain = service
              name when ServiceDatabaseToDomainMap is empty)
@@ -2359,7 +2359,7 @@ Entry format:
   Fix hint : Decide k per (application, day) on the true distinct-actor count of that cell; compute the folded bucket's actor count
              as a distinct count over the union of actors (not a sum); fold per day or drop the Day field from the merged bucket.
 
-[EXT-18] LOW | bug | AuthPluginHost aborts gateway startup on any non-.NET or unloadable DLL in the shared plugin directory (and ignores manifest.json in the documented "plugins" format)
+[EXT-18] LOW | bug | AuthPluginHost aborts gateway startup on any non-.NET or unloadable DLL in the shared plugin directory (and ignores manifest.json in the documented "plugins" format)  [RESOLVED 382eb70b]
   Location : src/Autheris.Infrastructure/Plugins/Auth/AuthPluginHost.cs:170-261 (catch ... when not SecurityException -> rethrow),
              :450-461 (LoadManifest = Deserialize<Dictionary<string,string>>, errors -> null); caller
              src/Autheris.Api/Extensions/GatewayApplicationBuilderExtensions.cs:152-162 (same Plugins.Directory for both hosts)
@@ -2375,7 +2375,7 @@ Entry format:
   Fix hint : Share one hardened loader between both hosts (skip BadImageFormat, handle ReflectionTypeLoadException per type), parse
              the manifest with the same LoadManifest implementation, and treat a manifest parse error as fatal (fail closed).
 
-[EXT-19] LOW | bug | OData: $top=0 returns a data row and $filter navigation paths ("Orders/Amount") silently filter on a base-table column
+[EXT-19] LOW | bug | OData: $top=0 returns a data row and $filter navigation paths ("Orders/Amount") silently filter on a base-table column  [RESOLVED e2bebb48]
   Location : src/Autheris.Extensions/OData/ODataHandler.cs:294 (Math.Clamp(top, 1, 1000)); src/Autheris.Extensions/OData/ODataFilterParser.cs:242
              (identifiers may contain '/'), :652 (ColumnNode.Name = last path segment)
   Problem  : (1) $top=0 is clamped to 1, so a request for zero rows (the standard "$top=0&$count=true" count probe used by Power BI /
@@ -2393,7 +2393,7 @@ Entry format:
   Scenario : In a 3-replica PostgreSQL deployment an owner adds a masking rule to column "salary" (or deactivates a leaked table / raises sensitivity) via replica A. Replicas B and C keep serving the cached metadata without the rule for up to 30 s, returning salary in clear (or still serving the deactivated table) to every caller routed to them - exactly during the incident response window where the change was made.
   Fix hint : Subscribe the repository cache to catalog:changed (or compare the cached entry's catalog/table epoch with POLICY_EPOCHS on hit), invalidate on every replica, and do not cache security-relevant metadata longer than the epoch check interval; never cache negative results without invalidation.
 
-[GOV-13] LOW | security | Unapproved and self-approved functional-right mappings are emitted as functional-right claims (four-eyes/customer ceiling only in an unused code path)
+[GOV-13] LOW | security | Unapproved and self-approved functional-right mappings are emitted as functional-right claims (four-eyes/customer ceiling only in an unused code path)  [RESOLVED 3842ad6e]
   Location : src/Autheris.Infrastructure/Persistence/RightsAndPoliciesStore.cs:48-84 ("GetApproved..." returns every mapping, approved_by is
              never filtered); consumer src/Autheris.Api/Security/EnterpriseClaimsTransformation.cs:100-107; the filtering logic lives only in
              src/Autheris.Application/Governance/Rights/FunctionalRightMapper.cs:89-144 (GetRightsForGroupsAndRolesAsync), which no production
@@ -2417,7 +2417,7 @@ Entry format:
   Scenario : An attacker (or a faulty sync job) with write access to one anchor location (local file next to the DB, or one mirror of a composite store) writes garbage into it. From then on no anchor advances anywhere, Tier-A mutations (consent grants/revocations, deprovisioning) are acknowledged without external anchoring, and the chain tail is protected only by the in-memory reference: after a restart the attacker can truncate/rewrite DB rows after the last valid anchor without the "anchor ahead of DB" check firing; on PG/MSSQL the gateway keeps running in a non-faulted state.
   Fix hint : Treat an invalid stored anchor as anchor failure on write (throw AuditUnavailableException for Tier-A) and call FlagAuditChainViolation in PG/MSSQL verification as SQLite does; for composites, keep writing to the healthy members and alert instead of disabling all of them.
 
-[GOV-14] LOW | security | Deprovisioning invalidates the role cache only on the local node; the lock broadcast has no subscriber anywhere
+[GOV-14] LOW | security | Deprovisioning invalidates the role cache only on the local node; the lock broadcast has no subscriber anywhere  [RESOLVED 66e3853e]
   Location : src/Autheris.Application/Identity/Services/IdentityDeprovisioningService.cs:84-91 (publisher); IRedisLockPubSubChannel.Subscribe has no
              caller in src/ (only src/Autheris.Infrastructure/Identity/Locks/RedisLockPubSubChannel.cs implements it); cache:
              src/Autheris.Application/Identity/Caching/RoleResolverCache.cs (per-process L1), TTL RoleResolver.cs:123 (15 min workforce / 5 min)
@@ -2432,7 +2432,7 @@ Entry format:
              cache for that subject) or move the role cache to the distributed store with an epoch; make token revocation mandatory
              for the lock path.
 
-[GOV-15] LOW | security | Consent decision guard treats client-credentials tokens that carry preferred_username (e.g. Keycloak service accounts) as persons
+[GOV-15] LOW | security | Consent decision guard treats client-credentials tokens that carry preferred_username (e.g. Keycloak service accounts) as persons  [RESOLVED 3d26e511]
   Location : src/Autheris.Application/Governance/ConsentRequests/ConsentDecisionGuard.cs:74-94 (relies on
              src/Autheris.Application/Services/IdentitySubjectResolver.cs:56-70); same heuristic in
              src/Autheris.Application/Identity/Attributes/CallerSubjectFactory.cs:71-80
@@ -2467,7 +2467,7 @@ Entry format:
              or remove/disable the API; create policies inactive and require a distinct approver (ApprovedBy != CreatedBy) before
              IsActive takes effect.
 
-[EP-12] LOW | security | 2FA enrollment exposed as GET; response carries the TOTP seed without Cache-Control: no-store
+[EP-12] LOW | security | 2FA enrollment exposed as GET; response carries the TOTP seed without Cache-Control: no-store  [RESOLVED a2ec70ab]
   Location : src/Autheris.Api/Endpoints/GovernanceApiEndpoints.cs:26-56 (BeginEnrollment mapped for POST and GET /api/v1/governance/2fa/enroll)
   Problem  : The GET alias performs a state change (creates/overwrites the user's pending enrollment seed) and returns the
              enrollment object (SecretBase32 + otpauth QR URI) with no Cache-Control/Pragma headers (no global no-store middleware;
@@ -2479,7 +2479,7 @@ Entry format:
              silently replace the pending seed (enrollment confusion).
   Fix hint : Map enrollment POST-only and set Cache-Control: no-store, Pragma: no-cache on all 2FA responses.
 
-[EP-13] LOW | security | dbt proposal approve/reject attributes the decision to Identity.Name instead of the canonical SID
+[EP-13] LOW | security | dbt proposal approve/reject attributes the decision to Identity.Name instead of the canonical SID  [RESOLVED de6fce64]
   Location : src/Autheris.Api/Endpoints/DbtEndpoints.cs (proposal approve ~line 160 / reject ~line 190 on this branch:
              var user = context.User.Identity?.Name ?? context.User.GetUserSid()?.Value ?? "system_admin")
   Problem  : Masking-metadata approvals are recorded with the display/user name first; the SID is only a fallback and "system_admin"
@@ -2493,7 +2493,7 @@ Entry format:
   Fix hint : Use EndpointSecurity.GetCallerIdentity(context) (fail with 403 when null) for the approver, as in the other
              governance endpoints.
 
-[EP-14] LOW | bug | Anonymous catalog webhooks: EventGrid validation handshake throws on malformed JSON -> unauthenticated 500s
+[EP-14] LOW | bug | Anonymous catalog webhooks: EventGrid validation handshake throws on malformed JSON -> unauthenticated 500s  [RESOLVED 65ac11dd]
   Location : src/Autheris.Api/Endpoints/WebhookEndpoints.cs:99-123 and 199-223 (/api/webhooks/catalog, /api/v1/governance/catalog/webhook/{provider})
   Problem  : With header Aeg-Event-Type: SubscriptionValidation the handler runs JsonDocument.Parse(payload) and then
              TryGetProperty/GetString without any try/catch, before signature verification. Invalid JSON (JsonException), an array
