@@ -38,6 +38,7 @@ RUN apt-get update \
         gss-ntlmssp \
         krb5-user \
         libkrb5-3 \
+        zlib1g \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /etc/gss/mech.d \
     && if [ -f /etc/gss/mech.d/mech.ntlmssp.conf ]; then \
