@@ -1,7 +1,7 @@
 # Plan: Security review fixes, area PERS (persistence)
 
 Source: `docs/plans/security.txt`, findings `PERS-*` with severity HIGH or MEDIUM (PERS-08, PERS-12, PERS-15 are LOW and out of
-scope; PERS-12 is covered by `2026-10-22-plan-security-gov.md` WP-GOV-C). Verified against branch
+scope; PERS-12 is covered by the GOV area plan WP-GOV-C (merged in PR #287, history in git)). Verified against branch
 `fix/security-review-open-findings` at `55dc7e27`. Breaking changes are allowed (no production); no upgrade migrations: baseline
 schema files are changed in place and the caller supplies the newest schema.
 
@@ -17,7 +17,7 @@ schema files are changed in place and the caller supplies the newest schema.
 | PERS-06 | M | Confirmed (PK and `DELETE` on raw `subject`; `subject_norm` nullable) | C |
 | PERS-07 | H | Confirmed (`IdentityStore.cs:146-156`, `:268-278`, `:342-358`; no cache invalidation in `ScimService.DeleteGroupAsync`) | B |
 | PERS-09 | H | Confirmed in the reduced form of the correction (self-approved privileged and customer-realm mappings granted as claims) | B |
-| PERS-10 | H | **Superseded by EP D-0** (`2026-10-22-plan-security-ep.md`): scoped policy API, engine, repository methods removed | - |
+| PERS-10 | H | **Superseded by EP D-0** (EP area plan, merged in PR #287, history in git): scoped policy API, engine, repository methods removed | - |
 | PERS-11 | M | **Superseded by EP D-0** (same reason) | - |
 | PERS-13 | M | Confirmed (`VirtualFilterStore.ApplyAsync` has no expected generation/hash) | E |
 | PERS-14 | M | Confirmed (PG `ON CONFLICT (id) DO NOTHING`, MSSQL `WHERE NOT EXISTS`) | D |
