@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -42,7 +43,6 @@ public sealed partial class DatabricksStatementExecutionClient(
     private static readonly TimeSpan MaxWait = TimeSpan.FromSeconds(50);
     private static readonly TimeSpan CancelTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly DatabricksTokenCache _tokenCache = tokenCache ?? new DatabricksTokenCache();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly IDatabricksCredentialProvider _credentialProvider = credentialProvider
         ?? new DatabricksOboTokenProvider(http, options, secrets, environment, tokenCache, null, timeProvider);
@@ -74,7 +74,7 @@ public sealed partial class DatabricksStatementExecutionClient(
         try
         {
             var db = settings.Databricks;
-            using var firstDoc = await SendAsync(db, token, HttpMethod.Post, "/api/2.0/sql/statements/", BuildBody(request, db), deadline.Token).ConfigureAwait(false);
+            using var firstDoc = await SendAsync(db, token, HttpMethod.Post, "/api/2.0/sql/statements/", BuildBody(request, db), request.Delegation, deadline.Token).ConfigureAwait(false);
             statementId = ReadStatementId(firstDoc.RootElement);
             var current = firstDoc;
 
@@ -85,7 +85,7 @@ public sealed partial class DatabricksStatementExecutionClient(
                 {
                     await Task.Delay(TimeSpan.FromMilliseconds(db.PollIntervalMilliseconds), _time, deadline.Token).ConfigureAwait(false);
                     polled?.Dispose();
-                    polled = await SendAsync(db, token, HttpMethod.Get, $"/api/2.0/sql/statements/{statementId}", null, deadline.Token).ConfigureAwait(false);
+                    polled = await SendAsync(db, token, HttpMethod.Get, $"/api/2.0/sql/statements/{statementId}", null, request.Delegation, deadline.Token).ConfigureAwait(false);
                     if (!string.Equals(ReadStatementId(polled.RootElement), statementId, StringComparison.Ordinal))
                     {
                         throw Protocol("The statement id changed between calls.");
@@ -94,7 +94,7 @@ public sealed partial class DatabricksStatementExecutionClient(
                     current = polled;
                 }
 
-                return await ReadResultAsync(db, token, statementId, current.RootElement, deadline.Token).ConfigureAwait(false);
+                return await ReadResultAsync(db, token, statementId, current.RootElement, request.Delegation, deadline.Token).ConfigureAwait(false);
             }
             finally
             {
@@ -103,7 +103,7 @@ public sealed partial class DatabricksStatementExecutionClient(
         }
         catch (OperationCanceledException) when (statementId is not null)
         {
-            await TryCancelAsync(settings.Databricks, token, statementId).ConfigureAwait(false);
+            await TryCancelAsync(settings.Databricks, token, statementId, request.Delegation).ConfigureAwait(false);
             if (ct.IsCancellationRequested)
             {
                 throw;
@@ -128,15 +128,15 @@ public sealed partial class DatabricksStatementExecutionClient(
 
         var settings = ResolveSettings(dataSource);
         var token = await AcquireTokenAsync(settings.Databricks, ct).ConfigureAwait(false);
-        using var _ = await SendAsync(settings.Databricks, token, HttpMethod.Post, $"/api/2.0/sql/statements/{statementId}/cancel", null, ct).ConfigureAwait(false);
+        using var _ = await SendAsync(settings.Databricks, token, HttpMethod.Post, $"/api/2.0/sql/statements/{statementId}/cancel", null, null, ct).ConfigureAwait(false);
     }
 
-    private async Task TryCancelAsync(DatabricksDataSourceOptions db, string token, string statementId)
+    private async Task TryCancelAsync(DatabricksDataSourceOptions db, string token, string statementId, DelegationContext? delegation)
     {
         try
         {
             using var cts = new CancellationTokenSource(CancelTimeout);
-            using var _ = await SendAsync(db, token, HttpMethod.Post, $"/api/2.0/sql/statements/{statementId}/cancel", null, cts.Token).ConfigureAwait(false);
+            using var _ = await SendAsync(db, token, HttpMethod.Post, $"/api/2.0/sql/statements/{statementId}/cancel", null, delegation, cts.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -225,7 +225,7 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     // ---- HTTP ----
 
-    private async Task<JsonDocument> SendAsync(DatabricksDataSourceOptions db, string token, HttpMethod method, string path, string? body, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(DatabricksDataSourceOptions db, string token, HttpMethod method, string path, string? body, DelegationContext? delegation, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, new Uri($"https://{db.Host}{path}"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -245,7 +245,7 @@ public sealed partial class DatabricksStatementExecutionClient(
         {
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                _tokenCache.Remove(db.Host, db.Auth.ClientId ?? string.Empty);
+                _credentialProvider.EvictToken(db, delegation);
                 throw new DatabricksProviderException(DatabricksErrorCodes.AuthFailed, $"Databricks rejected the credentials (HTTP {status}).");
             }
 
@@ -399,7 +399,7 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     private static bool IsInProgress(JsonElement root) => ReadState(root) is "PENDING" or "RUNNING";
 
-    private async Task<DatabricksStatementResult> ReadResultAsync(DatabricksDataSourceOptions db, string token, string statementId, JsonElement root, CancellationToken ct)
+    private async Task<DatabricksStatementResult> ReadResultAsync(DatabricksDataSourceOptions db, string token, string statementId, JsonElement root, DelegationContext? delegation, CancellationToken ct)
     {
         var state = ReadState(root);
         switch (state)
@@ -450,7 +450,7 @@ public sealed partial class DatabricksStatementExecutionClient(
                 }
 
                 lastIndex = index;
-                var nextDoc = await SendAsync(db, token, HttpMethod.Get, $"/api/2.0/sql/statements/{statementId}/result/chunks/{index.ToString(CultureInfo.InvariantCulture)}", null, ct).ConfigureAwait(false);
+                var nextDoc = await SendAsync(db, token, HttpMethod.Get, $"/api/2.0/sql/statements/{statementId}/result/chunks/{index.ToString(CultureInfo.InvariantCulture)}", null, delegation, ct).ConfigureAwait(false);
                 chunkDoc?.Dispose();
                 chunkDoc = nextDoc;
                 chunk = chunkDoc.RootElement;

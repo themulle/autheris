@@ -81,7 +81,7 @@ public sealed class PurviewDataCatalogClient : IDataCatalogClient
         }
 
         var json = await CatalogHttpContent.ReadBoundedStringAsync(response, "Purview", ct).ConfigureAwait(false);
-        return ParseAtlasSearchResponse(json);
+        return ParseAtlasSearchResponse(json, _logger);
     }
 
     public async Task<CatalogTableAsset?> GetTableAsync(TableIdentifier table, CancellationToken ct = default)
@@ -171,28 +171,35 @@ public sealed class PurviewDataCatalogClient : IDataCatalogClient
         }
     }
 
-    private static IReadOnlyList<CatalogTableAsset> ParseAtlasSearchResponse(string json)
+    internal static IReadOnlyList<CatalogTableAsset> ParseAtlasSearchResponse(string json, ILogger logger)
     {
         var result = new List<CatalogTableAsset>();
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("entities", out var entities) || entities.ValueKind != JsonValueKind.Array)
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("entities", out var entities) || entities.ValueKind != JsonValueKind.Array)
             {
                 return result;
             }
 
+            var index = -1;
             foreach (var entity in entities.EnumerateArray())
             {
-                var qualifiedName = entity.TryGetProperty("attributes", out var attrs) && attrs.TryGetProperty("qualifiedName", out var qn)
-                    ? qn.GetString()
-                    : null;
-                var tableName = attrs.TryGetProperty("name", out var n) ? n.GetString() : "unknown";
+                index++;
 
-                var parts = qualifiedName?.Split('/') ?? [];
-                var domain = parts.Length > 0 ? parts[0] : "default";
-                var schema = parts.Length > 1 ? parts[1] : "dbo";
-                var tableId = new TableIdentifier(domain, schema, tableName ?? "unknown");
+                // EXT-17: each entity is handled on its own; a bad entity is skipped and never empties the page.
+                // The raw qualifiedName is attacker-influenced and is never logged.
+                if (entity.ValueKind != JsonValueKind.Object ||
+                    !entity.TryGetProperty("attributes", out var attrs) || attrs.ValueKind != JsonValueKind.Object ||
+                    !attrs.TryGetProperty("qualifiedName", out var qn) || qn.ValueKind != JsonValueKind.String ||
+                    !PurviewQualifiedName.TryParse(qn.GetString(), out var tableId))
+                {
+                    logger.LogWarning("Purview entity at index {EntityIndex} skipped: qualifiedName rejected.", index);
+                    continue;
+                }
+
+                var tableName = tableId.TableName;
 
                 var classifications = new List<string>();
                 if (entity.TryGetProperty("classificationNames", out var cNames) && cNames.ValueKind == JsonValueKind.Array)
@@ -212,9 +219,10 @@ public sealed class PurviewDataCatalogClient : IDataCatalogClient
                 });
             }
         }
-        catch
+        catch (JsonException)
         {
-            // Resilient fallback on parsing error
+            // Document-level parse failure: return what was parsed so far (nothing is fabricated).
+            logger.LogWarning("Purview search response could not be parsed as JSON.");
         }
 
         return result;

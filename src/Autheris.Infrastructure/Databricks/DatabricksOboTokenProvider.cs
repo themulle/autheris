@@ -105,6 +105,64 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         return AcquireTokenAsync(connection.Databricks, context, ct);
     }
 
+    private static string NormalizeCallerToken(string callerToken)
+    {
+        var rawToken = callerToken.Trim();
+        if (rawToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            rawToken = rawToken["Bearer ".Length..].Trim();
+        }
+
+        return rawToken;
+    }
+
+    private static string HashAssertion(string normalizedToken) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedToken)));
+
+    // INF-07: single source of the OBO cache partition key; shared by Set/TryGet and eviction so they cannot drift.
+    private static string? CallerAssertionHash(DelegationContext? context)
+    {
+        if (string.IsNullOrWhiteSpace(context?.CallerToken))
+        {
+            return null;
+        }
+
+        var raw = NormalizeCallerToken(context.CallerToken);
+        return string.IsNullOrEmpty(raw) ? null : HashAssertion(raw);
+    }
+
+    /// <inheritdoc />
+    public void EvictToken(DatabricksDataSourceOptions db, DelegationContext? context)
+    {
+        try
+        {
+            var auth = db?.Auth;
+            if (auth is null || auth.Mode == DatabricksAuthMode.Pat)
+            {
+                return;
+            }
+
+            if (auth.Mode == DatabricksAuthMode.OAuthObo)
+            {
+                var obo = auth.Obo;
+                var hash = CallerAssertionHash(context);
+                if (obo is null || string.IsNullOrWhiteSpace(obo.ClientId) || hash is null)
+                {
+                    return;
+                }
+
+                _tokenCache.Remove(db!.Host, obo.ClientId, hash);
+                return;
+            }
+
+            _tokenCache.Remove(db!.Host, auth.ClientId ?? string.Empty, string.Empty);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Eviction is best effort; the original 401/403 is what propagates.
+        }
+    }
+
     private async Task<string> AcquireOboTokenAsync(DatabricksDataSourceOptions db, DelegationContext? context, CancellationToken ct)
     {
         var obo = db.Auth.Obo ?? throw new DatabricksProviderException(
@@ -126,12 +184,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                 "Databricks OBO authentication failed: caller token assertion is missing or empty.");
         }
 
-        var rawToken = context.CallerToken.Trim();
-        if (rawToken.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            rawToken = rawToken["Bearer ".Length..].Trim();
-        }
-
+        var rawToken = NormalizeCallerToken(context.CallerToken);
         if (string.IsNullOrEmpty(rawToken))
         {
             throw new DatabricksProviderException(
@@ -151,7 +204,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         }
 
         // Partition cache by SHA-256 hash of caller assertion (SEC-OBO238-03)
-        var assertionHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
+        var assertionHash = HashAssertion(rawToken);
         if (_tokenCache.TryGet(db.Host, obo.ClientId, assertionHash, now, out var cached))
         {
             return cached;

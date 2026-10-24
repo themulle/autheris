@@ -124,7 +124,7 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
         }
 
         // 4. Parse changed table entities from JSON payload
-        var affectedTables = ExtractAffectedTables(rawPayload, provider);
+        var affectedTables = ExtractAffectedTables(rawPayload, provider, _logger);
         if (affectedTables.Count == 0)
         {
             _logger.LogInformation("Catalog webhook processed: no relevant table changes detected in payload.");
@@ -352,7 +352,9 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
         return CryptographicOperations.FixedTimeEquals(expectedHash, providedBytes);
     }
 
-    private static IReadOnlyList<TableIdentifier> ExtractAffectedTables(string rawPayload, string? provider)
+    private const int MaxEventsPerPayload = 100;
+
+    private static IReadOnlyList<TableIdentifier> ExtractAffectedTables(string rawPayload, string? provider, ILogger logger)
     {
         var tables = new List<TableIdentifier>();
 
@@ -400,8 +402,17 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
             else if (root.ValueKind == JsonValueKind.Array)
             {
                 // Microsoft Purview / Azure EventGrid notification schema
+                var eventIndex = -1;
                 foreach (var item in root.EnumerateArray())
                 {
+                    eventIndex++;
+                    if (eventIndex >= MaxEventsPerPayload)
+                    {
+                        // EXT-17: bound the work per payload; the remaining events are ignored.
+                        logger.LogWarning("Catalog webhook payload exceeds {Max} events; remaining events ignored.", MaxEventsPerPayload);
+                        break;
+                    }
+
                     if (item.ValueKind == JsonValueKind.Object &&
                         item.TryGetProperty("eventType", out var evType) &&
                         item.TryGetProperty("data", out var dataElem) &&
@@ -409,14 +420,14 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
                     {
                         if (dataElem.TryGetProperty("qualifiedName", out var qnProp))
                         {
-                            var qn = qnProp.GetString();
-                            if (!string.IsNullOrWhiteSpace(qn))
+                            // EXT-17: same parser as the sync path; an unparsable event invalidates nothing and the raw name is never logged.
+                            if (qnProp.ValueKind == JsonValueKind.String && PurviewQualifiedName.TryParse(qnProp.GetString(), out var parsed))
                             {
-                                var parts = qn.Split('/');
-                                if (parts.Length >= 2)
-                                {
-                                    tables.Add(new TableIdentifier(parts[0], "public", parts[^1]));
-                                }
+                                tables.Add(parsed);
+                            }
+                            else
+                            {
+                                logger.LogWarning("Catalog webhook event at index {EventIndex} skipped: qualifiedName rejected.", eventIndex);
                             }
                         }
                     }

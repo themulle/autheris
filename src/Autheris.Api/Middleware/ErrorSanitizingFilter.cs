@@ -127,7 +127,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated."
     };
 
-    internal const string ValidationCode = "GRAPHQL_VALIDATION_FAILED";
+    internal const string MaskedCode = "MASKED";
+    internal const string MaskedMessage = "A requested column is masked for the current caller.";
+    internal const string ValidationCode ="GRAPHQL_VALIDATION_FAILED";
     internal const string ValidationMessage = "The GraphQL request is invalid.";
     internal const string ComplexMessage = "The query exceeds the allowed complexity.";
     internal const string DepthMessage = "The query exceeds the maximum allowed execution depth.";
@@ -180,7 +182,13 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
                 .WithCode(code);
         }
 
-        if (error.Code != null && FixedClientMessages.TryGetValue(error.Code, out var fixedMessage))
+        // GQL-17: ReportMasked (CatalogGraphQlTypeModule) code is matched exactly (ordinal) so MASKED_COLUMN or "masked" stay masked.
+        var isMaskedCode = string.Equals(error.Code, MaskedCode, StringComparison.Ordinal);
+        if (isMaskedCode)
+        {
+            error = error.WithMessage(MaskedMessage);
+        }
+        else if (error.Code != null && FixedClientMessages.TryGetValue(error.Code, out var fixedMessage))
         {
             error = error.WithMessage(fixedMessage);
         }
@@ -196,7 +204,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             _logger.LogError(error.Exception, "GraphQL Execution Error [{Code}] trace {TraceId}", error.Code, Activity.Current?.TraceId.ToString());
         }
 
-        var isWhitelisted = error.Code != null && WhitelistedSafeCodes.Contains(error.Code);
+        var isWhitelisted = isMaskedCode || (error.Code != null && WhitelistedSafeCodes.Contains(error.Code));
         if (!isWhitelisted && Classify(error) is { } classified)
         {
             error = classified;
