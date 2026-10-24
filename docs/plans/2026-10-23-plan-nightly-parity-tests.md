@@ -216,8 +216,12 @@ Observed (Robin WP-R1, R49 `Robin_Proactive_IsNullAmount`, R50 `Robin_Proactive_
 ### PARITY-GAP-034
 Observed (Robin WP-R1, R41 `Robin_Proactive_GroupByQuarter`). Capability: GraphQL `QUARTER` time bucket. Channel: GraphQL on a SQLite source. Input: `timeBuckets: [{ column: sale_date, bucket: QUARTER }]` with a COUNT aggregate. Expected: 8 groups keyed by the first day of the quarter. Actual: HTTP 200 with GraphQL error `AGGREGATION_RESULT_TYPE_MISMATCH`, no data.
 
+Fixed 2026-10-23 on fix/robin-gaps (#325): the SQLite QUARTER bucket is the first day of the quarter (same key shape as MONTH).
+
 ### PARITY-GAP-035
 Observed (Robin WP-R1, R44 `Robin_130_HourBucketBerlinWinterSummer`). Capability: GraphQL `HOUR` time bucket with `timeZone`. Channel: GraphQL on a SQLite source. Input: `where: { id: { in: [1, 8] } }, timeBuckets: [{ column: sold_at, bucket: HOUR, timeZone: "Europe/Berlin" }]`. Expected: local hours 11 (winter, CET) and 17 (summer, CEST). Actual: 11 and 16: the summer-time offset is not applied to the hour bucket.
+
+Fixed 2026-10-23 on fix/robin-gaps (#326): the SQLite HOUR bucket with a time zone uses DST-aware UTC offset arms generated from the allowlisted zone.
 <!-- WP-R1 end -->
 <!-- WP-R2 -->
 ### PARITY-GAP-050
@@ -227,11 +231,17 @@ Observed (Robin-100 WP-R2, R78 and R79). Capability: federated join chain. Chann
 ### PARITY-GAP-051
 Observed (Robin-100 v2-11, `Robin_Proactive_NotInWithNullIsEmpty`). Capability: GraphQL `nin` filter with a null list member. Channel: GraphQL on a SQLite source. Input: `where: { region: { nin: ["North", null] } }`. Expected: 200 with zero rows (three-valued logic, as WebSQL `NOT IN ('North', NULL)`). Actual: 200 with rows.
 
+Fixed 2026-10-23 on fix/robin-gaps (#328): a `nin` list with a null member renders `1 = 0` (three-valued logic, never wider).
+
 ### PARITY-GAP-052
 Observed (Robin-100 v2-14, `Robin_318_IntVariablesFirstOffset`, issue #318). Capability: GraphQL `first` / `offset` supplied as `Int` variables. Channel: GraphQL on a SQLite source. Input: `query($f: Int, $o: Int)` with (5, 10), (null, null) and (0, null). Expected: 200 with ids 11-15, ids 1-18 and zero rows. Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED` in all three cases.
 
+Fixed 2026-10-23 on fix/robin-gaps (#318): `first` / `offset` as `Int` variables (null, zero, values) are priced from the coerced runtime value and reach the tree builder; the validation-phase cost rule no longer answers them with QUERY_TOO_COMPLEX.
+
 ### PARITY-GAP-053
 Observed (Robin-100 v2-15, `Robin_319_EmptyLogicalMembers`, issue #319). Capability: GraphQL `or` with an empty object member. Channel: GraphQL on a SQLite source. Input: `where: { or: [{}, { region: { eq: "North" } }] }`. Expected: 200 with all 18 rows (`{}` is true). Actual: 200 with the North rows only.
+
+Fixed 2026-10-23 on fix/robin-gaps (#319): an empty `or` member makes the whole `or` neutral; null members are rejected.
 
 ### PARITY-GAP-054
 Observed (Robin-100 v2-17, `Robin_302_OffsetBoundaryAndFirstZero`, issue #302). Capability: row offset above the cap. Channel: REST on a SQLite source. Input: `offset=10001&limit=10` on `parity_big`. Expected: 400 `INVALID_QUERY`, as on GraphQL. Actual: HTTP 200 with zero rows.
@@ -241,6 +251,8 @@ Observed (Robin-100 v2-10 `Robin_Proactive_TypeMismatchStableCode` and v2-18 `Ro
 
 ### PARITY-GAP-057
 Observed (Robin-100 B3, `Robin_39_PageAboveCapIsRejectedOrSignalled`). Capability: GraphQL page size above the allowed limit. Channel: GraphQL on a SQLite source. Input: `first: 100000` on `parity_big` (v2 B3) and `first: -1` on the sales list (R90, `Robin_Proactive_NegativeLimitRejected`). Expected: `INVALID_QUERY` (`GraphQlTreeBuilder`: "The page size must be between 0 and MaxAllowedLimit"; REST answers `INVALID_QUERY`). Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED` (the sanitizer maps both to the generic validation code, so GRAPHQL_VALIDATION_FAILED is not the designed code for page-size violations; it is only the designed code for type/schema errors such as `first: "10"`).
+
+Fixed 2026-10-23 on fix/robin-gaps (#330): an out-of-range `first` / `offset` is INVALID_QUERY with the fixed page-range message, not a cost error; the production shield passes only that exact constant.
 <!-- WP-V2a end -->
 
 ### Observed server errors and leaks (SEC-PAR-05, not gaps)

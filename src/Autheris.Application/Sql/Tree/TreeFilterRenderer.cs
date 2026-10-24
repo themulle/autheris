@@ -91,7 +91,13 @@ internal static class TreeFilterRenderer
             case TreeFilterOperator.In:
             case TreeFilterOperator.NotIn:
             {
-                var items = ToList(comparison);
+                var items = ToList(comparison, out var hasNull);
+                if (hasNull && comparison.Operator == TreeFilterOperator.NotIn)
+                {
+                    // SEC-RG-16 (#328): x NOT IN (..., NULL) is never true under three-valued logic; fail closed (narrower, never wider).
+                    return "1 = 0";
+                }
+
                 if (items.Count == 0)
                 {
                     return comparison.Operator == TreeFilterOperator.In ? "1 = 0" : "1 = 1";
@@ -164,13 +170,15 @@ internal static class TreeFilterRenderer
     private static string RequireText(TreeComparison comparison) =>
         comparison.Value as string ?? throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' needs a text value.");
 
-    private static List<object?> ToList(TreeComparison comparison)
+    private static List<object?> ToList(TreeComparison comparison, out bool hasNull)
     {
         if (comparison.Value is string || comparison.Value is not IEnumerable enumerable)
         {
             throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' needs a list.");
         }
-        var items = enumerable.Cast<object?>().Where(v => v != null).Distinct().ToList();
+        var all = enumerable.Cast<object?>().ToList();
+        hasNull = all.Any(v => v == null);
+        var items = all.Where(v => v != null).Distinct().ToList();
         if (items.Count > TreeSqlCompiler.MaxInListSize)
         {
             throw new GatewayInvalidQueryException($"A list filter may contain at most {TreeSqlCompiler.MaxInListSize} values.");

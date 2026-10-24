@@ -79,6 +79,20 @@ public class GatewayInvalidQueryException : Exception
     }
 }
 
+/// <summary>
+/// #330 (SEC-RG-07): a page size or offset outside its allowed range. The message is a server constant without caller text; it is the only
+/// message the GraphQL error shield passes through outside Development.
+/// </summary>
+public sealed class GatewayPageRangeException : GatewayInvalidQueryException
+{
+    public const string FixedMessage = "The page size or offset is out of range.";
+
+    public GatewayPageRangeException()
+        : base(FixedMessage, "INVALID_QUERY_OPTION")
+    {
+    }
+}
+
 /// <summary>O10: Too many concurrent reads of the same table by the same user (429 with Retry-After).</summary>
 public sealed class GatewayThrottledException : Exception
 {
