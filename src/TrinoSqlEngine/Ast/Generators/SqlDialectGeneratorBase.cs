@@ -467,13 +467,19 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         builder.Append(')');
     }
 
-    private static string GetJoinTypeKeyword(JoinType type) => type switch
+    /// <summary>
+    /// The keyword of a cross join (comma join or explicit CROSS JOIN). A dialect overrides it when CROSS JOIN carries a planner
+    /// meaning (SQLite pins the join order); the returned text must be a constant.
+    /// </summary>
+    protected virtual string CrossJoinKeyword => "CROSS JOIN";
+
+    private string GetJoinTypeKeyword(JoinType type) => type switch
     {
         JoinType.Inner => "INNER JOIN",
         JoinType.LeftOuter => "LEFT OUTER JOIN",
         JoinType.RightOuter => "RIGHT OUTER JOIN",
         JoinType.FullOuter => "FULL OUTER JOIN",
-        JoinType.Cross => "CROSS JOIN",
+        JoinType.Cross => CrossJoinKeyword,
         JoinType.Natural => "NATURAL JOIN",
         _ => "JOIN"
     };
