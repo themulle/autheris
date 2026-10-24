@@ -3,7 +3,9 @@ using System.Text.Json;
 using Autheris.Api.Middleware;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Tree;
+using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
@@ -334,5 +336,42 @@ public sealed class GraphQlPagingEngineTests
 
         errors.ShouldNotBeEmpty(json);
         _nodes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_11_OrEmptyMember_RowPolicyStillApplied()
+    {
+        // The neutral or leaves no tree filter, but the row policy is added by the compiler outside the user filter.
+        var (json, errors) = await RunAsync("Development", "{ sales_dbo_customers(first: 5, where: { or: [{}, { name: { eq: \"A\" } }] }) { id } }");
+        errors.ShouldBeEmpty(json);
+        var node = _nodes.Single();
+        node.Where.ShouldBeNull();
+
+        var meta = new TableMetadata
+        {
+            Identifier = Customers,
+            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "customers", SourceType = "Sqlite" },
+            PrimaryKeyColumns = ["id"],
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "integer" },
+                new TableColumn { ColumnName = "name", DataType = "text" },
+                new TableColumn { ColumnName = "tenant_id", DataType = "text" }
+            ]
+        };
+        var access = new Dictionary<TableIdentifier, TreeTableAccess>
+        {
+            [Customers] = new(
+                meta,
+                TableAccessDecision.Allowed(Customers, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true),
+                "tenant_id",
+                "tenant-1")
+        };
+
+        var compiled = TreeSqlCompiler.Compile(node, access, Autheris.Domain.Common.DatabaseDialect.Sqlite);
+
+        compiled.Sql.ShouldContain("\"tenant_id\" = ");
+        compiled.Parameters.Values.ShouldContain("tenant-1");
     }
 }

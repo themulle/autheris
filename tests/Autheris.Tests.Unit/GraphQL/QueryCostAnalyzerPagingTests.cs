@@ -164,4 +164,27 @@ public sealed class QueryCostAnalyzerPagingTests
 
         Cost(schema, "{ rows { id } }").ShouldBe(Cost(schema, "{ rows(first: 100) { id } }"));
     }
+
+    [Theory]
+    [InlineData("\"10\"")]
+    [InlineData("true")]
+    [InlineData("[1]")]
+    [InlineData("{ a: 1 }")]
+    [InlineData("ASC")]
+    public async Task NonIntLiteralPageSize_OnACatalogField_IsATypeErrorNotAComplexityError(string literal)
+    {
+        // HotChocolate rejects it during validation, so the type error must not be hidden behind QUERY_TOO_COMPLEX.
+        var schema = await SchemaAsync();
+
+        Cost(schema, "{ rows(first: " + literal + ") { id } }").ShouldBe(Cost(schema, "{ rows(first: 0) { id } }"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_05_NonIntLiteralPageSize_OnAnotherField_KeepsTheWorstCase()
+    {
+        var schema = await SchemaAsync();
+
+        Cost(schema, "{ plain(first: \"10\") { id } }").ShouldBe(Cost(schema, "{ plain(first: 1000) { id } }"));
+    }
 }

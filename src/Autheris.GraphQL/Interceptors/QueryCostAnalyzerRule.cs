@@ -436,6 +436,14 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                 break;
                             }
 
+                            if (treeField && arg.Value is not (IntValueNode or VariableNode or NullValueNode))
+                            {
+                                // A non-Int literal (string, boolean, enum, list, object) is a type error HotChocolate rejects during
+                                // validation; it never executes, so it is priced minimal and the type error is what the caller sees.
+                                rejectedAtExecution = true;
+                                break;
+                            }
+
                             if (arg.Value is IntValueNode intVal)
                             {
                                 if (long.TryParse(intVal.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var literal))
