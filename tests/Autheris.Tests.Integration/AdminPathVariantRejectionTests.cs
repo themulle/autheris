@@ -2,6 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -53,18 +54,19 @@ public sealed class AdminPathVariantRejectionTests : IClassFixture<WebApplicatio
     {
         using var anonymous = CreateClient(null);
         using var nonAdmin = CreateClient("User");
-        using var admin = CreateClient("ClusterAdmin", "trusted-documents:read");
+        using var admin = CreateClient("ClusterAdmin", "trusted-documents:write");
 
         using var anonymousResponse = await anonymous.GetAsync("/api/admin/trusted-documents/app-1");
         using var nonAdminResponse = await nonAdmin.GetAsync("/api/admin/trusted-documents/app-1");
-        using var adminResponse = await admin.GetAsync("/api/admin/trusted-documents/app-1");
-
         ((int)anonymousResponse.StatusCode).ShouldBe(401);
         ((int)nonAdminResponse.StatusCode).ShouldBe(403);
-        // Positive control: the route is mapped, so the 401/403 above and the variant rejections below are not a blanket 404.
-        ((int)adminResponse.StatusCode).ShouldNotBe(404);
-        ((int)adminResponse.StatusCode).ShouldNotBe(401);
-        ((int)adminResponse.StatusCode).ShouldNotBe(403);
+
+        // Positive control: seed the app so GET cannot answer 404 for a missing app; 200/200 proves the routes are mapped.
+        var body = new { hashes = new[] { new string('a', 64) }, allowedOrigins = new[] { "https://shop.example.com" } };
+        using var put = await admin.PutAsJsonAsync("/api/admin/trusted-documents/app-1/1.0", body);
+        ((int)put.StatusCode).ShouldBe(200);
+        using var get = await admin.GetAsync("/api/admin/trusted-documents/app-1");
+        ((int)get.StatusCode).ShouldBe(200);
     }
 
     [Theory]
