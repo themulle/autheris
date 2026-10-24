@@ -156,3 +156,15 @@ Reviewer: csharp-security-expert, 2026-10-23. Verdict: **APPROVED WITH CONDITION
 - `DatasetDataEndpointsTests.PolicyViolation_NotRemappedToInvalidQuery` (SEC-RG-14)
 - `CrossSourcePlannerTests.JoinChainSameNameDifferentSource_DistinctAndPolicyChecked` (SEC-RG-15)
 - `TreeFilterRendererTests.NotInWithNull_RendersFalse` (SEC-RG-16)
+
+## 6. Changelog
+
+- 2026-10-23 (WP-S, G-PLAN-REBASE): code facts re-checked against `fix/robin-gaps-s`; drift and decisions:
+  - S1: the single-catalog variant does not go through `CrossSourceQueryRouter`. `GovernedSqlRewriter` (single catalog, `ResolveAllowedDataSource`) threw the plain `WebSqlPolicyException`. Fix applied there too: new non-throwing `SqlDataSourceResolver.TryResolveAllowedDataSource`, denial is `WebSqlTableDeniedException`. `GovernedSqlExecutor` (explicit request data source name, not table text) is unchanged.
+  - S2: the provider classification (SEC-RG-03) lives in `DmlErrorSanitizer.Map` (provider code or SQLSTATE per dialect, message token only for SQLite, DuckDB and Databricks, which have no number); the mapper maps the resulting `SQL_SYNTAX_ERROR` governed code to 400. PARITY-FU-003 is reduced to container-dialect confirmation. A cell `Robin_Proactive_SetOperations|WebSql|wildcard_mismatch` was added (SEC-RG-03 mandatory).
+  - S3: `WindowColumnReferences` is a new init property of `SqlQueryMetadata`; `QueryAnalysisService` and `CrossSourcePlanner` (staging projection) read it next to `FilterColumnReferences`. A masked window column answers `AGGREGATION_ON_MASKED_COLUMN`; a denied one keeps the existing filter-style denial (`WebSqlRedactedPredicateGuardrailTests` pins that message; it was not changed).
+  - S4: a second defect hid behind the first: `FederatedStagingService` passed the subtree SELECT as `PushdownFilterSql`, which the connector predicate validation always rejected (400 `SQL_SYNTAX_ERROR`). The subtree SQL now travels only in `Items["SubtreeSql"]`/`["SubtreePlan"]` and runs through the governed pipeline. The planner match uses table name, schema/catalog qualifier and alias, one member per source.
+  - S6: the escape character is `!`, not a backslash: the SQL token policy rejects every backslash in a string literal (`RejectBackslashInStrings`), so `ESCAPE '\'` is never executable. `escape` is not added to `ReservedKeywords` (a column of that name would escape the masked-column extraction); the keyword is skipped only right after a string literal. The column extraction runs on the rewritten text so `startswith`/`contains` are not taken for columns.
+  - S7: `BoundaryOracle` (Parity) expects `IS NULL` semantics for the Rest `eq null` cells (contract change per section 3; the plan had not listed the Boundary sweep).
+  - S8: a separate catch answers a mapped `SQL_SYNTAX_ERROR` as 400 `INVALID_QUERY`; every other mapped code is unchanged.
+  - The four "intentional red" cells (Robin_30 join and single, SetOperations mismatch, RowNumber masked) already asserted the fixed behaviour; no expectation was edited, they pass now.

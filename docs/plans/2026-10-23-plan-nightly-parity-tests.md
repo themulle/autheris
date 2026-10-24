@@ -210,8 +210,12 @@ Fixed 2026-10-23 on fix/parity-gaps (#311): left and right are removed from the 
 ### PARITY-GAP-030
 Observed (Robin WP-R1, R61 `Robin_Proactive_LikePrefix`). Capability: REST filter translator, OData `startswith` function syntax (the translator accepts `like`, which passes). Channel: REST on a SQLite source. Input: `GET /api/v1/data/default/main/parity_sales?select=id&filter=startswith(note,'emoji')&orderBy=id&limit=100`. Expected: 200 with the single row whose note starts with `emoji`, as on WebSQL and GraphQL. Actual: 400 `INVALID_QUERY`.
 
+Fixed 2026-10-23 on fix/robin-gaps (#323): REST `startswith`, `endswith` and `contains` are rewritten to an escaped `LIKE ... ESCAPE '!'` (a backslash cannot be the escape character: the SQL token policy rejects it in every literal).
+
 ### PARITY-GAP-033
 Observed (Robin WP-R1, R49 `Robin_Proactive_IsNullAmount`, R50 `Robin_Proactive_IsNotNullRegion`, R55 `Robin_Proactive_NullBoolIsReturn`). Capability: REST filter translator, `eq null` / `ne null` syntax (the translator accepts `is null` / `is not null`, which pass). Channel: REST on a SQLite source. Input: `filter=amount eq null`, `filter=region ne null`, `filter=is_return eq null`. Expected: 200 with the rows where the column is NULL (or NOT NULL), as on WebSQL (`IS NULL`) and GraphQL (`isNull`). Actual: 200 with zero rows in all three cases.
+
+Fixed 2026-10-23 on fix/robin-gaps (#324): REST `eq null` / `ne null` are `IS NULL` / `IS NOT NULL`; the Boundary oracle expects that for the Rest channel (WebSQL and GraphQL keep the three-valued `eq: null`, #300).
 
 ### PARITY-GAP-034
 Observed (Robin WP-R1, R41 `Robin_Proactive_GroupByQuarter`). Capability: GraphQL `QUARTER` time bucket. Channel: GraphQL on a SQLite source. Input: `timeBuckets: [{ column: sale_date, bucket: QUARTER }]` with a COUNT aggregate. Expected: 8 groups keyed by the first day of the quarter. Actual: HTTP 200 with GraphQL error `AGGREGATION_RESULT_TYPE_MISMATCH`, no data.
@@ -222,6 +226,8 @@ Observed (Robin WP-R1, R44 `Robin_130_HourBucketBerlinWinterSummer`). Capability
 <!-- WP-R2 -->
 ### PARITY-GAP-050
 Observed (Robin-100 WP-R2, R78 and R79). Capability: federated join chain. Channel: WebSQL. Input: a join of a default-source table to a default-source dimension table followed by a join to the `second` source (`a JOIN default.main.parity_regions r ON ... JOIN second.main.parity_sales b ON ...`). Expected: 200 with the four overlapping rows. Actual: 400 `SQL_SYNTAX_ERROR`. The same chain with the `second` join first and the default-source dimension join last returns 200 with the four rows.
+
+Fixed 2026-10-23 on fix/robin-gaps (#327): same-source subtrees are matched on the qualified table identity and alias, and a subtree read no longer passes its SELECT as a connector predicate filter.
 
 <!-- WP-V2a begin -->
 ### PARITY-GAP-051
@@ -236,8 +242,12 @@ Observed (Robin-100 v2-15, `Robin_319_EmptyLogicalMembers`, issue #319). Capabil
 ### PARITY-GAP-054
 Observed (Robin-100 v2-17, `Robin_302_OffsetBoundaryAndFirstZero`, issue #302). Capability: row offset above the cap. Channel: REST on a SQLite source. Input: `offset=10001&limit=10` on `parity_big`. Expected: 400 `INVALID_QUERY`, as on GraphQL. Actual: HTTP 200 with zero rows.
 
+Fixed 2026-10-23 on fix/robin-gaps (#302, REST part): the REST offset cap defaults to 10000 (equal to the GraphQL cap) and the setting must be 1-10000000. The GraphQL part is WP-G.
+
 ### PARITY-GAP-056
 Observed (Robin-100 v2-10 `Robin_Proactive_TypeMismatchStableCode` and v2-18 `Robin_Proactive_MalformedFilterStableCode`). Capability: stable code for a malformed REST filter (same root cause, cf. #313). Channel: REST on a SQLite source. Input: `filter=region eq` (dangling operator) and `filter=(region eq 'North'` (unbalanced parenthesis). Expected: 400 `INVALID_QUERY` (as for `nope(region)` and for REST paging). Actual: 400 `SQL_SYNTAX_ERROR`.
+
+Fixed 2026-10-23 on fix/robin-gaps (#329): a REST filter that fails the parser answers 400 `INVALID_QUERY` with the fixed message (REST never answers `SQL_SYNTAX_ERROR`).
 
 ### PARITY-GAP-057
 Observed (Robin-100 B3, `Robin_39_PageAboveCapIsRejectedOrSignalled`). Capability: GraphQL page size above the allowed limit. Channel: GraphQL on a SQLite source. Input: `first: 100000` on `parity_big` (v2 B3) and `first: -1` on the sales list (R90, `Robin_Proactive_NegativeLimitRejected`). Expected: `INVALID_QUERY` (`GraphQlTreeBuilder`: "The page size must be between 0 and MaxAllowedLimit"; REST answers `INVALID_QUERY`). Actual: HTTP 400 `GRAPHQL_VALIDATION_FAILED` (the sanitizer maps both to the generic validation code, so GRAPHQL_VALIDATION_FAILED is not the designed code for page-size violations; it is only the designed code for type/schema errors such as `first: "10"`).
@@ -265,6 +275,10 @@ MCP channel driver. The 36 MCP cells of the capability x channel matrix are `Pen
 ### PARITY-FU-002
 
 Mutations and subscriptions of the GraphQL schema are not swept by block F (WP6): a mutation changes the shared seed and a subscription needs a transport. The sweep reports their count (9 mutations, 1 subscription on the parity host). Work: call each mutation against an isolated copy of the seed (own host fixture per mutation class) with generated minimal values and assert success or a stable 4xx; drive the subscription over the websocket transport.
+
+### PARITY-FU-003
+
+Provider message variants of the set-operation column-count error (reduced from "wildcard operands"). #321 rejects a set operation with unequal column counts in the AST and classifies the provider error by code (SQL Server 205, Oracle ORA-01789, PostgreSQL SQLSTATE 42601, SQLite, DuckDB and Databricks message tokens), so a `*` operand answers 400 `SQL_SYNTAX_ERROR` instead of 502. Work: a container-dialect cell (`wildcard_mismatch` on PostgreSQL, SQL Server, Oracle) confirming each provider code; a code the classifier does not know stays the sanitized 502.
 
 ## 6. Changelog
 
