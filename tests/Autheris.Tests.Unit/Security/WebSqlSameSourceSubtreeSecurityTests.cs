@@ -530,4 +530,55 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         synthCols.ShouldContain("id");
         synthCols.ShouldContain("item_name");
     }
+
+    /// <summary>
+    /// #327: the session of a subtree read passes the connector's policy evaluator (the subtree SELECT is not a predicate), and the subtree
+    /// statement still travels with the session.
+    /// </summary>
+    [Fact]
+    public async Task SubtreeSession_PassesConnectorSecurityPolicy_AndCarriesTheSubtreeSql()
+    {
+        var sql = "SELECT o.id, oi.item_name FROM pg.public.orders o " +
+                  "JOIN pg.public.order_items oi ON o.id = oi.order_id " +
+                  "JOIN ms.dbo.shipments s ON o.id = s.id";
+        var metadata = Engine.Analyze(sql.AsMemory());
+        var orderMeta = CreateTable("pg", "public", "orders", DataSourceType.Sql, ["id"], DatabaseDialect.PostgreSql);
+        var itemMeta = CreateTable("pg", "public", "order_items", DataSourceType.Sql, ["id", "order_id", "item_name"], DatabaseDialect.PostgreSql);
+        var shipMeta = CreateTable("ms", "dbo", "shipments", DataSourceType.Sql, ["id"], DatabaseDialect.SqlServer);
+        var tables = new List<ResolvedSourceTable>
+        {
+            new(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "pg"),
+            new(metadata.ReferencedTables[1], itemMeta.Identifier, itemMeta, "pg"),
+            new(metadata.ReferencedTables[2], shipMeta.Identifier, shipMeta, "ms")
+        };
+        var decisions = tables.ToDictionary(
+            t => t.Metadata.Identifier,
+            t => TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true },
+            Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
+        var subtreeRequest = plan.StagingRequests.Single(r => r.Subtree != null);
+
+        ConnectorSessionContext? captured = null;
+        var connector = Substitute.For<IAutherisConnector>();
+        var splitManager = Substitute.For<IConnectorSplitManager>();
+        var recordSource = Substitute.For<IConnectorRecordSource>();
+        connector.SplitManager.Returns(splitManager);
+        connector.RecordSource.Returns(recordSource);
+        splitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns([ConnectorSplit.Default("split-1")]);
+        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Do<ConnectorSessionContext>(s => captured = s), Arg.Any<CancellationToken>())
+            .Returns(new List<IReadOnlyDictionary<string, object?>>());
+        var registry = Substitute.For<IAutherisConnectorRegistry>();
+        registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!)
+            .Returns(x => { x[1] = connector; return true; });
+        var stagingService = new FederatedStagingService(registry, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IAuditLogRepository>(),
+            Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance);
+
+        await stagingService.StageAsync([subtreeRequest], CreateUser(), new TenantId(Tenant), CreateBudget(maxRows: 100));
+
+        captured.ShouldNotBeNull();
+        Autheris.Application.Connectors.ConnectorSecurityPolicyEvaluator.EnforceSecurityPolicy(captured!, subtreeRequest.Subtree!.SyntheticMetadata);
+        captured!.Items["SubtreeSql"].ShouldBe(subtreeRequest.Subtree!.Compiled.Sql);
+        captured.Items.ShouldContainKey("SubtreePlan");
+    }
 }

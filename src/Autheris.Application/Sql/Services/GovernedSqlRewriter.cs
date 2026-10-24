@@ -340,7 +340,12 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         else if (distinctCatalogs.Count == 1)
         {
-            effectiveDataSourceName = _dataSourceResolver.ResolveAllowedDataSource(distinctCatalogs[0], tenantId);
+            // #320 (SEC-RG-01): a catalog the caller may not use answers like an unknown table (SQL_POLICY_DENIED), before any metadata lookup.
+            if (!_dataSourceResolver.TryResolveAllowedDataSource(distinctCatalogs[0], tenantId, out effectiveDataSourceName!))
+            {
+                var catalogTarget = metadata.ReferencedTables.First(t => string.Equals(t.Catalog, distinctCatalogs[0], StringComparison.OrdinalIgnoreCase));
+                throw SqlDataSourceResolver.TableDenied(catalogTarget);
+            }
         }
         else
         {
@@ -603,12 +608,21 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                             $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
                     }
 
+                    // #322 (SEC-RG-04): same window decision as the executor guard (masked: window code; denied: filter-style denial).
+                    bool isUsedInWindow = metadata.WindowColumnReferences is { Count: > 0 } windowRefs &&
+                        windowRefs.Any(wc => SqlDataSourceResolver.ReferencesColumn(wc.TableOrAlias, wc.ColumnName, col.ColumnName, target));
+                    if (isUsedInWindow && lvl == ColumnAccessLevel.Mask)
+                    {
+                        throw new MaskedAggregationException();
+                    }
+
                     bool isUsedInFilter = false;
                     if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
                     {
                         isUsedInFilter = metadata.FilterColumnReferences.Any(fc => SqlDataSourceResolver.ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
                     }
 
+                    isUsedInFilter |= isUsedInWindow;
                     if (isUsedInFilter)
                     {
                         string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)

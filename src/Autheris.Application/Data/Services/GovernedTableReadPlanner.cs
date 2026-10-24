@@ -570,7 +570,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         }
     }
 
-    private static (string SelectExpr, string GroupByExpr) BuildTimeBucketExpression(
+    internal static (string SelectExpr, string GroupByExpr) BuildTimeBucketExpression(
         string columnName,
         TimeBucketSpecification spec,
         DatabaseDialect dialect)
@@ -618,37 +618,24 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             }
             case DatabaseDialect.Sqlite:
             {
-                string fmt = unit switch
-                {
-                    "hour" => "%Y-%m-%d %H:00:00",
-                    "day" => "%Y-%m-%d",
-                    "week" => "%Y-%W",
-                    "month" => "%Y-%m-01",
-                    "quarter" => "%Y-m",
-                    "year" => "%Y-01-01",
-                    _ => "%Y-%m-%d"
-                };
+                // #326 (SEC-RG-12): the local time is the UTC value shifted by the zone's offset at that instant; the offset arms are generated
+                // from an allowlisted zone only (SqliteZoneOffsetTable), never from caller text.
+                string utc = $"datetime({quotedCol})";
+                string local = string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase)
+                    ? utc
+                    : $"datetime({quotedCol}, {SqliteZoneOffsetTable.OffsetModifier(timeZone, utc)})";
 
-                string expr;
-                if (string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase))
+                string expr = unit switch
                 {
-                    expr = $"strftime('{fmt}', datetime({quotedCol}))";
-                }
-                else
-                {
-                    TimeSpan offset = TimeSpan.Zero;
-                    try
-                    {
-                        var tzi = TimeZoneInfo.FindSystemTimeZoneById(timeZone);
-                        offset = tzi.BaseUtcOffset;
-                    }
-                    catch
-                    {
-                        // Fallback
-                    }
-                    var offsetStr = (offset >= TimeSpan.Zero ? "+" : "-") + offset.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
-                    expr = $"strftime('{fmt}', datetime({quotedCol}, '{offsetStr}'))";
-                }
+                    "hour" => $"strftime('%Y-%m-%d %H:00:00', {local})",
+                    "day" => $"strftime('%Y-%m-%d', {local})",
+                    "week" => $"strftime('%Y-%W', {local})",
+                    "month" => $"strftime('%Y-%m-01', {local})",
+                    // #325: the first day of the quarter, in the same key shape as MONTH.
+                    "quarter" => $"date({local}, 'start of month', CASE WHEN strftime('%m', {local}) IN ('02', '05', '08', '11') THEN '-1 months' WHEN strftime('%m', {local}) IN ('03', '06', '09', '12') THEN '-2 months' ELSE '-0 months' END)",
+                    "year" => $"strftime('%Y-01-01', {local})",
+                    _ => $"strftime('%Y-%m-%d', {local})"
+                };
                 return ($"{expr} AS {quotedCol}", expr);
             }
             default:

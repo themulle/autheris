@@ -100,16 +100,18 @@ public sealed class GraphQlTreeBuilderNullTests
     }
 
     [Fact]
-    public void NotInList_OnlyNull_IsAlwaysTrue_AndDropsNullItems()
+    [Trait("Category", "Security")]
+    public void NotInList_WithNull_IsNeverTrue()
     {
+        // #328 (SEC-RG-16): x NOT IN (a, NULL) is never true in three-valued logic, so a list with a null renders no rows (it used to drop the null).
         var onlyNull = TreeFilterClauseBuilder.Build(
             new TreeComparison("action", TreeFilterOperator.NotIn, new List<object?> { null }), Resolve);
-        onlyNull.SqlPredicate.ShouldBe("1 = 1");
+        onlyNull.SqlPredicate.ShouldBe("1 = 0");
 
         var mixed = TreeFilterClauseBuilder.Build(
             new TreeComparison("action", TreeFilterOperator.NotIn, new List<object?> { "a", null }), Resolve);
-        mixed.SqlPredicate.ShouldContain("NOT IN (@__gql_tf_0)");
-        mixed.Parameters.Values.ShouldBe(["a"]);
+        mixed.SqlPredicate.ShouldBe("1 = 0");
+        mixed.Parameters.ShouldBeEmpty();
     }
 
     [Fact]

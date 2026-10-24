@@ -385,7 +385,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
                 if (IsReferenced(statementColumns, col.ColumnName, t.Target) ||
                     (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Any(jc => GovernedSqlExecutionService.ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, t.Target))) ||
-                    (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Any(fc => GovernedSqlExecutionService.ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, t.Target))))
+                    (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Any(fc => GovernedSqlExecutionService.ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, t.Target))) ||
+                    (metadata.WindowColumnReferences != null && metadata.WindowColumnReferences.Any(wc => GovernedSqlExecutionService.ReferencesColumn(wc.TableOrAlias, wc.ColumnName, col.ColumnName, t.Target))))
                 {
                     projected.Add(col.ColumnName);
                 }
@@ -621,24 +622,78 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             return base.VisitJoinedTableSource(node);
         }
 
+        /// <summary>
+        /// #327 / SEC-RG-15: a join node is a subtree only when its table sources are exactly the members of the plan. Each source is matched
+        /// on its qualified identity (catalog, schema, table) and alias, one member per source, never on the last name part alone: in
+        /// <c>((a JOIN r) JOIN b)</c> with <c>a</c> and <c>b</c> both named <c>parity_sales</c> the outer node holds one more source than the
+        /// subtree <c>{a, r}</c> and must not be replaced by it.
+        /// </summary>
         private static bool MatchesSubtree(TableSource node, SubtreeExecutionPlan plan)
         {
-            var tableNamesInNode = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            CollectTableNames(node, tableNamesInNode);
-            var memberNames = new HashSet<string>(plan.MemberTables.Select(m => m.Target.TableName), StringComparer.OrdinalIgnoreCase);
-            return tableNamesInNode.Count > 0 && tableNamesInNode.SetEquals(memberNames);
+            var sources = new List<NamedTableSource>();
+            CollectTableSources(node, sources);
+            if (sources.Count == 0 || sources.Count != plan.MemberTables.Count)
+            {
+                return false;
+            }
+
+            var used = new bool[plan.MemberTables.Count];
+            foreach (var source in sources)
+            {
+                bool matched = false;
+                for (int i = 0; i < used.Length; i++)
+                {
+                    if (!used[i] && IsSameTable(source, plan.MemberTables[i].Target))
+                    {
+                        used[i] = true;
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if (!matched)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
-        private static void CollectTableNames(TableSource source, HashSet<string> names)
+        private static bool IsSameTable(NamedTableSource source, TableAccessTarget target)
+        {
+            var parts = source.Name.Parts;
+            if (!string.Equals(parts[^1].Value, target.TableName, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!string.Equals(source.Alias?.Value, target.Alias, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // A qualifier the statement wrote must agree with the resolved target (same name in another schema or source is a different table).
+            if (parts.Count >= 2 && !string.IsNullOrEmpty(target.Schema) &&
+                !string.Equals(parts[^2].Value, target.Schema, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return parts.Count < 3 || string.IsNullOrEmpty(target.Catalog) ||
+                   string.Equals(parts[^3].Value, target.Catalog, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void CollectTableSources(TableSource source, List<NamedTableSource> sources)
         {
             if (source is NamedTableSource named)
             {
-                names.Add(named.Name.Parts[^1].Value);
+                sources.Add(named);
             }
             else if (source is JoinedTableSource joined)
             {
-                CollectTableNames(joined.Left, names);
-                CollectTableNames(joined.Right, names);
+                CollectTableSources(joined.Left, sources);
+                CollectTableSources(joined.Right, sources);
             }
         }
 

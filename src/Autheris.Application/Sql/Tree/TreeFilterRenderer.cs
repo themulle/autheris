@@ -33,7 +33,7 @@ internal interface ITreeFilterTarget
 /// </summary>
 internal static class TreeFilterRenderer
 {
-    public static string Render(TreeFilter filter, ITreeFilterTarget target, int depth = 0)
+    public static string Render(TreeFilter filter, ITreeFilterTarget target, int depth = 0, bool negated = false)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(target);
@@ -48,21 +48,21 @@ internal static class TreeFilterRenderer
             case TreeAndFilter and:
                 return and.Items.Count == 0
                     ? "1 = 1"
-                    : "(" + string.Join(" AND ", and.Items.Select(i => Render(i, target, depth + 1))) + ")";
+                    : "(" + string.Join(" AND ", and.Items.Select(i => Render(i, target, depth + 1, negated))) + ")";
             case TreeOrFilter or:
                 return or.Items.Count == 0
                     ? "1 = 0"
-                    : "(" + string.Join(" OR ", or.Items.Select(i => Render(i, target, depth + 1))) + ")";
+                    : "(" + string.Join(" OR ", or.Items.Select(i => Render(i, target, depth + 1, negated))) + ")";
             case TreeNotFilter not:
-                return "NOT (" + Render(not.Item, target, depth + 1) + ")";
+                return "NOT (" + Render(not.Item, target, depth + 1, !negated) + ")";
             case TreeComparison comparison:
-                return RenderComparison(comparison, target);
+                return RenderComparison(comparison, target, negated);
             default:
                 throw new GatewayInvalidQueryException("Unsupported filter.");
         }
     }
 
-    private static string RenderComparison(TreeComparison comparison, ITreeFilterTarget target)
+    private static string RenderComparison(TreeComparison comparison, ITreeFilterTarget target, bool negated)
     {
         var column = target.Column(comparison.Column);
         var value = comparison.Value;
@@ -91,7 +91,30 @@ internal static class TreeFilterRenderer
             case TreeFilterOperator.In:
             case TreeFilterOperator.NotIn:
             {
-                var items = ToList(comparison);
+                var items = ToList(comparison, out var hasNull);
+                if (hasNull)
+                {
+                    // SEC-RG-16 (#328): x NOT IN (..., NULL) is never true under three-valued logic, and x IN (..., NULL) is true or unknown. Under an
+                    // odd number of enclosing NOTs the term is rendered so that its negation is that same never-wider answer: the negated NOT IN
+                    // keeps its matches (NOT (x IN (...))), the negated IN is true so that its NOT is false.
+                    if (comparison.Operator == TreeFilterOperator.NotIn)
+                    {
+                        if (!negated)
+                        {
+                            return "1 = 0";
+                        }
+
+                        return items.Count == 0
+                            ? "1 = 1"
+                            : $"NOT ({column} IN ({string.Join(", ", items.Select(target.AddParameter))}))";
+                    }
+
+                    if (negated)
+                    {
+                        return "1 = 1";
+                    }
+                }
+
                 if (items.Count == 0)
                 {
                     return comparison.Operator == TreeFilterOperator.In ? "1 = 0" : "1 = 1";
@@ -164,13 +187,15 @@ internal static class TreeFilterRenderer
     private static string RequireText(TreeComparison comparison) =>
         comparison.Value as string ?? throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' needs a text value.");
 
-    private static List<object?> ToList(TreeComparison comparison)
+    private static List<object?> ToList(TreeComparison comparison, out bool hasNull)
     {
         if (comparison.Value is string || comparison.Value is not IEnumerable enumerable)
         {
             throw new GatewayInvalidQueryException($"The operator '{comparison.Operator}' needs a list.");
         }
-        var items = enumerable.Cast<object?>().Where(v => v != null).Distinct().ToList();
+        var all = enumerable.Cast<object?>().ToList();
+        hasNull = all.Any(v => v == null);
+        var items = all.Where(v => v != null).Distinct().ToList();
         if (items.Count > TreeSqlCompiler.MaxInListSize)
         {
             throw new GatewayInvalidQueryException($"A list filter may contain at most {TreeSqlCompiler.MaxInListSize} values.");

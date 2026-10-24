@@ -8,6 +8,14 @@ public static class RobinKnownGaps
 {
     private static readonly IReadOnlyDictionary<string, string> Gaps = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        // --- WP-R1 ---
+        // --- end WP-R1 ---
+        // --- WP-R2 ---
+        // --- end WP-R2 ---
+        // --- WP-V2a ---
+        // --- end WP-V2a ---
+        // --- WP-V2b ---
+        // --- end WP-V2b ---
     };
 
     public static string? For(string caseMethod, string channel, string? variant) =>

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Autheris.Domain.Exceptions;
 using HotChocolate;
 using HotChocolate.Execution;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +41,14 @@ public sealed class GraphQlEnumerationShieldMiddleware
 
     private static bool IsStructuralLimitError(IError error) =>
         IsDepthError(error) || string.Equals(error.Code, ComplexCode, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// #330 (SEC-RG-08/09): the one resolver error that is not shielded outside Development, because it carries no schema information:
+    /// code <c>INVALID_QUERY</c> with exactly the fixed page-range message (ordinal compare) of <see cref="GatewayPageRangeException"/>.
+    /// </summary>
+    internal static bool IsPageRangeError(IError error) =>
+        string.Equals(error.Code, Code, StringComparison.Ordinal)
+        && string.Equals(error.Message, GatewayPageRangeException.FixedMessage, StringComparison.Ordinal);
 
     private readonly RequestDelegate _next;
 
@@ -86,6 +95,19 @@ public sealed class GraphQlEnumerationShieldMiddleware
             var data = result.ContextData;
             await result.DisposeAsync().ConfigureAwait(false);
             context.Result = new OperationResult(limits.ToImmutableList()) { ContextData = data };
+            return;
+        }
+
+        // #330: a result whose every error is the page-range error answers that one fixed error (no path, locations or extensions) in
+        // every environment; the table was authorized before it was raised. A mixed result (any other error) is shielded as before.
+        if (!validationFailed && errors.All(IsPageRangeError))
+        {
+            await result.DisposeAsync().ConfigureAwait(false);
+            context.Result = new OperationResult(ImmutableList.Create(
+                ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode(Code).Build()))
+            {
+                ContextData = ImmutableDictionary<string, object?>.Empty.Add(ExecutionContextData.ValidationErrors, true)
+            };
             return;
         }
 
