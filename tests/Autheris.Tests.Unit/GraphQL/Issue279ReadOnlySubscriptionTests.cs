@@ -16,6 +16,7 @@ using HotChocolate.Language;
 using HotChocolate.Types;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -53,6 +54,9 @@ public sealed class Issue279ReadOnlySubscriptionTests
             throw new InvalidOperationException("resolver must not run");
         }
     }
+
+    // Hot Chocolate emits no error code for an operation type the schema does not define; the generic message is pinned instead (SEC-279-A1).
+    private const string UnsupportedOperationMessage = "This GraphQL schema does not support `Subscription` operations.";
 
     private static ClaimsPrincipal Principal(bool readOnly, string? scope = null)
     {
@@ -250,6 +254,7 @@ public sealed class Issue279ReadOnlySubscriptionTests
             var or = r.ShouldBeOfType<OperationResult>();
             or.Errors.ShouldNotBeNull();
             or.Errors.ShouldNotBeEmpty();
+            or.Errors[0].Message.ShouldBe(UnsupportedOperationMessage);
         }
         S.Calls.ShouldBe(0);
     }
@@ -272,6 +277,39 @@ public sealed class Issue279ReadOnlySubscriptionTests
         ex.Schema.SubscriptionType.ShouldNotBeNull();
         ShouldBeRejected(await RunAsync(ex, "mutation { touch }", Principal(true)));
         M.Calls.ShouldBe(0);
+    }
+
+    private static async Task<(bool Accepted, string? Message)> ConnectInitAsync(Microsoft.AspNetCore.Http.DefaultHttpContext http)
+    {
+        var session = NSubstitute.Substitute.For<HotChocolate.AspNetCore.Subscriptions.ISocketSession>();
+        session.Connection.HttpContext.Returns(http);
+        using var doc = System.Text.Json.JsonDocument.Parse("{}");
+        var payload = NSubstitute.Substitute.For<HotChocolate.AspNetCore.Subscriptions.Protocols.IOperationMessagePayload>();
+        payload.Payload.Returns(doc.RootElement.Clone());
+        var interceptor = new WebSocketAuthInterceptor(Microsoft.Extensions.Logging.Abstractions.NullLogger<WebSocketAuthInterceptor>.Instance);
+        var status = await interceptor.OnConnectAsync(session, payload);
+        return (status.Accepted, status.Message);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Subscriptions_Disabled_ConnectionInit_NoToken_Unauthenticated_Rejected()
+    {
+        // SEC-279-A2: the interceptor is mode independent; an anonymous connection_init without token is rejected.
+        var result = await ConnectInitAsync(new Microsoft.AspNetCore.Http.DefaultHttpContext());
+        result.Accepted.ShouldBeFalse();
+        result.Message.ShouldBe("Unauthorized connection_init payload");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Subscriptions_Disabled_ConnectionInit_OriginPresent_AmbientCredentialsNoToken_Rejected()
+    {
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "u1")], "Cookie"));
+        http.Request.Headers["Origin"] = "https://evil.example";
+        var result = await ConnectInitAsync(http);
+        result.Accepted.ShouldBeFalse(); // SEC-279-A2
     }
 
     [Fact]
@@ -383,7 +421,7 @@ public sealed class Issue279ReadOnlySubscriptionTests
         var r = (OperationResult)await ex.ExecuteAsync("subscription { onTick }");
         r.Errors.ShouldNotBeNull();
         r.Errors.ShouldNotBeEmpty();
-        r.Errors[0].Code.ShouldNotBe("READ_ONLY_TOKEN");
+        r.Errors[0].Message.ShouldBe(UnsupportedOperationMessage);
         S.Calls.ShouldBe(0);
         // SEC-279-A1: generic Hot Chocolate text only, no config key or internal names.
         var text = string.Join(" | ", r.Errors.Select(e => e.Message + e.Code));

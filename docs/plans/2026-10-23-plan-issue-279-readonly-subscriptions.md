@@ -152,3 +152,10 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - `Subscriptions_Disabled_WebSocketSubscribe_ErrorFrame_NoSubscriptionCreated` (graphql-transport-ws via host or interceptor-level with executor lacking the type; unauthenticated `connection_init` still rejected).
 - `Subscriptions_Disabled_Introspection_SubscriptionTypeNull`.
 - `Subscriptions_Enabled_ReadOnlyToken_Mutation_ReturnsReadOnlyTokenCode` (regression for #288 with `Enabled=true`).
+
+### Phase 4 deviations (WP-279-A, 2026-10-24)
+
+- `Subscriptions_Disabled_GetSseAndWebSocketSubscribe_RejectedByValidation_NoSubscriptionCreated` is an executor-level test. GET, SSE and graphql-transport-ws `subscribe` all run the same executor, and no host or WebSocket client exists in `tests/`. The HTTP POST mandatory test and the HTTP GET/SSE test share this executor-level coverage.
+- Mandatory test names were merged or renamed: `Subscriptions_Disabled_Introspection_SubscriptionTypeNull` is `AddGatewaySubscriptions_DefaultOptions_SchemaHasNoSubscriptionType_AndIntrospectionSubscriptionTypeNull`; `Subscriptions_DefaultOptions_EnabledIsFalse` is split into the defaults, section-absent, empty-value (startup fails) and `AppSettings_GraphQLSubscriptionsEnabled_IsFalse` tests; `Subscriptions_InvalidBool_FailsStartup_NotEnabled` is the existing `GraphQLSubscriptionOptions_InvalidBool_FailsStartup`; the pre-existing `Subscriptions_Disabled_WebSocketAuthInterceptor_StillRegistered` is kept.
+- Final state of the Hot Chocolate pin: the validation error carries no `Code` (null), so the tests pin the generic message "This GraphQL schema does not support `Subscription` operations." instead of a code.
+- SEC-279-A2 connection_init: `Subscriptions_Disabled_ConnectionInit_NoToken_Unauthenticated_Rejected` and `Subscriptions_Disabled_ConnectionInit_OriginPresent_AmbientCredentialsNoToken_Rejected` use the real `WebSocketAuthInterceptor`.
