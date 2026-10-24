@@ -156,19 +156,52 @@ if command -v helm >/dev/null 2>&1; then
         FAILURES=$((FAILURES + 1))
     fi
 
-    # Admin API exposure (issue #281): the default ingress must deny /api/admin; the opt-out must remove the rule.
+    # Admin API exposure (issue #281, SEC-281-6): the default ingress must deny /api/admin; exposeAdmin=true must remove the rule.
     if ! DEFOUT="$(render)"; then
         echo "ERROR: default Helm render failed: ${DEFOUT}" >&2
         FAILURES=$((FAILURES + 1))
     elif ! grep -q 'path: /api/admin' <<<"${DEFOUT}" || ! grep -q -- '-admin-blocked' <<<"${DEFOUT}"; then
         echo "ERROR: default Helm ingress exposes /api/admin (no deny rule rendered)" >&2
         FAILURES=$((FAILURES + 1))
+    elif grep -qi 'snippet' <<<"${DEFOUT}"; then
+        echo "ERROR: default Helm render contains a snippet annotation" >&2
+        FAILURES=$((FAILURES + 1))
     fi
-    if ! OPTOUT="$(render --set ingress.blockAdminPath=false)"; then
-        echo "ERROR: Helm render with ingress.blockAdminPath=false failed: ${OPTOUT}" >&2
+    if ! OPTOUT="$(render --set ingress.exposeAdmin=true)"; then
+        echo "ERROR: Helm render with ingress.exposeAdmin=true failed: ${OPTOUT}" >&2
         FAILURES=$((FAILURES + 1))
     elif grep -q 'path: /api/admin' <<<"${OPTOUT}"; then
-        echo "ERROR: ingress.blockAdminPath=false still renders the /api/admin rule" >&2
+        echo "ERROR: ingress.exposeAdmin=true still renders the /api/admin rule" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    # A non-boolean exposeAdmin must keep the deny rule (fail closed).
+    if ! STROUT="$(render --set-string ingress.exposeAdmin=true)" || ! grep -q 'path: /api/admin' <<<"${STROUT}"; then
+        echo "ERROR: string ingress.exposeAdmin=true must keep the /api/admin deny rule" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    # nginx: use-regex makes the deny case-insensitive; no snippet annotation may ever be rendered.
+    if ! NGXOUT="$(render --set ingress.className=nginx)"; then
+        echo "ERROR: nginx Helm render failed: ${NGXOUT}" >&2
+        FAILURES=$((FAILURES + 1))
+    elif ! grep -q 'nginx.ingress.kubernetes.io/use-regex: "true"' <<<"${NGXOUT}" || ! grep -q 'path: /api/admin' <<<"${NGXOUT}"; then
+        echo "ERROR: nginx Helm render lacks use-regex or the /api/admin deny rule" >&2
+        FAILURES=$((FAILURES + 1))
+    elif grep -qi 'snippet' <<<"${NGXOUT}"; then
+        echo "ERROR: nginx Helm render contains a snippet annotation" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    if ! NGXOPT="$(render --set ingress.className=nginx --set ingress.nginxCaseInsensitiveAdminDeny=false)" \
+        || ! grep -q 'path: /api/admin' <<<"${NGXOPT}" || grep -q 'use-regex' <<<"${NGXOPT}"; then
+        echo "ERROR: nginx opt-out render must keep the deny rule and omit use-regex" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    if ! NGXUSR="$(render --set ingress.className=nginx --set-string 'ingress.annotations.nginx\.ingress\.kubernetes\.io/use-regex=false')" \
+        || ! grep -q 'use-regex: "true"' <<<"${NGXUSR}" || grep -q 'use-regex: "false"' <<<"${NGXUSR}"; then
+        echo "ERROR: a user annotation must not switch off use-regex while the deny rule relies on it" >&2
+        FAILURES=$((FAILURES + 1))
+    fi
+    if ! EXPNGX="$(render --set ingress.className=nginx --set ingress.exposeAdmin=true)" || grep -qi 'snippet' <<<"${EXPNGX}"; then
+        echo "ERROR: nginx render with exposeAdmin=true failed or contains a snippet annotation" >&2
         FAILURES=$((FAILURES + 1))
     fi
 else

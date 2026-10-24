@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -165,13 +166,16 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
             return false;
         }
 
-        if (consent.IsRevoked)
+        var now = DateTimeOffset.UtcNow;
+
+        // PERS-04: only an active consent is extended; a revoked or expired one needs a new consent (and its approval).
+        if (consent.IsRevoked || consent.ValidTo <= now)
         {
-            throw new InvalidOperationException($"Cannot extend revoked consent '{consentId}'.");
+            _logger.LogWarning("Rejected extension of non-extendable consent '{ConsentId}'.", consentId);
+            throw new ConsentNotExtendableException(consentId);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var newValidTo = (consent.ValidTo > now ? consent.ValidTo : now).Add(extensionDuration);
+        var newValidTo = consent.ValidTo.Add(extensionDuration);
 
         // WP-SC-16 rule 3: an extension of an individual grant is a new approval by someone other than the grantee, capped by the
         // class maximum (now + max), with a role-conversion hint after repeated renewals and a campaign decision from the 4th.
@@ -197,6 +201,12 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
         }
 
         GrantPolicyViolationException.ThrowIfDenied(decision);
+        if (newValidTo <= consent.ValidTo)
+        {
+            _logger.LogWarning("Rejected extension of consent '{ConsentId}': the capped expiry is not later than the current one.", consentId);
+            throw new ConsentNotExtendableException(consentId);
+        }
+
         await _consentRepo.ExtendConsentExpiryAsync(consentId, newValidTo, ct).ConfigureAwait(false);
 
         _logger.LogInformation(

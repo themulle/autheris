@@ -521,8 +521,8 @@ public partial class SqlServerGovernanceRepository
             cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
             cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@validFrom", consent.ValidFrom.ToString("O"));
-            cmd.Parameters.AddWithValue("@validTo", consent.ValidTo.ToString("O"));
+            cmd.Parameters.AddWithValue("@validFrom", consent.ValidFrom.ToUniversalTime().ToString("O"));
+            cmd.Parameters.AddWithValue("@validTo", consent.ValidTo.ToUniversalTime().ToString("O"));
             cmd.Parameters.AddWithValue("@tenantId", tenantIdStr);
             cmd.Parameters.AddWithValue("@description", (object?)consent.Description ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -953,11 +953,16 @@ public partial class SqlServerGovernanceRepository
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1 WHERE id = @id";
+                cmd.CommandText = "UPDATE CONSENTS SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1 WHERE id = @id AND is_revoked = 0 AND valid_to > @now AND @validTo > valid_to";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
-                cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));
-                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToString("O"));
-                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                cmd.Parameters.AddWithValue("@validTo", newValidTo.ToUniversalTime().ToString("O"));
+                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToUniversalTime().ToString("O"));
+                cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+                // PERS-04 / SEC-P4R-1: zero rows (unknown, revoked, expired, not strictly later) rejects before epoch and audit; the catch rolls back.
+                if (await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
+                {
+                    throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(consentId);
+                }
             }
 
             if (tableId.HasValue)
@@ -1087,7 +1092,7 @@ public partial class SqlServerGovernanceRepository
             cmd.Parameters.AddWithValue("@just", request.BusinessJustification);
             cmd.Parameters.AddWithValue("@status", request.Status);
             cmd.Parameters.AddWithValue("@reqAt", request.RequestedAt.ToString("O"));
-            cmd.Parameters.AddWithValue("@reqTo", request.RequestedValidTo.ToString("O"));
+            cmd.Parameters.AddWithValue("@reqTo", request.RequestedValidTo.ToUniversalTime().ToString("O"));
             cmd.Parameters.AddWithValue("@ticket", (object?)request.ItsmTicketId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@tenantId", request.TenantId.Value);
             cmd.Parameters.AddWithValue("@reqIds", (object?)reqIdentifiersJson ?? DBNull.Value);
@@ -1831,7 +1836,7 @@ public partial class SqlServerGovernanceRepository
                 cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)granteeSid?.Value ?? DBNull.Value));
                 cmd.Parameters.AddWithValue("@roleName", (object?)roleName ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@validFrom", DateTimeOffset.UtcNow.ToString("O"));
-                cmd.Parameters.AddWithValue("@validTo", req.RequestedValidTo.ToString("O"));
+                cmd.Parameters.AddWithValue("@validTo", req.RequestedValidTo.ToUniversalTime().ToString("O"));
                 cmd.Parameters.AddWithValue("@tenantId", req.TenantId.Value);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }

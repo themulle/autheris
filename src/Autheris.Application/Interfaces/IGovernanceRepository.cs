@@ -106,6 +106,11 @@ public interface IConsentRepository
     /// <paramref name="maxResults"/> (PERS-04: already expired consents are never returned, on every provider).
     /// </summary>
     Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default);
+    /// <summary>
+    /// PERS-04: extends only an active consent to a strictly later expiry. Throws <see cref="Autheris.Domain.Exceptions.ConsentNotExtendableException"/>
+    /// when the row does not exist, is revoked, is expired at server time, or <paramref name="newValidTo"/> is not later than the stored
+    /// <c>valid_to</c>; nothing is written (no epoch bump, no audit) in that case.
+    /// </summary>
     Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default);
 
     /// <summary>
