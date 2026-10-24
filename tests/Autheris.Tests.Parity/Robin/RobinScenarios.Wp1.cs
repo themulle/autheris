@@ -9,7 +9,7 @@ using Xunit.Sdk;
 
 namespace Autheris.Tests.Parity.Robin;
 
-// WP-R1: scenarios R31..R65 (plan docs/plans/2026-10-23-plan-robin-100-addendum.md). Expected values are hand-computed from the seed literals.
+// WP-R1: scenarios R31..R65 (REQ-ROBIN-100, PR #331; plan in git history). Expected values are hand-computed from the seed literals.
 public sealed partial class RobinScenarios
 {
     private const string Big = ParitySeed.BigTable;

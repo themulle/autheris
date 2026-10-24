@@ -71,7 +71,7 @@ flowchart TD
 
 ### Cross-cutting items
 
-- **SQL compiler gate:** Resolved 2026-10-15 — all 18 entries in `accepted-differences.json` reviewed and approved ([`PLAN-SQLGATE-CUTOVER-03`](../2026-10-15-plan-sqlgate-cutover-and-accepted-differences.md)).
+- **SQL compiler gate:** Resolved 2026-10-15 — all 18 entries in `accepted-differences.json` reviewed and approved (`PLAN-SQLGATE-CUTOVER-03`, history in git).
 - **CI duration:** `WP-TS-00..06` (TRX artifacts, shared DB containers, 4-way integration sharding, parallel Spark job, Cecil cache, `SerialIntegrationCollection`, parallel SQL compiler gate) delivered (`impl-test-suite-speedup.md`).
 - **Catalog owner tenant (G-11, second half):** Resolved — `OwnerTenantId` added to `TableMetadata` and baseline schema `0001`.
 
