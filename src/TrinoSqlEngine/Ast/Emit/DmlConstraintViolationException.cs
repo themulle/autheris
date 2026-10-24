@@ -79,6 +79,12 @@ public static class DmlErrorSanitizer
             if (IsUnknownIdentifier(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, dialect);
         }
 
+        // #321 (SEC-RG-03): a set-operation column-count mismatch is a caller mistake (a syntax-class error), not a provider outage.
+        for (Exception? current = error; current is not null; current = current.InnerException)
+        {
+            if (IsSetOperationDegreeError(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.SyntaxError, dialect);
+        }
+
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
             if (IsDataError(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.DataError, dialect);
@@ -102,6 +108,24 @@ public static class DmlErrorSanitizer
                                    (error.Message.Contains("Referenced column", StringComparison.Ordinal) ||
                                     error.Message.Contains("does not have a column named", StringComparison.Ordinal)),
         TargetSqlDialect.Databricks => error.Message.Contains("UNRESOLVED_COLUMN", StringComparison.Ordinal),
+        _ => false
+    };
+
+    /// <summary>
+    /// Provider codes of a set operation whose operands have a different column count: SQL Server 205, Oracle ORA-01789, PostgreSQL
+    /// SQLSTATE 42601 (syntax_error), SQLite result code 1 with the engine's own token, DuckDB binder message and the Databricks
+    /// NUM_COLUMNS_MISMATCH error class.
+    /// </summary>
+    private static bool IsSetOperationDegreeError(TargetSqlDialect dialect, Exception error) => dialect switch
+    {
+        TargetSqlDialect.SqlServer => Number(error) == 205 || ErrorsContain(error, 205),
+        TargetSqlDialect.Oracle => Number(error) == 1789 || ErrorsContain(error, 1789),
+        TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) == "42601",
+        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") == 1 &&
+                                   error.Message.Contains("do not have the same number of result columns", StringComparison.OrdinalIgnoreCase),
+        TargetSqlDialect.DuckDb => error.Message.Contains("Binder Error", StringComparison.Ordinal) &&
+                                   error.Message.Contains("same number of result columns", StringComparison.Ordinal),
+        TargetSqlDialect.Databricks => error.Message.Contains("NUM_COLUMNS_MISMATCH", StringComparison.Ordinal),
         _ => false
     };
 

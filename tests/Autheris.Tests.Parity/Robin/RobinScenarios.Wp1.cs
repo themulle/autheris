@@ -380,6 +380,7 @@ public sealed partial class RobinScenarios
     [InlineData("except")]
     [InlineData("intersect")]
     [InlineData("mismatch")]
+    [InlineData("wildcard_mismatch")]
     public Task Robin_Proactive_SetOperations(string variant) => Run("WebSql", "set_operations", async () =>
     {
         const string a = "SELECT id FROM parity_sales WHERE region = 'North'";
@@ -397,6 +398,10 @@ public sealed partial class RobinScenarios
                 break;
             case "intersect":
                 (await Sql($"{a} INTERSECT {b}")).IdsShouldBe(1, 2, 5, 18);
+                break;
+            case "wildcard_mismatch":
+                // #321 (SEC-RG-03): a '*' operand cannot be checked in the AST; the provider column-count error is classified (never a 5xx).
+                Denied(await Sql("SELECT * FROM parity_sales UNION SELECT id FROM parity_sales"), "set operation column mismatch with a wildcard", "SQL_SYNTAX_ERROR");
                 break;
             default:
                 Denied(await Sql($"{a} UNION SELECT id, qty FROM parity_sales"), "set operation column mismatch", "SQL_SYNTAX_ERROR");

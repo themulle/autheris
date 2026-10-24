@@ -42,6 +42,10 @@ public static class BoundaryOracle
 
         switch (c.Slot)
         {
+            case BoundarySlot.Eq when channel == "Rest" && v.Type == ParityType.Null:
+                // #324 (GAP-033): REST `eq null` is an IS NULL test by contract (the REST filter grammar has no other way to ask for NULL);
+                // WebSQL and GraphQL keep the three-valued `= NULL` (#300).
+                return v.Expected == Expectation.Ok ? new(Expectation.Ok, Ids(c.Column!, x => x is null), true) : new(v.Expected, null, true);
             case BoundarySlot.Eq:
             case BoundarySlot.Param:
                 return v.Expected == Expectation.Ok && Matches(c.Column!, v) ? new(Expectation.Ok, Ids(c.Column!, x => IsEqual(x, v.Value)), true) : new(v.Expected, null, true);

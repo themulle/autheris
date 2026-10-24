@@ -40,6 +40,13 @@ public sealed record SqlQueryMetadata(
     IReadOnlyList<JoinColumnReference>? JoinColumnReferences = null,
     IReadOnlyList<FilterColumnReference>? FilterColumnReferences = null)
 {
+    /// <summary>
+    /// #322 (SEC-RG-04): the columns of window <c>PARTITION BY</c> and <c>ORDER BY</c> (OVER clauses and named windows). Kept apart from
+    /// <see cref="FilterColumnReferences"/> so a masked or denied column in a window answers with its own code; every consumer that
+    /// needs "all referenced columns" must read both lists.
+    /// </summary>
+    public IReadOnlyList<FilterColumnReference>? WindowColumnReferences { get; init; }
+
     /// <summary>Issue #277: the statement contains a <c>WITH RECURSIVE</c> (any nesting level).</summary>
     public bool HasRecursiveCte { get; init; }
 

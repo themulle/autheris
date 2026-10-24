@@ -37,6 +37,14 @@ public sealed class SqlDataSourceResolver
         return resolved;
     }
 
+    /// <summary>
+    /// SEC-RG-01: non-throwing form of <see cref="ResolveAllowedDataSource"/> (same global and tenant decision, in memory only) so a statement
+    /// that names a source the caller may not use can be answered exactly like an unknown table.
+    /// </summary>
+    public bool TryResolveAllowedDataSource(string? requested, TenantId tenantId, out string resolved) =>
+        TryResolveGloballyAllowedDataSource(_options.Value.WebSql, requested, out resolved) &&
+        GovernedSqlExecutionService.IsDataSourceAllowedForTenant(_options.Value.WebSql, tenantId, resolved);
+
     public string ResolveGloballyAllowedDataSource(string? requested)
     {
         if (TryResolveGloballyAllowedDataSource(_options.Value.WebSql, requested, out var resolved))
