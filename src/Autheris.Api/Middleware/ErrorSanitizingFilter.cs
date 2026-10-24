@@ -129,7 +129,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
 
     internal const string MaskedCode = "MASKED";
     internal const string MaskedMessage = "A requested column is masked for the current caller.";
-    internal const string ValidationCode ="GRAPHQL_VALIDATION_FAILED";
+    internal const string ValidationCode = "GRAPHQL_VALIDATION_FAILED";
     internal const string ValidationMessage = "The GraphQL request is invalid.";
     internal const string ComplexMessage = "The query exceeds the allowed complexity.";
     internal const string DepthMessage = "The query exceeds the maximum allowed execution depth.";

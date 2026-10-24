@@ -145,3 +145,11 @@ Section 4 test lists are binding, plus:
 
 ### Catalog
 Confirmed: `SecurityRegressionTraceabilityTests` only scans `(SEC|SQ|SQL|SR15|RR)-<digits>`; `INF-07`, `GQL-14`, `GQL-17`, `MCP-15`, `EXT-17` do not match, so no catalog rows are required. Requirement: no new test, comment or name may contain an `SEC-`/`SQ-`/`SQL-`/`SR15-`/`RR-` token followed by digits (the cited existing `SEC-PG-12` has no digits-only suffix and is already in source).
+
+## 6. Status (2026-10-24)
+
+- Phase 4: implementation commit `c0bed9ee` (sub-lanes `fix/lowqw-lane1` and `fix/lowqw-lane2` consolidated into this branch). All section 4 and section 5 tests exist and pass.
+- Phase 5: APPROVED WITH FINDINGS (no Critical/High/Medium). Fixed: missing space in `ErrorSanitizingFilter.ValidationCode`. Accepted as is: `MASKED` is handled by an exact ordinal branch with a fixed message (no column name) instead of an entry in `FixedClientMessages`, because `WhitelistedSafeCodes` is case-insensitive and LQ-GQL17-2 requires `masked` to stay masked; the Databricks cancel path passes no delegation, so an OBO 401/403 on cancel evicts nothing (fail-safe, no wider purge).
+- Local verification: Release build with `-warnaserror` clean; `Autheris.Tests.Unit` and `Autheris.Extensions.Tests` green. `Autheris.Tests.Architecture` green except `GovernanceRepositoryConstructorArchitectureTests.Scanner_DetectsAnOpenInTheConstructor`, which failed once in the full run and passes in isolation (order-dependent fixture lookup in the shared Cecil module cache; file not touched by this lane).
+- `security.txt`: INF-07 RESOLVED; GQL-14, GQL-17, MCP-15, EXT-17 PARTIAL (deferred parts in section 1).
+
