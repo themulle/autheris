@@ -216,7 +216,8 @@ public sealed class GraphQlPagingEngineTests
     [InlineData("Development", "100000")]
     [InlineData("Production", "100000")]
     [InlineData("Production", "-1")]
-    public async Task FirstOutOfRange_Variable_FixedBody(string env, string first)
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_07_FirstOutOfRange_Variable_FixedBody(string env, string first)
     {
         var (json, _) = await RunAsync(env, PagedQuery, "{\"f\":" + first + ",\"o\":0}");
 
@@ -330,7 +331,9 @@ public sealed class GraphQlPagingEngineTests
     [InlineData("or: [null, { name: { eq: \"A\" } }]")]
     [InlineData("and: [null, { name: { eq: \"A\" } }]")]
     [InlineData("or: [{ name: { eq: \"A\" } }, null]")]
-    public async Task NullMember_Rejected(string where)
+    [InlineData("and: [{ name: { eq: \"A\" } }, null]")]
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_11_NullMember_Rejected(string where)
     {
         var (json, errors) = await RunAsync("Development", "{ sales_dbo_customers(first: 5, where: { " + where + " }) { id } }");
 

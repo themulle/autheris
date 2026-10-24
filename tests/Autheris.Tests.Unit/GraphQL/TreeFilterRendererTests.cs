@@ -80,4 +80,42 @@ public sealed class TreeFilterRendererTests
     {
         Render(TreeFilterOperator.NotIn).Sql.ShouldBe("1 = 1");
     }
+
+    private static string RenderNot(TreeFilterOperator op, params object?[] values)
+    {
+        var target = new Target();
+        return TreeFilterRenderer.Render(new TreeNotFilter(new TreeComparison("region", op, values.ToList())), target);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_RG_16_NotOfInWithNull_NeverTrue()
+    {
+        // NOT (x IN (a, NULL)) is never true under 3VL: the inner IN renders TRUE so that its negation is false.
+        RenderNot(TreeFilterOperator.In, "A", null).ShouldBe("NOT (1 = 1)");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_RG_16_NotOfNotInWithNull_KeepsOnlyTheMatches()
+    {
+        RenderNot(TreeFilterOperator.NotIn, "A", null).ShouldBe("NOT (NOT (\"region\" IN (@p0)))");
+        RenderNot(TreeFilterOperator.NotIn, new object?[] { null }).ShouldBe("NOT (1 = 1)");
+    }
+
+    [Fact]
+    public void NotOfInWithoutNull_Unchanged()
+    {
+        RenderNot(TreeFilterOperator.In, "A").ShouldBe("NOT (\"region\" IN (@p0))");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_RG_16_DoubleNegation_RendersTheSameAsNone()
+    {
+        var target = new Target();
+        var inner = new TreeNotFilter(new TreeNotFilter(new TreeComparison("region", TreeFilterOperator.NotIn, new List<object?> { "A", null })));
+
+        TreeFilterRenderer.Render(inner, target).ShouldBe("NOT (NOT (1 = 0))");
+    }
 }

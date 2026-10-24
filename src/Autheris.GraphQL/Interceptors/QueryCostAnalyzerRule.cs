@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Autheris.Application.Analytics;
+using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
@@ -423,6 +424,13 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     // [0, maxResponseRows] is a rejected request (priced as the minimal page), never a worst-case page. Other fields clamp or
                     // ignore the value, so they keep the conservative pricing.
                     bool treeField = fieldDef != null && IsTreePagedField(fieldDef);
+
+                    // The builder's real bounds: a root field is limited to maxResponseRows and defaults to min(100, maxResponseRows); a relation list
+                    // is limited to TreeSqlCompiler.MaxLimit and defaults to 100. A value is discounted only when the builder rejects it for that field.
+                    bool rootField = ReferenceEquals(currentType, schema.QueryType)
+                        || (currentType is not null && schema.QueryType is not null && string.Equals(currentType.Name, schema.QueryType.Name, StringComparison.Ordinal));
+                    int treeBound = rootField ? _maxResponseRows : TreeSqlCompiler.MaxLimit;
+                    int treeDefault = rootField ? Math.Min(DefaultTreePageSize, _maxResponseRows) : DefaultTreePageSize;
                     bool rejectedAtExecution = false;
                     bool limitArgumentPresent = false;
                     foreach (var arg in field.Arguments)
@@ -432,7 +440,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                             limitArgumentPresent = true;
                             if (arg.Value is NullValueNode && treeField)
                             {
-                                requestedLimit = Math.Min(DefaultTreePageSize, _maxResponseRows);
+                                requestedLimit = treeDefault;
                                 break;
                             }
 
@@ -448,7 +456,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                             {
                                 if (long.TryParse(intVal.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var literal))
                                 {
-                                    if (treeField && (literal < 0 || literal > _maxResponseRows))
+                                    if (treeField && (literal < 0 || literal > treeBound))
                                     {
                                         rejectedAtExecution = true;
                                     }
@@ -481,7 +489,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                             // SEC-PG-07: a runtime value of 0 is a bounded query, never the worst case and never free.
                                             zeroLimit = true;
                                             break;
-                                        case RuntimeLimit.Number when treeField && (runtimeNumber < 0 || runtimeNumber > _maxResponseRows):
+                                        case RuntimeLimit.Number when treeField && (runtimeNumber < 0 || runtimeNumber > treeBound):
                                             rejectedAtExecution = true;
                                             break;
                                         case RuntimeLimit.Number when runtimeNumber > 0 && runtimeNumber <= int.MaxValue:
@@ -492,7 +500,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                             break;
                                         case RuntimeLimit.Null when treeField:
                                             // An explicit null executes the field's default page (SEC-RG-06), never the declared variable default.
-                                            requestedLimit = Math.Min(DefaultTreePageSize, _maxResponseRows);
+                                            requestedLimit = treeDefault;
                                             break;
                                         default:
                                             // Unparsable (or null on another field): the worst case (fail closed).
@@ -525,7 +533,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                 {
                                     // Absent and without a default: the field's own default page applies (the validation pass has no
                                     // variable values; the runtime pass prices every supplied value).
-                                    requestedLimit = Math.Min(DefaultTreePageSize, _maxResponseRows);
+                                    requestedLimit = treeDefault;
                                 }
                             }
                         }
@@ -534,7 +542,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     if (treeField && !limitArgumentPresent)
                     {
                         // An omitted page size is the field's default page (argument default), which is exactly what executes.
-                        requestedLimit = Math.Min(DefaultTreePageSize, _maxResponseRows);
+                        requestedLimit = treeDefault;
                     }
 
                     if (rejectedAtExecution)
@@ -550,7 +558,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     }
                     else if (requestedLimit > 0)
                     {
-                        effectiveRows = Math.Min(requestedLimit, _maxResponseRows);
+                        effectiveRows = Math.Min(requestedLimit, treeField && !rootField ? TreeSqlCompiler.MaxLimit : _maxResponseRows);
                     }
                     else if (string.Equals(field.Name.Value, "catalog", StringComparison.OrdinalIgnoreCase))
                     {

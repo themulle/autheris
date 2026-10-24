@@ -187,4 +187,48 @@ public sealed class QueryCostAnalyzerPagingTests
 
         Cost(schema, "{ plain(first: \"10\") { id } }").ShouldBe(Cost(schema, "{ plain(first: 1000) { id } }"));
     }
+
+    [Theory]
+    [InlineData("1001")]
+    [InlineData("5000")]
+    [InlineData("10001")]
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_05_RelationFirst_BetweenMaxResponseRowsAndMaxLimit_IsPricedAtItsValue(string first)
+    {
+        // The builder accepts a relation page up to TreeSqlCompiler.MaxLimit (10001), so it is not "rejected" and must not be discounted.
+        var schema = await SchemaAsync();
+        var discounted = Cost(schema, "{ rows(first: 5) { children(first: 0) { id } } }");
+        var atCap = Cost(schema, "{ rows(first: 5) { children(first: 1000) { id } } }");
+
+        var literal = Cost(schema, "{ rows(first: 5) { children(first: " + first + ") { id } } }");
+        var variable = Cost(schema, "query($f: Int) { rows(first: 5) { children(first: $f) { id } } }", new Dictionary<string, object?> { ["f"] = int.Parse(first) });
+        var runtimeNode = Cost(schema, "query($f: Int) { rows(first: 5) { children(first: $f) { id } } }", new Dictionary<string, object?> { ["f"] = new IntValueNode(int.Parse(first)) });
+
+        literal.ShouldBeGreaterThan(discounted);
+        literal.ShouldBeGreaterThanOrEqualTo(atCap);
+        variable.ShouldBe(literal);
+        runtimeNode.ShouldBe(literal);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_05_RelationFirst_AboveMaxLimit_IsRejectedAtExecution_Discounted()
+    {
+        var schema = await SchemaAsync();
+
+        Cost(schema, "{ rows(first: 5) { children(first: 10002) { id } } }").ShouldBe(Cost(schema, "{ rows(first: 5) { children(first: 0) { id } } }"));
+        Cost(schema, "{ rows(first: 5) { children(first: -1) { id } } }").ShouldBe(Cost(schema, "{ rows(first: 5) { children(first: 0) { id } } }"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_05_RelationDefaultPage_IsPricedAtWhatExecutes()
+    {
+        // A relation list without first executes 100 rows even when maxResponseRows is below 100.
+        var schema = await SchemaAsync();
+        int Small(string q) => QueryCostAnalyzerRule.CalculateCost(Utf8GraphQLParser.Parse(q), schema, defaultListMultiplier: 10, maxResponseRows: 50, variableValues: null);
+
+        Small("{ rows(first: 1) { children { id } } }").ShouldBe(Small("{ rows(first: 1) { children(first: 100) { id } } }"));
+        Small("{ rows(first: 1) { children { id } } }").ShouldBeGreaterThan(Small("{ rows(first: 1) { children(first: 50) { id } } }"));
+    }
 }

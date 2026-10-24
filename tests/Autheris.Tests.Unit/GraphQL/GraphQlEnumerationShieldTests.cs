@@ -162,7 +162,8 @@ public sealed class GraphQlEnumerationShieldTests
     [Theory]
     [InlineData("Production")]
     [InlineData("Development")]
-    public async Task PageRange_NotShielded_FixedBody(string environment)
+    [Trait("Category", "Security")]
+    public async Task SEC_RG_08_PageRange_NotShielded_FixedBody(string environment)
     {
         var executor = await CreateExecutorAsync(environment);
 
