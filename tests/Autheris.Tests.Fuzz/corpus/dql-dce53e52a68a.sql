@@ -1,0 +1,1 @@
+SELECT id FROM employees WHERE id IS NOT NULL

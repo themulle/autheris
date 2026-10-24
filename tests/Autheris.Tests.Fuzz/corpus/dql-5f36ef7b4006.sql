@@ -1,0 +1,1 @@
+SELECT id FROM dbo.people p ORDER BY p.salary DESC

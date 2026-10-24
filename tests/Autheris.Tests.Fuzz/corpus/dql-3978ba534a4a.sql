@@ -1,0 +1,1 @@
+SELECT d.id FROM (SELECT id FROM orders) d

@@ -1,0 +1,1 @@
+SELECT COUNT(*), created FROM t

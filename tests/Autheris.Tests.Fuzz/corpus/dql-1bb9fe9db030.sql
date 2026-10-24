@@ -1,0 +1,1 @@
+SELECT DISTINCT tenant_id FROM entitlements

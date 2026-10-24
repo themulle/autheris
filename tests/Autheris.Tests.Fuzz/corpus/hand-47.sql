@@ -1,0 +1,1 @@
+UPDATE orders SET status = 'closed' WHERE id = 1

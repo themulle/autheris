@@ -1,0 +1,1 @@
+SELECT o.id, o.status, sum(o.amount) AS total FROM orders o JOIN entitlements e ON e.orderid = o.id WHERE o.status = 'open' GROUP BY o.id, o.status ORDER BY total DESC

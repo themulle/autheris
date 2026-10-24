@@ -1,0 +1,1 @@
+SELECT id FROM orders INTERSECT SELECT id FROM customers EXCEPT SELECT id FROM users

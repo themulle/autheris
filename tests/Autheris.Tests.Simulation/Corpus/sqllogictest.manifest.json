@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "source": "github.com/gregrahn/sqllogictest (mirror of the sqlite.org fossil repository)",
+  "host": "raw.githubusercontent.com",
+  "repo": "gregrahn/sqllogictest",
+  "commit": "c93ac416f05635ff5cc490009add936d9753d01d",
+  "license": "MIT (elected from the GPL/BSD/MIT/CC0 author grant)",
+  "files": [
+    { "path": "test/select1.test", "queries": 1000, "sha256": "e93b83d64d06f78aee0e690455b6c604e86ad9a339f77d927a782cefb6b0e1d5" },
+    { "path": "test/select2.test", "queries": 1000, "sha256": "a8ecc3d206c4d4b2cd6a154c18999e558ec97168cd7e327a4369e23aaf31be64" },
+    { "path": "test/select3.test", "queries": 3320, "sha256": "d5c321683bfe903c9be95ebe80a8d23da4d8f4a39193b2087dbc34cb4e137623" },
+    { "path": "test/select4.test", "queries": 2832, "sha256": "155ff6bb9bbf7c2dcf1e5659bb1688dec5dab58126f8dc66d23dcae6df43f59e" },
+    { "path": "test/select5.test", "queries": 732, "sha256": "049a5d0bf90999c56db2d5880ef28febdc88906526f87069cc96af9f84c99869" }
+  ]
+}

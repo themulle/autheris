@@ -1,0 +1,1 @@
+SELECT id FROM customers WHERE email = 'x'

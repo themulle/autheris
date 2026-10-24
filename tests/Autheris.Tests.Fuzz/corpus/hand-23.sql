@@ -1,0 +1,1 @@
+SELECT "id", "tenant_id" FROM "orders"

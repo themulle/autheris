@@ -1,0 +1,1 @@
+SELECT count(*) FILTER (WHERE amount > 1) FROM orders

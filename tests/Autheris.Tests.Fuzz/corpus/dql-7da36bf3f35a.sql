@@ -1,0 +1,1 @@
+SELECT id, name AS full_name FROM users WHERE active = true

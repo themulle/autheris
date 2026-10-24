@@ -1,0 +1,1 @@
+SELECT $$dollar string$$ FROM orders

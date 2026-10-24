@@ -1,0 +1,1 @@
+SELECT count(DISTINCT customer_id), min(amount), max(amount), approx_distinct(id) FROM orders

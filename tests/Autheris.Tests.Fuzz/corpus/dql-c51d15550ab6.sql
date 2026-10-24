@@ -1,0 +1,1 @@
+SELECT count(*) FROM "Orders" WHERE "TenantId" = 'acme'

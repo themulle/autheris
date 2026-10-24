@@ -1,0 +1,1 @@
+SELECT * FROM (VALUES (1, '1'), (2, '2')) OFFSET 2 ROWS

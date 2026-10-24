@@ -1,0 +1,1 @@
+SELECT id, carrier FROM logistics.v1.shipments

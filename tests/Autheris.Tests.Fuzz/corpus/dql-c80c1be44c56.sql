@@ -1,0 +1,1 @@
+SELECT * FROM server.database.schema.table

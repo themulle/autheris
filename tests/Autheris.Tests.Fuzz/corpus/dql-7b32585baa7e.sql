@@ -1,0 +1,1 @@
+WITH orders AS (SELECT 1 AS id) SELECT id FROM Orders

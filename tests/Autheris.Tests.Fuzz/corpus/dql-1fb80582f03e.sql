@@ -1,0 +1,1 @@
+SELECT serial_number, crane_type, tonnage FROM e2e_cranes WHERE crane_type = @crane_type ORDER BY serial_number

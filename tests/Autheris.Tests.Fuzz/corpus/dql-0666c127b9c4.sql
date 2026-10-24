@@ -1,0 +1,1 @@
+SELECT id, row_number() OVER (ORDER BY id) FROM orders

@@ -1,0 +1,1 @@
+SELECT current_date, current_timestamp FROM t

@@ -1,0 +1,1 @@
+MERGE INTO users u USING customers c ON u.id = c.id WHEN MATCHED THEN UPDATE SET name = c.name WHEN NOT MATCHED THEN INSERT (id, name) VALUES (c.id, c.name)

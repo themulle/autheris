@@ -1,0 +1,1 @@
+SELECT /* c */ id FROM orders -- trailing

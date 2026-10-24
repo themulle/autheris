@@ -1,0 +1,1 @@
+SELECT order_id, count(*) FROM entitlements GROUP BY order_id

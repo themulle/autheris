@@ -1,0 +1,1 @@
+WITH o AS (SELECT id, status FROM orders)

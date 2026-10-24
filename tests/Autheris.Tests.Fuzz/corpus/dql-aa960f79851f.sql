@@ -1,0 +1,1 @@
+SELECT t.id FROM customers t WHERE t.id > 1

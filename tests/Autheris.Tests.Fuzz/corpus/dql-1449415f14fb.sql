@@ -1,0 +1,1 @@
+SELECT id, amount FROM (SELECT * FROM orders WHERE tenant_id = 42) WHERE amount > 100

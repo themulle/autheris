@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "errorClass": "UnexpectedRejection:Compile/SecurityException:AST depth exceeded invariant limit of #.",
+      "docRef": "docs/features/f-dialect-02-ast-sql-compiler.md (INV-7: bounded resources, AST depth)"
+    },
+    {
+      "errorClass": "UnexpectedRejection:Compile/SecurityException:SQL query exceeded the maximum allowable AST nesting depth of #.",
+      "docRef": "docs/features/f-dialect-02-ast-sql-compiler.md (INV-7: bounded resources, AST depth)"
+    }
+  ]
+}

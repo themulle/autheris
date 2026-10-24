@@ -1,0 +1,1 @@
+SELECT c.id FROM dbo.contacts c JOIN dbo.people p ON c.id = p.id WHERE c.email = 'anna@example.com' ORDER BY c.salary

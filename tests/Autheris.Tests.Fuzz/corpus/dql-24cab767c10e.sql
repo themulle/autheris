@@ -1,0 +1,1 @@
+WITH x AS (SELECT id FROM orders) SELECT id FROM x
