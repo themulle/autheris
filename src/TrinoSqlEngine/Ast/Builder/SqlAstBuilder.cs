@@ -1208,7 +1208,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                     {
                         return new LiteralExpression(decVal, LiteralType.Decimal);
                     }
-                    return new LiteralExpression(text, LiteralType.Decimal);
+                    // #343: no bound decimal can represent the value (out of range, infinity). Fail closed with a fixed message;
+                    // the literal text is never echoed and never reaches the generator, where the conversion would overflow.
+                    throw new AstBuildException("Numeric literal is outside the supported decimal range.");
                 }
             case SqlBaseParser.StringLiteralContext str:
                 {

@@ -90,6 +90,10 @@ public static class ODataFilterParser
 
     internal readonly record struct Token(TokenType Type, string Text, object? Value, int Position);
 
+    // #343: fixed message, the literal text is never echoed.
+    private static GatewayInvalidQueryException OutOfRange() =>
+        new("Numeric literal in $filter expression is outside the supported range.");
+
     internal static List<Token> Tokenize(string input)
     {
         var tokens = new List<Token>();
@@ -205,19 +209,19 @@ public static class ODataFilterParser
                 object numVal;
                 if (suffix is 'l' or 'L')
                 {
-                    numVal = long.Parse(rawNum, CultureInfo.InvariantCulture);
+                    numVal = long.TryParse(rawNum, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var longVal) ? longVal : throw OutOfRange();
                 }
                 else if (suffix is 'm' or 'M' || (isDecimal && suffix == '\0'))
                 {
-                    numVal = decimal.Parse(rawNum, CultureInfo.InvariantCulture);
+                    numVal = decimal.TryParse(rawNum, NumberStyles.Number, CultureInfo.InvariantCulture, out var decVal) ? decVal : throw OutOfRange();
                 }
                 else if (suffix is 'f' or 'F')
                 {
-                    numVal = float.Parse(rawNum, CultureInfo.InvariantCulture);
+                    numVal = float.TryParse(rawNum, NumberStyles.Float, CultureInfo.InvariantCulture, out var floatVal) && float.IsFinite(floatVal) ? floatVal : throw OutOfRange();
                 }
                 else if (suffix is 'd' or 'D')
                 {
-                    numVal = double.Parse(rawNum, CultureInfo.InvariantCulture);
+                    numVal = double.TryParse(rawNum, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal) && double.IsFinite(doubleVal) ? doubleVal : throw OutOfRange();
                 }
                 else
                 {
@@ -227,7 +231,7 @@ public static class ODataFilterParser
                     }
                     else
                     {
-                        numVal = decimal.Parse(rawNum, CultureInfo.InvariantCulture);
+                        numVal = decimal.TryParse(rawNum, NumberStyles.Number, CultureInfo.InvariantCulture, out var bigVal) ? bigVal : throw OutOfRange();
                     }
                 }
 
