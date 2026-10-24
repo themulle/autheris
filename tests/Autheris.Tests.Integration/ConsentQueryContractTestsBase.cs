@@ -383,7 +383,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         if (!Available) return;
         var seed = await SeedAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RRev", null, TenantA, ConsentEffect.Allow, -1, 30));
-        await Repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-Admin"), "no longer needed");
+        await Repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-RRev"), "no longer needed");
 
         await AssertExtendRejectedAsync(seed, consent.Id, seed.Now.AddDays(60));
     }
