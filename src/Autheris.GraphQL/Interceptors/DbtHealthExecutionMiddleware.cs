@@ -86,7 +86,13 @@ public sealed class DbtHealthExecutionMiddleware
         foreach (var modelName in referencedModels)
         {
             var tenant = principal.GetTenantId();
-            var tableId = new TableIdentifier(tenant.Value, "default", modelName);
+            // #341: a name argument is caller text (empty, dotted, with line breaks); it cannot name a dbt model, so it has no health
+            // state to disclose and the downstream resolver validates it.
+            if (!TableIdentifier.TryCreate(tenant.Value, "default", modelName, out var tableId))
+            {
+                continue;
+            }
+
             var health = await _circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted).ConfigureAwait(false);
             if (health.Status == DbtModelHealthStatus.Healthy && !string.Equals(tenant.Value, "default", StringComparison.OrdinalIgnoreCase))
             {

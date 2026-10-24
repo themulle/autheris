@@ -72,7 +72,8 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw new ConsentRequestException("FORBIDDEN", "Self-service access requests are disabled.");
         }
 
-        if (string.IsNullOrWhiteSpace(command.Domain) || string.IsNullOrWhiteSpace(command.Schema) || string.IsNullOrWhiteSpace(command.TableName))
+        // #341: caller text; a blank component or one with a dot or line break is a client error, not a constructor fault.
+        if (!TableIdentifier.TryCreate(command.Domain, command.Schema, command.TableName, out var tableId))
         {
             throw Invalid("Domain, Schema and TableName must be valid, non-empty values.");
         }
@@ -106,7 +107,6 @@ public sealed class ConsentRequestService : IConsentRequestService
             return existing;
         }
 
-        var tableId = new TableIdentifier(command.Domain, command.Schema, command.TableName);
         var meta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
         if (meta == null)
         {
@@ -298,7 +298,7 @@ public sealed class ConsentRequestService : IConsentRequestService
         return set.ToList();
     }
 
-    private static ConsentRequestException Invalid(string message) => new("INVALID_ARGUMENT", message);
+    private static ConsentRequestException Invalid(string message) => new("VALIDATION_ERROR", message);
 
     // GQL-11: a key only replays the result of the same operation with the same arguments in the same tenant.
     private static string IdempotencyFingerprint(params object?[] parts)

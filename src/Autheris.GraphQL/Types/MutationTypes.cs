@@ -843,7 +843,7 @@ public sealed class Mutation
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 3)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
+                .SetCode("VALIDATION_ERROR")
                 .SetMessage("A rejection reason of at least 3 characters is required.")
                 .Build());
         }
@@ -851,7 +851,7 @@ public sealed class Mutation
         if (reason.Length > 1000)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
+                .SetCode("VALIDATION_ERROR")
                 .SetMessage("The rejection reason must not exceed 1000 characters.")
                 .Build());
         }
@@ -945,7 +945,7 @@ public sealed class Mutation
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 3)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
+                .SetCode("VALIDATION_ERROR")
                 .SetMessage("A revocation reason of at least 3 characters is required.")
                 .Build());
         }
@@ -953,7 +953,7 @@ public sealed class Mutation
         if (reason.Length > 1000)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("INVALID_ARGUMENT")
+                .SetCode("VALIDATION_ERROR")
                 .SetMessage("The revocation reason must not exceed 1000 characters.")
                 .Build());
         }
@@ -1254,7 +1254,19 @@ public sealed class Mutation
             await auditLog.RecordAuditEventAsync(writeAheadEntry, ct).ConfigureAwait(false);
         }
 
-        var result = await catalogSyncService.SyncCatalogAsync(dryRun, restrictToTenant, ct).ConfigureAwait(false);
+        Autheris.Application.DataCatalog.Models.CatalogSyncResult result;
+        try
+        {
+            result = await catalogSyncService.SyncCatalogAsync(dryRun, restrictToTenant, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not GraphQLException)
+        {
+            // #341: the same fixed code as SyncOpenMetadata; the cause (an egress refusal, an unreachable source) stays in the server log.
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("SYNC_FAILED")
+                .SetMessage("The data catalog synchronization failed.")
+                .Build());
+        }
 
         var completionEntry = new AuditLogEntry
         {

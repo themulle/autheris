@@ -273,7 +273,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
                 (await Should.ThrowAsync<InvalidOperationException>(run)).Message.ShouldContain("does not match the provider");
                 break;
             case RelationExecutabilityTests.TreeOutcome.NoConnection:
-                (await Should.ThrowAsync<InvalidOperationException>(run)).Message.ShouldContain("has no database connection");
+                (await Should.ThrowAsync<GatewayForbiddenException>(run)).Message.ShouldBe("Access denied.");
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(outcome));

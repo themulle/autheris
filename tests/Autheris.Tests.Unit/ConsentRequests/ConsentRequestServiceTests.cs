@@ -107,7 +107,7 @@ public sealed class ConsentRequestServiceTests
         var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
             service.SubmitAsync(new ConsentRequestSubmission(domain, schema, table, justification, days, null, User, Principal("t"), TenantId.LegacySingleTenant)));
 
-        ex.Code.ShouldBe("INVALID_ARGUMENT");
+        ex.Code.ShouldBe("VALIDATION_ERROR");
     }
 
     [Fact]
