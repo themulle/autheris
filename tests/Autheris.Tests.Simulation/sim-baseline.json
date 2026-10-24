@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "corpus": {
+    "minExecuted": 5000,
+    "maxHarnessMismatchPercent": 1,
+    "knownGapClasses": []
+  }
+}

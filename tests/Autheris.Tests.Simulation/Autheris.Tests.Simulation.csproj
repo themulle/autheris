@@ -33,6 +33,10 @@
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- WP1: manifest, classification files, own fixtures and the report baseline (data only, no third-party content). -->
+    <None Update="Corpus\sqllogictest.manifest.json;Corpus\slt-*.json;Corpus\fixtures\*.test;sim-baseline.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

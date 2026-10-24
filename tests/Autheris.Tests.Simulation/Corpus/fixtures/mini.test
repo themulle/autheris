@@ -1,0 +1,40 @@
+# Our own fixture in the sqllogictest record format; not third-party content.
+hash-threshold 4
+
+statement ok
+CREATE TABLE t1(a INTEGER, b INTEGER, c TEXT)
+
+statement ok
+INSERT INTO t1 VALUES(3, 30, 'three')
+
+statement ok
+INSERT INTO t1 VALUES(1, 10, 'one')
+
+statement ok
+INSERT INTO t1 VALUES(2, 20, NULL)
+
+statement error
+SELECT * FROM missing_table
+
+skipif sqlite
+query I nosort
+SELECT 99
+----
+99
+
+onlyif sqlite
+query I rowsort sqlite-label
+SELECT a FROM t1
+----
+1
+2
+3
+
+query IIT rowsort
+SELECT a, b, c FROM t1 WHERE a > 5
+----
+
+query I valuesort
+SELECT a FROM t1 UNION ALL SELECT b FROM t1
+----
+6 values hashing to 0000000000000000000000000000dead
