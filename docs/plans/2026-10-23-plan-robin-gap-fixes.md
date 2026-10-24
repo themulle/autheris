@@ -157,7 +157,11 @@ Reviewer: csharp-security-expert, 2026-10-23. Verdict: **APPROVED WITH CONDITION
 - `CrossSourcePlannerTests.JoinChainSameNameDifferentSource_DistinctAndPolicyChecked` (SEC-RG-15)
 - `TreeFilterRendererTests.NotInWithNull_RendersFalse` (SEC-RG-16)
 
-## 6. Changelog
+## 6. Delivery result (2026-10-24, fix/robin-gaps)
+
+All defects fixed, none by design. Phase 5: WP-G and WP-S approved after one fix round each. Branch rebased onto main after #317 (feat/robin-100 squashed in, then the fixes). Lead verification: build `-warnaserror` clean; unit 14704 passed; Architecture 178 passed (1 skipped); Parity SQLite (`Category=Parity&Dialect!=Container`) 2399 passed, 0 failed (2335 pass cells, 71 pending, no gap); `parity-baseline.json` regenerated with `parity-report.py --update-baseline` (pass cells only added); SqlCompilerGate with `SQLGATE_PROFILE=pr`: 142 passed, the 36 PostgreSQL/SQL Server/Oracle differential gates need Docker and run in CI. `parity-baseline-dialects.json` cannot be regenerated without a container: it is updated after the first nightly `parity-dialects` run. `Robin100_KnownGapsOnlyInNonSecurityCellsWithStableCode` no longer requires at least one gap key (all gaps are fixed); it stays non-vacuous by parsing a known sample and requiring every `PARITY-GAP-` literal in `RobinKnownGaps.cs` to be a parsed key.
+
+## 7. Changelog
 
 ### WP-G
 

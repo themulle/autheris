@@ -247,3 +247,7 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - Final gap keys: 030, 033, 034, 035, 050, 051, 052, 053, 054, 056, 057 (no security cell keyed).
 - R82 `Robin_30_UnknownTableSameCodeAsUnknownSchema` pins per channel: WebSQL 403 `SQL_POLICY_DENIED`, REST 404 `RESOURCE_NOT_FOUND`, GraphQL 400 `GRAPHQL_VALIDATION_FAILED`.
 - SEC-R100-19 enforcement: the guard maps 051/052/053 to their methods and allows 054 only for `Robin_302...|Rest|offset_over`; the 054 cell throws the hard failure `DeniedRequestSucceededException` if the body carries any row. "Outcome equals the recorded observation" for 051-053 is not enforced by the gap mechanism (strict xfail only requires the cell to fail); a changed wrong outcome is therefore not detected beyond the leak scan (`RobinMaskedLeakScan` now also matches whole amounts as number or quoted string) and remains an open item.
+
+## Follow-up: gap fixes (2026-10-24)
+
+All Robin known gaps (PARITY-GAP-030, 033, 034, 035, 050-054, 056, 057) and the four intentional red cells are fixed on `fix/robin-gaps` (plan [`2026-10-23-plan-robin-gap-fixes.md`](2026-10-23-plan-robin-gap-fixes.md), issues #302, #318-#330). `RobinKnownGaps` is empty; one cell was added (`Robin_Proactive_SetOperations|WebSql|wildcard_mismatch`).

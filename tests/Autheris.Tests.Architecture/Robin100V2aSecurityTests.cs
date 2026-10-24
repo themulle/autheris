@@ -107,7 +107,11 @@ public sealed partial class Robin100V2aSecurityTests
         var gaps = Path.Combine(root, RobinDir, "RobinKnownGaps.cs");
         File.Exists(gaps).ShouldBeTrue("RobinKnownGaps.cs not found: the guard fails closed.");
         var source = File.ReadAllText(gaps);
-        ReadKeys(source).Count.ShouldBeGreaterThan(0, "no gap key parsed: vacuous guard.");
+        // Non-vacuous even when every gap is fixed: the parser must read a known sample, and every gap id literal in the file must be a parsed key.
+        ReadKeys("[\"Robin_Proactive_LikePrefix|Rest|\"] = \"PARITY-GAP-030\",").Count.ShouldBe(1, "the gap key parser is broken: vacuous guard.");
+        ReadKeys(source).Count.ShouldBe(
+            System.Text.RegularExpressions.Regex.Count(source, "\"PARITY-GAP-\\d+\""),
+            "a gap id literal was not parsed as a key: vacuous guard.");
         Violations(source).ShouldBeEmpty("SEC-R100-11: a gap outside the closed list of non-security cells.");
         Robin100ArchitectureTests.SecurityGapKeys(source).ShouldBeEmpty("SEC-R100-02: a denied/leak/masking/scope cell must never be a known gap.");
 
