@@ -3304,17 +3304,17 @@
       "Id": "date-translated-004",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('hour', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "AstBuildException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(DATEADD(hour, DATEPART(hour, [ts]), CAST(CAST([ts] AS date) AS datetime2)) AS datetimeoffset) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "date-translated-005",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('week', d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "AstBuildException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(DATEADD(day, -((DATEDIFF(day, CAST('19000101' AS date), CAST([d] AS date)) % 7 + 7) % 7), CAST([d] AS date)) AS datetimeoffset) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "date-translated-006",

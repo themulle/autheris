@@ -79,7 +79,7 @@ public sealed class SqlFilterDefinitionTests : IDisposable
     [InlineData("from conf.client client where target.client_id = ?", "parameter")]
     [InlineData("from conf.client client where client.client_id = 1", "target")]
     [InlineData("from conf.client client where target.client_id = client.client_id and client.name = 'target.x'", "target")]
-    [InlineData("from conf.client client where target.client_id = client.client_id and target.ts > date_trunc('week', current_timestamp)", "SqlServer")]
+    [InlineData("from conf.client client where target.client_id = client.client_id and target.ts > date_trunc('second', current_timestamp)", "SqlServer")]
     public void InvalidDefinitions_AreRejectedBeforeStoring(string sql, string reasonContains)
     {
         var ex = Should.Throw<ArgumentException>(() => Validate(sql));

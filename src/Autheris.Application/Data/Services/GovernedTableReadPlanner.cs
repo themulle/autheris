@@ -8,6 +8,7 @@ using System.Text;
 using Autheris.Application.Analytics;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -195,7 +196,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         {
             if (timeBucketMap != null && timeBucketMap.TryGetValue(gCol, out var bucketSpec))
             {
-                var (selectExpr, groupByExpr) = BuildTimeBucketExpression(gCol, bucketSpec, metadata.Dialect);
+                var (selectExpr, groupByExpr) = BuildTimeBucketExpression(gCol, bucketSpec, metadata.Dialect, metadata.GetColumn(gCol)?.DataType);
                 selectItems.Add(selectExpr);
                 groupByExpressions.Add(groupByExpr);
             }
@@ -573,7 +574,8 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
     internal static (string SelectExpr, string GroupByExpr) BuildTimeBucketExpression(
         string columnName,
         TimeBucketSpecification spec,
-        DatabaseDialect dialect)
+        DatabaseDialect dialect,
+        string? dataType = null)
     {
         var unit = spec.Interval switch
         {
@@ -597,24 +599,33 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         switch (dialect)
         {
             case DatabaseDialect.PostgreSql:
-            {
-                TrinoSqlEngine.TimeZoneRegistry.TryResolve(
-                    TrinoSqlEngine.TargetSqlDialect.PostgreSql,
-                    timeZone,
-                    out var dialectZone);
-                var zone = string.IsNullOrWhiteSpace(dialectZone) ? timeZone : dialectZone;
-                var expr = $"date_trunc('{unit}', {quotedCol} AT TIME ZONE '{zone}')";
-                return ($"{expr} AS {quotedCol}", expr);
-            }
             case DatabaseDialect.SqlServer:
             {
-                TrinoSqlEngine.TimeZoneRegistry.TryResolve(
-                    TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    timeZone,
-                    out var winZone);
-                var zone = string.IsNullOrWhiteSpace(winZone) ? timeZone : winZone;
-                var expr = $"DATETRUNC({unit}, {quotedCol} AT TIME ZONE '{zone}')";
-                return ($"{expr} AS {quotedCol}", expr);
+                // #333 (SEC-PGP-01/-02): canonical Trino SQL for the AST compiler, which translates it per dialect. The source is a plain
+                // timestamp or a date cast to one; zoned, unknown or non-temporal types are refused (they would depend on the session time zone).
+                var quoted = DataApiFilterTranslator.QuoteIdentifier(columnName);
+                string src;
+                if (ColumnValueKinds.IsDateOnly(dataType))
+                {
+                    src = $"CAST({quoted} AS timestamp)";
+                }
+                else if (TrinoSqlEngine.Ast.Security.PlainTimestampClassifier.IsPlain(SqlDialectMapper.ToTargetDialect(dialect), dataType))
+                {
+                    src = quoted;
+                }
+                else
+                {
+                    throw new ArgumentException("Time bucketing requires a date or a timestamp without time zone column.");
+                }
+
+                if (!string.Equals(timeZone, "UTC", StringComparison.Ordinal))
+                {
+                    // Only a registry key reaches the text (ordinal match, at most 64 characters); the quote is doubled as a second guard.
+                    src = $"convert_timezone('UTC', '{timeZone.Replace("'", "''", StringComparison.Ordinal)}', {src})";
+                }
+
+                var expr = $"date_trunc('{unit}', {src})";
+                return ($"{expr} AS {quoted}", expr);
             }
             case DatabaseDialect.Sqlite:
             {

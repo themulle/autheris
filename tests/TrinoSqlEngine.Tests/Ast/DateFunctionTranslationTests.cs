@@ -67,8 +67,7 @@ public sealed class DateFunctionTranslationTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.SqlServer, "hour")]
-    [InlineData(TargetSqlDialect.SqlServer, "week")]
+    [InlineData(TargetSqlDialect.SqlServer, "second")]
     [InlineData(TargetSqlDialect.Sqlite, "week")]
     [InlineData(TargetSqlDialect.Oracle, "second")]
     public void DateTrunc_UnitTheDialectCannotTruncate_IsRejectedNamingDialectAndFunction(TargetSqlDialect dialect, string unit)

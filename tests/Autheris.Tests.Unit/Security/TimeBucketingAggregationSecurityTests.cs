@@ -47,7 +47,7 @@ public sealed class TimeBucketingAggregationSecurityTests
             new TableColumn { ColumnName = "id", DataType = "bigint" },
             new TableColumn { ColumnName = "tenant_id", DataType = "varchar" },
             new TableColumn { ColumnName = "device_id", DataType = "varchar" },
-            new TableColumn { ColumnName = "ts", DataType = "timestamptz" },
+            new TableColumn { ColumnName = "ts", DataType = "timestamp" },
             new TableColumn { ColumnName = "bytes_sent", DataType = "bigint" }
         ]
     };
@@ -206,9 +206,9 @@ public sealed class TimeBucketingAggregationSecurityTests
 
         var planned = planner.PlanAggregate(intent, metadata, decision);
 
-        // SQL statement must contain exact PostgreSQL date_trunc and AT TIME ZONE 'Europe/Berlin'
-        planned.Sql.ShouldContain("date_trunc('day', \"ts\" AT TIME ZONE 'Europe/Berlin') AS \"ts\"");
-        planned.Sql.ShouldContain("GROUP BY date_trunc('day', \"ts\" AT TIME ZONE 'Europe/Berlin')");
+        // Canonical Trino SQL: the registry zone key only, converted from UTC (the AST compiler translates it per dialect).
+        planned.Sql.ShouldContain("date_trunc('day', convert_timezone('UTC', 'Europe/Berlin', \"ts\")) AS \"ts\"");
+        planned.Sql.ShouldContain("GROUP BY date_trunc('day', convert_timezone('UTC', 'Europe/Berlin', \"ts\"))");
         planned.Sql.ShouldNotContain("';");
     }
 

@@ -30,19 +30,19 @@ public sealed class TimeBucketingQueryPlanningTests
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "bigint" },
-            new TableColumn { ColumnName = "created_at", DataType = "timestamptz" },
+            new TableColumn { ColumnName = "created_at", DataType = sourceType == "SqlServer" ? "datetime2" : "timestamp" },
             new TableColumn { ColumnName = "level", DataType = "varchar" },
             new TableColumn { ColumnName = "latency_ms", DataType = "double" }
         ]
     };
 
     [Theory]
-    [InlineData("PostgreSQL", TimeBucketInterval.Hour, "date_trunc('hour', \"created_at\" AT TIME ZONE 'UTC')")]
-    [InlineData("PostgreSQL", TimeBucketInterval.Day, "date_trunc('day', \"created_at\" AT TIME ZONE 'UTC')")]
-    [InlineData("PostgreSQL", TimeBucketInterval.Week, "date_trunc('week', \"created_at\" AT TIME ZONE 'UTC')")]
-    [InlineData("PostgreSQL", TimeBucketInterval.Month, "date_trunc('month', \"created_at\" AT TIME ZONE 'UTC')")]
-    [InlineData("PostgreSQL", TimeBucketInterval.Quarter, "date_trunc('quarter', \"created_at\" AT TIME ZONE 'UTC')")]
-    [InlineData("PostgreSQL", TimeBucketInterval.Year, "date_trunc('year', \"created_at\" AT TIME ZONE 'UTC')")]
+    [InlineData("PostgreSQL", TimeBucketInterval.Hour, "date_trunc('hour', \"created_at\")")]
+    [InlineData("PostgreSQL", TimeBucketInterval.Day, "date_trunc('day', \"created_at\")")]
+    [InlineData("PostgreSQL", TimeBucketInterval.Week, "date_trunc('week', \"created_at\")")]
+    [InlineData("PostgreSQL", TimeBucketInterval.Month, "date_trunc('month', \"created_at\")")]
+    [InlineData("PostgreSQL", TimeBucketInterval.Quarter, "date_trunc('quarter', \"created_at\")")]
+    [InlineData("PostgreSQL", TimeBucketInterval.Year, "date_trunc('year', \"created_at\")")]
     public void PlanAggregate_PostgreSql_EmitsDateTrunc(string sourceType, TimeBucketInterval interval, string expectedExpr)
     {
         var metadata = CreateTableForDialect(sourceType);
@@ -65,7 +65,7 @@ public sealed class TimeBucketingQueryPlanningTests
     }
 
     [Fact]
-    public void PlanAggregate_SqlServer_EmitsDateTruncWithWindowsTimeZone()
+    public void PlanAggregate_SqlServer_EmitsCanonicalConvertTimezone()
     {
         var metadata = CreateTableForDialect("SqlServer");
         var decision = TableAccessDecision.Allowed(LogsTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
@@ -82,8 +82,8 @@ public sealed class TimeBucketingQueryPlanningTests
 
         var planned = planner.PlanAggregate(intent, metadata, decision);
 
-        planned.Sql.ShouldContain("DATETRUNC(day, [created_at] AT TIME ZONE 'W. Europe Standard Time') AS [created_at]");
-        planned.Sql.ShouldContain("GROUP BY DATETRUNC(day, [created_at] AT TIME ZONE 'W. Europe Standard Time')");
+        planned.Sql.ShouldContain("date_trunc('day', convert_timezone('UTC', 'Europe/Berlin', \"created_at\")) AS \"created_at\"");
+        planned.Sql.ShouldContain("GROUP BY date_trunc('day', convert_timezone('UTC', 'Europe/Berlin', \"created_at\"))");
     }
 
     [Fact]
