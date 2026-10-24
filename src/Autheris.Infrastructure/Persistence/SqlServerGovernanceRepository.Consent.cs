@@ -1092,7 +1092,7 @@ public partial class SqlServerGovernanceRepository
             cmd.Parameters.AddWithValue("@just", request.BusinessJustification);
             cmd.Parameters.AddWithValue("@status", request.Status);
             cmd.Parameters.AddWithValue("@reqAt", request.RequestedAt.ToString("O"));
-            cmd.Parameters.AddWithValue("@reqTo", request.RequestedValidTo.ToString("O"));
+            cmd.Parameters.AddWithValue("@reqTo", request.RequestedValidTo.ToUniversalTime().ToString("O"));
             cmd.Parameters.AddWithValue("@ticket", (object?)request.ItsmTicketId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@tenantId", request.TenantId.Value);
             cmd.Parameters.AddWithValue("@reqIds", (object?)reqIdentifiersJson ?? DBNull.Value);

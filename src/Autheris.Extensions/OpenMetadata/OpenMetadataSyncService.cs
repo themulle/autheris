@@ -536,6 +536,14 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             }
             catch (ConsentNotExtendableException)
             {
+                // SEC-P4R-7: a consent revoked concurrently by a user or admin must stay revoked; only an expired or changed consent is recreated.
+                var current = await _consentRepo.GetConsentByIdAsync(existing.Id, ct);
+                if (current is { IsRevoked: true })
+                {
+                    _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected and the consent is revoked; not recreating it.", existing.Id);
+                    return;
+                }
+
                 _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected; creating a new consent.", existing.Id);
                 await _consentRepo.CreateConsentAsync(replacement, ct);
                 affectedTables.Add(replacement.TableIdentifier);
@@ -549,11 +557,14 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             SyncActorSid,
             "OpenMetadata sync shortens this consent to the refresh window (revoked and recreated).",
             ct);
-        if (revoked)
+        if (!revoked)
         {
-            affectedTables.Add(existing.TableIdentifier);
+            // SEC-P4R-7: already revoked (concurrently); do not resurrect the consent.
+            _logger.LogWarning("OpenMetadata-synced consent {ConsentId} was already revoked; not recreating it.", existing.Id);
+            return;
         }
 
+        affectedTables.Add(existing.TableIdentifier);
         await _consentRepo.CreateConsentAsync(replacement, ct);
         affectedTables.Add(replacement.TableIdentifier);
     }

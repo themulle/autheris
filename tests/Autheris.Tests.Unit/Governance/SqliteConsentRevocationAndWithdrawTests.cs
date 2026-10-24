@@ -125,4 +125,27 @@ public sealed class SqliteConsentRevocationAndWithdrawTests : IDisposable
 
         await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "missing"));
     }
+
+    [Fact]
+    public async Task SEC_P4R_3_ConsentRequest_NonUtcRequestedValidTo_IsStoredAsUtc()
+    {
+        await EnsureTableAsync();
+        var local = new DateTimeOffset(2031, 5, 4, 12, 0, 0, TimeSpan.FromHours(5));
+        var id = Guid.NewGuid();
+        await _repo.CreateConsentRequestAsync(new ConsentRequest
+        {
+            Id = id, TableId = _tableId, TableIdentifier = _table, RequesterSid = Requester,
+            RequestedGranteeType = GranteeType.User, RequestedGranteeRef = Requester.Value,
+            BusinessJustification = "Quarterly reporting", Status = "PENDING",
+            RequestedAt = DateTimeOffset.UtcNow, RequestedValidTo = local, TenantId = Tenant
+        });
+
+        await using var conn = await _repo.Connections.OpenAsync(CancellationToken.None);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT requested_valid_to FROM CONSENT_REQUESTS WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", id.ToString());
+        var stored = (string?)await cmd.ExecuteScalarAsync();
+
+        stored.ShouldBe(local.ToUniversalTime().ToString("O"));
+    }
 }

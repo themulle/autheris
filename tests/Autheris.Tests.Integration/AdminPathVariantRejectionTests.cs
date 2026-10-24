@@ -22,9 +22,49 @@ public sealed class AdminPathVariantRejectionTests : IClassFixture<WebApplicatio
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            // The routes are mapped only while app-scoped trusted documents are enabled; without this every path would 404 vacuously.
+            builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
+            builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         });
+    }
+
+    private HttpClient CreateClient(string? roles, string? scope = null)
+    {
+        var client = _factory.CreateClient();
+        if (roles is not null)
+        {
+            client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-caller");
+            client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
+            client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
+            if (scope is not null)
+            {
+                client.DefaultRequestHeaders.Add("X-Test-Scope", scope);
+            }
+        }
+
+        return client;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Admin_CanonicalPath_Anonymous401_NonAdmin403_ClusterAdminIsMapped()
+    {
+        using var anonymous = CreateClient(null);
+        using var nonAdmin = CreateClient("User");
+        using var admin = CreateClient("ClusterAdmin", "trusted-documents:read");
+
+        using var anonymousResponse = await anonymous.GetAsync("/api/admin/trusted-documents/app-1");
+        using var nonAdminResponse = await nonAdmin.GetAsync("/api/admin/trusted-documents/app-1");
+        using var adminResponse = await admin.GetAsync("/api/admin/trusted-documents/app-1");
+
+        ((int)anonymousResponse.StatusCode).ShouldBe(401);
+        ((int)nonAdminResponse.StatusCode).ShouldBe(403);
+        // Positive control: the route is mapped, so the 401/403 above and the variant rejections below are not a blanket 404.
+        ((int)adminResponse.StatusCode).ShouldNotBe(404);
+        ((int)adminResponse.StatusCode).ShouldNotBe(401);
+        ((int)adminResponse.StatusCode).ShouldNotBe(403);
     }
 
     [Theory]

@@ -362,6 +362,46 @@ public sealed class Round4OpenMetadataTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_ConcurrentlyRevokedConsent_IsNotRecreated()
+    {
+        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
+        f.ConsentRepo.GetConsentByIdAsync(existing.Id, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Consent?>(new Consent
+            {
+                Id = existing.Id,
+                TableIdentifier = existing.TableIdentifier,
+                GranteeType = existing.GranteeType,
+                RoleName = existing.RoleName,
+                ConsentRequestId = existing.ConsentRequestId,
+                ValidFrom = existing.ValidFrom,
+                ValidTo = existing.ValidTo,
+                IsRevoked = true,
+            }));
+
+        await f.Service.SyncPermissionsAsync();
+
+        f.Created.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_RevokeReturnedFalse_DoesNotCreate()
+    {
+        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        f.ConsentRepo.RevokeSystemConsentAsync(existing.Id, Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(false));
+
+        await f.Service.SyncPermissionsAsync();
+
+        f.Created.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task PERS_04_Sync_ActiveSyncConsent_IsStillExtended()
     {
         var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
