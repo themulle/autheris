@@ -1,0 +1,1 @@
+SELECT count(*) FILTER (WHERE amount > 15) AS n, array_agg(id ORDER BY id) AS ids FROM orders

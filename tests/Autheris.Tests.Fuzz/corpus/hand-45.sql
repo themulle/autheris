@@ -1,0 +1,1 @@
+INSERT INTO users (id, name, status) VALUES (1, 'a', 'open')

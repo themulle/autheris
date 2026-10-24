@@ -1,0 +1,1 @@
+WITH t AS (SELECT id FROM orders) SELECT * FROM t WHERE id < 100

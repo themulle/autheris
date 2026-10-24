@@ -1,0 +1,1 @@
+SELECT CASE WHEN amount > 100 THEN 'big' WHEN amount > 10 THEN 'mid' ELSE 'small' END FROM orders

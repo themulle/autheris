@@ -1,0 +1,1 @@
+SELECT transform(tags, x -> upper(x)) FROM t

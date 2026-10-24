@@ -1,0 +1,1 @@
+SELECT id FROM entitlements a WHERE EXISTS (SELECT 1 FROM entitlements b WHERE b.id = a.id)

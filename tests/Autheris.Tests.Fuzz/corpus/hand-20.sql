@@ -1,0 +1,1 @@
+SELECT ARRAY[1, 2][1], ROW(1, 'a'), MAP(ARRAY['k'], ARRAY[1])

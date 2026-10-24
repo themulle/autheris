@@ -1,0 +1,1 @@
+SELECT substring(a FROM 2 FOR 3) AS s, substring(a FROM 2) AS s2 FROM t

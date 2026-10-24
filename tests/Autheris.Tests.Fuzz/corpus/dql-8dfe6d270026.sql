@@ -1,0 +1,1 @@
+SELECT len(name) FROM orders

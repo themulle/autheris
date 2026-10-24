@@ -1,0 +1,1 @@
+SELECT id, COALESCE(dept, 'none') FROM orders

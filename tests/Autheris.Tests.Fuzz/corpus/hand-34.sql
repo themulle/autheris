@@ -1,0 +1,1 @@
+SELECT transform(ARRAY[1, 2], x -> x + 1)

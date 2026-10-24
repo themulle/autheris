@@ -1,0 +1,1 @@
+SELECT id FROM employees WHERE dept IS NOT NULL

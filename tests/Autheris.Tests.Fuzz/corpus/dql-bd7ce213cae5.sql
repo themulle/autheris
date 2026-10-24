@@ -1,0 +1,1 @@
+SELECT a.id, b.id FROM entitlements a JOIN entitlements b ON a.id = b.id

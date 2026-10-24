@@ -1,0 +1,1 @@
+SELECT upper(a) FROM t

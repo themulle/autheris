@@ -1,0 +1,1 @@
+SELECT id, amount FROM finance.dbo.invoices

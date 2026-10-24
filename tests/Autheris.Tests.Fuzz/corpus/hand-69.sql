@@ -1,0 +1,1 @@
+SELECT first_value(id) OVER w FROM orders WINDOW w AS (PARTITION BY status ORDER BY id)

@@ -1,0 +1,1 @@
+SELECT date_add('day', 3, d) AS a, date_add('month', 2, d) AS m, date_trunc('month', d) AS t FROM t

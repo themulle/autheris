@@ -1,0 +1,1 @@
+SELECT o.id FROM orders o LEFT JOIN entitlements e ON e.order_id = o.id WHERE e.id IS NULL

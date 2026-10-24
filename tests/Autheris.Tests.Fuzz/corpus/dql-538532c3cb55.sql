@@ -1,0 +1,1 @@
+SELECT (name).f(1) FROM employees

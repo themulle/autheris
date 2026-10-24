@@ -1,0 +1,1 @@
+SELECT extract(year FROM date '2024-05-06') AS y, extract(week FROM date '2024-05-06') AS w FROM orders

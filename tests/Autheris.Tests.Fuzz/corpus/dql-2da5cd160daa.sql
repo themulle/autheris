@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE id IN (SELECT id FROM orders WHERE id < 3)

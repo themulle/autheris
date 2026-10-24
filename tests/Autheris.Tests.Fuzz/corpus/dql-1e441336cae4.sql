@@ -1,0 +1,1 @@
+SELECT id, '__gql_mk0' FROM employees

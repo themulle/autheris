@@ -1,0 +1,1 @@
+SELECT id, email FROM customers ORDER BY id

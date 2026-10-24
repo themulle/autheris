@@ -1,0 +1,1 @@
+SELECT is_srvrolemember('sysadmin')

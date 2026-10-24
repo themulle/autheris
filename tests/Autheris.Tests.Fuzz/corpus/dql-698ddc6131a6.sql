@@ -1,0 +1,1 @@
+SELECT tenant_id, count(*) FROM users GROUP BY tenant_id

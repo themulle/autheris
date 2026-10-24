@@ -1,0 +1,1 @@
+SELECT c.id, c.status, e.credit FROM erp.public.customers e JOIN crm_api.public.customers c ON c.id = e.id

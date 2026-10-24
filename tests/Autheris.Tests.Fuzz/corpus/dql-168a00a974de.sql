@@ -1,0 +1,1 @@
+SELECT client_id FROM erp.auth.client

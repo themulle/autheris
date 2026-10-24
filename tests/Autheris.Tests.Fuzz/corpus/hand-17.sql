@@ -1,0 +1,1 @@
+SELECT (SELECT max(amount) FROM orders) AS m

@@ -435,6 +435,11 @@ public sealed partial class SimulationIsolationArchitectureTests
                 bad.Add($"afl-fuzz with unbounded memory (-m none): {line.Trim()}");
             }
 
+            if (Regex.IsMatch(line, @"\bafl-fuzz\b") && !Regex.IsMatch(line, @"\s-m\s+(\d+|""\$\{?SIM_AFL_MEM_MB\}?"")(\s|$)") && !Regex.IsMatch(line, @"\s-m\s+none\b") && Regex.IsMatch(line, @"\s-i\s"))
+            {
+                bad.Add($"afl-fuzz without a finite -m limit: {line.Trim()}");
+            }
+
             if (Regex.IsMatch(line, @"\bdotnet\s+restore\b") && !line.Contains("--locked-mode", StringComparison.Ordinal))
             {
                 bad.Add($"restore without --locked-mode: {line.Trim()}");
@@ -936,9 +941,17 @@ public sealed partial class SimulationIsolationArchitectureTests
     [Trait("Category", "Security")]
     public void SimWorkflow_NoUnpinnedToolInstalls()
     {
-        ToolInstallViolations(WorkflowAndScriptTexts()).ShouldBeEmpty();
+        var texts = WorkflowAndScriptTexts();
+        ToolInstallViolations(texts).ShouldBeEmpty();
+
+        // vacuity: the guard must really see the pinned SharpFuzz.CommandLine install and the finite afl-fuzz memory limit (REQ-SIMTEST WP3)
+        var lines = JoinedNonCommentLines(texts);
+        lines.Count(l => Regex.IsMatch(l, @"\bdotnet\s+tool\s+install\s+SharpFuzz\.CommandLine\s+--version\s+\d+\.\d+\.\d+\b")).ShouldBe(1, "run-parser-fuzz.sh must install the pinned tool");
+        lines.Count(l => Regex.IsMatch(l, @"^\s*afl-fuzz\s") && l.Contains("-m \"$SIM_AFL_MEM_MB\"", StringComparison.Ordinal)).ShouldBe(1, "afl-fuzz must pass a finite -m limit");
 
         // negative self-check
+        ToolInstallViolations(["afl-fuzz -i a -o b -- x"]).Count.ShouldBe(1);
+        ToolInstallViolations(["afl-fuzz -i a -o b -m \"$SIM_AFL_MEM_MB\" -- x", "afl-fuzz -i a -o b -m 2048 -- x"]).ShouldBeEmpty();
         ToolInstallViolations(["dotnet tool install SharpFuzz.CommandLine --tool-path x"]).Count.ShouldBe(1);
         ToolInstallViolations(["dotnet tool install SharpFuzz.CommandLine --version 2.3.0 --tool-path x"]).ShouldBeEmpty();
         ToolInstallViolations(["pip install schemathesis", "curl https://x | sh", "sudo apt-get install -y afl++", "image: foo:latest", "afl-fuzz -i a -o b -m none -- x", "dotnet restore x"]).Count.ShouldBe(6);
@@ -954,10 +967,9 @@ public sealed partial class SimulationIsolationArchitectureTests
         calls.Count.ShouldBeLessThanOrEqualTo(1, "exactly one sharpfuzz call is allowed (SEC-SIM-16)");
 
         var script = Path.Combine(Root, "scripts", "sim", "run-parser-fuzz.sh");
-        if (File.Exists(script))
-        {
-            SharpFuzzCalls([File.ReadAllText(script)]).Count.ShouldBe(1, "run-parser-fuzz.sh must instrument exactly one assembly");
-        }
+        File.Exists(script).ShouldBeTrue("run-parser-fuzz.sh must exist (vacuous guard otherwise)");
+        SharpFuzzCalls([File.ReadAllText(script)]).Count.ShouldBe(1, "run-parser-fuzz.sh must instrument exactly one assembly");
+        calls.Count.ShouldBe(1, "exactly one sharpfuzz call must be found (vacuity check)");
 
         // negative self-check
         SharpFuzzViolations(SharpFuzzCalls(["\"$RUNNER_TEMP/sf/sharpfuzz\" \"$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll\""])).ShouldBeEmpty();

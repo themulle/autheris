@@ -1,0 +1,1 @@
+SELECT a FROM t WHERE crane_type = __param_crane_type

@@ -1,0 +1,1 @@
+SELECT CAST(id AS varchar(20)), CAST(amount AS decimal(10, 2)) FROM orders
