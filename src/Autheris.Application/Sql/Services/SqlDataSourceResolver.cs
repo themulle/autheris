@@ -28,22 +28,33 @@ public sealed class SqlDataSourceResolver
 
     public string ResolveAllowedDataSource(string? requested, TenantId tenantId)
     {
-        string resolved = ResolveGloballyAllowedDataSource(requested);
-        if (!GovernedSqlExecutionService.IsDataSourceAllowedForTenant(_options.Value.WebSql, tenantId, resolved))
+        string? denial = EvaluateAllowed(requested, tenantId, out string resolved);
+        if (denial != null)
         {
-            throw new WebSqlPolicyException("The requested data source is not enabled for this tenant.");
+            throw new WebSqlPolicyException(denial);
         }
 
         return resolved;
     }
 
     /// <summary>
-    /// SEC-RG-01: non-throwing form of <see cref="ResolveAllowedDataSource"/> (same global and tenant decision, in memory only) so a statement
-    /// that names a source the caller may not use can be answered exactly like an unknown table.
+    /// SEC-RG-01: non-throwing form of <see cref="ResolveAllowedDataSource"/> (one shared decision, in memory only) so a statement that
+    /// names a source the caller may not use can be answered exactly like an unknown table.
     /// </summary>
     public bool TryResolveAllowedDataSource(string? requested, TenantId tenantId, out string resolved) =>
-        TryResolveGloballyAllowedDataSource(_options.Value.WebSql, requested, out resolved) &&
-        GovernedSqlExecutionService.IsDataSourceAllowedForTenant(_options.Value.WebSql, tenantId, resolved);
+        EvaluateAllowed(requested, tenantId, out resolved) == null;
+
+    private string? EvaluateAllowed(string? requested, TenantId tenantId, out string resolved)
+    {
+        if (!TryResolveGloballyAllowedDataSource(_options.Value.WebSql, requested, out resolved))
+        {
+            return "The requested data source is not enabled for WebSQL.";
+        }
+
+        return GovernedSqlExecutionService.IsDataSourceAllowedForTenant(_options.Value.WebSql, tenantId, resolved)
+            ? null
+            : "The requested data source is not enabled for this tenant.";
+    }
 
     public string ResolveGloballyAllowedDataSource(string? requested)
     {

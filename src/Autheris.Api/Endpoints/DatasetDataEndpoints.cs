@@ -191,18 +191,21 @@ public static class DatasetDataEndpoints
             var envelope = await queryService.ExecuteQueryAsync(request, requestContext, ct).ConfigureAwait(false);
             await StreamDatasetEnvelopeAsync(httpContext.Response, envelope, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out mapped) && mapped.Code != SyntaxErrorCode)
+        catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out mapped))
         {
-            // Phase 5 M4: governed SQL errors (compiler, policy, DML, source unavailable, timeout) answer with their stable code and the
-            // fixed message of that code, exactly as WebSQL does. Nothing of the exception reaches the response.
-            await SqlErrorResponse.WriteAsync(httpContext, ex, mapped, logger, "Dataset query", ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out var syntax) && syntax.Code == SyntaxErrorCode)
-        {
-            // #329 (SEC-RG-14): REST builds the SQL from quoted select and orderBy parts, so the filter is the only free text that reaches the
-            // parser: a parser failure is a malformed request, answered like every other bad parameter. Only the code is logged (no filter text).
-            logger.LogWarning("Malformed filter for {Table}: governed SQL error {Code}", tableId, syntax.Code);
-            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
+            if (mapped.Code == TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError)
+            {
+                // #329 (SEC-RG-14): REST builds the SQL from quoted select and orderBy parts, so the filter is the only free text that reaches the
+                // parser: a parser failure is a malformed request, answered like every other bad parameter. Only the code is logged (no filter text).
+                logger.LogWarning("Malformed filter for {Table}: governed SQL error {Code}", tableId, mapped.Code);
+                await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
+            }
+            else
+            {
+                // Phase 5 M4: governed SQL errors (compiler, policy, DML, source unavailable, timeout) answer with their stable code and the
+                // fixed message of that code, exactly as WebSQL does. Nothing of the exception reaches the response.
+                await SqlErrorResponse.WriteAsync(httpContext, ex, mapped, logger, "Dataset query", ct).ConfigureAwait(false);
+            }
         }
         catch (TableNotFoundException ex)
         {
@@ -239,7 +242,6 @@ public static class DatasetDataEndpoints
         }
     }
 
-    private const string SyntaxErrorCode = "SQL_SYNTAX_ERROR";
     private const string InvalidQueryMessage = "The query parameters are invalid.";
     private const int DefaultLimit = 50;
     private const int MaxParamDigits = 10;

@@ -120,7 +120,9 @@ public static class DmlErrorSanitizer
     {
         TargetSqlDialect.SqlServer => Number(error) == 205 || ErrorsContain(error, 205),
         TargetSqlDialect.Oracle => Number(error) == 1789 || ErrorsContain(error, 1789),
-        TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) == "42601",
+        // 42601 is the generic syntax_error: only the parser routine of the set-operation check counts (a gateway emitter defect stays a 502).
+        TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) == "42601" &&
+                                       StringProperty(error, "Routine") == "transformSetOperationTree",
         TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") == 1 &&
                                    error.Message.Contains("do not have the same number of result columns", StringComparison.OrdinalIgnoreCase),
         TargetSqlDialect.DuckDb => error.Message.Contains("Binder Error", StringComparison.Ordinal) &&

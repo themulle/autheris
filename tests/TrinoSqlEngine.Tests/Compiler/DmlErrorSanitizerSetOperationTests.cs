@@ -16,9 +16,10 @@ public class DmlErrorSanitizerSetOperationTests
         public int Number { get; } = number;
     }
 
-    private sealed class SqlStateException(string sqlState, string message) : DbException(message)
+    private sealed class SqlStateException(string sqlState, string message, string? routine = null) : DbException(message)
     {
         public override string? SqlState { get; } = sqlState;
+        public string? Routine { get; } = routine;
     }
 
     private sealed class SqliteLikeException(int code, string message) : DbException(message)
@@ -47,7 +48,7 @@ public class DmlErrorSanitizerSetOperationTests
     [Fact]
     public void PostgreSqlSyntaxState_IsSyntaxError() =>
         AssertSyntax(DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42601",
-            "each UNION query must have the same number of columns " + Leaky)), TargetSqlDialect.PostgreSql);
+            "each UNION query must have the same number of columns " + Leaky, "transformSetOperationTree")), TargetSqlDialect.PostgreSql);
 
     [Fact]
     public void SqlServer205_IsSyntaxError() =>
@@ -75,6 +76,10 @@ public class DmlErrorSanitizerSetOperationTests
         Assert.Equal(GovernedSqlErrorCodes.ProviderError, sqlite.Code);
         var pg = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42P01", "each UNION query must have the same number of columns"));
         Assert.Equal(GovernedSqlErrorCodes.ProviderError, pg.Code);
+        var otherRoutine = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42601", "syntax error at or near", "scanner_yyerror"));
+        Assert.Equal(GovernedSqlErrorCodes.ProviderError, otherRoutine.Code);
+        var noRoutine = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42601", "x"));
+        Assert.Equal(GovernedSqlErrorCodes.ProviderError, noRoutine.Code);
         var sqlServer = DmlErrorSanitizer.Map(TargetSqlDialect.SqlServer, new NumberedException(208, "All queries combined"));
         Assert.Equal(GovernedSqlErrorCodes.ProviderError, sqlServer.Code);
     }

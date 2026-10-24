@@ -27,6 +27,12 @@ public static partial class DataApiFilterTranslator
     [GeneratedRegex(@"(?<![a-zA-Z0-9_.""])(startswith|endswith|contains)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex StringFunctionHeadRegex();
 
+    [GeneratedRegex(@"\beq\s+null\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex EqNullRegex();
+
+    [GeneratedRegex(@"\bne\s+null\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex NeNullRegex();
+
     [GeneratedRegex(@"^\s*\)", RegexOptions.CultureInvariant)]
     private static partial Regex StringFunctionTailRegex();
 
@@ -52,7 +58,7 @@ public static partial class DataApiFilterTranslator
             }
 
             // The ESCAPE keyword the rewrite emits right after a pattern literal (only there; never a column).
-            if (string.Equals(word, "ESCAPE", StringComparison.OrdinalIgnoreCase) &&
+            if (string.Equals(word, "ESCAPE", StringComparison.Ordinal) &&
                 withoutStrings.AsSpan(0, match.Index).TrimEnd().EndsWith("''", StringComparison.Ordinal))
             {
                 continue;
@@ -316,8 +322,8 @@ public static partial class DataApiFilterTranslator
     private static string ReplaceOperators(string text)
     {
         // #324 (SEC-RG-10): "= NULL" never matches (3VL); a comparison with the null keyword is an IS [NOT] NULL test. Non-literal segments only.
-        var result = Regex.Replace(text, @"\beq\s+null\b", "IS NULL", RegexOptions.IgnoreCase);
-        result = Regex.Replace(result, @"\bne\s+null\b", "IS NOT NULL", RegexOptions.IgnoreCase);
+        var result = EqNullRegex().Replace(text, "IS NULL");
+        result = NeNullRegex().Replace(result, "IS NOT NULL");
         // Safe word-boundary operator replacements
         result = Regex.Replace(result, @"\beq\b", "=", RegexOptions.IgnoreCase);
         result = Regex.Replace(result, @"\bne\b", "<>", RegexOptions.IgnoreCase);
