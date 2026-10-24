@@ -645,7 +645,7 @@ public class GovernanceSecurityTests : IDisposable
         {
             await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", justification, 7, null, new ConsentRequestService(_repository, _repository), accessor);
         });
-        ex.Errors.ShouldContain(e => e.Code == "INVALID_ARGUMENT");
+        ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
     }
 
     [Theory]
@@ -659,7 +659,7 @@ public class GovernanceSecurityTests : IDisposable
         {
             await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", "Valid justification here", durationDays, null, new ConsentRequestService(_repository, _repository), accessor);
         });
-        ex.Errors.ShouldContain(e => e.Code == "INVALID_ARGUMENT");
+        ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
     }
 
     [Fact]
@@ -740,7 +740,7 @@ public class GovernanceSecurityTests : IDisposable
             await _mutation.RejectConsentRequestAsync(Guid.NewGuid(), "no", null, _repository, _repository, accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "INVALID_ARGUMENT");
+        ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
     }
 
     [Fact]

@@ -85,7 +85,10 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN",
         "INDIVIDUAL_GRANT_DISABLED_FOR_REALM",
         "INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION",
-        "INDIVIDUAL_GRANT_INDETERMINATE"
+        "INDIVIDUAL_GRANT_INDETERMINATE",
+        // #341: stable codes the resolvers already raised that were masked as INTERNAL_SERVER_ERROR; fixed messages only.
+        "SYNC_FAILED",
+        "GDPR_SUBJECT_SCOPE_UNRESOLVED"
     };
 
     /// <summary>
@@ -126,7 +129,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN"] = "This grant can only be renewed through a recertification campaign.",
         ["INDIVIDUAL_GRANT_DISABLED_FOR_REALM"] = "Individual grants are disabled for this realm.",
         ["INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION"] = "A justification is required for this grant.",
-        ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated."
+        ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated.",
+        ["SYNC_FAILED"] = "The synchronization failed.",
+        ["GDPR_SUBJECT_SCOPE_UNRESOLVED"] = "The report scope cannot be resolved: name the table that holds the data subject's data."
     };
 
     internal const string MaskedCode = "MASKED";
@@ -182,6 +187,15 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             error = error
                 .WithMessage(message)
                 .WithCode(code);
+        }
+
+        // #341: the governed SQL pipeline refused a table (unregistered, inactive, denied: one cause for the caller, like SQL_POLICY_DENIED on
+        // the SQL and OData channels). It answers the GraphQL denial code with the fixed text, never the exception message.
+        if (error.Exception is Autheris.Application.Sql.WebSqlTableDeniedException)
+        {
+            error = error
+                .WithMessage("Access denied.")
+                .WithCode("ACCESS_DENIED");
         }
 
         // GQL-17: ReportMasked (CatalogGraphQlTypeModule) code is matched exactly (ordinal) so MASKED_COLUMN or "masked" stay masked.

@@ -581,9 +581,15 @@ public sealed class CostAndQuotaMiddleware
                 if (val.Contains('_'))
                 {
                     var parts = val.Split('_', 2);
-                    return new TableIdentifier(parts[0], "public", parts[1]);
+                    if (TableIdentifier.TryCreate(parts[0], "public", parts[1], out var qualified))
+                    {
+                        return qualified;
+                    }
                 }
-                return new TableIdentifier("graphql", "public", val);
+                else if (TableIdentifier.TryCreate("graphql", "public", val, out var plain))
+                {
+                    return plain;
+                }
             }
         }
         return new TableIdentifier("graphql", "query", "graphql");

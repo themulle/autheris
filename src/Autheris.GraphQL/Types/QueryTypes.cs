@@ -56,7 +56,11 @@ public sealed class Query
             headers = reqHeaders.ToDictionary(h => h.Key, h => h.Value.Where(v => v != null).Select(v => v!).ToArray(), StringComparer.OrdinalIgnoreCase);
         }
 
-        var tableId = new TableIdentifier(domain, schema, name);
+        if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
+        {
+            throw InvalidTableArgument();
+        }
+
         var (rows, decision) = await executionService.ExecuteTableQueryAsync(
             principal, tableId, first, after, queryArguments: null, requestedFields: null, requestHeaders: headers, ct: ct);
 
@@ -552,6 +556,12 @@ public sealed class Query
         return query.ToList();
     }
 
+    /// <summary>#341: table arguments are caller text; a blank or malformed component is a client error (never an existence signal).</summary>
+    private static GraphQLException InvalidTableArgument() => new(ErrorBuilder.New()
+        .SetCode("BAD_REQUEST")
+        .SetMessage("The table identifier is invalid.")
+        .Build());
+
     public async Task<ConsentRevocationImpactReport> CalculateConsentRevocationImpactAsync(
         Guid consentId,
         [Service] ILineageImpactAnalyzerService lineageService,
@@ -567,11 +577,23 @@ public sealed class Query
                 .Build());
         }
 
-        return await lineageService.CalculateConsentRevocationImpactAsync(
-            callerContext.Tenant,
-            consentId,
-            callerContext,
-            ct);
+        try
+        {
+            return await lineageService.CalculateConsentRevocationImpactAsync(
+                callerContext.Tenant,
+                consentId,
+                callerContext,
+                ct);
+        }
+        catch (Exception ex) when (ex is System.Collections.Generic.KeyNotFoundException or Autheris.Domain.Exceptions.GatewayForbiddenException)
+        {
+            // #341: an unknown consent, a foreign tenant's consent and a missing owner/admin role answer the same fixed NOT_FOUND
+            // (the contract of the consent mutations); the service message names the consent id and stays in the server log.
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("NOT_FOUND")
+                .SetMessage("The consent was not found.")
+                .Build());
+        }
     }
 
     public async Task<TableConsumersReport> GetTableConsumersAsync(
@@ -594,7 +616,10 @@ public sealed class Query
                 .Build());
         }
 
-        var tableId = new TableIdentifier(domain, schema, tableName);
+        if (!TableIdentifier.TryCreate(domain, schema, tableName, out var tableId))
+        {
+            throw InvalidTableArgument();
+        }
 
         // GQL-6: Consent and Tenant Authorization Filter
         bool isPrivilegedAdmin = callerContext.IsClusterAdmin || callerContext.IsGovernanceAdmin;
@@ -652,9 +677,17 @@ public sealed class Query
                 .Build());
         }
 
-        TableIdentifier? tableId = !string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(schema) && !string.IsNullOrWhiteSpace(tableName)
-            ? new TableIdentifier(domain, schema, tableName)
-            : null;
+        TableIdentifier? tableId = null;
+        if (!string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(schema) && !string.IsNullOrWhiteSpace(tableName))
+        {
+            if (!TableIdentifier.TryCreate(domain, schema, tableName, out var parsedTableId))
+            {
+                throw InvalidTableArgument();
+            }
+
+            tableId = parsedTableId;
+        }
+
         Sid? sid = !string.IsNullOrWhiteSpace(subjectSid) ? new Sid(subjectSid) : (Sid?)null;
 
         bool isClusterAdmin = callerContext.IsClusterAdmin;
