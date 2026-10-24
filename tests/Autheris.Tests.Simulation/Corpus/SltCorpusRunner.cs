@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text;
 using Autheris.Tests.Simulation.Infrastructure;
 using Microsoft.Data.Sqlite;
@@ -14,6 +15,15 @@ public sealed class SltRunSummary
     public int HarnessMismatches { get; set; }
 
     public int ReferenceAgreed { get; set; }
+
+    public int HangLimit { get; set; } = SltCorpusRunner.HangCircuitLimit;
+
+    /// <summary>Hangs per (file, error class); a file whose count reaches <see cref="HangLimit"/> is skipped from then on.</summary>
+    public Dictionary<(string File, string Class), int> HangCounts { get; } = [];
+
+    public Dictionary<string, string> OpenCircuits { get; } = new(StringComparer.Ordinal);
+
+    public Dictionary<string, int> Skipped { get; } = new(StringComparer.Ordinal);
 
     public int SampledQueries { get; set; }
 
@@ -33,6 +43,9 @@ public sealed class SltRunSummary
 /// </summary>
 public static class SltCorpusRunner
 {
+    /// <summary>After this many hangs of one error class in one file, the remaining queries of that file are skipped (the job stays red).</summary>
+    public const int HangCircuitLimit = 40;
+
     private static readonly string[] RowFilterFiles = ["test/select1.test", "test/select2.test", "test/select3.test"];
 
     public static IReadOnlyList<SltQuery> AllQueries(IReadOnlyDictionary<string, IReadOnlyList<SltRecord>> corpus) =>
@@ -46,9 +59,12 @@ public static class SltCorpusRunner
         int sampleSize,
         SltClassifier classifier,
         string reproPrefix,
-        bool referenceOnly = false)
+        bool referenceOnly = false,
+        Func<SltScenario, DbConnection, ISltEngine>? engineFactory = null,
+        int hangCircuitLimit = HangCircuitLimit)
     {
-        var summary = new SltRunSummary();
+        var summary = new SltRunSummary { HangLimit = hangCircuitLimit };
+        engineFactory ??= static (scenario, connection) => new SltEngineRunner(scenario, connection);
         var sampled = SltSampler.Select(AllQueries(corpus), seed, sampleSize);
         summary.SampledQueries = sampled.Count;
         var sampledIds = sampled.Select(q => q.Id).ToHashSet(StringComparer.Ordinal);
@@ -60,7 +76,7 @@ public static class SltCorpusRunner
                 continue;
             }
 
-            await RunFileAsync(file, records, sampledIds, classifier, summary, reproPrefix, referenceOnly);
+            await RunFileAsync(file, records, sampledIds, classifier, summary, reproPrefix, referenceOnly, engineFactory);
         }
 
         summary.Results.AddNote("Executed", "scenario:A", summary.Executed.GetValueOrDefault(SltScenario.Permissive), $"sample={sampleSize};seed={seed};sampled={sampled.Count}");
@@ -71,16 +87,22 @@ public static class SltCorpusRunner
         }
 
         summary.Results.AddNote("HarnessMismatch", "reference-disagrees-with-recorded", summary.HarnessMismatches, "n/a");
+        foreach (var (openFile, cls) in summary.OpenCircuits.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            var skipped = summary.Skipped.GetValueOrDefault(openFile);
+            summary.Results.AddNote("CircuitOpen", $"{cls} circuit open: {skipped} skipped", skipped, $"file={openFile};limit={hangCircuitLimit}");
+        }
+
         return summary;
     }
 
-    private static async Task RunFileAsync(string file, IReadOnlyList<SltRecord> records, HashSet<string> sampledIds, SltClassifier classifier, SltRunSummary summary, string reproPrefix, bool referenceOnly)
+    private static async Task RunFileAsync(string file, IReadOnlyList<SltRecord> records, HashSet<string> sampledIds, SltClassifier classifier, SltRunSummary summary, string reproPrefix, bool referenceOnly, Func<SltScenario, DbConnection, ISltEngine> engineFactory)
     {
         await using var reference = SltReference.Create();
         SltReference? filtered = null;
         SqliteConnection? engineConnection = null;
-        SltEngineRunner? runnerA = null;
-        SltEngineRunner? runnerB = null;
+        ISltEngine? runnerA = null;
+        ISltEngine? runnerB = null;
         var rowFilterFile = RowFilterFiles.Contains(file, StringComparer.Ordinal);
         try
         {
@@ -107,12 +129,12 @@ public static class SltCorpusRunner
                         break;
                     case SltQuery q when sampledIds.Contains(q.Id):
                         engineConnection ??= SltReference.OpenConnection(reference.Path, readOnly: true);
-                        runnerA ??= new SltEngineRunner(SltScenario.Permissive, engineConnection);
+                        runnerA ??= engineFactory(SltScenario.Permissive, engineConnection);
                         if (rowFilterFile && filtered is null && !referenceOnly)
                         {
                             filtered = reference.Clone();
                             await filtered.ExecuteAsync($"DELETE FROM {SltEngineRunner.FilteredTable} WHERE {SltEngineRunner.FilterColumn} IS NULL OR NOT ({SltEngineRunner.FilterColumn} > {SltEngineRunner.FilterMinExclusive})");
-                            runnerB = new SltEngineRunner(SltScenario.RowFilter, engineConnection);
+                            runnerB = engineFactory(SltScenario.RowFilter, engineConnection);
                         }
 
                         await RunQueryAsync(q, reference, filtered, runnerA, runnerB, classifier, summary, reproPrefix, referenceOnly);
@@ -140,7 +162,7 @@ public static class SltCorpusRunner
                 summary.HarnessMismatches++;
             }
         }
-        catch (Exception ex) when (ex is SqliteException or SltReferenceRejectedException)
+        catch (Exception ex) when (ex is SqliteException or SltReferenceRejectedException or TimeoutException)
         {
             if (s.ExpectOk)
             {
@@ -149,8 +171,14 @@ public static class SltCorpusRunner
         }
     }
 
-    private static async Task RunQueryAsync(SltQuery q, SltReference reference, SltReference? filtered, SltEngineRunner runnerA, SltEngineRunner? runnerB, SltClassifier classifier, SltRunSummary summary, string reproPrefix, bool referenceOnly)
+    private static async Task RunQueryAsync(SltQuery q, SltReference reference, SltReference? filtered, ISltEngine runnerA, ISltEngine? runnerB, SltClassifier classifier, SltRunSummary summary, string reproPrefix, bool referenceOnly)
     {
+        if (!referenceOnly && summary.OpenCircuits.ContainsKey(q.File))
+        {
+            summary.Skipped[q.File] = summary.Skipped.GetValueOrDefault(q.File) + 1;
+            return;
+        }
+
         IReadOnlyList<string> expected;
         try
         {
@@ -178,7 +206,17 @@ public static class SltCorpusRunner
 
         if (runnerB is not null && filtered is not null)
         {
-            var expectedB = SltResultFormatter.Format(await filtered.RunAsync(q.Sql), q.Types, q.Sort);
+            IReadOnlyList<string> expectedB;
+            try
+            {
+                expectedB = SltResultFormatter.Format(await filtered.RunAsync(q.Sql), q.Types, q.Sort);
+            }
+            catch (Exception ex) when (ex is SqliteException or SltReferenceRejectedException or InvalidOperationException or TimeoutException)
+            {
+                summary.HarnessMismatches++;
+                return;
+            }
+
             Record(q, SltScenario.RowFilter, runnerB.Run(q.Sql), expectedB, expected, classifier, summary, reproPrefix);
         }
     }
@@ -202,6 +240,17 @@ public static class SltCorpusRunner
             outcome is SltEngineRows ? Preview(actualValues) : Describe(outcome),
             $"{reproPrefix} # scenario {SltComparison.Name(scenario)}, query {q.Id} at {q.File}:{q.Line}");
         summary.Results.Add(finding, verdict.ToString());
+        if (verdict == SltVerdict.Hang)
+        {
+            var key = (q.File, observation.ErrorClass);
+            var hangs = summary.HangCounts.GetValueOrDefault(key) + 1;
+            summary.HangCounts[key] = hangs;
+            if (hangs >= summary.HangLimit)
+            {
+                summary.OpenCircuits.TryAdd(q.File, observation.ErrorClass);
+            }
+        }
+
         summary.FirstByClass.TryAdd(observation.ErrorClass, (verdict, finding, q.File, q.Line));
     }
 

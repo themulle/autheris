@@ -90,7 +90,7 @@ verify_dir() {
 }
 
 fetch() {
-  local manifest="$1" out="$2" parsed commit host repo path sha url tmp
+  local manifest="$1" out="$2" parsed commit host repo path sha url tmp size
   [ -n "$out" ] || die "output directory required"
   [ ! -e "$out" ] || die "output directory already exists: $out"
   parsed="$(read_manifest "$manifest")" || die "invalid manifest"
@@ -103,6 +103,8 @@ fetch() {
     mkdir -p -- "$tmp/$(dirname -- "$path")"
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error --max-redirs 0 --max-filesize "$MAX_BYTES" --max-time 120 \
       --output "$tmp/$path" -- "$url" || die "download failed for $path"
+    size="$(wc -c < "$tmp/$path")"
+    if [ "$size" -le 0 ] || [ "$size" -gt "$MAX_BYTES" ]; then die "file $path is empty or over 20 MB"; fi
   done <<< "$(printf '%s\n' "$parsed" | tail -n +2)"
   verify_dir "$manifest" "$tmp"
   mv -- "$tmp" "$out"

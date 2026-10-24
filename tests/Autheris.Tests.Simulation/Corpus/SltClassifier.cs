@@ -17,7 +17,7 @@ public enum SltVerdict
 }
 
 /// <summary>What one comparison saw. <see cref="Kind"/> is null for equal results.</summary>
-public sealed record SltObservation(FindingKind? Kind, string ErrorClass, bool HarnessMismatch = false);
+public sealed record SltObservation(FindingKind? Kind, string ErrorClass, bool HarnessMismatch = false, bool RowFilterScenario = false);
 
 /// <summary>
 /// REQ-SIM-04: the verdict of one observation. Security classes (policy leak, crash, hang) are decided first and can never be downgraded by an
@@ -46,6 +46,12 @@ public sealed class SltClassifier(IReadOnlySet<string> acceptedDifferences, IRea
                 return SltVerdict.Hang;
             case FindingKind.Crash or FindingKind.ServerError:
                 return SltVerdict.Crash;
+        }
+
+        // a wrong result under the row filter may hide a leaked or dropped row: it is always a finding, never an accepted difference or a KnownGap
+        if (kind == FindingKind.WrongResult && observation.RowFilterScenario)
+        {
+            return SltVerdict.Finding;
         }
 
         if (kind == FindingKind.WrongResult && acceptedDifferences.Contains(observation.ErrorClass))
@@ -126,7 +132,7 @@ public static class SltComparison
                 }
                 catch (InvalidOperationException)
                 {
-                    return new SltObservation(FindingKind.WrongResult, SimErrorClass.Build(FindingKind.WrongResult, "ResultMismatch", $"column count differs (scenario {Name(scenario)})"));
+                    return new SltObservation(FindingKind.WrongResult, SimErrorClass.Build(FindingKind.WrongResult, "ResultMismatch", $"column count differs (scenario {Name(scenario)})"), RowFilterScenario: scenario == SltScenario.RowFilter);
                 }
 
                 if (actualValues.SequenceEqual(expectedValues, StringComparer.Ordinal))
@@ -140,7 +146,7 @@ public static class SltComparison
                 }
 
                 var why = actualValues.Count != expectedValues.Count ? "value count differs" : "values differ";
-                return new SltObservation(FindingKind.WrongResult, SimErrorClass.Build(FindingKind.WrongResult, "ResultMismatch", $"{why} (scenario {Name(scenario)})"));
+                return new SltObservation(FindingKind.WrongResult, SimErrorClass.Build(FindingKind.WrongResult, "ResultMismatch", $"{why} (scenario {Name(scenario)})"), RowFilterScenario: scenario == SltScenario.RowFilter);
             default:
                 throw new InvalidOperationException("unknown engine outcome.");
         }

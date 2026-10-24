@@ -64,6 +64,7 @@ public sealed class SltCorpusUnitTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-12
     public void SltParser_RejectsOversizedFileAndLine()
     {
         Should.Throw<SltParseException>(() => SltParser.Parse(new string('x', SltParser.MaxFileChars + 1), "big.test")).Message.ShouldContain("exceeds");
@@ -75,6 +76,7 @@ public sealed class SltCorpusUnitTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-12
     public void SltParser_TreatsContentAsDataOnly()
     {
         var marker = Path.Combine(Path.GetTempPath(), "sim-slt-pwned-" + Guid.NewGuid().ToString("N"));
@@ -152,6 +154,7 @@ public sealed class SltCorpusUnitTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-17
     public void SltClassifier_PolicyLeakNeverKnownGap()
     {
         const string cls = "PolicyLeak:RowFilter:result of the unfiltered table returned";
@@ -223,6 +226,7 @@ public sealed class SltCorpusUnitTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-12
     public async Task SltReference_DisablesExtensionLoadingAndOutsideAttach()
     {
         await using var reference = SltReference.Create();
@@ -269,6 +273,7 @@ public sealed class SltCorpusUnitTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-17 (policy leak is never a KnownGap)
     public async Task SltEngine_RowFilterProbesNeverReturnRowsOutsideTheFilter()
     {
         var (violations, answered) = await SltRowFilterProbes.RunAsync();
@@ -311,6 +316,7 @@ public sealed class SltCorpusUnitTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-10
     public void SltCorpus_LoadFailsClosedOnMissingDirectoryAndHashMismatch()
     {
         var manifest = SltCorpus.LoadManifest(SltCorpus.ManifestPath);
@@ -331,5 +337,113 @@ public sealed class SltCorpusUnitTests
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    private const string EndlessQuery = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SltReference_ReadInterruptsLongStatementAndKeepsConnectionUsable()
+    {
+        // SEC-SIM-12: per-query timeout enforced by sqlite3_interrupt, not by the ADO busy timeout
+        await using var reference = SltReference.Create();
+        using var connection = SltReference.OpenConnection(reference.Path, readOnly: false);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Should.Throw<TimeoutException>(() => SltReference.ReadRows(connection, EndlessQuery, timeoutSeconds: 1));
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
+
+        SltReference.ReadRows(connection, "SELECT 1")[0][0].ShouldBe(1L);
+        SltReference.ReadRows(connection, "SELECT 2", timeoutSeconds: 1)[0][0].ShouldBe(2L); // a fast query does not time out
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SltReference_ExecuteInterruptsLongNonQueryStatement()
+    {
+        // SEC-SIM-12
+        await using var reference = SltReference.Create();
+        await reference.ExecuteAsync("CREATE TABLE t(x INTEGER)");
+
+        await Should.ThrowAsync<TimeoutException>(async () =>
+            await reference.ExecuteAsync("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) INSERT INTO t SELECT x FROM c", timeoutSeconds: 1));
+
+        (await reference.RunAsync("SELECT count(*) FROM t"))[0][0].ShouldBe(0L); // the statement was rolled back, the reference is usable
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SltEngineRunner_MapsInterruptedExecutionToHang()
+    {
+        // SEC-SIM-17: a hang is its own class and never a KnownGap
+        await using var reference = SltReference.Create();
+        await reference.ExecuteAsync("CREATE TABLE t(x INTEGER)");
+        await reference.ExecuteAsync("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000) INSERT INTO t SELECT x FROM c");
+        using var connection = SltReference.OpenConnection(reference.Path, readOnly: true);
+        var runner = new SltEngineRunner(SltScenario.Permissive, connection, executeTimeoutSeconds: 1);
+
+        runner.Run("SELECT count(*) FROM t a, t b, t c").ShouldBeOfType<SltEngineHung>().Stage.ShouldBe("Execute");
+        runner.Run("SELECT count(*) FROM t").ShouldBeOfType<SltEngineRows>(); // fast query unaffected, connection still usable
+    }
+
+    private sealed class HangingEngine : ISltEngine
+    {
+        public int Calls { get; private set; }
+
+        public SltEngineOutcome Run(string sql)
+        {
+            Calls++;
+            return new SltEngineHung("Execute");
+        }
+
+        public void InvalidateCatalog()
+        {
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SltCorpusRunner_HangCircuitBreakerSkipsRemainingQueriesAndStaysRed()
+    {
+        // SEC-SIM-17: the breaker bounds the run time but the Hang is still reported (red), never downgraded
+        var text = "statement ok\nCREATE TABLE t(a INTEGER)\n\n" + string.Concat(Enumerable.Range(1, 10).Select(n => $"query I nosort\nSELECT {n}\n----\n{n}\n\n"));
+        var corpus = new Dictionary<string, IReadOnlyList<SltRecord>> { ["test/x.test"] = SltParser.Parse(text, "test/x.test") };
+        var engine = new HangingEngine();
+        var classifier = new SltClassifier(new HashSet<string>(), new HashSet<string>(), new SimKnownGaps());
+
+        var summary = await SltCorpusRunner.RunAsync(corpus, 1, int.MaxValue, classifier, "repro", engineFactory: (_, _) => engine, hangCircuitLimit: 3);
+
+        engine.Calls.ShouldBe(3);
+        summary.Count(SltVerdict.Hang).ShouldBe(3);
+        summary.Skipped["test/x.test"].ShouldBe(7);
+        summary.OpenCircuits["test/x.test"].ShouldStartWith("Hang:Execute");
+        summary.FirstByClass.Values.Single().Verdict.ShouldBe(SltVerdict.Hang);
+        SltClassifier.IsRed(SltVerdict.Hang).ShouldBeTrue();
+
+        var dir = Path.Combine(Path.GetTempPath(), "sim-breaker-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var lines = File.ReadAllLines(summary.Results.Write(dir, "corpus"));
+            lines.ShouldContain(l => l.Contains("\"kind\":\"Hang\"", StringComparison.Ordinal) && l.Contains("\"count\":3", StringComparison.Ordinal));
+            lines.ShouldContain(l => l.Contains("circuit open: 7 skipped", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SltClassifier_RowFilterWrongResultIsAlwaysAFinding()
+    {
+        // SEC-SIM-17: a wrong result under the row filter may hide a leaked row
+        const string cls = "WrongResult:ResultMismatch:values differ (scenario B)";
+        var gaps = new SimKnownGaps();
+        gaps.Register("SIM-GAP-005", FindingKind.WrongResult, cls);
+        var classifier = new SltClassifier(new HashSet<string> { cls }, new HashSet<string>(), gaps);
+
+        classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: true)).ShouldBe(SltVerdict.Finding);
+        classifier.Classify(new SltObservation(FindingKind.WrongResult, cls, RowFilterScenario: false)).ShouldBe(SltVerdict.AcceptedDifference);
     }
 }

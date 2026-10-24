@@ -26,7 +26,7 @@ MAX_LINES = 100_000
 SCHEMA = 1
 FINDING_KINDS = ("WrongResult", "UnexpectedRejection", "SchemaNonConformance", "Crash", "Hang", "ServerError", "PolicyLeak")
 SECURITY_KINDS = ("Crash", "Hang", "ServerError", "PolicyLeak")
-NOTE_KINDS = ("Executed", "Equal", "AcceptedDifference", "UnsupportedByDesign", "HarnessMismatch")
+NOTE_KINDS = ("Executed", "Equal", "AcceptedDifference", "UnsupportedByDesign", "HarnessMismatch", "CircuitOpen")
 DISPOSITIONS = ("KnownGap", "Finding", "AcceptedDifference", "UnsupportedByDesign", "PolicyLeak", "Crash", "Hang")
 SUITE = re.compile(r"^[a-z][a-z0-9\-]{0,31}$")
 CANARY = re.compile(r"SIMCANARY-[A-Za-z0-9\-]+")
@@ -111,7 +111,7 @@ def parse_baseline(path: pathlib.Path) -> dict:
     unknown = set(corpus) - {"minExecuted", "maxHarnessMismatchPercent", "knownGapClasses"}
     if unknown:
         raise InvalidInput("baseline corpus has unknown keys")
-    if not isinstance(corpus.get("minExecuted"), int) or corpus["minExecuted"] < 1:
+    if not isinstance(corpus.get("minExecuted"), int) or isinstance(corpus["minExecuted"], bool) or corpus["minExecuted"] < 1:
         raise InvalidInput("baseline minExecuted must be a positive integer")
     pct = corpus.get("maxHarnessMismatchPercent")
     if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not 0 <= pct <= 100:
@@ -258,6 +258,7 @@ def self_test() -> int:
         check([], 1, raw=b"x" * (MAX_BYTES + 1))
         check(ok, 1, baseline="{broken")
         check(ok, 1, baseline=json.dumps({"v": 1}))
+        check(ok, 1, baseline=json.dumps({"v": 1, "corpus": {**base["corpus"], "minExecuted": True}}))
         assert run(d / "missing.jsonl", bl, out) == 1, "missing input must exit 1"
 
         # escaping and canary redaction

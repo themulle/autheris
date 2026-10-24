@@ -64,14 +64,50 @@ public sealed partial class SltReference : IAsyncDisposable
         }
     }
 
-    public Task ExecuteAsync(string sql)
+    /// <summary>Runs a non-query statement; it is interrupted after <paramref name="timeoutSeconds"/> like a query (<see cref="TimeoutException"/>).</summary>
+    public Task ExecuteAsync(string sql, int timeoutSeconds = CommandTimeoutSeconds)
     {
         Guard(sql);
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = sql;
-        cmd.CommandTimeout = CommandTimeoutSeconds;
-        cmd.ExecuteNonQuery();
+        cmd.CommandTimeout = timeoutSeconds;
+        using var guard = InterruptGuard.Start(_connection, timeoutSeconds);
+        try
+        {
+            cmd.ExecuteNonQuery();
+        }
+        catch (SqliteException) when (guard.Fired)
+        {
+            throw new TimeoutException($"statement interrupted after {timeoutSeconds} s.");
+        }
+
         return Task.CompletedTask;
+    }
+
+    /// <summary>Wall-clock interrupt of a running SQLite statement. The flag is written by the timer thread and read by the caller (volatile).</summary>
+    private sealed class InterruptGuard : IDisposable
+    {
+        private volatile bool _fired;
+        private Timer? _timer;
+
+        public bool Fired => _fired;
+
+        public static InterruptGuard Start(DbConnection? connection, int timeoutSeconds)
+        {
+            var guard = new InterruptGuard();
+            if (connection is SqliteConnection { Handle: { } handle })
+            {
+                guard._timer = new Timer(_ =>
+                {
+                    guard._fired = true;
+                    SQLitePCL.raw.sqlite3_interrupt(handle);
+                }, null, TimeSpan.FromSeconds(timeoutSeconds), Timeout.InfiniteTimeSpan);
+            }
+
+            return guard;
+        }
+
+        public void Dispose() => _timer?.Dispose();
     }
 
     public Task<IReadOnlyList<object?[]>> RunAsync(string sql)
@@ -81,11 +117,11 @@ public sealed partial class SltReference : IAsyncDisposable
     }
 
     /// <summary>Runs <paramref name="sql"/> on <paramref name="connection"/> with the shared timeout and row cap.</summary>
-    public static IReadOnlyList<object?[]> ReadRows(DbConnection connection, string sql, IEnumerable<(string Name, object? Value)>? parameters = null)
+    public static IReadOnlyList<object?[]> ReadRows(DbConnection connection, string sql, IEnumerable<(string Name, object? Value)>? parameters = null, int timeoutSeconds = CommandTimeoutSeconds)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = sql;
-        cmd.CommandTimeout = CommandTimeoutSeconds;
+        cmd.CommandTimeout = timeoutSeconds;
         foreach (var (name, value) in parameters ?? [])
         {
             var p = cmd.CreateParameter();
@@ -94,7 +130,7 @@ public sealed partial class SltReference : IAsyncDisposable
             cmd.Parameters.Add(p);
         }
 
-        return Read(cmd);
+        return Read(cmd, timeoutSeconds);
     }
 
     /// <summary>
@@ -104,14 +140,7 @@ public sealed partial class SltReference : IAsyncDisposable
     public static IReadOnlyList<object?[]> Read(DbCommand cmd, int timeoutSeconds = CommandTimeoutSeconds)
     {
         var rows = new List<object?[]>();
-        var interrupted = false;
-        using var timer = cmd.Connection is SqliteConnection { Handle: { } handle }
-            ? new Timer(_ =>
-            {
-                interrupted = true;
-                SQLitePCL.raw.sqlite3_interrupt(handle);
-            }, null, TimeSpan.FromSeconds(timeoutSeconds), Timeout.InfiniteTimeSpan)
-            : null;
+        using var guard = InterruptGuard.Start(cmd.Connection, timeoutSeconds);
         try
         {
             using var reader = cmd.ExecuteReader();
@@ -131,7 +160,7 @@ public sealed partial class SltReference : IAsyncDisposable
                 rows.Add(row);
             }
         }
-        catch (SqliteException) when (interrupted)
+        catch (SqliteException) when (guard.Fired)
         {
             throw new TimeoutException($"statement interrupted after {timeoutSeconds} s.");
         }

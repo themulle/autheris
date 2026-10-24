@@ -35,7 +35,15 @@ public sealed record SltEngineHung(string Stage) : SltEngineOutcome;
 /// <c>GateRunner.RunAstAsync</c>, decision 10: the gate fixture is not loaded) and executes the emitted SQL on the corpus SQLite file.
 /// The catalog is built from <c>PRAGMA table_info</c> of that file.
 /// </summary>
-public sealed class SltEngineRunner(SltScenario scenario, DbConnection connection)
+/// <summary>The engine side of one scenario (a seam so the circuit breaker can be tested with a fake).</summary>
+public interface ISltEngine
+{
+    SltEngineOutcome Run(string sql);
+
+    void InvalidateCatalog();
+}
+
+public sealed class SltEngineRunner(SltScenario scenario, DbConnection connection, int executeTimeoutSeconds = SltEngineRunner.ExecuteTimeoutSeconds) : ISltEngine
 {
     public const string Schema = "main";
     public const string FilteredTable = "t1";
@@ -46,6 +54,8 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
 
     private readonly FastSqlEngine _engine = new();
     private readonly SqliteCompiledSqlBinder _binder = new();
+    private readonly Policies _policies = new(scenario);
+    private readonly FrozenSet<string> _consentTables = (scenario == SltScenario.RowFilter ? new HashSet<string>([FilteredTable], StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     private InMemoryTableCatalog? _catalog;
 
     public SltScenario Scenario => scenario;
@@ -78,9 +88,9 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
         try
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandTimeout = ExecuteTimeoutSeconds;
+            cmd.CommandTimeout = executeTimeoutSeconds;
             _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
-            return new SltEngineRows(SltReference.Read(cmd, ExecuteTimeoutSeconds));
+            return new SltEngineRows(SltReference.Read(cmd, executeTimeoutSeconds));
         }
         catch (Exception ex) when (ex is SecurityException or GovernedSqlException)
         {
@@ -102,7 +112,6 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
 
     private CompileRequest Request()
     {
-        var policies = new Policies(scenario);
         return new CompileRequest
         {
             TargetDialect = TargetSqlDialect.Sqlite,
@@ -111,11 +120,11 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
             AllowedFunctions = SqlFunctionAllowlists.Build(TargetSqlDialect.Sqlite, null),
             Policy = new GovernancePolicy
             {
-                RowFilters = policies,
-                Masks = policies,
+                RowFilters = _policies,
+                Masks = _policies,
                 Catalog = _catalog ??= BuildCatalog(),
                 Tenant = new TenantBinding("__autheris_tenant", "sim", SqlParameterType.String),
-                TablesWithConsentRowFilter = (scenario == SltScenario.RowFilter ? new HashSet<string>([FilteredTable], StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+                TablesWithConsentRowFilter = _consentTables,
                 TablesWithMaskedColumns = FrozenSet<string>.Empty,
             },
         };

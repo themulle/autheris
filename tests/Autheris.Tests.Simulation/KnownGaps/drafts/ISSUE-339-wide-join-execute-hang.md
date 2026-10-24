@@ -3,6 +3,8 @@
 This is an issue draft for a candidate product defect found by the sqllogictest corpus (REQ-SIMTEST P1). It is not a KnownGap: a `Hang`
 can never be one (SEC-SIM-17). Until it is fixed or owner-quarantined with an issue number, the `sim-corpus` job stays red.
 
+Tracked in GitHub issue #339.
+
 Kind: Hang
 Error class: Hang:Execute:
 
@@ -24,6 +26,8 @@ CROSS JOIN (SELECT "a53" AS "a53", ... FROM "main"."t53") AS "t53" CROSS JOIN ..
 
 Measured with Python `sqlite3` on the select5 data: original SQL 0.0 s; the emitted SQL (parameter `?1` = 9) was interrupted after 60 s.
 A simpler chain join over 24 own tables did not reproduce it, so the trigger is the random equality graph of the wide join, not the wrapping alone.
+
+The corpus runner opens a circuit breaker after 40 hangs of the same error class in one file and skips the rest of that file (the Hang line keeps the count, a `CircuitOpen` note records the skipped queries), so the job stays red but cannot time out.
 
 ## Expected
 

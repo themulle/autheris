@@ -8,6 +8,7 @@ public sealed class SimWp0FollowUpTests
 {
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-17
     public void SimQuarantine_RejectsDuplicateSha256()
     {
         var sha = new string('a', 64);
@@ -19,6 +20,7 @@ public sealed class SimWp0FollowUpTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-14
     public void IssueDraft_CellReplacesCarriageReturnAndLineFeedWithSpace()
     {
         var finding = new SimFinding(FindingKind.WrongResult, "WrongResult:a\r\nb\nc\rd", "q", "e", "a", "r");

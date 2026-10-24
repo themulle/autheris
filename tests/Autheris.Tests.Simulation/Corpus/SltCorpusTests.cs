@@ -45,6 +45,7 @@ public sealed class SltCorpusTests : SimulationTestBase
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-17 (row filter leak is a PolicyLeak, never a KnownGap)
     public async Task Corpus_RowFilterScenario_NeverLeaksFilteredRows()
     {
         var (violations, answered) = await SltRowFilterProbes.RunAsync();

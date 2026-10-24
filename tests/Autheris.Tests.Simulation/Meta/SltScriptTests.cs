@@ -67,6 +67,7 @@ public sealed class SltScriptTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-10
     public void SltFetch_FailsClosedOnShaMismatch()
     {
         var manifest = TempManifest("statement ok\nSELECT 1\n", out var dir);
@@ -87,6 +88,7 @@ public sealed class SltScriptTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-10
     public void SltFetch_RejectsNonHttpsOrUnpinnedHost()
     {
         var manifest = RealManifest;
@@ -117,6 +119,7 @@ public sealed class SltScriptTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-10/11
     public void SltFetch_LeavesNoPartialDirectory()
     {
         var manifest = TempManifest("statement ok\nSELECT 1\n", out var dir);
@@ -163,6 +166,7 @@ public sealed class SltScriptTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-19
     public void SimReport_FailsClosedOnEmptyMalformedOrOversizedInput()
     {
         var baseline = Baseline();
@@ -195,6 +199,7 @@ public sealed class SltScriptTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-14
     public void SimReport_EscapesMarkdownAndRedactsCanaries()
     {
         var outMd = Path.Combine(_tmp, "o.md");
