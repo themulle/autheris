@@ -84,3 +84,10 @@ Verdict: APPROVED WITH CONDITIONS. Defaults 2 (no audit) and 3 (cap in the calle
 ### Owner questions (recommended defaults)
 - Q1: Revoke-then-create in OpenMetadata changes the consent id on shortening; accept (default yes, audited).
 - Q2: Rejecting at the repository vs capping in the workflow for max duration: keep cap (default).
+
+## Status (2026-10-24)
+- Phase 4: WP-A and WP-B consolidated on this branch (sub-lane `fix/pers-04-ingress-admin-b` folded in), commits `2eb84797`, `808702fb`, `395d11d2`, `5c2b9e78`. All mandatory security tests exist.
+- Phase 5 round 1 findings fixed: OpenMetadata race fallback re-reads the consent and never recreates a revoked one, revoke-then-create creates only when the revoke succeeded (SEC-P4R-7; tests `PERS_04_Sync_ConcurrentlyRevokedConsent_IsNotRecreated`, `PERS_04_Sync_RevokeReturnedFalse_DoesNotCreate`); `AdminPathVariantRejectionTests` enables app-scoped trusted documents and has a seeded ClusterAdmin positive control with exact 401/403 on the canonical path (SEC-281-6-C5); `consent_requests` requested expiry stored as UTC (SEC-P4R-3).
+- Accepted Low: helm render tests return early when `helm` is absent locally; CI `helm-render` and `verify-hardening.sh` assert the same renders (SEC-281-6-C6).
+- Local verification: Release build with `-warnaserror` clean; unit, Extensions and Architecture suites green (known timing flakes pass in isolation). Integration tests run in GitHub CI.
+
