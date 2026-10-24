@@ -3,6 +3,8 @@
 Issue draft for a candidate product defect found by the Schemathesis API fuzz (REQ-SIMTEST P2, write phase). It is not a KnownGap: a 5xx can
 never be one (SEC-SIM-18). Until it is fixed or owner-quarantined with an issue number, the `sim-api-fuzz` job stays red.
 
+Tracked in GitHub issue #340.
+
 Kind: ServerError
 Error class: `ServerError:500:INTERNAL_ERROR`
 

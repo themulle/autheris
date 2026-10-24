@@ -231,6 +231,20 @@ public sealed class ApiReportTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-SIM-19
+    public void ApiReport_FailsWhenOneHarOfSeveralIsEmpty()
+    {
+        var empty = Path.Combine(_tmp, "empty-one.har");
+        File.WriteAllText(empty, """{"log":{"version":"1.2","entries":[]}}""");
+
+        var (exit, output) = Check([Fixture("clean.har"), empty]);
+
+        exit.ShouldBe(2, output);
+        output.ShouldContain("no requests");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     // SEC-SIM-14
     public void ApiReport_ScrubsHeadersAndCanariesFromOutput()
     {

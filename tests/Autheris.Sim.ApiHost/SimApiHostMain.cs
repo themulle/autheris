@@ -129,7 +129,7 @@ public static class SimApiHostMain
         {
             Directory.Delete(dataDir, true);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // best effort; the data dir is under the runner temp dir and is removed with the job
         }

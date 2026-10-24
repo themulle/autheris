@@ -113,6 +113,8 @@ def parse_har(path: pathlib.Path) -> list[Entry]:
         raise InvalidInput(f"HAR has no log.version 1.2 with entries: {path.name}")
     if len(log["entries"]) > MAX_ENTRIES:
         raise InvalidInput("HAR has too many entries")
+    if not log["entries"]:
+        raise InvalidInput(f"HAR contains no requests (a run must record at least one): {path.name}")
     out = []
     for index, raw_entry in enumerate(log["entries"]):
         try:
@@ -484,7 +486,7 @@ def self_test() -> int:
         check(2, raw=b"not json", label="malformed")
         check(2, har_text=json.dumps({"log": {"version": "9.9", "entries": []}}), label="unknown version")
         check(2, raw=b"x" * (MAX_BYTES + 1), label="oversized")
-        check(1, har_text=har(), label="empty HAR")
+        check(2, har_text=har(), label="empty HAR")
         check(2, har_text='{"log":{"version":"1.2","entries":[{"request":{},"response":{}}]}}', label="malformed entry")
         check(2, ok, canary_text="\n", label="empty canaries")
         assert run([d / "missing.har"], [], canaries, gaps, out) == 2, "missing input must fail"

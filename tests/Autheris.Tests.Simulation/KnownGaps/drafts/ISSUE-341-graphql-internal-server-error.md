@@ -3,6 +3,8 @@
 Issue draft for a candidate product defect found by the Schemathesis API fuzz in GraphQL mode (REQ-SIMTEST P2). It is not a KnownGap: an unhandled
 server error can never be one (SEC-SIM-18). Until it is fixed or owner-quarantined with an issue number, the `sim-api-fuzz` job stays red.
 
+Tracked in GitHub issue #341.
+
 Kind: ServerError
 Error class: `ServerError:GraphQL:200:INTERNAL_SERVER_ERROR` (HTTP 200 with an `errors` entry whose `extensions.code` is `INTERNAL_SERVER_ERROR`); also seen with HTTP 400.
 

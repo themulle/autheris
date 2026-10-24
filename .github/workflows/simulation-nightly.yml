@@ -166,7 +166,10 @@ jobs:
 
       - name: API report (scrubbed output only)
         if: always()
-        run: python3 -I .github/scripts/sim-api-report.py --har "$RUNNER_TEMP"/st/out/*.har --junit "$RUNNER_TEMP"/st/out/*.xml --canaries "$RUNNER_TEMP/sim-canaries.txt" --gaps tests/Autheris.Tests.Simulation/ApiFuzz/api-known-gaps.json --out "$AUTHERIS_SIM_REPORT_DIR"
+        run: |
+          set -euo pipefail
+          if [ -n "$SIM_SEED_INPUT" ]; then export AUTHERIS_SIM_SEED="$SIM_SEED_INPUT"; fi
+          python3 -I .github/scripts/sim-api-report.py --har "$RUNNER_TEMP"/st/out/*.har --junit "$RUNNER_TEMP"/st/out/*.xml --canaries "$RUNNER_TEMP/sim-canaries.txt" --gaps tests/Autheris.Tests.Simulation/ApiFuzz/api-known-gaps.json --out "$AUTHERIS_SIM_REPORT_DIR"
 
       - name: Upload simulation results
         if: always()

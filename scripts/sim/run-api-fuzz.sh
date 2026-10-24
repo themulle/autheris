@@ -9,7 +9,7 @@
 #   run-api-fuzz.sh --self-test
 #
 # Environment: AUTHERIS_SIM_SEED (1 to 10 digits, default UTC date), SIM_API_PORT (1024-65535, default 5071),
-# SIM_API_BASE_URL (default http://127.0.0.1:$SIM_API_PORT; validated like --check-url, SEC-SIM-02), SIM_API_MAX_EXAMPLES (1-3 digits, default 50).
+# SIM_API_BASE_URL (default http://127.0.0.1:$SIM_API_PORT; validated like --check-url, SEC-SIM-02), SIM_API_MAX_EXAMPLES (1-3 digits, default 10; keeps every HAR under the checker cap of 50 MB).
 #
 # Outputs (never uploaded): raw HAR and JUnit in $RUNNER_TEMP/st/out, the canary list in $RUNNER_TEMP/sim-canaries.txt.
 # The checker .github/scripts/sim-api-report.py judges them. Exit codes: non-zero for infrastructure problems (host did not start, a
@@ -20,6 +20,7 @@ SEED_REGEX='^[0-9]{1,10}$'
 HOST_DLL="tests/Autheris.Sim.ApiHost/bin/Release/net10.0/Autheris.Sim.ApiHost.dll"
 READ_CAP=1500   # 25 minutes
 WRITE_CAP=900   # 15 minutes
+HAR_CAP_BYTES=52428800  # must equal MAX_BYTES of sim-api-report.py
 CHECKS="not_a_server_error,response_schema_conformance,status_code_conformance"
 
 die() {
@@ -83,6 +84,11 @@ with open(sys.argv[2], "w", encoding="utf-8") as handle:
 PY
 }
 
+# Log tails go to the job log: canaries are replaced and stack-trace frames dropped (the checker treats them as leaks).
+safe_tail() {
+  tail -n "$2" "$1" | grep -v -E '^[[:space:]]+at ' | sed -E 's/SIMCANARY-[A-Za-z0-9-]+/<canary>/g' >&2 || true
+}
+
 wait_for_file() {
   local file="$1" seconds="$2" i
   for ((i = 0; i < seconds; i++)); do
@@ -118,6 +124,7 @@ stop_host() {
     fi
   fi
   HOST_PID=""
+  [ -z "${DATA_DIR:-}" ] || rm -rf "$DATA_DIR"
 }
 
 start_host() {
@@ -128,7 +135,7 @@ start_host() {
   dotnet "$HOST_DLL" --port "$PORT" --data-dir "$DATA_DIR" --ready-file "$READY_FILE" --profile "$profile" >"$RUNNER_TEMP/sim-host-$profile.log" 2>&1 &
   HOST_PID=$!
   if ! wait_for_file "$READY_FILE" 180; then
-    tail -n 20 "$RUNNER_TEMP/sim-host-$profile.log" | sed -E 's/SIMCANARY-[A-Za-z0-9-]+/<canary>/g' >&2 || true
+    safe_tail "$RUNNER_TEMP/sim-host-$profile.log" 40
     die "the sim host ($profile) did not become ready"
   fi
   cat "$DATA_DIR/canaries.txt" >>"$RUNNER_TEMP/sim-canaries.txt"
@@ -157,7 +164,9 @@ run_st() {
   [ "$budget" -gt "$left" ] && budget=$left
   local rc=0
   echo "run-api-fuzz: $label (seed $SEED, cap ${budget}s)"
-  timeout -k 15 "$budget" docker run --rm --network host --read-only --cap-drop ALL --security-opt no-new-privileges \
+  # --network host shares the runner network namespace: the target is only ever the fixed, validated --url and schemas have their servers
+  # entries stripped, so a schema cannot steer traffic to another host or port.
+  timeout -k 15 "$budget" docker run --rm --pull never --name "st-$label" --network host --read-only --cap-drop ALL --security-opt no-new-privileges \
     --tmpfs /tmp -e HOME=/tmp -w /work --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/st:/work" "$SCHEMATHESIS_IMAGE" run "$schema" "$@" \
     -H "X-Test-User-Sid: S-1-5-SIM" -H "X-Test-Roles: $roles" -H "X-Test-Tenant: tenant_sim" -H "GraphQL-Preflight: 1" \
     --seed "$SEED" --workers 1 --max-examples "$MAX_EXAMPLES" --request-timeout 10 --max-redirects 0 --checks "$CHECKS" --generation-database none \
@@ -166,7 +175,19 @@ run_st() {
   # 0 = passed, 1 = Schemathesis found failures (the checker classifies them); anything else (usage error, timeout 124/137) is red here.
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
     echo "run-api-fuzz: $label ended with exit code $rc (infrastructure problem or phase cap)" >&2
-    tail -n 8 "$RUNNER_TEMP/st/out/$label.log" | sed -E 's/SIMCANARY-[A-Za-z0-9-]+/<canary>/g' >&2 || true
+    safe_tail "$RUNNER_TEMP/st/out/$label.log" 12
+    FAILED=1
+  fi
+  # Every run must leave a non-empty HAR and JUnit file within the checker cap; otherwise coverage would silently be missing or the checker would reject it.
+  local f
+  for f in "$label.har" "$label.xml"; do
+    if [ ! -s "$RUNNER_TEMP/st/out/$f" ]; then
+      echo "run-api-fuzz: $f is missing or empty after $label" >&2
+      FAILED=1
+    fi
+  done
+  if [ -f "$RUNNER_TEMP/st/out/$label.har" ] && [ "$(stat -c %s "$RUNNER_TEMP/st/out/$label.har")" -gt "$HAR_CAP_BYTES" ]; then
+    echo "run-api-fuzz: $label.har exceeds the checker cap of 50 MB, lower SIM_API_MAX_EXAMPLES" >&2
     FAILED=1
   fi
 }
@@ -245,7 +266,7 @@ SEED="${AUTHERIS_SIM_SEED:-$(date -u +%Y%m%d)}"
 [[ "$SEED" =~ $SEED_REGEX ]] || die "AUTHERIS_SIM_SEED must be 1 to 10 digits"
 PORT="${SIM_API_PORT:-5071}"
 [[ "$PORT" =~ ^[0-9]{4,5}$ ]] && [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "SIM_API_PORT must be numeric between 1024 and 65535"
-MAX_EXAMPLES="${SIM_API_MAX_EXAMPLES:-50}"
+MAX_EXAMPLES="${SIM_API_MAX_EXAMPLES:-10}"
 [[ "$MAX_EXAMPLES" =~ ^[1-9][0-9]{0,2}$ ]] || die "SIM_API_MAX_EXAMPLES must be 1 to 3 digits"
 BASE_URL="${SIM_API_BASE_URL:-http://127.0.0.1:$PORT}"
 check_url "$BASE_URL" || die "refusing target: $BASE_URL"
@@ -253,7 +274,13 @@ check_url "$BASE_URL" || die "refusing target: $BASE_URL"
 [ -f "$HOST_DLL" ] || die "build the sim host first: $HOST_DLL not found"
 
 echo "run-api-fuzz: seed $SEED, target $BASE_URL"
-trap stop_host EXIT
+cleanup() {
+  stop_host
+  for name in read-odata read-websql read-graphql write-governance write-websql write-graphql; do
+    docker rm -f "st-$name" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup EXIT
 mkdir -p "$RUNNER_TEMP/st/out"
 : >"$RUNNER_TEMP/sim-canaries.txt"
 
