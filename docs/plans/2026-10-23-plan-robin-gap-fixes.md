@@ -157,7 +157,9 @@ Reviewer: csharp-security-expert, 2026-10-23. Verdict: **APPROVED WITH CONDITION
 - `CrossSourcePlannerTests.JoinChainSameNameDifferentSource_DistinctAndPolicyChecked` (SEC-RG-15)
 - `TreeFilterRendererTests.NotInWithNull_RendersFalse` (SEC-RG-16)
 
-## 6. Changelog (Phase 4, WP-G)
+## 6. Changelog
+
+### WP-G
 
 - 2026-10-23 G0 pinned: the raw error of every rejected input (`first` variable without default, `first: 100000`, `first: -1`) is a validation-phase `QUERY_TOO_COMPLEX`, emitted by `QueryCostAnalyzerRule.Validate` (the only emitter of that code; no HotChocolate built-in is involved). Budget 5000 in the parity host: a variable without default priced at `maxResponseRows` x 10, an out-of-range literal at `min(value, maxResponseRows)` x 10.
 - 2026-10-23 Drift: `IVariableValueCollection.TryGetValue<T>` is constrained to `IValueNode`, so the tree builder reads page variables through that one path (value node); root cause (b) of G1 is only the cost rule. `ReadPageNumber` now covers value nodes, null, and saturating overflow.
@@ -171,3 +173,17 @@ Reviewer: csharp-security-expert, 2026-10-23. Verdict: **APPROVED WITH CONDITION
 - 2026-10-24 Test renames (Security trait added): `PageRange_NotShielded_FixedBody` -> `SEC_RG_08_PageRange_NotShielded_FixedBody`; `FirstOutOfRange_Variable_FixedBody` -> `SEC_RG_07_FirstOutOfRange_Variable_FixedBody`; `NullMember_Rejected` -> `SEC_RG_11_NullMember_Rejected` (now covers `or` and `and`, null first and last).
 - 2026-10-24 Known cost (not changed): the SQLite DST offset `CASE` is repeated at every use of the local time in a bucket expression (about 13 KB per use for Berlin; QUARTER with a zone uses it three times, in SELECT and GROUP BY), so a zone-aware QUARTER is roughly 80 KB of SQL, far below SQLite's 1 MB limit. A subquery would not survive the governed rewriter, which re-parses the planned SQL, so it is left as is.
 - 2026-10-24 Tree fields in the cost rule are still recognised by the argument set `where`, `orderBy`, `first`, `offset`; marking them through field features/context data was not cheap in HotChocolate 16 and is left as a follow-up. The discount never applies to other fields.
+
+### WP-S
+
+- 2026-10-23 (WP-S, G-PLAN-REBASE): code facts re-checked against `fix/robin-gaps-s`; drift and decisions:
+  - S1: the single-catalog variant does not go through `CrossSourceQueryRouter`. `GovernedSqlRewriter` (single catalog, `ResolveAllowedDataSource`) threw the plain `WebSqlPolicyException`. Fix applied there too: new non-throwing `SqlDataSourceResolver.TryResolveAllowedDataSource`, denial is `WebSqlTableDeniedException`. `GovernedSqlExecutor` (explicit request data source name, not table text) is unchanged.
+  - S2: the provider classification (SEC-RG-03) lives in `DmlErrorSanitizer.Map` (provider code or SQLSTATE per dialect, message token only for SQLite, DuckDB and Databricks, which have no number); the mapper maps the resulting `SQL_SYNTAX_ERROR` governed code to 400. PARITY-FU-003 is reduced to container-dialect confirmation. A cell `Robin_Proactive_SetOperations|WebSql|wildcard_mismatch` was added (SEC-RG-03 mandatory).
+  - S3: `WindowColumnReferences` is a new init property of `SqlQueryMetadata`; `QueryAnalysisService` and `CrossSourcePlanner` (staging projection) read it next to `FilterColumnReferences`. A masked window column answers `AGGREGATION_ON_MASKED_COLUMN`; a denied one keeps the existing filter-style denial (`WebSqlRedactedPredicateGuardrailTests` pins that message; it was not changed).
+  - S4: a second defect hid behind the first: `FederatedStagingService` passed the subtree SELECT as `PushdownFilterSql`, which the connector predicate validation always rejected (400 `SQL_SYNTAX_ERROR`). The subtree SQL now travels only in `Items["SubtreeSql"]`/`["SubtreePlan"]` and runs through the governed pipeline. The planner match uses table name, schema/catalog qualifier and alias, one member per source.
+  - S6: the escape character is `!`, not a backslash: the SQL token policy rejects every backslash in a string literal (`RejectBackslashInStrings`), so `ESCAPE '\'` is never executable. `escape` is not added to `ReservedKeywords` (a column of that name would escape the masked-column extraction); the keyword is skipped only right after a string literal. The column extraction runs on the rewritten text so `startswith`/`contains` are not taken for columns.
+  - S7: `BoundaryOracle` (Parity) expects `IS NULL` semantics for the Rest `eq null` cells (contract change per section 3; the plan had not listed the Boundary sweep).
+  - S8: a separate catch answers a mapped `SQL_SYNTAX_ERROR` as 400 `INVALID_QUERY`; every other mapped code is unchanged.
+  - The four "intentional red" cells (Robin_30 join and single, SetOperations mismatch, RowNumber masked) already asserted the fixed behaviour; no expectation was edited, they pass now.
+- 2026-10-24 (WP-S Phase 5 fixes): PostgreSQL set-operation errors need SQLSTATE 42601 and routine `transformSetOperationTree` (42601 alone is a generic syntax error and stays a 502 otherwise). `SqlDataSourceResolver` now has one shared decision core (`EvaluateAllowed`) behind `ResolveAllowedDataSource` and `TryResolveAllowedDataSource`; it stays separate from `DataSourceAllowlistGuard.Evaluate` on purpose (the resolver always restricts to the default and allowed sources, the guard only once an allowlist is configured; merging them would change the staging callers).
+- The mandatory tests `GovernedSqlExecutionServiceMaskTests.*` and `GovernedSqlRewriterMaskTests.WindowOverMasked_Denied` live as `WebSqlRedactedPredicateGuardrailTests.WindowOverMasked_ThrowsMaskedAggregation`, `WindowPartitionOnDeniedColumn_Denied` and `ExecutorGuard_WindowOverMaskedOrDenied_DeniedBeforeExecution`.

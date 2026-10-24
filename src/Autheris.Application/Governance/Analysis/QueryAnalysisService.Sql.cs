@@ -125,9 +125,10 @@ public sealed partial class QueryAnalysisService
             AssignColumnReferenceToTable(colExpr, metadata.ReferencedTables, aliasToTable, tableLookup, columnsByTable);
         }
 
-        if (metadata.FilterColumnReferences != null)
+        // #322: window PARTITION BY / ORDER BY columns are filter-style usages for the column analysis as before.
+        var filterAndWindowRefs = (metadata.FilterColumnReferences ?? []).Concat(metadata.WindowColumnReferences ?? []);
         {
-            foreach (var fRef in metadata.FilterColumnReferences)
+            foreach (var fRef in filterAndWindowRefs)
             {
                 var qualified = !string.IsNullOrWhiteSpace(fRef.TableOrAlias)
                     ? $"{fRef.TableOrAlias}.{fRef.ColumnName}"

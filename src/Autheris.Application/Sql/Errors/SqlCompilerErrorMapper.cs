@@ -140,6 +140,8 @@ public static class SqlCompilerErrorMapper
         e => e is GatewaySecurityException { ErrorCode: GovernedSqlErrorCodes.TenantIdCollision } ? Of(403, GovernedSqlErrorCodes.TenantIdCollision) : null,
         // Gateway defects fail closed. They precede the generic SecurityException row because they derive from it.
         e => e is SecurityCoverageException or EmittedSqlInvariantViolationException or SqlCompileConfigurationException ? Of(500, GovernedSqlErrorCodes.CompilerInvariant) : null,
+        // #321: the AST-level degree check of a set operation (fixed message, no column text); a caller mistake like a syntax error.
+        e => e is SetOperationDegreeMismatchException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MaskedAggregationException ? Of(403, GovernedSqlErrorCodes.AggregationOnMaskedColumn) : null,
         e => e is RequiredFilterColumnMissingException ? Of(400, GovernedSqlErrorCodes.RequiredFilterColumnMissing) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.InvalidIdentifierQualification } ? Of(400, GovernedSqlErrorCodes.InvalidIdentifierQualification) : null,
@@ -175,6 +177,8 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.ProviderError => Of(502, code),
         // #312 (SEC-PG-10): the executor classified an unknown identifier by provider code; it answers exactly like a denied column.
         GovernedSqlErrorCodes.PolicyDenied => Of(403, code),
+        // #321 (SEC-RG-03): a provider set-operation column-count error, classified by provider code in the sanitizer.
+        GovernedSqlErrorCodes.SyntaxError => Of(400, code),
         GovernedSqlErrorCodes.CheckedExecutionRequired => Of(500, code),
         // An unknown governed code is a gateway defect: fail closed.
         _ => Of(500, GovernedSqlErrorCodes.CompilerInvariant)

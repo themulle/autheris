@@ -13,6 +13,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly HashSet<string> _seenTableKeys = new(StringComparer.Ordinal);
     private readonly List<JoinColumnReference> _joinColumnReferences = new();
     private readonly List<FilterColumnReference> _filterColumnReferences = new();
+    private readonly List<FilterColumnReference> _windowColumnReferences = new();
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private readonly List<string> _functionCalls = new();
     private readonly HashSet<string> _seenFunctionCalls = new(StringComparer.Ordinal);
@@ -57,6 +58,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             JoinColumnReferences: _joinColumnReferences.ToArray(),
             FilterColumnReferences: _filterColumnReferences.ToArray())
         {
+            WindowColumnReferences = _windowColumnReferences.ToArray(),
             HasRecursiveCte = _hasRecursiveCte,
             HasNonRecursiveSelfReference = _hasNonRecursiveSelfReference
         };
@@ -70,6 +72,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _seenTableKeys.Clear();
         _joinColumnReferences.Clear();
         _filterColumnReferences.Clear();
+        _windowColumnReferences.Clear();
         _cteScopeStack.Clear();
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
         _functionCalls.Clear();
@@ -428,7 +431,17 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     /// </summary>
     public override void EnterOrderBy(SqlBaseParser.OrderByContext context)
     {
-        ExtractFilterColumnReferences(context, _filterColumnReferences);
+        // #322: the ORDER BY of a window is a window reference (the window guard answers it), not a plain filter reference.
+        ExtractFilterColumnReferences(context, context.Parent is SqlBaseParser.WindowSpecificationContext ? _windowColumnReferences : _filterColumnReferences);
+    }
+
+    /// <summary>#322 (SEC-RG-04): PARTITION BY expressions of a window (the ORDER BY is taken by <see cref="EnterOrderBy"/>).</summary>
+    public override void EnterWindowSpecification(SqlBaseParser.WindowSpecificationContext context)
+    {
+        foreach (var partition in context._partition)
+        {
+            ExtractFilterColumnReferences(partition, _windowColumnReferences);
+        }
     }
 
     /// <summary>Wunsch 4 / Befund 3.6: an aggregate <c>FILTER (WHERE …)</c> filters rows like WHERE.</summary>

@@ -15,30 +15,49 @@ public static class DataSourceAllowlistGuard
 {
     public static string EnsureAllowed(WebSqlOptions webSqlOptions, TenantId tenantId, string? dataSourceName)
     {
+        string? denial = Evaluate(webSqlOptions, tenantId, dataSourceName, out string resolved);
+        if (denial != null)
+        {
+            throw new WebSqlPolicyException(denial);
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// SEC-RG-01: non-throwing form of <see cref="EnsureAllowed"/> with the identical decision (shared core). In-memory only, never
+    /// touches a repository, so callers can answer a denied source uniformly before any metadata lookup.
+    /// </summary>
+    public static bool IsAllowed(WebSqlOptions webSqlOptions, TenantId tenantId, string? dataSourceName) =>
+        Evaluate(webSqlOptions, tenantId, dataSourceName, out _) == null;
+
+    private static string? Evaluate(WebSqlOptions webSqlOptions, TenantId tenantId, string? dataSourceName, out string resolved)
+    {
         ArgumentNullException.ThrowIfNull(webSqlOptions);
+        resolved = string.Empty;
 
         if (string.IsNullOrWhiteSpace(dataSourceName))
         {
-            throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+            return "The requested data source is not enabled for WebSQL.";
         }
 
         // Governance domains of staged/federated tables are not necessarily WebSQL data source names, so the global
         // allowlist is only a restriction once the operator has configured one (AllowedDataSources / mappings).
         bool globalRestricted = webSqlOptions.AllowedDataSources is { Count: > 0 } ||
                                 webSqlOptions.DataSourceMappings is { Count: > 0 };
-        string resolved = dataSourceName;
+        resolved = dataSourceName;
         if (globalRestricted &&
             !SqlDataSourceResolver.TryResolveGloballyAllowedDataSource(webSqlOptions, dataSourceName, out resolved))
         {
-            throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+            return "The requested data source is not enabled for WebSQL.";
         }
 
         if (!GovernedSqlExecutionService.IsDataSourceAllowedForTenant(webSqlOptions, tenantId, resolved))
         {
-            throw new WebSqlPolicyException("The requested data source is not enabled for this tenant.");
+            return "The requested data source is not enabled for this tenant.";
         }
 
-        return resolved;
+        return null;
     }
 
     /// <summary>
