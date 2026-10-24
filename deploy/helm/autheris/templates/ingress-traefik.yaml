@@ -1,11 +1,25 @@
 {{- if .Values.ingress.enabled -}}
+{{- $denyAdmin := not (include "autheris.exposeAdmin" .) -}}
+{{- $ann := deepCopy (.Values.ingress.annotations | default dict) -}}
+{{- $regexMode := and $denyAdmin (eq (toString .Values.ingress.className) "nginx") (ne (toString .Values.ingress.nginxCaseInsensitiveAdminDeny) "false") -}}
+{{- if $regexMode -}}
+{{- /* The chart value wins over a user-supplied annotation: use-regex cannot be switched off while the deny rule relies on it. */ -}}
+{{- $_ := set $ann "nginx.ingress.kubernetes.io/use-regex" "true" -}}
+{{- range .Values.ingress.hosts -}}
+{{- range .paths -}}
+{{- if regexMatch "[.*+?()\\[\\]{}|^$\\\\]" (toString .path) -}}
+{{- fail (printf "ingress path %q contains a regex metacharacter, but nginx use-regex mode (nginxCaseInsensitiveAdminDeny) treats every path as a regex; use plain paths or set ingress.nginxCaseInsensitiveAdminDeny=false" .path) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "autheris.fullname" . }}
   labels:
     {{- include "autheris.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with $ann }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -28,7 +42,7 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          {{- if $.Values.ingress.blockAdminPath }}
+          {{- if $denyAdmin }}
           # Deny rule: the admin API is cluster-internal only. The longer prefix wins over "/" and lands on a
           # selector-less Service without endpoints, so the controller answers 503 instead of forwarding.
           - path: /api/admin

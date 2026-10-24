@@ -217,3 +217,9 @@ Rendered as the entries of a container "env" list.
   value: {{ .Values.gateway.redis.revocationLookupGraceSeconds | default 60 | quote }}
 {{- end }}
 {{- end }}
+{{/*
+Admin API exposure (SEC-281-6): "true" only when ingress.exposeAdmin is the boolean true; any other value (string, null, number) keeps the deny rule.
+*/}}
+{{- define "autheris.exposeAdmin" -}}
+{{- if and (kindIs "bool" .Values.ingress.exposeAdmin) .Values.ingress.exposeAdmin -}}true{{- end -}}
+{{- end }}

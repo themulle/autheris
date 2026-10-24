@@ -5,6 +5,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.OpenMetadata.Models;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -451,11 +452,11 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                     if (existing.Effect == ConsentEffect.Allow)
                     {
                         // Short validity, refreshed on every successful run (a failing sync closes access instead of keeping it open).
-                        await _consentRepo.ExtendConsentExpiryAsync(existing.Id, validTo, ct);
+                        await RefreshSyncConsentAsync(existing, validTo, effective[key], affectedTables, ct);
                     }
                     else if (existing.ValidTo < DateTimeOffset.UtcNow.Add(DenyRefreshThreshold))
                     {
-                        await _consentRepo.ExtendConsentExpiryAsync(existing.Id, denyValidTo, ct);
+                        await RefreshSyncConsentAsync(existing, denyValidTo, effective[key], affectedTables, ct);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -515,6 +516,46 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         }
 
         return new ReconcileOutcome(syncedConsentsCount, success);
+    }
+
+    /// <summary>
+    /// PERS-04: an extension only ever moves an active consent to a later expiry. A consent that is already valid longer than the refresh
+    /// window is shortened by an audited revoke followed by a new consent (same marker, principal and tenant); when the extension is
+    /// rejected because the consent expired or was changed concurrently, exactly one new consent is created (no retry loop).
+    /// A failing create leaves the old consent revoked (fail closed); the next run recreates it.
+    /// </summary>
+    private async Task RefreshSyncConsentAsync(
+        Consent existing, DateTimeOffset newValidTo, Consent replacement, HashSet<TableIdentifier> affectedTables, CancellationToken ct)
+    {
+        if (newValidTo > existing.ValidTo)
+        {
+            try
+            {
+                await _consentRepo.ExtendConsentExpiryAsync(existing.Id, newValidTo, ct);
+                return;
+            }
+            catch (ConsentNotExtendableException)
+            {
+                _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected; creating a new consent.", existing.Id);
+                await _consentRepo.CreateConsentAsync(replacement, ct);
+                affectedTables.Add(replacement.TableIdentifier);
+                return;
+            }
+        }
+
+        var revoked = await _consentRepo.RevokeSystemConsentAsync(
+            existing.Id,
+            OpenMetadataSyncConsentMarker,
+            SyncActorSid,
+            "OpenMetadata sync shortens this consent to the refresh window (revoked and recreated).",
+            ct);
+        if (revoked)
+        {
+            affectedTables.Add(existing.TableIdentifier);
+        }
+
+        await _consentRepo.CreateConsentAsync(replacement, ct);
+        affectedTables.Add(replacement.TableIdentifier);
     }
 
     /// <summary>SEC E-05 / EX-02: sync consents are valid for two sync intervals and refreshed on every successful run.</summary>

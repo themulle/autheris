@@ -953,7 +953,7 @@ public partial class SqliteGovernanceRepository
                 cmd.Parameters.AddWithValue("@roleId", DBNull.Value);
                 cmd.Parameters.AddWithValue("@roleName", isRole ? (object)req.RequestedGranteeRef : DBNull.Value);
                 cmd.Parameters.AddWithValue("@from", DateTimeOffset.UtcNow.ToString("O"));
-                cmd.Parameters.AddWithValue("@to", req.RequestedValidTo.ToString("O"));
+                cmd.Parameters.AddWithValue("@to", req.RequestedValidTo.ToUniversalTime().ToString("O"));
                 cmd.Parameters.AddWithValue("@tenantId", req.TenantId.Value);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
@@ -1618,8 +1618,8 @@ public partial class SqliteGovernanceRepository
         cmd.Parameters.AddWithValue("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
         cmd.Parameters.AddWithValue("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToString("O"));
-        cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToString("O"));
+        cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToUniversalTime().ToString("O"));
+        cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToUniversalTime().ToString("O"));
         cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
         cmd.Parameters.AddWithValue("@description", (object?)consent.Description ?? DBNull.Value);
 
@@ -1977,11 +1977,16 @@ public partial class SqliteGovernanceRepository
             {
                 cmd.CommandText = @"UPDATE CONSENTS
                                     SET valid_to = @validTo, valid_from = @validFrom, renewal_count = renewal_count + 1
-                                    WHERE id = @id";
+                                    WHERE id = @id AND is_revoked = 0 AND valid_to > @now AND @validTo > valid_to";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
-                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToString("O"));
-                cmd.Parameters.AddWithValue("@validTo", newValidTo.ToString("O"));
-                await cmd.ExecuteNonQueryAsync(ct);
+                cmd.Parameters.AddWithValue("@validFrom", newValidFrom.ToUniversalTime().ToString("O"));
+                cmd.Parameters.AddWithValue("@validTo", newValidTo.ToUniversalTime().ToString("O"));
+                cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+                // PERS-04 / SEC-P4R-1: zero rows (unknown, revoked, expired, not strictly later) rejects before epoch and audit; nothing was written.
+                if (await cmd.ExecuteNonQueryAsync(ct) != 1)
+                {
+                    throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(consentId);
+                }
             }
 
             if (tableId.HasValue)

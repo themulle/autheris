@@ -66,11 +66,11 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         return Task.CompletedTask;
     }
 
-    private static Consent Clone(Consent c, bool revoked) => new()
+    private static Consent Clone(Consent c, bool revoked, DateTimeOffset? validTo = null, int renewalCountDelta = 0) => new()
     {
         Id = c.Id, TableId = c.TableId, TableIdentifier = c.TableIdentifier, TenantId = c.TenantId, Effect = c.Effect,
-        GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleName = c.RoleName, ValidFrom = c.ValidFrom, ValidTo = c.ValidTo,
-        IsRevoked = revoked, ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description
+        GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, RoleName = c.RoleName, ValidFrom = c.ValidFrom, ValidTo = validTo ?? c.ValidTo,
+        IsRevoked = revoked, RenewalCount = c.RenewalCount + renewalCountDelta, ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description
     };
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
@@ -118,7 +118,18 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>(_consents.Where(c => !c.IsRevoked && c.ValidTo <= threshold).ToList());
 
-    public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) => Task.CompletedTask;
+    public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default)
+    {
+        // PERS-04: same rule as the providers.
+        var i = _consents.FindIndex(c => c.Id == consentId);
+        if (i < 0 || _consents[i].IsRevoked || _consents[i].ValidTo <= DateTimeOffset.UtcNow || newValidTo <= _consents[i].ValidTo)
+        {
+            throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(consentId);
+        }
+
+        _consents[i] = Clone(_consents[i], revoked: false, validTo: newValidTo, renewalCountDelta: 1);
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>([]);

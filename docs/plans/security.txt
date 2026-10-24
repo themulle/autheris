@@ -5,7 +5,7 @@ Method: parallel static audit by area-scoped agents. Each finding is appended
 immediately after discovery. Findings are unverified until fixed/tested;
 severity is the auditor's estimate.
 
-Status marker: "[RESOLVED]" or "[RESOLVED <sha>]" at the end of a heading = fixed; "[PARTIAL <sha>]" = partly fixed (2026-10-23, branch fix/security-impl-all). All HIGH and MEDIUM code findings are resolved and were re-verified against the code on 2026-10-23. Not marked = open. Owner actions: OPS-01 (rotate the GitHub PAT, use a credential helper), MISC-01/02 (create the protected "release" environment), PERS-04 residual decision (ExtendConsentExpiryAsync still accepts already-expired consents, see plan-security-pers).
+Status marker: "[RESOLVED]" or "[RESOLVED <sha>]" at the end of a heading = fixed; "[PARTIAL <sha>]" = partly fixed (2026-10-23, branch fix/security-impl-all). All HIGH and MEDIUM code findings are resolved and were re-verified against the code on 2026-10-23. Not marked = open. Owner actions: OPS-01 (rotate the GitHub PAT, use a credential helper), MISC-01/02 (create the protected "release" environment), PERS-04 residual resolved 2026-10-24 (ExtendConsentExpiryAsync now rejects revoked, expired and non-later extensions with CONSENT_NOT_EXTENDABLE, see 2026-10-24-plan-pers-04-sec-281-6-residuals).
 
 Entry format:
 [<AREA>-<NN>] <SEVERITY: CRITICAL|HIGH|MEDIUM|LOW> | <bug|security> | <short title>
@@ -679,6 +679,7 @@ Entry format:
   Problem  : SQLite filters "is_revoked = 0 AND valid_to > @now AND valid_to <= @threshold"; PostgreSQL and SQL Server only filter "is_revoked = 0 AND valid_to <= @threshold" and have no row limit. Expired consents are never revoked (expiry is read-time), so the result set contains every consent that ever expired, growing without bound, and each is fully hydrated (HydrateConsentsBatchAsync).
   Scenario : ConsentRecertificationWorkflowService.ScanAndTriggerExpiringConsentRecertificationsAsync (Workflows/ConsentRecertificationWorkflowService.cs:65) enqueues an ITSM "ConsentRecertificationRequired" ticket per returned consent, de-duplicated only for 24h in memory -> every expired consent (months/years old) produces a new ticket every day forever ("expires in 1 hours" because of Math.Max(1, ...)), flooding the ITSM system; owners following these tickets call ExtendConsentExpiryAsync, which only refuses revoked consents, resurrecting long-expired access. Scan time and memory grow linearly with history.
   Fix hint : Add "AND c.valid_to > @now" (as SQLite) plus a hard row limit/paging on PG and MSSQL; add a provider-parity test.
+  Residual : ExtendConsentExpiryAsync accepted already-expired consents; resolved per the 2026-10-24 addendum (docs/plans/2026-10-24-plan-pers-04-sec-281-6-residuals.md): only active consents are extended to a strictly later expiry (CONSENT_NOT_EXTENDABLE otherwise).
 
 [INF-09] MEDIUM | security | Streaming row-filter evaluator ignores source collation: case-insensitive LIKE and ordinal '='/IN let rows through that SQL hides  [RESOLVED]
   Location : src/Autheris.Application/Streaming/Services/StreamingRowFilterAstEvaluator.cs:349 (LIKE, RegexOptions.IgnoreCase),

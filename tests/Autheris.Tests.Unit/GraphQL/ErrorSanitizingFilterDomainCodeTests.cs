@@ -30,6 +30,8 @@ public sealed class ErrorSanitizingFilterDomainCodeTests
     [InlineData("Development", "INVALID_STATE")]
     [InlineData("Production", "INVALID_STATE")]
     [InlineData("Production", "CONSENT_ON_ATTRIBUTE_SOURCE")]
+    [InlineData("Production", "CONSENT_NOT_EXTENDABLE")]
+    [InlineData("Development", "CONSENT_NOT_EXTENDABLE")]
     [InlineData("Production", "INDIVIDUAL_GRANT_REQUIRES_EXPIRY")]
     [InlineData("Production", "INDIVIDUAL_GRANT_EXPIRY_IN_PAST")]
     [InlineData("Production", "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM")]
@@ -68,5 +70,20 @@ public sealed class ErrorSanitizingFilterDomainCodeTests
 
         result.Code.ShouldBe("INTERNAL_SERVER_ERROR");
         result.Message.ShouldNotContain("hunter2");
+    }
+
+    [Fact]
+    public void PERS_04_ExtendRejected_ErrorResponse_ContainsNoConsentValues()
+    {
+        var id = Guid.NewGuid();
+        var ex = new Autheris.Domain.Exceptions.ConsentNotExtendableException(id);
+        var error = ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.Code).SetException(ex).Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Code.ShouldBe("CONSENT_NOT_EXTENDABLE");
+        result.Message.ShouldBe("The consent cannot be extended. Create a new consent.");
+        result.Message.ShouldNotContain(id.ToString());
+        result.Exception.ShouldBeNull();
     }
 }
