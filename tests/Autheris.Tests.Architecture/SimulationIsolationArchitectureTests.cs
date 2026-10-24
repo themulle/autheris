@@ -361,7 +361,14 @@ public sealed partial class SimulationIsolationArchitectureTests
     internal static IReadOnlyList<string> DockerRunViolations(IEnumerable<string> texts)
     {
         var bad = new List<string>();
-        foreach (var line in JoinedNonCommentLines(texts).Where(l => Regex.IsMatch(l, @"\bdocker\s+run\b")))
+        var runLines = JoinedNonCommentLines(texts).Where(l => Regex.IsMatch(l, @"\bdocker\s+run\b")).ToList();
+        if (runLines.Count == 0)
+        {
+            // Vacuity check: scripts/sim/run-api-fuzz.sh must contain the Schemathesis docker run this guard is about.
+            bad.Add("no docker run found in the workflow or the sim scripts (vacuous guard)");
+        }
+
+        foreach (var line in runLines)
         {
             foreach (var required in new[] { "--read-only", "--cap-drop ALL", "--security-opt no-new-privileges" })
             {
@@ -919,6 +926,7 @@ public sealed partial class SimulationIsolationArchitectureTests
         DockerRunViolations(WorkflowAndScriptTexts()).ShouldBeEmpty();
 
         // negative self-check
+        DockerRunViolations(["echo no container here"]).ShouldBe(["no docker run found in the workflow or the sim scripts (vacuous guard)"]);
         DockerRunViolations(["docker run --rm -v /var/run/docker.sock:/s -v $HOME:/h img run"]).Count.ShouldBeGreaterThanOrEqualTo(6);
         DockerRunViolations(["docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges -v \"$RUNNER_TEMP/st:/work\" \"$SCHEMATHESIS_IMAGE\" run"]).ShouldBeEmpty();
         DockerRunViolations(["docker run --rm --read-only --cap-drop ALL \\\n  --security-opt no-new-privileges -v $RUNNER_TEMP/st:/work $SCHEMATHESIS_IMAGE run"]).ShouldBeEmpty();

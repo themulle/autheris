@@ -1,0 +1,388 @@
+{
+ "openapi": "3.0.3",
+ "info": {
+  "title": "Autheris governance and catalog write paths (sim fuzz, hand-written)",
+  "version": "1"
+ },
+ "paths": {
+  "/api/catalog/datasets/{id}/keys": {
+   "put": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   }
+  },
+  "/api/catalog/datasets/{id}/required-filters": {
+   "put": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   }
+  },
+  "/api/catalog/datasets/{id}/synthetic-samples": {
+   "put": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   }
+  },
+  "/api/governance/policy-simulation/replay": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  },
+  "/api/governance/sunsetting/rules": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  },
+  "/api/governance/sunsetting/evaluate": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  },
+  "/api/governance/differential-privacy/budget/{clientId}/reset": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "clientId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   }
+  },
+  "/api/governance/differential-privacy/perturb": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  },
+  "/api/v1/governance/row-filters/{id}/evaluation": {
+   "put": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/consents/bulk": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  },
+  "/api/v1/profiles/{id}/assignments/approve": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/profiles/{id}": {
+   "delete": {
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 64,
+       "pattern": "^[A-Za-z0-9-]+$"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  },
+  "/api/v1/governance/consents/apply": {
+   "post": {
+    "requestBody": {
+     "required": false,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK"
+     },
+     "default": {
+      "description": "Any governed error"
+     }
+    }
+   }
+  }
+ }
+}

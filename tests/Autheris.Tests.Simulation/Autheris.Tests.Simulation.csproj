@@ -29,6 +29,12 @@
     <ProjectReference Include="..\Autheris.Tests.Fuzz\Autheris.Tests.Fuzz.csproj" />
   </ItemGroup>
 
+  <!-- WP2: the pure option parser of Autheris.Sim.ApiHost is compiled in so its loopback rules are unit-tested without a project reference
+       (the host project needs the test-auth build switch, which this project never sets, SEC-SIM-03). -->
+  <ItemGroup>
+    <Compile Include="..\Autheris.Sim.ApiHost\SimApiHostOptions.cs" Link="ApiFuzz\Linked\SimApiHostOptions.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
