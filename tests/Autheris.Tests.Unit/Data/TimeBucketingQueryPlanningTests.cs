@@ -86,6 +86,29 @@ public sealed class TimeBucketingQueryPlanningTests
         planned.Sql.ShouldContain("GROUP BY date_trunc('day', convert_timezone('UTC', 'Europe/Berlin', \"created_at\"))");
     }
 
+    [Theory]
+    [InlineData("europe/berlin")]
+    [InlineData("Europe/Berlin'); DROP TABLE logs;--")]
+    [Trait("Category", "Security")]
+    public void PlanAggregate_SecPgp01_SecPgp03_UnknownOrMiscasedZone_RefusedWithFixedMessage(string zone)
+    {
+        var metadata = CreateTableForDialect("SqlServer");
+        var decision = TableAccessDecision.Allowed(LogsTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+        var intent = new TableAggregateIntent(
+            LogsTableId,
+            GroupBy: ["created_at"],
+            Aggregates: [new AggregateSelection(AggregateFunction.Count, Alias: "cnt")],
+            Filter: null,
+            OrderBy: null,
+            Limit: 100,
+            TimeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day, zone)]);
+
+        var ex = Should.Throw<ArgumentException>(() => new GovernedTableReadPlanner().PlanAggregate(intent, metadata, decision));
+
+        ex.Message.ShouldNotContain(zone, Case.Insensitive);
+        ex.Message.ShouldNotContain("DROP", Case.Insensitive);
+    }
+
     [Fact]
     public void PlanAggregate_Sqlite_WithNonUtcTimeZone_AppliesOffset()
     {

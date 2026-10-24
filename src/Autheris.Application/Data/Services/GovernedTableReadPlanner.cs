@@ -593,7 +593,8 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         if (!TrinoSqlEngine.TimeZoneRegistry.Contains(timeZone))
         {
-            throw new ArgumentException($"Time zone '{timeZone}' is not recognized.");
+            // SEC-PGP-03: fixed message, no request text. The registry matches ordinally, so an accepted value is the canonical id (SEC-PGP-01).
+            throw new ArgumentException("The time zone is not a recognized IANA zone id.");
         }
 
         switch (dialect)
