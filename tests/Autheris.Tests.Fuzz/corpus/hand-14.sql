@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE note LIKE 'a%' ESCAPE '!' OR note NOT LIKE '%z'

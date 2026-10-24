@@ -1,0 +1,1 @@
+SELECT o.id, t.x FROM orders o CROSS JOIN LATERAL (SELECT o.id + 1 AS x) t

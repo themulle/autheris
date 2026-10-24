@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites errors="0" failures="1" skipped="0" tests="2" time="1.0">
+  <testsuite name="schemathesis" errors="0" failures="1" skipped="0" tests="2" time="1.0">
+    <testcase name="GET /default/main/sim_accounts" time="0.2">
+      <failure type="failure" message="ST108">1. Test Case ID: fixture
+
+- ST108 Response violates schema
+
+    null is not of type "string"
+
+    Validated against the response schema for status code 200.
+
+Reproduce with:
+
+    curl -X GET 'http://127.0.0.1:5071/odata/v4/default/main/sim_accounts'</failure>
+    </testcase>
+    <testcase name="GET /governance/system/policies" time="0.1" />
+  </testsuite>
+</testsuites>

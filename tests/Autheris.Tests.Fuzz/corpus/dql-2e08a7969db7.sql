@@ -1,0 +1,1 @@
+SELECT iban FROM sales.dbo.customers

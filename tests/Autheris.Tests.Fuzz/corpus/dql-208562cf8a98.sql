@@ -1,0 +1,1 @@
+SELECT a, b, GROUPING(a, b) AS g FROM t GROUP BY CUBE (a, b)

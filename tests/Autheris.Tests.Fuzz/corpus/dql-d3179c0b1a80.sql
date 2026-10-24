@@ -1,0 +1,1 @@
+SELECT id FROM dbo.people ORDER BY email

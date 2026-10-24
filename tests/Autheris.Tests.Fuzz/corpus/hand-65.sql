@@ -1,0 +1,1 @@
+SELECT * FROM TABLE(some_function(1))

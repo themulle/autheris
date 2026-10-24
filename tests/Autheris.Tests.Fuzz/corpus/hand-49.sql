@@ -1,0 +1,1 @@
+DELETE FROM entitlements WHERE order_id = 1

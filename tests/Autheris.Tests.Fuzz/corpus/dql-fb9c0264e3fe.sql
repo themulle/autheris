@@ -1,0 +1,1 @@
+SELECT c.id FROM crm_api.public.customers c WHERE c.id IN ('2', '4')

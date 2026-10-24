@@ -1,0 +1,1 @@
+SELECT EXTRACT(foo FROM ts) FROM orders

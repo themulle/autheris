@@ -1,0 +1,1 @@
+SELECT DISTINCT region FROM orders ORDER BY region

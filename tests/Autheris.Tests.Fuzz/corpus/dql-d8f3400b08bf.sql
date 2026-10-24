@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE dept IN (SELECT dept FROM orders WHERE amount > 200)

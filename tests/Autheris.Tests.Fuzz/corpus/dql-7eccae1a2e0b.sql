@@ -1,0 +1,1 @@
+SELECT * FROM table1 GROUP BY AUTO

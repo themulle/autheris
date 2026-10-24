@@ -1,0 +1,1 @@
+SELECT note, count(*) FROM orders GROUP BY note

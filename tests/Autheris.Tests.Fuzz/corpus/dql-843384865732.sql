@@ -1,0 +1,1 @@
+SELECT id FROM entitlements WHERE tenant_id = 'B'

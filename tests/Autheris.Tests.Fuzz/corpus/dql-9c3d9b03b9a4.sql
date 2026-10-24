@@ -1,0 +1,1 @@
+SELECT CASE WHEN a > 1 THEN 'x' ELSE 'y' END AS c FROM t

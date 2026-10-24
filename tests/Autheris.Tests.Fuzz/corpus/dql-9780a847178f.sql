@@ -1,0 +1,1 @@
+SELECT "serial_number" FROM "crane" AS "autheris_target" WHERE "tenant_id" = @rs_tenant AND (f) AND (("serial_number" = @rs_0_0) OR ("serial_number" = @rs_1_0))

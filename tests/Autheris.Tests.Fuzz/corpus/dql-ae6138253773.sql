@@ -1,0 +1,1 @@
+SELECT c.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id WHERE c.id = 1 UNION SELECT id FROM erp.public.orders

@@ -1,0 +1,1 @@
+SELECT CAST(ts AS timestamp(3) with time zone) FROM orders

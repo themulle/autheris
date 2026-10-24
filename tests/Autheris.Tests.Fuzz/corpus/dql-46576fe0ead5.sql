@@ -1,0 +1,1 @@
+SELECT COUNT(DISTINCT dept) FROM orders

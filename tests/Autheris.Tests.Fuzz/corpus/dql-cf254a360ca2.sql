@@ -1,0 +1,1 @@
+SELECT DISTINCT dept FROM orders

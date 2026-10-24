@@ -1,0 +1,1 @@
+SELECT id FROM tbl WHERE id = __param_user_id

@@ -1,0 +1,1 @@
+SELECT count(*) FROM default.orders_ci WHERE tenantid = 'acme'

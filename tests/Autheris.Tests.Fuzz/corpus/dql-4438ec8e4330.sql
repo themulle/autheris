@@ -1,0 +1,1 @@
+SELECT DISTINCT created_at FROM orders

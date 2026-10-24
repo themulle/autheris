@@ -1,0 +1,1 @@
+SELECT * FROM orders FOR VERSION AS OF 1

@@ -1,0 +1,1 @@
+SELECT * FROM (SELECT "id, ssn AS id2", "na""me", substr(ssn, 1, 2) AS "ssn" FROM customers WHERE tenant_id = 't1')

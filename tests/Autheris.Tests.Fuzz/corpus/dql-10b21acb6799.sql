@@ -1,0 +1,1 @@
+SELECT tenant_id, count(*) FROM customers GROUP BY tenant_id HAVING count(*) > 0
