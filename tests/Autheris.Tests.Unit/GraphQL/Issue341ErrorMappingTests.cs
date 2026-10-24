@@ -14,6 +14,7 @@ using Xunit;
 /// Issue #341: stable codes the resolvers already raised, and the governed SQL table refusal, no longer fall through to
 /// INTERNAL_SERVER_ERROR; caller text and exception messages never reach the client.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Issue341ErrorMappingTests
 {
     private const string Leak = "table finance.dbo.finance_items password=hunter2";
@@ -80,5 +81,51 @@ public sealed class Issue341ErrorMappingTests
     {
         TableIdentifier.TryCreate(" finance ", "dbo", "items", out var id).ShouldBeTrue();
         id.ToString().ShouldBe("finance.dbo.items");
+    }
+
+    [Theory]
+    [InlineData("d", "s", "t")]
+    [InlineData("", "s", "t")]
+    [InlineData(" ", "s", "t")]
+    [InlineData("d", "s", "a.b")]
+    [InlineData("d", "s", "a\nb")]
+    [InlineData("d", "s", "a\rb")]
+    [InlineData("d", "s", "a\0b")]
+    [InlineData("d", null, "t")]
+    [InlineData("d\tx", "s", "t")]
+    public void TableIdentifier_TryCreate_MatchesConstructorRules(string? domain, string? schema, string? name)
+    {
+        var constructed = true;
+        try
+        {
+            _ = new TableIdentifier(domain!, schema!, name!);
+        }
+        catch (ArgumentException)
+        {
+            constructed = false;
+        }
+
+        TableIdentifier.TryCreate(domain, schema, name, out _).ShouldBe(constructed);
+    }
+
+    [Theory]
+    [InlineData("", "orders")]
+    [InlineData("a_", "x")]
+    [InlineData("_x", "x")]
+    public void CostAndQuota_InvalidTableName_StillChargedAgainstFallbackBucket(string fieldName, string _)
+    {
+        var method = typeof(Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware)
+            .GetMethod("ExtractTableFromDocument", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        method.ShouldNotBeNull();
+        var doc = HotChocolate.Language.Utf8GraphQLParser.Parse($"{{ {(fieldName.Length == 0 ? "ok" : fieldName)} }}");
+
+        var id = (TableIdentifier)method.Invoke(null, [doc])!;
+
+        // A name that cannot construct an identifier lands in a fixed bucket instead of throwing or escaping the quota.
+        id.ShouldNotBe(default);
+        if (fieldName.Length != 0)
+        {
+            id.ToString().ShouldBe("graphql.query.graphql");
+        }
     }
 }

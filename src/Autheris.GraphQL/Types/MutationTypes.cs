@@ -1259,9 +1259,21 @@ public sealed class Mutation
         {
             result = await catalogSyncService.SyncCatalogAsync(dryRun, restrictToTenant, ct).ConfigureAwait(false);
         }
+        catch (Autheris.Domain.Exceptions.GatewayForbiddenException)
+        {
+            await RecordSyncFailureAsync(auditWriter, auditLog, auditTenant, principal, dryRun, restrictToTenant, "Forbidden", ct).ConfigureAwait(false);
+            throw new GraphQLException(ErrorBuilder.New().SetCode("ACCESS_DENIED").SetMessage("Access denied.").Build());
+        }
         catch (Exception ex) when (ex is not OperationCanceledException and not GraphQLException)
         {
-            // #341: the same fixed code as SyncOpenMetadata; the cause (an egress refusal, an unreachable source) stays in the server log.
+            // #341 (C341-6): the cause (an egress refusal, an unreachable source) is logged here, server side only; the caller gets the
+            // same fixed code as SyncOpenMetadata.
+            var services = httpContextAccessor?.HttpContext?.RequestServices;
+            var logger = services != null
+                ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<ILogger<Mutation>>(services)
+                : null;
+            logger?.LogError(ex, "Data catalog synchronization failed ({ExceptionType}).", ex.GetType().Name);
+            await RecordSyncFailureAsync(auditWriter, auditLog, auditTenant, principal, dryRun, restrictToTenant, "Failed", ct).ConfigureAwait(false);
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("SYNC_FAILED")
                 .SetMessage("The data catalog synchronization failed.")
@@ -1305,6 +1317,45 @@ public sealed class Mutation
             Art9ProtectedTablesCount = result.Art9ProtectedTablesCount,
             Warnings = result.Warnings.ToList()
         };
+    }
+
+    /// <summary>#341 (C341-7): closes the write-ahead sync entry with a failure outcome; an unavailable audit sink never replaces the governed error.</summary>
+    private static async Task RecordSyncFailureAsync(
+        Autheris.Application.Audit.IAuditWriter? auditWriter,
+        Autheris.Application.Interfaces.IAuditLogRepository? auditLog,
+        TenantId tenant,
+        ClaimsPrincipal principal,
+        bool dryRun,
+        TenantId? restrictToTenant,
+        string outcome,
+        CancellationToken ct)
+    {
+        var entry = new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = AuditEventTypes.DataCatalogSync,
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ERROR",
+            TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { dryRun, scope = restrictToTenant?.Value ?? "cluster", outcome })
+        };
+
+        try
+        {
+            if (auditWriter != null)
+            {
+                await auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+            }
+            else if (auditLog != null)
+            {
+                await auditLog.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The failure entry is best effort; the write-ahead entry already exists.
+        }
     }
 
     private static List<string> ExtractPrincipalIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null)

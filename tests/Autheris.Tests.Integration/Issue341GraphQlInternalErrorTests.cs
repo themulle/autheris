@@ -21,6 +21,7 @@ using Xunit;
 /// source "default", the default seeded catalog whose "finance", "hr" and "governance" sources have no connection). Every request must
 /// answer a governed code, never INTERNAL_SERVER_ERROR; an unknown and a forbidden table stay indistinguishable. No SQL Server or Docker needed.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Issue341GraphQlInternalErrorTests : IDisposable
 {
     private readonly string _dbFile = Path.Combine(Path.GetTempPath(), $"autheris-i341-{Guid.NewGuid():N}.db");
@@ -86,7 +87,43 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
     public async Task UnknownIdsAndEmptyText_AreGovernedErrors_NotInternalError(string query) =>
         await AssertGovernedAsync(query, "GovernanceAdmin");
 
+    [Theory]
+    [InlineData("{ table(domain: \"a.b\", name: \"orders\", schema: \"dbo\") { jsonRows } }")]
+    [InlineData("{ table(domain: \"\", name: \"\", schema: \"\") { jsonRows } }")]
+    [InlineData("{ tableConsumers(domain: \"x\\ny\", schema: \"dbo\", tableName: \"t\") { __typename } }")]
+    public async Task Query_EmptyOrMalformedTableArgument_BadRequest_NoInputEcho(string query)
+    {
+        var (_, codes, messages) = await SendAsync(query, "Reader");
+
+        codes.ShouldBe(["BAD_REQUEST"]);
+        messages.ShouldBe(["The table identifier is invalid."]);
+    }
+
+    [Fact]
+    public async Task UnbackedSource_AnswersAccessDenied_SameForEveryUnbackedEntry_NoSourceNameInResponse()
+    {
+        var finance = await SendAsync("{ finance_dbo_finance_items(first: 1, offset: 0) { id } }", "Reader");
+        var governance = await SendAsync("{ governance_system_policies(first: 1, offset: 0) { id } }", "Reader");
+
+        finance.Codes.ShouldBe(["ACCESS_DENIED"]);
+        governance.Codes.ShouldBe(finance.Codes);
+        governance.Messages.ShouldBe(finance.Messages);
+        finance.Messages.ShouldBe(["Access denied."]);
+        finance.Body.ShouldNotContain("no database connection");
+        governance.Body.ShouldNotContain("no database connection");
+    }
+
     private async Task AssertGovernedAsync(string query, string roles)
+    {
+        var (body, codes, _) = await SendAsync(query, roles);
+        var faults = _logs.Faults.ToArray();
+        codes.ShouldNotContain("INTERNAL_SERVER_ERROR", $"{query} body={body} threw: {string.Join(" | ", faults)}");
+        body.ShouldNotContain("no database connection");
+        body.ShouldNotContain("Exception");
+        body.ShouldNotContain("   at ");
+    }
+
+    private async Task<(string Body, List<string> Codes, List<string> Messages)> SendAsync(string query, string roles)
     {
         using var factory = Create();
         using var client = factory.CreateClient();
@@ -100,22 +137,18 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         var body = await response.Content.ReadAsStringAsync();
 
         var codes = new List<string>();
-        using (var doc = JsonDocument.Parse(body))
+        var messages = new List<string>();
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.TryGetProperty("errors", out var errors))
         {
-            if (doc.RootElement.TryGetProperty("errors", out var errors))
+            foreach (var e in errors.EnumerateArray())
             {
-                foreach (var e in errors.EnumerateArray())
-                {
-                    codes.Add(e.TryGetProperty("extensions", out var ext) && ext.TryGetProperty("code", out var c) ? c.GetString() ?? "" : "");
-                }
+                codes.Add(e.TryGetProperty("extensions", out var ext) && ext.TryGetProperty("code", out var c) ? c.GetString() ?? "" : "");
+                messages.Add(e.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "");
             }
         }
 
-        var faults = _logs.Faults.ToArray();
-        codes.ShouldNotContain("INTERNAL_SERVER_ERROR", $"{query} body={body} threw: {string.Join(" | ", faults)}");
-        body.ShouldNotContain("no database connection");
-        body.ShouldNotContain("Exception");
-        body.ShouldNotContain("   at ");
+        return (body, codes, messages);
     }
 
     private WebApplicationFactory<Program> Create() =>

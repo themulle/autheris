@@ -219,6 +219,20 @@ public class DbtHealthExecutionMiddlewareTests
         return result.ToJson();
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("{ orders(name: \"\") }")]
+    [InlineData("{ orders(name: \"a.b\") }")]
+    public async Task DbtHealthMiddleware_InvalidModelName_Skipped_RealModelStillQuarantined(string document)
+    {
+        // #341 (C341-4): a name argument that cannot construct an identifier is skipped, the real model field is still checked.
+        var json = await ExecuteAuthorizedAsync(document, DbtModelHealthStatus.Quarantined);
+
+        json.ShouldNotContain("TableIdentifier component");
+        json.ShouldNotContain("empty string");
+        json.ShouldContain("TABLE_IN_QUARANTINE");
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Gql14_InlineFragmentOnQuery_ReturnsTableInQuarantine()
