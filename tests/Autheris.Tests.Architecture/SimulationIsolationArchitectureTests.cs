@@ -46,7 +46,7 @@ public sealed partial class SimulationIsolationArchitectureTests
     [GeneratedRegex(@"schemathesis/schemathesis:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}")]
     private static partial Regex PinnedSchemathesis();
 
-    [GeneratedRegex(@"(?<![\w./$-])(?<cmd>\S*sharpfuzz)\s+(?<arg>\S+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![\w./$-])(?<cmd>""?\S*sharpfuzz""?)\s+(?<arg>\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex SharpFuzzCall();
 
     [GeneratedRegex(@"^""?\$\{?RUNNER_TEMP\}?/fuzz-bin/TrinoSqlEngine\.dll""?$")]
@@ -974,6 +974,9 @@ public sealed partial class SimulationIsolationArchitectureTests
         // negative self-check
         SharpFuzzViolations(SharpFuzzCalls(["\"$RUNNER_TEMP/sf/sharpfuzz\" \"$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll\""])).ShouldBeEmpty();
         SharpFuzzViolations(SharpFuzzCalls(["$RUNNER_TEMP/sf/sharpfuzz src/Autheris.Api/bin/Autheris.Api.dll"])).Count.ShouldBe(1);
+        SharpFuzzCalls(["\"$TOOL_DIR/sharpfuzz\" \"$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll\""]).Count.ShouldBe(1);
+        SharpFuzzViolations(SharpFuzzCalls(["\"$TOOL_DIR/sharpfuzz\" \"src/Autheris.Api/bin/Autheris.Api.dll\""])).Count.ShouldBe(1);
+        SharpFuzzViolations(SharpFuzzCalls(["\"$TOOL_DIR/sharpfuzz\" \"/tmp/fuzz-bin/TrinoSqlEngine.dll\""])).Count.ShouldBe(1);
         SharpFuzzViolations(SharpFuzzCalls(["sharpfuzz /tmp/fuzz-bin/TrinoSqlEngine.dll"])).Count.ShouldBe(1);
         SharpFuzzCalls(["dotnet tool install SharpFuzz.CommandLine --version 2.3.0 --tool-path x", "# sharpfuzz a.dll"]).ShouldBeEmpty();
     }

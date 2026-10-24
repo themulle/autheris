@@ -2,7 +2,7 @@
 
 Issue draft for a candidate product defect found by the parser fuzz mutation smoke (REQ-SIMTEST P3). It is not a KnownGap: a crash can never be one
 (SEC-SIM-17). Until it is fixed or owner-quarantined with an issue number (quarantine.json, owner approval), the `sim-parser-fuzz` jobs stay red.
-No GitHub issue is filed yet.
+Tracked in GitHub issue #343.
 
 Kind: Crash
 Error class: `Crash:System.OverflowException` (not a documented `TrinoSqlEngine` rejection)

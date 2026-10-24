@@ -90,7 +90,7 @@ cp -a -- "$FUZZ_BIN" "$REPLAY_BIN"
 rm -rf -- "$TOOL_DIR"
 dotnet tool install SharpFuzz.CommandLine --version 2.3.0 --tool-path "$TOOL_DIR"
 # The only instrumented assembly: the copy under RUNNER_TEMP, never a production build.
-$RUNNER_TEMP/sf/sharpfuzz "$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll"
+"$TOOL_DIR/sharpfuzz" "$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll"
 
 mkdir -p "$AFL_IN"
 cp -- "$CORPUS"/*.sql "$AFL_IN"/
@@ -101,7 +101,7 @@ cp -- "$CORPUS"/*.sql "$AFL_IN"/
 export AFL_SKIP_CPUFREQ=1 AFL_NO_UI=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_SKIP_BIN_CHECK=1
 export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 DOTNET_GCHeapHardLimit=0x20000000 DOTNET_TieredCompilation=0 DOTNET_TieredPGO=0 DOTNET_gcServer=0
 set +e
-afl-fuzz -i "$AFL_IN" -x "$CORPUS/sql.dict" -o "$AFL_OUT" -t 5000 -m "$SIM_AFL_MEM_MB" -s "$SEED" -V "$MODE" -- dotnet "$FUZZ_BIN/Autheris.Tests.Fuzz.dll" --afl
+afl-fuzz -i "$AFL_IN" -x "$CORPUS/sql.dict" -o "$AFL_OUT" -t 5000 -G 65536 -m "$SIM_AFL_MEM_MB" -s "$SEED" -V "$MODE" -- dotnet "$FUZZ_BIN/Autheris.Tests.Fuzz.dll" --afl
 AFL_RC=$?
 set -e
 echo "run-parser-fuzz: afl-fuzz exit code $AFL_RC"

@@ -448,12 +448,14 @@ public sealed partial class FuzzHarnessTests
 
         lines.Count(l => Regex.IsMatch(l, @"\bdotnet\s+tool\s+install\s+SharpFuzz\.CommandLine\s+--version\s+2\.3\.0\b")).ShouldBe(1);
         lines.Count(l => Regex.IsMatch(l, @"\bdotnet\s+tool\s+install\b")).ShouldBe(1);
-        lines.Count(l => Regex.IsMatch(l, @"(^|\s)\$RUNNER_TEMP/sf/sharpfuzz\s+""\$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine\.dll""\s*$")).ShouldBe(1);
-        lines.Count(l => Regex.IsMatch(l, @"sharpfuzz\s", RegexOptions.IgnoreCase) && !l.Contains("dotnet tool install", StringComparison.Ordinal)).ShouldBe(1);
+        lines.Count(l => Regex.IsMatch(l, @"^\s*""\$TOOL_DIR/sharpfuzz""\s+""\$RUNNER_TEMP/fuzz-bin/TrinoSqlEngine\.dll""\s*$")).ShouldBe(1);
+        lines.Count(l => Regex.IsMatch(l, @"sharpfuzz""?\s", RegexOptions.IgnoreCase) && !l.Contains("dotnet tool install", StringComparison.Ordinal)).ShouldBe(1);
 
         var afl = lines.Single(l => Regex.IsMatch(l, @"^\s*afl-fuzz\s"));
         afl.ShouldContain("-m \"$SIM_AFL_MEM_MB\"");
         afl.ShouldContain("-t 5000");
+        afl.ShouldContain("-G 65536");
+        afl.ShouldContain("-s \"$SEED\"");
         afl.ShouldContain("-V \"$MODE\"");
         afl.ShouldContain("-x \"$CORPUS/sql.dict\"");
         afl.ShouldContain("--afl");
