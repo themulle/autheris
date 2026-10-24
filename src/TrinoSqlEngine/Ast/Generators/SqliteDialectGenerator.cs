@@ -22,6 +22,13 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     protected override string SubstringFunctionName => "SUBSTR";
 
     /// <summary>
+    /// Issue #339: in SQLite CROSS JOIN is a join-order hint (the left operand is always the outer loop, the planner never reorders it),
+    /// which makes wide comma joins of derived tables near-cartesian. A plain JOIN without ON is the same cartesian inner join, but the
+    /// planner may reorder it.
+    /// </summary>
+    protected override string CrossJoinKeyword => "JOIN";
+
+    /// <summary>
     /// <c>blob</c> is the tenant comparison cast; <c>varbinary</c> maps to it, because SQLite would give the spelling "varbinary" a
     /// NUMERIC affinity (the name contains neither BLOB nor a text keyword).
     /// </summary>

@@ -4748,7 +4748,7 @@
       "Group": "source",
       "Sql": "SELECT a FROM t1 CROSS JOIN t2",
       "Outcome": "ok",
-      "Expected": "SELECT \"a\" FROM \"t1\" CROSS JOIN \"t2\"",
+      "Expected": "SELECT \"a\" FROM \"t1\" JOIN \"t2\"",
       "Parameters": []
     },
     {
@@ -4756,7 +4756,7 @@
       "Group": "source",
       "Sql": "SELECT a FROM t1, t2",
       "Outcome": "ok",
-      "Expected": "SELECT \"a\" FROM \"t1\" CROSS JOIN \"t2\"",
+      "Expected": "SELECT \"a\" FROM \"t1\" JOIN \"t2\"",
       "Parameters": []
     },
     {
@@ -4979,7 +4979,7 @@
       "Group": "source",
       "Sql": "SELECT a FROM t1 CROSS JOIN LATERAL (SELECT b FROM t2 WHERE t2.id = t1.id) AS l",
       "Outcome": "ok",
-      "Expected": "SELECT \"a\" FROM \"t1\" CROSS JOIN LATERAL (SELECT \"b\" FROM \"t2\" WHERE \"t2\".\"id\" = \"t1\".\"id\") AS \"l\"",
+      "Expected": "SELECT \"a\" FROM \"t1\" JOIN LATERAL (SELECT \"b\" FROM \"t2\" WHERE \"t2\".\"id\" = \"t1\".\"id\") AS \"l\"",
       "Parameters": []
     },
     {
