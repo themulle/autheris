@@ -41,6 +41,7 @@
 | **5** | **BL-07:** PostgreSQL wire protocol endpoint ([`REQ-PG-WIRE-01`](2026-10-16-req-postgres-wire-protocol-endpoint.md)) | L | **PROPOSED** | Conditional go pending owner decision on the open questions (PRD section 13). |
 | **6** | **WP-ARC-C-19 / WP-ARC-B-11:** unit test project physical separation; folder and interface hygiene ([`architecture.md`](architecture.md), [`implementation/00-implementation-roadmap.md`](implementation/00-implementation-roadmap.md)) | S | **DEFERRED** | Needs a dedicated merge-freeze window on `tests/Autheris.Tests.Unit/**`. |
 | **7** | **Security Wave C deployment remainders** `SR-D-06`..`SR-D-09` ([`security.md`](security.md) section 2, [`implementation/impl-security-wave-c-2.md`](implementation/impl-security-wave-c-2.md)) | S | **PARTIALLY RESOLVED** | Open remainders listed in `security.md` section 2. |
+| **8** | **Simulation test programme** ([`REQ-SIMTEST`](2026-10-24-req-simulation-testing.md), plan [`2026-10-24-plan-simulation-testing.md`](2026-10-24-plan-simulation-testing.md)) | L | **STAGE 1 MERGED (PR #344)** | Stage 1: sqllogictest corpus (P1), Schemathesis nightly (P2), SharpFuzz on TrinoSqlEngine (P3). Open: first `workflow_dispatch` run of `simulation-nightly.yml`, repeat fuzz runs, Stages 2-4 (policy-aware generator, accelerated-time soak with its own PRD addendum, fault injection). |
 
 ---
 
