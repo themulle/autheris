@@ -1,0 +1,1 @@
+UPDATE employees SET salary = salary + 1 WHERE dept = 'it'

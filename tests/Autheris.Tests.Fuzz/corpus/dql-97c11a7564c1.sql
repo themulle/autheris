@@ -1,0 +1,1 @@
+SELECT id FROM employees UNION ALL SELECT id FROM employees

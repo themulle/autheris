@@ -1,0 +1,1 @@
+SELECT pivot FROM t

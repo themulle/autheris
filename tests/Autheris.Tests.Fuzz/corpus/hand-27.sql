@@ -1,0 +1,1 @@
+SELECT try(CAST(note AS integer)), nullif(id, 0), if(id > 1, 'a', 'b') FROM orders

@@ -1,0 +1,1 @@
+SELECT `a` FROM `t` WHERE `a` = :p1 AND `b` = :p2 AND `c` = :p1

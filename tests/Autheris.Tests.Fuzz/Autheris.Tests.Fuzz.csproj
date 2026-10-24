@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- REQ-SIMTEST P3: SharpFuzz harness for TrinoSqlEngine. Not part of Autheris.sln; built only by simulation-nightly.yml (SEC-SIM-16/21).
+       SharpFuzz 2.3.0 is pinned here; the SharpFuzz.CommandLine tool pin (2.3.0) lives in scripts/sim/run-parser-fuzz.sh (SEC-SIM-09). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,1 @@
+SELECT (SELECT count(*) FROM orders) AS n FROM orders WHERE id = 1

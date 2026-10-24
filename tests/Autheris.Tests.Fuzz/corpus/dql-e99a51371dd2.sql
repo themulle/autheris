@@ -1,0 +1,1 @@
+SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY id) FROM orders

@@ -1,0 +1,1 @@
+SELECT amount, count(*) FROM orders GROUP BY amount

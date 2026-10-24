@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE amount IS NOT DISTINCT FROM 5

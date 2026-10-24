@@ -1,0 +1,1 @@
+SELECT id FROM orders o WHERE EXISTS (SELECT 1 FROM entitlements e WHERE e.order_id = o.id)

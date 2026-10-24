@@ -1,0 +1,1 @@
+SELECT created_at AT TIME ZONE 'UTC' FROM orders

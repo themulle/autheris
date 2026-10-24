@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- REQ-SIMTEST: not part of Autheris.sln; run only by .github/workflows/simulation-nightly.yml (SEC-SIM-21).
+       This project never enables the test-auth build switch (SEC-SIM-03); only the Sim.ApiHost build command line does. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.SqlCompilerGate\Autheris.Tests.SqlCompilerGate.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.Fuzz\Autheris.Tests.Fuzz.csproj" />
+  </ItemGroup>
+
+  <!-- WP2: the pure option parser of Autheris.Sim.ApiHost is compiled in so its loopback rules are unit-tested without a project reference
+       (the host project needs the test-auth build switch, which this project never sets, SEC-SIM-03). -->
+  <ItemGroup>
+    <Compile Include="..\Autheris.Sim.ApiHost\SimApiHostOptions.cs" Link="ApiFuzz\Linked\SimApiHostOptions.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- WP1: manifest, classification files, own fixtures and the report baseline (data only, no third-party content). -->
+    <None Update="Corpus\sqllogictest.manifest.json;Corpus\slt-*.json;Corpus\fixtures\*.test;sim-baseline.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

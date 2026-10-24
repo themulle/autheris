@@ -1,0 +1,1 @@
+SELECT '[' , x FROM orders WHERE a = ']--'

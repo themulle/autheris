@@ -1,0 +1,1 @@
+SELECT position('-' IN created_at) FROM orders

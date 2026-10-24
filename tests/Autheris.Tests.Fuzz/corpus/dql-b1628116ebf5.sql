@@ -1,0 +1,1 @@
+SELECT o.id FROM erp.public.orders o LEFT JOIN crm_api.public.customers c ON c.id = o.customer_id AND c.id = '2' ORDER BY o.id

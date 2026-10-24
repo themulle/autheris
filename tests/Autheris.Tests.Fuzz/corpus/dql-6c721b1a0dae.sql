@@ -1,0 +1,1 @@
+SELECT a AS "x${y}" FROM t

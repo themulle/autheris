@@ -1,0 +1,1 @@
+SELECT dbms_pipe.receive_message('pipe', 5)

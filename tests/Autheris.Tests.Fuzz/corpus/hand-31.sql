@@ -1,0 +1,1 @@
+SELECT status, region, count(*) FROM orders GROUP BY GROUPING SETS ((status), (region), ())

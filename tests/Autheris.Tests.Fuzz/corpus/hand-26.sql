@@ -1,0 +1,1 @@
+SELECT lower(name), upper(name), length(name), substr(name, 1, 3), coalesce(name, 'x') FROM customers

@@ -1,0 +1,1 @@
+SELECT o.id FROM o JOIN entitlements e ON e.orderid = o.id

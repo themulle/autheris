@@ -1,0 +1,1 @@
+SELECT id, username FROM users WHERE active = true

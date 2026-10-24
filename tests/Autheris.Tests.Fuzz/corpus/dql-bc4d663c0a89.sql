@@ -1,0 +1,1 @@
+SELECT o.id, c.email FROM orders o LEFT JOIN customers c ON o.customer_id = c.id

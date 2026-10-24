@@ -1,0 +1,1 @@
+SELECT id FROM orders WHERE status IN ('open', 'closed') AND amount BETWEEN 1 AND 99

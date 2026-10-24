@@ -1,0 +1,1 @@
+SELECT id FROM lwetem_prod.md.crane LIMIT 60000

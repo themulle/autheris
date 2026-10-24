@@ -1,0 +1,1 @@
+SELECT dept, SUM(amount) FROM orders GROUP BY AUTO

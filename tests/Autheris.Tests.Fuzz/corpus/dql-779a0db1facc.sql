@@ -1,0 +1,1 @@
+SELECT id FROM users WHERE id = 1 OR tenant_id = 'B'

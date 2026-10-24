@@ -1,0 +1,1 @@
+INSERT INTO users (id, name) SELECT id, name FROM customers

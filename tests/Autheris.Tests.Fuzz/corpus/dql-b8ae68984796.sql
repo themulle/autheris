@@ -1,0 +1,1 @@
+SELECT region, count(*), sum(amount), round(avg(amount), 2), date_trunc('month', created_at),

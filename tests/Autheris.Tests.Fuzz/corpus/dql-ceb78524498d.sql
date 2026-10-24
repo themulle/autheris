@@ -1,0 +1,1 @@
+SELECT zone FROM t

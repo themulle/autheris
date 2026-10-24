@@ -1,0 +1,1 @@
+SELECT regexp_like(note, '^a.*z$'), concat(note, 'x'), 'a' || 'b' FROM orders
