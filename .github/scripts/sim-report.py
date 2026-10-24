@@ -148,6 +148,10 @@ def evaluate(rows: list[dict], baseline: dict) -> tuple[str, list[str]]:
     if total and harness * 100 > allowed_pct * total:
         problems.append(f"{harness} reference/recorded disagreements exceed {allowed_pct}% of {total} queries")
 
+    for r in rows:
+        if r["kind"] == "CircuitOpen" and r["count"] > 0:
+            problems.append(f"{r['count']} queries skipped by the circuit breaker, coverage incomplete ({r['errorClass']})")
+
     known = set(baseline["knownGapClasses"])
     gaps = []
     findings = []
@@ -246,6 +250,8 @@ def self_test() -> int:
         check(ok + [line("WrongResult", "WrongResult:Other", 3)], 1)  # unclassified
         check(ok + [line("PolicyLeak", "PolicyLeak:RowFilter", 1, disposition="PolicyLeak")], 1)
         check(ok + [line("Crash", "Crash:x", 1)], 1)
+        check(ok + [line("CircuitOpen", "Hang:x circuit open: 12 skipped", 12)], 1)  # skipped queries are red, not silent
+        check(ok + [line("CircuitOpen", "none", 0)], 0)
         check([], 1)  # empty = failure, not green
         check([line("Equal")], 1)  # no Executed line
         check([line("Executed", "scenario:A", 10, "sample=5000;seed=1")], 1)  # too few executed
