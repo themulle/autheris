@@ -24,6 +24,12 @@ public static partial class DataApiFilterTranslator
     [GeneratedRegex(@"[a-zA-Z_][a-zA-Z0-9_]*", RegexOptions.CultureInvariant)]
     private static partial Regex IdentifierRegex();
 
+    [GeneratedRegex(@"(?<![a-zA-Z0-9_.""])(startswith|endswith|contains)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex StringFunctionHeadRegex();
+
+    [GeneratedRegex(@"^\s*\)", RegexOptions.CultureInvariant)]
+    private static partial Regex StringFunctionTailRegex();
+
     public static IReadOnlyList<string> ExtractReferencedColumns(string expression, TableMetadata metadata)
     {
         if (string.IsNullOrWhiteSpace(expression))
@@ -31,8 +37,8 @@ public static partial class DataApiFilterTranslator
             return Array.Empty<string>();
         }
 
-        // Replace string literals with placeholders to avoid matching identifiers inside strings
-        var withoutStrings = StringLiteralRegex().Replace(expression, " '' ");
+        // #323: the string functions are looked at in their LIKE form, so the function names are never taken for columns.
+        var withoutStrings = StringLiteralRegex().Replace(RewriteStringFunctionsInText(expression), " '' ");
 
         var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var matches = IdentifierRegex().Matches(withoutStrings);
@@ -41,6 +47,13 @@ public static partial class DataApiFilterTranslator
         {
             var word = match.Value;
             if (ReservedKeywords.Contains(word))
+            {
+                continue;
+            }
+
+            // The ESCAPE keyword the rewrite emits right after a pattern literal (only there; never a column).
+            if (string.Equals(word, "ESCAPE", StringComparison.OrdinalIgnoreCase) &&
+                withoutStrings.AsSpan(0, match.Index).TrimEnd().EndsWith("''", StringComparison.Ordinal))
             {
                 continue;
             }
@@ -92,24 +105,104 @@ public static partial class DataApiFilterTranslator
         }
 
         // Tokenize and replace operators while preserving string literals
+        var pieces = SegmentLiterals(filterExpression);
+        RewriteStringFunctions(pieces);
+
         var sb = new StringBuilder();
-        var matches = StringLiteralRegex().Matches(filterExpression);
-        int lastIndex = 0;
-
-        foreach (Match match in matches)
+        foreach (var (text, isLiteral) in pieces)
         {
-            var nonLiteral = filterExpression[lastIndex..match.Index];
-            sb.Append(ReplaceOperators(nonLiteral));
-            sb.Append(match.Value); // preserve exact string literal
-            lastIndex = match.Index + match.Length;
-        }
-
-        if (lastIndex < filterExpression.Length)
-        {
-            sb.Append(ReplaceOperators(filterExpression[lastIndex..]));
+            sb.Append(isLiteral ? text : ReplaceOperators(text));
         }
 
         return sb.ToString().Trim();
+    }
+
+    private static List<(string Text, bool IsLiteral)> SegmentLiterals(string expression)
+    {
+        var pieces = new List<(string Text, bool IsLiteral)>();
+        int lastIndex = 0;
+        foreach (Match match in StringLiteralRegex().Matches(expression))
+        {
+            pieces.Add((expression[lastIndex..match.Index], false));
+            pieces.Add((match.Value, true)); // preserve exact string literal
+            lastIndex = match.Index + match.Length;
+        }
+
+        if (lastIndex < expression.Length)
+        {
+            pieces.Add((expression[lastIndex..], false));
+        }
+
+        return pieces;
+    }
+
+    private static string RewriteStringFunctionsInText(string expression)
+    {
+        var pieces = SegmentLiterals(expression);
+        RewriteStringFunctions(pieces);
+        var sb = new StringBuilder(expression.Length + 16);
+        foreach (var (text, _) in pieces)
+        {
+            sb.Append(text);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// #323 (SEC-RG-14): <c>startswith|endswith|contains(identifier, 'literal')</c> becomes <c>identifier LIKE 'pattern' ESCAPE '!'</c>. The
+    /// literal is escaped (<c>!</c>, <c>%</c>, <c>_</c> get an <c>!</c> prefix; <c>''</c> stays one quote) so a caller cannot widen the pattern. The escape
+    /// character is not a backslash: the SQL token policy rejects every backslash in a string literal. Only that exact shape
+    /// is rewritten and only on a real string literal (never inside one); any other argument shape stays untouched and fails as before.
+    /// </summary>
+    private static void RewriteStringFunctions(List<(string Text, bool IsLiteral)> pieces)
+    {
+        for (int i = 1; i + 1 < pieces.Count; i++)
+        {
+            if (!pieces[i].IsLiteral)
+            {
+                continue;
+            }
+
+            var head = StringFunctionHeadRegex().Match(pieces[i - 1].Text);
+            var tail = StringFunctionTailRegex().Match(pieces[i + 1].Text);
+            if (!head.Success || !tail.Success)
+            {
+                continue;
+            }
+
+            string function = head.Groups[1].Value.ToLowerInvariant();
+            string inner = EscapeLikeLiteral(pieces[i].Text[1..^1]);
+            string pattern = function switch
+            {
+                "startswith" => $"'{inner}%'",
+                "endswith" => $"'%{inner}'",
+                _ => $"'%{inner}%'"
+            };
+
+            pieces[i - 1] = (pieces[i - 1].Text[..head.Index] + head.Groups[2].Value + " LIKE ", false);
+            pieces[i] = (pattern, true);
+            pieces.Insert(i + 1, (" ESCAPE ", false));
+            pieces.Insert(i + 2, ("'!'", true));
+            pieces[i + 3] = (pieces[i + 3].Text[tail.Length..], false);
+            i += 2;
+        }
+    }
+
+    private static string EscapeLikeLiteral(string literalContent)
+    {
+        var sb = new StringBuilder(literalContent.Length + 4);
+        foreach (char c in literalContent)
+        {
+            if (c is '!' or '%' or '_')
+            {
+                sb.Append('!');
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>Quotes one identifier as a Trino delimited identifier (embedded quotes doubled).</summary>
@@ -136,12 +229,12 @@ public static partial class DataApiFilterTranslator
         int lastIndex = 0;
         foreach (Match literal in StringLiteralRegex().Matches(translated))
         {
-            sb.Append(QuoteColumnWords(translated[lastIndex..literal.Index], metadata));
+            sb.Append(QuoteColumnWords(translated[lastIndex..literal.Index], metadata, afterLiteral: lastIndex > 0));
             sb.Append(literal.Value);
             lastIndex = literal.Index + literal.Length;
         }
 
-        sb.Append(QuoteColumnWords(translated[lastIndex..], metadata));
+        sb.Append(QuoteColumnWords(translated[lastIndex..], metadata, afterLiteral: lastIndex > 0));
         return sb.ToString();
     }
 
@@ -196,9 +289,15 @@ public static partial class DataApiFilterTranslator
         return items;
     }
 
-    private static string QuoteColumnWords(string text, TableMetadata metadata) =>
+    private static string QuoteColumnWords(string text, TableMetadata metadata, bool afterLiteral) =>
         IdentifierRegex().Replace(text, m =>
         {
+            // #323: the ESCAPE keyword the translator emits right after a LIKE pattern literal (only there; never a column).
+            if (afterLiteral && string.Equals(m.Value, "ESCAPE", StringComparison.Ordinal) && text.AsSpan(0, m.Index).IsWhiteSpace())
+            {
+                return m.Value;
+            }
+
             // Not a word inside a number (1e5) or a qualified name.
             if (m.Index > 0 && (char.IsLetterOrDigit(text[m.Index - 1]) || text[m.Index - 1] is '_' or '.' or '"'))
             {
@@ -216,8 +315,11 @@ public static partial class DataApiFilterTranslator
 
     private static string ReplaceOperators(string text)
     {
+        // #324 (SEC-RG-10): "= NULL" never matches (3VL); a comparison with the null keyword is an IS [NOT] NULL test. Non-literal segments only.
+        var result = Regex.Replace(text, @"\beq\s+null\b", "IS NULL", RegexOptions.IgnoreCase);
+        result = Regex.Replace(result, @"\bne\s+null\b", "IS NOT NULL", RegexOptions.IgnoreCase);
         // Safe word-boundary operator replacements
-        var result = Regex.Replace(text, @"\beq\b", "=", RegexOptions.IgnoreCase);
+        result = Regex.Replace(result, @"\beq\b", "=", RegexOptions.IgnoreCase);
         result = Regex.Replace(result, @"\bne\b", "<>", RegexOptions.IgnoreCase);
         result = Regex.Replace(result, @"\bge\b", ">=", RegexOptions.IgnoreCase);
         result = Regex.Replace(result, @"\ble\b", "<=", RegexOptions.IgnoreCase);

@@ -11,10 +11,10 @@ public sealed class AnalyticsOptionsValidator : IValidateOptions<AnalyticsOption
         ArgumentNullException.ThrowIfNull(options);
 
         var maxOffset = options.DatasetApi?.MaxOffset;
-        if (maxOffset is null or < 0 or > DatasetApiOptions.UpperBoundMaxOffset)
+        if (maxOffset is null or <= 0 or > DatasetApiOptions.UpperBoundMaxOffset)
         {
             return ValidateOptionsResult.Fail(
-                $"Analytics:DatasetApi:MaxOffset must be between 0 and {DatasetApiOptions.UpperBoundMaxOffset}.");
+                $"Analytics:DatasetApi:MaxOffset must be between 1 and {DatasetApiOptions.UpperBoundMaxOffset}.");
         }
 
         if (options.Aggregation is null)
