@@ -1,6 +1,6 @@
 # REQ-SIMTEST: Phase 2 architecture plan (simulation testing)
 
-Input PRD: [`2026-10-24-req-simulation-testing.md`](2026-10-24-req-simulation-testing.md) (REQ-SIM-01..61). Branch `feat/simtest`. Code facts verified on `feat/simtest` (28c5fa8e).
+Input PRD: [`2026-10-24-req-simulation-testing.md`](2026-10-24-req-simulation-testing.md) (REQ-SIM-01..61). Branch `feat/simtest`. Code facts verified on `feat/simtest` (28c5fa8e); re-verified 2026-10-24 on `feat/simtest` over `origin/main` 5aa7db8f (sections 0a, 0b, 3a, 4-4c added in that pass).
 
 ## 0. Inputs and defaults taken
 
@@ -16,6 +16,29 @@ Input PRD: [`2026-10-24-req-simulation-testing.md`](2026-10-24-req-simulation-te
 | O8 | SQLite reference for sqllogictest. Default taken: the TPC-shaped reference (DuckDB or PostgreSQL) is decided in WP1b. |
 | O9 | Schemathesis image pinned to an exact version plus digest; the update is a manual monthly bump. |
 | PRD REQ-SIM-20 | The workflow name `sim-api-fuzz-nightly.yml` is replaced by one `simulation-nightly.yml` with one job per package (lead brief). REQ-SIM-20 is otherwise unchanged. |
+| P1 sample size | Owner acceptance is ">= 5000 new statements in the nightly", so the nightly default sample is 5000 (was 3000); the weekly run uses `all`. |
+| P2 GraphQL tool | Schemathesis GraphQL mode (supported in 4.x; GraphQL fixes in 4.21 and 4.26). EvoMaster stays a deferred option (default taken), revisited only if Schemathesis GraphQL coverage is shown to be shallow in WP-INT. |
+| P7 soak length | Default taken: 120 min wall clock weekly (existing `-weekly` guard limit) with an accelerated clock (section 4, P7). A longer run needs a guard change and a Phase 3 delta. |
+
+## 0a. Binding programme constraints
+
+Each constraint is enforced by a named mechanism; none is advisory.
+
+1. **Targets.** Fuzzers, generators and load only hit the loopback sim host (`Autheris.Sim.ApiHost`, in-process gate/parity hosts, or loopback containers) with per-run throwaway data (SEC-SIM-01/02/04/23/24).
+2. **Reports.** No secrets, tokens, auth headers or canary values in reports, drafts or artifacts (`IssueDraft`, `sim-report.py`, `sim-api-report.py`; SEC-SIM-14/15).
+3. **Schedule.** Only `simulation-nightly.yml` (`schedule` and `workflow_dispatch`); never `ci.yml` or PR triggers (decision 1, SEC-SIM-05/21). Nightly jobs <= 60 min; container, soak and dialect jobs are weekly (<= 120 min).
+4. **Determinism.** Every run takes `AUTHERIS_SIM_SEED` (date default), prints it first, and every finding carries a repro line (seed + minimal input + command) (decision 3).
+5. **Finding management.** Findings are grouped and deduplicated by error class (decision 4); each class is a strict-xfail KnownGap with an issue draft.
+6. **Strict policy.** 5xx, crash, hang, policy/masking leak and stack trace are never KnownGaps; they keep the job red until fixed or owner-quarantined with an issue number (SEC-SIM-17/18).
+7. **No product fixes in Stage 1.** Real product defects become GitHub issues from the drafts (lead files them in WP-INT); fixes run in separate lanes. Stages 2-4 follow the same rule except for the P7 time seam (section 4).
+8. **Success metric.** Per stage: number of confirmed product bugs (issues filed); a clean run with its seed and statement/request count is recorded as coverage evidence in this plan's stage log (section 4c).
+
+## 0b. Reused base (verified 2026-10-24)
+
+- Parity: `tests/Autheris.Tests.Parity` with `Seed/ParitySeed.cs`, `Infrastructure/ParityRunGuard.cs`, strict-xfail KnownGaps, `Pairwise/PairwiseTests.cs`, `Differential/Tlp.cs` (TLP already exists for filter shapes) and `Matrix/ParityOracle.cs`.
+- Gate: `tests/Autheris.Tests.SqlCompilerGate` with `Classification/PolicyOracle.cs` and `Databases/Databases.cs` (PostgreSQL `postgres:16-alpine`, SQL Server `mcr.microsoft.com/mssql/server:2022-latest` (unpinned), Oracle `gvenzl/oracle-free:23-slim-faststart@sha256:d86d0979...`, DuckDB). The owner's "~3310 statements" figure was not re-counted; WP-INT records the real count in the first report.
+- Workflows: `parity-nightly.yml` (cron 02:00, `seed` input validated `^[0-9]{1,10}$`, baseline report) and `sql-compiler-gate-nightly.yml` (cron 02:00).
+- Product time: some classes already take an optional `TimeProvider` (for example `BasicAuthAttemptGuard`, `WebSocketAuthInterceptor`, CDC pollers), but about 170 `src` files still read `DateTime(Offset).UtcNow` directly. This drives the P7 seam work (section 4).
 
 ## 1. Architecture decisions (Stage 1)
 
@@ -107,7 +130,7 @@ Input PRD: [`2026-10-24-req-simulation-testing.md`](2026-10-24-req-simulation-te
    - `HarnessMismatch`
 12. **Sampling (REQ-SIM-12).** `SltSampler.Select(queries, seed, size)`:
    - Takes the top-`size` queries ordered by `SimSeed.Hash(seed, id)`, then sorts them by (file, line) for execution.
-   - `AUTHERIS_SIM_SAMPLE` (`^[0-9]{1,5}$|^all$`) defaults to 3000 nightly; the weekly run uses `all`.
+   - `AUTHERIS_SIM_SAMPLE` (`^[0-9]{1,5}$|^all$`) defaults to 5000 nightly (owner acceptance), the weekly run uses `all`.
    - Setup statements always run in full and in order.
 13. **Tests.** Guarded tests in `Corpus/SltCorpusTests.cs`:
    - `Corpus_SampledQueries_MatchReferenceOrKnownGap`
@@ -185,20 +208,20 @@ Input PRD: [`2026-10-24-req-simulation-testing.md`](2026-10-24-req-simulation-te
 22. **Corpus folders.**
    - `tests/Autheris.Tests.Fuzz/corpus/`: about 300 seeds, each 4 KB or less, exported from our own `tests/Autheris.Tests.SqlCompilerGate/Corpus/dql.sql` (1193 statements, project-licensed) plus hand-written grammar seeds. No sqllogictest text.
    - `corpus/sql.dict`: AFL dictionary from `SqlKeywords`.
-   - `findings/crashes/`, `findings/hangs/` (`.gitkeep`) and `findings/quarantine.json` (`[{sha256, issue, reason}]`, owner-only).
+   - `findings/crashes/`, `findings/hangs/` (`.gitkeep`) and `findings/quarantine.json` (`[{sha256, issue, reason, approved}]`, owner-only; entries expire after 90 days, SEC-SIM-17).
    - A finding input is committed only together with its product fix (another lane). Until then the nightly stays red, unless the owner quarantines it explicitly.
 23. **Smoke run.** `scripts/sim/run-parser-fuzz.sh <seconds>`:
    - `dotnet publish tests/Autheris.Tests.Fuzz -c Release -o $RUNNER_TEMP/fuzz-bin`
    - `sharpfuzz $RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll`: only this copy is instrumented, never a production build. The tool is installed with `dotnet tool install SharpFuzz.CommandLine --version <pin> --tool-path $RUNNER_TEMP/sf`.
    - AFL++ comes from `sudo apt-get install -y --no-install-recommends afl++` on `ubuntu-24.04`, with `AFL_SKIP_CPUFREQ=1 AFL_NO_UI=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1`.
-   - `afl-fuzz -i corpus -x corpus/sql.dict -o $RUNNER_TEMP/afl -t 5000 -m none -s $SEED -V <seconds> -- dotnet $RUNNER_TEMP/fuzz-bin/Autheris.Tests.Fuzz.dll --afl`
+   - `afl-fuzz -i corpus -x corpus/sql.dict -o $RUNNER_TEMP/afl -t 5000 -m 2048 -s $SEED -V <seconds> -- dotnet $RUNNER_TEMP/fuzz-bin/Autheris.Tests.Fuzz.dll --afl`
    - Then `--replay` over `afl/default/{crashes,hangs}`. The job fails if either is non-empty, apart from quarantined sha256 values.
    - Local run: `dotnet run --project tests/Autheris.Tests.Fuzz -- --replay tests/Autheris.Tests.Fuzz/corpus tests/Autheris.Tests.Fuzz/findings` (no AFL needed).
 
 ## 2. Workflow `.github/workflows/simulation-nightly.yml` (owned by WP0)
 
 The workflow follows `parity-nightly.yml`:
-- Triggers: `schedule` and `workflow_dispatch` only. Top-level `permissions: {}`; each job `permissions: contents: read`. No secrets, no retries.
+- Triggers: `schedule` and `workflow_dispatch` only. Top-level `permissions: {}`; each job `permissions: contents: read`. No secrets, no retries. Fork guard `github.event.repository.fork == false` on every job; checkout with `persist-credentials: false` (SEC-SIM-05/22).
 - Actions pinned by SHA, copied: checkout `3d3c42e5aac5ba805825da76410c181273ba90b1`, setup-dotnet `a98b56852c35b8e3190ac28c8c2271da59106c68`, upload-artifact `cf430e030ddbb5b0abf93d22962f4752f3646cd9`.
 - Dispatch inputs `job` (choice: all|corpus|api|parser), `seed` and `sample` reach the shell only through `env:` and are regex-validated before use.
 - Each job sets `AUTHERIS_SIM_RUN: '1'` and `AUTHERIS_SIM_REPORT_DIR`. Each selects itself with `if: github.event_name == 'workflow_dispatch' || github.event.schedule == '<its cron>'`.
@@ -206,13 +229,13 @@ The workflow follows `parity-nightly.yml`:
 
 | Job | Cron (UTC) | Timeout | Budget |
 |---|---|---|---|
-| `sim-corpus` | `0 3 * * *` | 45 | build 5, fetch 1, 3000 sampled queries over A+B about 10 |
+| `sim-corpus` | `0 3 * * *` | 45 | build 5, fetch 1, 5000 sampled queries over A+B about 17 |
 | `sim-api-fuzz` | `30 3 * * *` | 60 | build 5, read phase 25, write phase 15 |
 | `sim-parser-fuzz` | `30 4 * * *` | 30 | install and build 8, AFL `-V 300`, replay 2 |
 | `sim-corpus-weekly` | `0 5 * * 0` | 90 | `sample=all` |
 | `sim-parser-fuzz-weekly` | `0 6 * * 0` | 90 | AFL `-V 3600` |
 
-Artifacts: reports, HAR, issue drafts and the AFL crash/hang inputs; never the host data dir.
+Artifacts: reports, scrubbed HAR, issue drafts and the AFL crash/hang inputs, `retention-days: 7`; never the host data dir (SEC-SIM-14/15). The four non-blocking changes of section 6 ("Plan changes required" a-d) are applied in sections 1 and 2.
 
 ## 3. Work packages, file sets and effort (Stage 1)
 
@@ -228,22 +251,131 @@ Order: **WP0 -> (WP1 || WP2 || WP3) -> WP-INT**.
 | WP1b (deferred, optional) | Job-time TPC behind `AUTHERIS_SIM_TPC=1` (pinned DuckDB CLI plus sha256, data and queries in `$RUNNER_TEMP` only) | 2 |
 
 Shared files and their owners:
-- WP0 owns the workflow, the architecture guard file, `THIRD-PARTY-NOTICES.md` and both csproj/lock pairs. Its notices entries: sqllogictest (fetched, MIT elected), Schemathesis (MIT, container), SharpFuzz (MIT), AFL++ (Apache-2.0, apt).
+- WP0 owns the workflow, the architecture guard file, `THIRD-PARTY-NOTICES.md` and both csproj/lock pairs. Its notices entries: sqllogictest (fetched, MIT elected), Schemathesis (MIT, container), SharpFuzz (MIT), AFL++ (apt; licence of the installed version: Apache-2.0 for the `ubuntu-24.04` package, upstream AGPL-3.0-or-later since 2026-06, section 4b).
 - WP0 sets every package and project reference up front, including the pinned SharpFuzz version and the Schemathesis image version plus digest. WP1-3 add no packages to the shared projects. If a WP needs a change, the lead makes it.
 - `Autheris.sln`, `ci.yml` and `Directory.Build.props` are **not touched**.
-- Stage 1 total: 12 days (14 with WP1b).
+- Stage 1 total: 12 PM-run days (14 with WP1b). Elapsed: WP0 1.5, then three parallel lanes of at most 4, then WP-INT 0.5, so about 6 working days (the owner's "about 1 week").
 
-## 4. Stages 2-4 (plan level; each gets an addendum before Phase 3)
+### 3a. Stage 1 package cards
 
-| P | Scope / approach | Placement | Days | Key risk |
+| P | Days | Acceptance | Schedule | Risks |
 |---|---|---|---|---|
-| P4 generator | One logical query model rendered to WebSQL, GraphQL and REST over the P2 fixture; CsCheck after a one-day spike; shrinking to under 10 tokens | nightly job `sim-generator`, 30 min | 6 | Renderer drift between channels |
-| P5 oracles | Channel equality, TLP, NoREC and security invariants; each oracle has a mutant self-test | with P4 | 5 | False positives on NULL/collation |
-| P6 policy variants | Stricter caller's result must be a subset or masked form of the broader caller's (roles, tenants, consent, masking) | with P4 | 3 | Fixture policy explosion |
-| P7 soak | `TimeProvider` injection in the test host, k6 external, leak trend and deadlock watchdog | weekly, 120 min | 6 | Needs a product `TimeProvider` seam: own PRD decision |
-| P8 faults | Toxiproxy container in front of source and governance DBs, clock jumps; expected outcome 503/fail-closed, then recovery | weekly | 4 | Flaky timing; assert outcomes, not latencies |
-| P9 dialects | Oracle, SQL Server, DuckDB and PostgreSQL containers; skewed data, special characters, extreme timestamps | weekly | 6 | Runner time; reuse gate container DBs |
-| P10 BI replay (optional) | Hand-curated anonymised pattern files | weekly | 2 | Provenance of the patterns |
+| P1 corpus | 4 (WP1) + 2 optional (WP1b) | Manifest pins >= 5000 sqllogictest statements (commit + per-file sha256). The nightly executes a seeded sample of 5000 through the gate compile path against the SQLite reference. Every mismatch is a classified finding: KnownGap + draft, or red for security/crash classes. No third-party file is committed. | nightly `sim-corpus` (45 min); weekly `all` (90 min) | Licence (handled: fetched, not committed; TPC not committed). SQLite semantics noise (rules per error class). Runtime (seeded sample). |
+| P2 API fuzz | 3 (WP2) | Zero 5xx, zero canary or stack trace in any response, in both the read and the write phase. Report deduplicated by (status, error code), each group with a repro line. Fixed seed. Checker self-test green before the run. | nightly `sim-api-fuzz` (60 min) | Schemathesis v4 flag drift (pinned image). The OData `$openapi` document may be incomplete (finding `SchemaNonConformance`, not a test tweak). Write-phase flakiness (fresh host). |
+| P3 parser fuzz | 3 (WP3) | No crash and no hang (2 s per input in the harness, AFL `-t 5000`) in the 300 s nightly smoke and the 3600 s weekly run. The committed seed and finding replay is deterministic and green. | nightly `sim-parser-fuzz` (30 min); weekly (90 min) | AFL non-determinism (replay is the acceptance). Runner CPU. AFL++ licence (section 4b). |
+
+## 4. Stages 2-4 (plan level; each gets an addendum and a Phase 3 delta before Phase 4)
+
+Common shape: new code lives in `tests/Autheris.Tests.Simulation/{Generator,Oracles,Soak,Faults,Dialects,BiReplay}/`, plus new jobs in `simulation-nightly.yml`. It reuses `SimSeed`, `SimFinding`, `SimKnownGaps`, `IssueDraft`, `SimResults`, the guard and `Autheris.Sim.ApiHost`. Every addendum re-states SEC-SIM-24. Order: P4 -> P5/P6 -> P7 -> P8 -> P9 -> P10. Each stage starts only after the previous stage's findings are triaged.
+
+**Stage 2: own generator with policy oracle (14 PM-run days, about 2-3 weeks elapsed).**
+
+- **P4 generator (6 days, including a 1-day CsCheck spike).**
+  - Architecture: `Generator/LogicalQuery.cs` is an immutable record tree:
+    - source table and projections;
+    - filters (comparison, `IS [NOT] NULL`, `IN`, `BETWEEN`, `LIKE`, AND/OR/NOT);
+    - inner/left joins on declared keys;
+    - `GROUP BY` with COUNT/SUM/MIN/MAX/AVG;
+    - `TimeBucket(column, grain)`;
+    - `IN`/`EXISTS`/scalar subqueries;
+    - ORDER BY + LIMIT.
+  - `Generator/SchemaModel.cs` reads the sim host catalog, the seed data and the policy description (masked columns, row filters, tenants, consent).
+  - CsCheck `Gen<LogicalQuery>` is seeded from `SimSeed.Hash(seed, "gen")`.
+  - Renderers `WebSqlRenderer`, `GraphQlRenderer` and `RestODataRenderer` each declare a capability set. A query is rendered only to the channels that support all of its features.
+  - Acceptance: >= 20,000 queries per night; same seed, byte-identical query list (`Generator_SameSeed_SameQueries`); an injected bug shrinks to under 10 tokens (`Generator_InjectedBug_ShrinksBelow10Tokens`); round-trip tests per renderer feature.
+  - Schedule: nightly `sim-generator`, 45 min.
+  - Risks:
+    - Renderer drift between channels: mitigated by capability sets and one contract test per feature.
+    - Budget wasted on rejected queries: the acceptance ratio is reported, and the job fails below 50 %.
+    - CsCheck fit: decided by the spike, with FsCheck as fallback.
+- **P5 oracles (5 days).** `Oracles/IQueryOracle` implementations:
+  - `ChannelEqualityOracle`: the same row multiset over all rendered channels, after type and order normalisation.
+  - `TlpOracle`: the logic of Parity `Tlp.cs` lifted to generated queries. Q equals Q WHERE p, plus Q WHERE NOT p, plus Q WHERE p IS NULL, for rows and for COUNT/SUM.
+  - `NoRecOracle`: the optimised filter count against the unoptimised `SUM(CASE WHEN p THEN 1 ELSE 0 END)`.
+  - `SecurityOracle`: no canary, masked value or out-of-policy row in the result, error text, headers or `/metrics` delta. "Unknown" and "forbidden" objects get identical status, code and message (the #320 case).
+  - Acceptance: each oracle has a mutant self-test with a deliberately injected bug in `Oracles/Mutants/`. If the oracle does not detect it, the job is red. Tests: `TlpOracle_DetectsDroppedNullPartition`, `NoRecOracle_DetectsWrongCount`, `ChannelEqualityOracle_DetectsRendererDrift`, `SecurityOracle_DetectsCanaryInErrorText`, `SecurityOracle_DetectsUnknownVsForbiddenDifference`. Security oracle hits are `PolicyLeak`, never KnownGaps.
+  - Schedule: runs inside `sim-generator`.
+  - Risks:
+    - False positives on NULL ordering, collation and float rounding: a type-wise normaliser with documented tolerances.
+    - Metrics scrape cost: scrape every N queries.
+- **P6 policy variants (3 days).**
+  - Architecture: `Generator/CallerMatrix.cs` crosses roles × tenants × consent on/off × masking profile, with a declared "restricts" order.
+  - `PolicyMonotonicityOracle` checks that the stricter caller's result is a subset of the broader caller's result, modulo masking. A masked cell is the mask token or null, never the original value.
+  - Acceptance: the property holds for every query and caller pair. Mutant self-test `PolicyMonotonicity_DetectsWidenedRowFilter`. A pairwise cover (Parity pairwise approach) keeps the matrix at <= 8 callers per night, rotated by seed.
+  - Schedule: runs inside `sim-generator`.
+  - Risks: policy explosion (pairwise cover). Intended non-subset semantics (for example consent) are allowed only as documented exceptions in the addendum, never as KnownGaps.
+
+**Stage 3: operations simulation, "the mileage" (12 PM-run days including the seam, about 2 weeks elapsed).**
+
+- **P7 soak with accelerated time (6 days + 2 days product time seam).**
+  - Prerequisite (separate lane, own PRD addendum and Phase 3): token validation, caches, consent and schema reload read time only from the DI `TimeProvider` (default `TimeProvider.System`). There is no test-only code in the product (section 0b).
+  - The sim host registers `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`, MIT). A seeded event schedule advances it (default 1 simulated hour per wall-clock minute, so >= 5 simulated days in 120 min) and fires token expiry, cache expiry, consent switches and schema reloads.
+  - Load: k6 (image pinned by digest, loopback) replays mixed-caller requests exported from P4 as JSONL.
+  - Watchdogs:
+    - Working set, handles and threads are sampled per minute through EventPipe counters.
+    - Deadlock watchdog: no completed request for 60 s under load means a dump plus a `Hang` finding.
+    - P5 oracles are sampled during the run, always right after each cache or schema event.
+  - Acceptance: working-set slope after warm-up below 10 % per simulated day (linear fit after forced GC samples); no hang or deadlock; zero wrong answers and leaks after every expiry or reload event; same seed, same event schedule.
+  - Schedule: weekly `sim-soak-weekly`, 120 min.
+  - Risks: the time seam is a product change (Phase 3 delta); GC noise (trend over many samples); runner variance.
+- **P8 fault injection (4 days).**
+  - Toxiproxy (MIT, digest-pinned, bound to `127.0.0.1`) sits between the sim host and PostgreSQL containers for the source and governance DBs. SQLite cannot be proxied, so the P8 host profile switches to PostgreSQL.
+  - Seeded toxics: latency, bandwidth, `reset_peer`, timeout and `slow_close`, plus clock jumps through `FakeTimeProvider`.
+  - Acceptance: under a fault, every request ends with either a correct answer or a 503/fail-closed documented error code, within the command timeout + 5 s. Never wrong data (P5), never a leak, never a hang. Full recovery within 30 s after the toxic is removed.
+  - Schedule: weekly `sim-faults-weekly`, 90 min. The soak also runs once per week with injection on (`sim-soak-weekly` fault variant).
+  - Risks: timing flakiness (assert outcomes, not latencies). Undefined governance-DB outage behaviour is a finding, not a test relaxation.
+
+**Stage 4: environment breadth (ongoing, 8 PM-run days).**
+
+- **P9 dialects and data shapes (6 days).**
+  - Reuse the gate's `Databases/Databases.cs` containers (PostgreSQL, SQL Server, Oracle Free, DuckDB) as P4 sources and references.
+  - Data shapes:
+    - Zipf-skewed keys and 10^6-row tables;
+    - special characters (quotes, combining marks, RTL, NUL);
+    - extreme times (0001-01-01, 9999-12-31, DST edges).
+  - Acceptance: P4 and P5 are green per dialect, and differences are classified per dialect error class. Every image is pinned by digest. The gate's SQL Server `2022-latest` tag must be digest-pinned for P9 (SEC-SIM-07/24).
+  - Schedule: weekly `sim-dialects-weekly`; if 120 min is exceeded, one dialect per week by rotation.
+  - Risks: container start time (Oracle Free about 2-3 min); image licence terms (section 4b); pull flakiness.
+- **P10 BI query replay (optional, 2 days).**
+  - Run Metabase OSS and dbt only against the sim host; Power BI patterns are captured manually against the same host. The host request log records the emitted SQL/REST.
+  - Patterns are curated into `BiReplay/patterns/*.json` with a provenance header and replayed through P5. There are no customer captures.
+  - Acceptance: >= 3 tools × >= 20 patterns replay green or as classified findings.
+  - Schedule: weekly, inside `sim-dialects-weekly`.
+  - Risks: provenance (only our own captures on synthetic data); tool version drift.
+
+### 4a. Rejected alternatives
+
+1. SQLsmith as code: GPL-3.0, and it targets DB crashes, not policy correctness. Its grammar-based random SQL idea is covered by P4.
+2. SQLancer code (MIT, Java): ideas only (TLP, NoREC, PQS) to avoid a JVM dependency; P5 implements them in C#.
+3. Jepsen-style consistency tests: Autheris is not a distributed store and makes no linearisability claim.
+4. Everything at once: rejected. Stages run in order, each one triaged before the next.
+5. NBomber, and TPC/IMDB content committed to the repo (section 4b).
+
+### 4b. Tool verdicts (re-verified 2026-10-24 via GitHub API and vendor pages; complements PRD section 4)
+
+| Tool | Licence | Last push | Runtime here | Verdict |
+|---|---|---|---|---|
+| sqllogictest | Runner: GPL/BSD/MIT/CC0 choice; test files under the same author terms | active | fetched at job time, parsed as text | USE P1, not committed, MIT elected |
+| TPC-H / TPC-DS | TPC EULA | n/a | optional job-time generation (WP1b) | **BLOCKER for committing**; fallback in place, not a programme blocker |
+| Schemathesis | MIT | 2026-10-23 (4.x supports GraphQL) | container, digest-pinned | USE P2 (REST, OData, GraphQL) |
+| EvoMaster | LGPL-3.0 | 2026-10-24 | JVM, external | allowed, deferred |
+| SharpFuzz | MIT | 2026-06-16 (stable) | .NET tool + package, pinned | USE P3 |
+| AFL++ | Upstream AGPL-3.0-or-later since 2026-06-03 (harness-compiled parts stay Apache-2.0); the `ubuntu-24.04` package predates the relicence (Apache-2.0) | 2026-10-19 | apt, external, unmodified | USE P3. Not a blocker: external process, not distributed. The notices entry must name the licence of the installed version. |
+| CsCheck / FsCheck | Apache-2.0 / BSD-3-Clause | 2026-10-21 | NuGet | USE CsCheck P4; FsCheck fallback |
+| k6 | AGPL-3.0 | 2026-10-23 | container, external, unmodified | USE P7 |
+| NBomber | Proprietary; free for personal use only (pricing page) | active | none | **EXCLUDED** (blocker without a paid subscription) |
+| Toxiproxy | MIT | 2026-10-20 | container | USE P8 |
+| TimeProvider.Testing | MIT (dotnet/extensions) | 2026-10-23 | NuGet, sim host only | USE P7 |
+| gvenzl/oracle-free | Image scripts Apache-2.0. The Oracle Database Free engine is under the Oracle Free Use Terms: internal use for developing, testing, prototyping and demonstrating, unmodified redistribution allowed. | 2026-10-22 | container, already digest-pinned in the gate | USE P9; pulled, never committed |
+| SQL Server image | Docker files MIT. Developer edition engine is free for non-production use; `ACCEPT_EULA=Y` is the organisation's EULA acceptance. | 2026-10-14 | container | USE P9, test-only, pin by digest |
+| PostgreSQL / DuckDB | PostgreSQL licence / MIT | active | container / embedded | USE P9 |
+| SQLancer | MIT | 2026-10-21 | none | ideas only |
+| SQLsmith | GPL-3.0 | 2026-07-15 | none | **REJECTED** (not used) |
+| Metabase / dbt-core / Power BI | AGPL-3.0 OSS edition (repo also holds enterprise code) / Apache-2.0 / proprietary | active | external, against the sim host only | P10 optional; only our own captures are committed |
+
+### 4c. Stage log
+
+After each stage, WP-INT (lead) appends one line here: stage, date, seed(s), statements or requests executed, confirmed bugs (issue numbers) and clean-run evidence.
 
 ## 5. Risks (Stage 1)
 
