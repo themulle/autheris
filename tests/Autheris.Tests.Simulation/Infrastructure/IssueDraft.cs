@@ -68,7 +68,7 @@ public static partial class IssueDraft
 
     private static string Cell(string value)
     {
-        var redacted = Redact(value).Replace("```", "'''", StringComparison.Ordinal);
+        var redacted = Redact(value).Replace("```", "'''", StringComparison.Ordinal).Replace('\r', ' ').Replace('\n', ' ');
         return redacted.Length <= MaxCellChars ? redacted : redacted[..MaxCellChars];
     }
 }

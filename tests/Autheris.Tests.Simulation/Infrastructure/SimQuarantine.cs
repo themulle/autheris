@@ -64,6 +64,11 @@ public static partial class SimQuarantine
                 throw new InvalidOperationException("quarantine approvedOn must be yyyy-MM-dd.");
             }
 
+            if (entries.Any(e => string.Equals(e.Sha256, sha, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("quarantine sha256 must be unique; duplicate entry rejected.");
+            }
+
             entries.Add(new SimQuarantineEntry(sha, issue, reason, approved));
         }
 

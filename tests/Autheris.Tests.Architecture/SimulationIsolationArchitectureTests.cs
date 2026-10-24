@@ -509,7 +509,7 @@ public sealed partial class SimulationIsolationArchitectureTests
     }
 
     internal static IReadOnlyList<string> MissingNotices(string text) =>
-        new[] { "sqllogictest", "Schemathesis", "SharpFuzz", "AFL++", "MIT", "Apache-2.0", "4.09c-1", "apt-cache policy afl++", "c93ac416f05635ff5cc490009add936d9753d01d" }
+        new[] { "sqllogictest", "Schemathesis", "SharpFuzz", "AFL++", "MIT", "Apache-2.0", "4.09c-1ubuntu3", "noble at time of writing", "apt-cache policy afl++", "c93ac416f05635ff5cc490009add936d9753d01d" }
             .Where(s => !text.Contains(s, StringComparison.Ordinal)).ToList();
 
     /// <summary>Files whose content hash is a known sqllogictest file, or that look like sqllogictest records outside <c>fixtures</c> (SEC-SIM-13).</summary>
