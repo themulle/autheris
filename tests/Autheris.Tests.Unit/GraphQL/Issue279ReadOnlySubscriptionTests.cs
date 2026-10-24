@@ -310,6 +310,7 @@ public sealed class Issue279ReadOnlySubscriptionTests
         http.Request.Headers["Origin"] = "https://evil.example";
         var result = await ConnectInitAsync(http);
         result.Accepted.ShouldBeFalse(); // SEC-279-A2
+        result.Message.ShouldBe("Cross-site WebSocket protection: token required in connection_init when Origin is present.");
     }
 
     [Fact]
