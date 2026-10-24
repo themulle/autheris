@@ -117,3 +117,4 @@ Verified against origin/main f065cb97. Q1 decided: canonical Trino SQL, no `atTi
 
 ## Changelog (Phase 4)
 - 2026-10-24 (WP1): drift vs plan: existing conformance fixtures (SqlServer `date-translated-004/-005`) and tests that asserted SQL Server `date_trunc` hour/week rejection were updated to the new supported output (`DateFunctionTranslationTests`, `SqlFilterDefinitionTests` now use `second`). `GovernedSqlRewriter` already logs through `SafeLog` (type name only), so no change was needed for SEC-PGP-03 logging. Non-temporal planned-path bucket values (for example SQLite text) pass through unchanged, as in plan 2.2 step 5.
+- 2026-10-24 (WP2): `WriteDbValue` moved to `WebSqlValueWriter.Write` (internal, same switch plus DateOnly/TimeOnly/TimeSpan/string/IFormattable arms, all InvariantCulture). Unknown non-formattable types whose ToString is the CLR type name write null (no type-name leak). No existing test asserted the old `"o"` WebSQL format.
