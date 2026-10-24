@@ -427,12 +427,43 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         var left = (QueryBody)Visit(context.left);
         var right = (QueryBody)Visit(context.right);
 
+        // #321: operands whose degree the AST knows must agree (a '*' is never expanded here; the provider error is classified instead).
+        if (TryGetDegree(left, out int leftDegree) && TryGetDegree(right, out int rightDegree) && leftDegree != rightDegree)
+        {
+            throw new SetOperationDegreeMismatchException();
+        }
+
         var op = SetOperator.Union;
         if (context.@operator.Type == SqlBaseLexer.INTERSECT) op = SetOperator.Intersect;
         else if (context.@operator.Type == SqlBaseLexer.EXCEPT) op = SetOperator.Except;
 
         bool distinct = context.setQuantifier()?.ALL() == null;
         return new SetOperationQuery(left, op, distinct, right);
+    }
+
+    private static bool TryGetDegree(QueryBody body, out int degree)
+    {
+        degree = 0;
+        while (body is SetOperationQuery set)
+        {
+            body = set.Left;
+        }
+
+        if (body is not QuerySpecification spec)
+        {
+            return false;
+        }
+
+        foreach (var item in spec.Projections)
+        {
+            if (item is WildcardSelectItem)
+            {
+                return false;
+            }
+        }
+
+        degree = spec.Projections.Count;
+        return true;
     }
 
     public override SqlNode VisitQueryPrimaryDefault(SqlBaseParser.QueryPrimaryDefaultContext context)

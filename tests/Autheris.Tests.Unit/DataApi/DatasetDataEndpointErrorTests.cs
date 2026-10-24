@@ -122,4 +122,62 @@ public sealed class DatasetDataEndpointErrorTests
         await svc.Received(1).ExecuteQueryAsync(
             Arg.Is<DatasetQueryRequest>(r => r.Limit == 0 && r.Offset == 3), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>());
     }
+
+    // #329 (SEC-RG-14): REST never answers SQL_SYNTAX_ERROR; a parser failure of the filter is a bad parameter.
+    [Fact]
+    public async Task DanglingOperator_Returns400InvalidQuery()
+    {
+        var (status, body, _) = await RunAsync(new Antlr4.Runtime.Misc.ParseCanceledException("line 1:7 mismatched input '<EOF>'"), "?filter=region%20eq");
+
+        status.ShouldBe(400);
+        body.GetProperty("code").GetString().ShouldBe("INVALID_QUERY");
+    }
+
+    [Fact]
+    public async Task UnbalancedParenthesis_Returns400InvalidQuery()
+    {
+        var (status, body, _) = await RunAsync(new Antlr4.Runtime.Misc.ParseCanceledException("line 1:12 missing ')'"), "?filter=(id%20eq%201");
+
+        status.ShouldBe(400);
+        body.GetProperty("code").GetString().ShouldBe("INVALID_QUERY");
+    }
+
+    [Fact]
+    public async Task MalformedFilter_BodyHasNoParserDetail()
+    {
+        var (status, body, raw) = await RunAsync(new Antlr4.Runtime.Misc.ParseCanceledException("line 1:7 mismatched input 'SECRET_TOKEN' expecting"), "?filter=region%20eq");
+
+        status.ShouldBe(400);
+        body.GetProperty("code").GetString().ShouldBe("INVALID_QUERY");
+        raw.ShouldNotContain("SECRET_TOKEN");
+        raw.ShouldNotContain("mismatched");
+        raw.ShouldNotContain("SYNTAX", Case.Insensitive);
+    }
+
+    [Fact]
+    public async Task PolicyViolation_NotRemappedToInvalidQuery()
+    {
+        var (status, body, _) = await RunAsync(new Autheris.Application.Sql.WebSqlPolicyException("masked column in filter"), "?filter=email%20eq%20%27x%27");
+
+        status.ShouldBe(403);
+        body.GetProperty("code").GetString().ShouldBe("SQL_POLICY_VIOLATION");
+    }
+
+    [Fact]
+    public async Task ProviderError_StaysMappedAs502()
+    {
+        var (status, body, _) = await RunAsync(new TrinoSqlEngine.Ast.Emit.GovernedSqlException(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ProviderError, TrinoSqlEngine.TargetSqlDialect.Sqlite));
+
+        status.ShouldBe(502);
+        body.GetProperty("code").GetString().ShouldBe("SQL_PROVIDER_ERROR");
+    }
+
+    [Fact]
+    public async Task OffsetAboveCap_Returns400InvalidQuery()
+    {
+        var (status, body, _) = await RunAsync(new ArgumentException("Offset too large: offset must not exceed 10000.", "request"), "?offset=10001");
+
+        status.ShouldBe(400);
+        body.GetProperty("code").GetString().ShouldBe("INVALID_QUERY");
+    }
 }

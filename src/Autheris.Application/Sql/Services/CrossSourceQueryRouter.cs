@@ -107,7 +107,11 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
 
             // SR-H-06: same data-source allowlists as the single-catalog path, for every referenced catalog,
             // before any metadata lookup or data read.
-            DataSourceAllowlistGuard.EnsureAllowed(_webSqlOptions, tenantId, domain);
+            // SEC-RG-01: a denied source answers exactly like an unknown table (no existence oracle between unknown source and unknown table).
+            if (!DataSourceAllowlistGuard.IsAllowed(_webSqlOptions, tenantId, domain))
+            {
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
+            }
 
             var meta = await _tableRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (meta == null && !string.Equals(tableId.Domain, "default", StringComparison.OrdinalIgnoreCase))
@@ -134,7 +138,10 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
                 throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
             }
 
-            DataSourceAllowlistGuard.EnsureAllowed(_webSqlOptions, tenantId, effectiveSource);
+            if (!DataSourceAllowlistGuard.IsAllowed(_webSqlOptions, tenantId, effectiveSource))
+            {
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
+            }
 
             // Check unsupported types (Phase 0 / 2)
             if (meta.Table.DataSourceType is DataSourceType.HttpPlugin or DataSourceType.LakehouseIceberg or DataSourceType.LakehouseDelta)

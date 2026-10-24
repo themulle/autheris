@@ -20,6 +20,7 @@ public static class ParityErrorCodes
         typeof(GovernedSqlErrorCodes),
         typeof(McpErrorCodes),
         typeof(VirtualFilterErrorCodes),
+        typeof(Autheris.Domain.Model.InvalidCursorException), // WP-R2: bulk keyset cursor (INVALID_CURSOR)
     ];
 
     /// <summary>WebSQL <c>error</c> tokens, accepted as codes when a body has no fine-grained <c>code</c>.</summary>
@@ -31,7 +32,7 @@ public static class ParityErrorCodes
     [
         "INVALID_ARGUMENT", "UNAUTHORIZED", "AUTH_NOT_AUTHORIZED", "AUTH_TOKEN_EXPIRED", "FORBIDDEN", "NOT_FOUND", "BAD_REQUEST",
         "UPGRADE_REQUIRED", "FIELD_PERMANENTLY_DECOMMISSIONED", "TOKEN_REVOCATION_UNAVAILABLE",
-        "GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED", "BAD_USER_INPUT", "QUERY_TOO_COMPLEX", "QUERY_COST_QUOTA_EXCEEDED", "AUTH_NOT_AUTHENTICATED",
+        "GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED", "BAD_USER_INPUT", "QUERY_TOO_COMPLEX", "QUERY_TOO_DEEP", "QUERY_COST_QUOTA_EXCEEDED", "AUTH_NOT_AUTHENTICATED",
     ];
 
     /// <summary>Codes that mean an unexpected server fault; they are hard failures on any status.</summary>

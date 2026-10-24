@@ -176,4 +176,104 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
 
         ex.Message.ShouldContain("people");
     }
+
+    // #322 (SEC-RG-04): a window over a masked column is denied before execution with the window code; plain ORDER BY keeps the policy violation.
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("SELECT id, row_number() OVER (ORDER BY email) FROM dbo.people")]
+    [InlineData("SELECT id, row_number() OVER (PARTITION BY email ORDER BY id) FROM dbo.people")]
+    [InlineData("SELECT id, rank() OVER (PARTITION BY p.email) FROM dbo.people p")]
+    [InlineData("SELECT id, rank() OVER w FROM dbo.people WINDOW w AS (ORDER BY email)")]
+    public async Task WindowOverMasked_ThrowsMaskedAggregation(string sql)
+    {
+        var service = CreateSingleTableService();
+
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
+
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Status.ShouldBe(403);
+        mapped.Code.ShouldBe("AGGREGATION_ON_MASKED_COLUMN");
+        ex.Message.ShouldNotContain("email");
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("SELECT id, row_number() OVER (PARTITION BY salary) FROM dbo.people")]
+    [InlineData("SELECT id, row_number() OVER (ORDER BY salary) FROM dbo.people")]
+    public async Task WindowPartitionOnDeniedColumn_Denied(string sql)
+    {
+        var service = CreateSingleTableService();
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
+
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Status.ShouldBe(403);
+        mapped.Code.ShouldNotBe("AGGREGATION_ON_MASKED_COLUMN");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task PlainOrderByMasked_StaysPolicyViolation()
+    {
+        var service = CreateSingleTableService();
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM dbo.people ORDER BY email", CreateUser(), new TenantId(Tenant)));
+
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("SELECT id, row_number() OVER (ORDER BY email) FROM dbo.people", "AGG")]
+    [InlineData("SELECT id, row_number() OVER (PARTITION BY email) FROM dbo.people", "AGG")]
+    [InlineData("SELECT id, row_number() OVER (ORDER BY salary) FROM dbo.people", "DENY")]
+    [InlineData("SELECT id FROM dbo.people ORDER BY email", "FILTER")]
+    public void ExecutorGuard_WindowOverMaskedOrDenied_DeniedBeforeExecution(string sql, string expected)
+    {
+        var table = CreateTable("people");
+        var metadata = TrinoSqlEngine.FastSqlEngine.Default.Analyze(sql.AsMemory());
+        var target = metadata.ReferencedTables[0];
+        var decision = TableAccessDecision.Allowed(
+            table.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["tenant_id"] = ColumnAccessLevel.Clear,
+                ["email"] = ColumnAccessLevel.Mask,
+                ["salary"] = ColumnAccessLevel.Deny
+            });
+
+        var ex = Should.Throw<System.Security.SecurityException>(() =>
+            GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(target, table, decision, metadata));
+
+        switch (expected)
+        {
+            case "AGG": ex.ShouldBeOfType<TrinoSqlEngine.MaskedAggregationException>(); break;
+            case "DENY": ex.ShouldBeOfType<WebSqlTableDeniedException>(); break;
+            default: ex.ShouldBeOfType<WebSqlPolicyException>(); break;
+        }
+    }
+
+    // #320 (SEC-RG-01): a catalog the caller may not use answers exactly like an unknown table (single-catalog path).
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("SELECT id FROM nosuchsource.dbo.people")]
+    [InlineData("SELECT id FROM dbo.nosuchtable")]
+    public async Task UnknownSourceAndUnknownTable_SameStatusCodeMessage(string sql)
+    {
+        var service = CreateSingleTableService();
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
+
+        ex.ShouldBeOfType<WebSqlTableDeniedException>();
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Status.ShouldBe(403);
+        mapped.Code.ShouldBe("SQL_POLICY_DENIED");
+        mapped.Title.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage("SQL_POLICY_DENIED"));
+    }
 }

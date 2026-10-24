@@ -609,9 +609,16 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
         try
         {
-            var queryNode = GraphQlTreeBuilder.BuildTree(ctx, table, schema, maxResponseRows);
+            var queryNode = GraphQlTreeBuilder.BuildTree(ctx, table, schema, maxResponseRows, out var pageRangeViolated);
             using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted)
                 .ConfigureAwait(false);
+
+            if (pageRangeViolated)
+            {
+                // SEC-RG-08 (#330): the tree was built with a zero-row page and has just passed table authorization, so a denied table
+                // answers ACCESS_DENIED for every page size; only an authorized caller learns the fixed page-range error.
+                throw new GatewayPageRangeException();
+            }
 
             RegisterMaskedColumns(ctx, treeService.GetMaskedColumns(principal, queryNode, opId));
 
@@ -667,6 +674,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         catch (AggregationRowCapExceededException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(AggregationRowCapExceededException.ErrorCodeConst).Build());
+        }
+        catch (GatewayPageRangeException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode("INVALID_QUERY").Build());
         }
         catch (GatewayInvalidQueryException ex)
         {

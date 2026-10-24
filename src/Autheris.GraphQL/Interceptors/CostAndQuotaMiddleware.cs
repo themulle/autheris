@@ -27,6 +27,72 @@ public sealed class CostAndQuotaMiddleware
         _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
     }
 
+    private static Dictionary<string, object?>? BuildRuntimeVariables(RequestContext context)
+    {
+        if (context.VariableValues.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        var runtimeVariables = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var coll in context.VariableValues)
+        {
+            foreach (var item in coll)
+            {
+                runtimeVariables[item.Name] = item.Value;
+            }
+        }
+
+        return runtimeVariables;
+    }
+
+    private static int EffectiveGatewayMaxCost(GatewayOptions gatewayOptions) =>
+        gatewayOptions.AreQueryLimitsRelaxed
+            ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100000 : 5000)
+            : gatewayOptions.GraphQL.MaxAllowedComplexity;
+
+    /// <summary>
+    /// The gateway-wide complexity limit on the runtime variable values, for the paths that skip the tier and quota gate (rate limiting
+    /// disabled, no HTTP context). Returns true when it rejected the request.
+    /// </summary>
+    private static bool RejectIfOverGatewayComplexity(RequestContext context, DocumentNode doc, GatewayOptions? gatewayOptions, HttpContext? httpContext)
+    {
+        if (gatewayOptions is null)
+        {
+            return false;
+        }
+
+        var maxCost = EffectiveGatewayMaxCost(gatewayOptions);
+        if (maxCost <= 0)
+        {
+            return false;
+        }
+
+        int cost = QueryCostAnalyzerRule.CalculateCost(
+            doc,
+            context.Schema,
+            maxResponseRows: gatewayOptions.GraphQL?.MaxResponseRows ?? 1000,
+            variableValues: BuildRuntimeVariables(context),
+            costOptions: gatewayOptions.QueryCost,
+            maxExecutionDepth: QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL));
+        if (cost <= maxCost)
+        {
+            return false;
+        }
+
+        context.Result = OperationResult.FromError(
+            ErrorBuilder.New()
+                .SetMessage("The query exceeds the allowed complexity.")
+                .SetCode("QUERY_COST_QUOTA_EXCEEDED")
+                .Build());
+        if (httpContext is not null)
+        {
+            HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status400BadRequest);
+        }
+
+        return true;
+    }
+
     public async ValueTask InvokeAsync(RequestContext context)
     {
         HttpContext? httpContext = null;
@@ -68,6 +134,12 @@ public sealed class CostAndQuotaMiddleware
 
         if (httpContext == null || doc == null || context.Schema == null)
         {
+            if (doc != null && context.Schema != null
+                && RejectIfOverGatewayComplexity(context, doc, context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value, httpContext))
+            {
+                return;
+            }
+
             await _next(context).ConfigureAwait(false);
             return;
         }
@@ -76,6 +148,12 @@ public sealed class CostAndQuotaMiddleware
         var gatewayOptions = services?.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
         if (gatewayOptions?.IsRateLimitingDisabled == true)
         {
+            // SEC-RG-05: the validation pass prices a variable page size without its value, so the runtime pass must still bound it here.
+            if (RejectIfOverGatewayComplexity(context, doc, gatewayOptions, httpContext))
+            {
+                return;
+            }
+
             await _next(context).ConfigureAwait(false);
             return;
         }
@@ -108,18 +186,7 @@ public sealed class CostAndQuotaMiddleware
         var clientContext = await tierResolver.ResolveAsync(principal, apiKey, clientIp, context.RequestAborted).ConfigureAwait(false);
 
         // 2. Calculate cost via QueryCostAnalyzerRule (incorporating actual runtime variable values and QueryCostOptions)
-        Dictionary<string, object?>? runtimeVariables = null;
-        if (!context.VariableValues.IsDefaultOrEmpty)
-        {
-            runtimeVariables = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var coll in context.VariableValues)
-            {
-                foreach (var item in coll)
-                {
-                    runtimeVariables[item.Name] = item.Value;
-                }
-            }
-        }
+        var runtimeVariables = BuildRuntimeVariables(context);
 
         int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
         int maxExecutionDepth = QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions?.GraphQL);
@@ -133,15 +200,9 @@ public sealed class CostAndQuotaMiddleware
             maxExecutionDepth: maxExecutionDepth);
 
         int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
-        if (gatewayOptions is not null)
+        if (gatewayOptions is not null && EffectiveGatewayMaxCost(gatewayOptions) is > 0 and var effectiveGatewayMaxCost)
         {
-            var effectiveGatewayMaxCost = gatewayOptions.AreQueryLimitsRelaxed
-                ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100000 : 5000)
-                : gatewayOptions.GraphQL.MaxAllowedComplexity;
-            if (effectiveGatewayMaxCost > 0)
-            {
-                maxAllowedCost = Math.Min(maxAllowedCost, effectiveGatewayMaxCost);
-            }
+            maxAllowedCost = Math.Min(maxAllowedCost, effectiveGatewayMaxCost);
         }
 
         // 3. Check query cost against effective max limit (min of Tier and MaxAllowedComplexity)

@@ -240,6 +240,12 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             // catalog cannot be enumerated (same text as GraphQlEnumerationShieldMiddleware).
             if (string.Equals(cleanError.Code, GraphQlEnumerationShieldMiddleware.Code, StringComparison.OrdinalIgnoreCase))
             {
+                // #330 (SEC-RG-08): the page-range message is a server constant without table or column names; it is kept as is.
+                if (GraphQlEnumerationShieldMiddleware.IsPageRangeError(cleanError))
+                {
+                    return cleanError;
+                }
+
                 return cleanError.WithMessage(GraphQlEnumerationShieldMiddleware.Message);
             }
 

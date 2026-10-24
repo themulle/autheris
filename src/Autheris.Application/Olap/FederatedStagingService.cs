@@ -209,7 +209,10 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     AccessDecision: req.Decision,
                     ProjectedColumns: subtree.ProjectedColumns.Count > 0 ? subtree.ProjectedColumns : subtree.SyntheticMetadata.Columns.Select(c => c.ColumnName).ToList(),
                     Arguments: subtreeSessionArgs,
-                    PushdownFilterSql: subtree.Compiled.Sql,
+                    // #327: the subtree statement is a SELECT, not a row filter; it travels in Items["SubtreeSql"]/["SubtreePlan"] and runs through the
+                    // governed pipeline (which validates it again). Passing it as PushdownFilterSql made the connector's predicate validation reject
+                    // every subtree read.
+                    PushdownFilterSql: null,
                     Limit: budget.MaxStagedRowsPerTable + 1,
                     Offset: 0);
 

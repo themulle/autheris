@@ -222,6 +222,37 @@ public sealed class GovernedDataQueryServiceTests
         exception.Message.ShouldContain("email");
     }
 
+    // #324 (SEC-RG-10): "eq null" / "ne null" rewrite to IS [NOT] NULL before the guards, which still see the masked column.
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("email eq null")]
+    [InlineData("email ne null")]
+    [InlineData("EMAIL EQ NULL")]
+    public async Task IsNullOnMaskedColumn_Denied(string filter)
+    {
+        var metadata = CreateCustomerTableMetadata();
+        _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
+        var decision = TableAccessDecision.Allowed(
+            _customerTable,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["email"] = ColumnAccessLevel.Mask,
+                ["name"] = ColumnAccessLevel.Clear
+            },
+            hasUnconstrainedColumnAllow: true);
+        _pdp.EvaluateAccessAsync(_customerTable, metadata, Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
+            Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>()).Returns(decision);
+        var service = new GovernedDataQueryService(_metadataRepo, _pdp, _sqlExecutionService, _federatedExecutionService, _maskingProvider);
+        var user = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("sub", "user-123") }, "TestAuth"));
+
+        var exception = await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(
+            new DatasetQueryRequest(Table: _customerTable, FilterExpression: filter, Limit: 10), new RequestContext(user, new TenantId("default"))));
+
+        exception.Message.ShouldContain("email");
+        await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
+
     // ---- Pagination window (FR-07/FR-09/FR-10) ----
 
     private void AllowAll(TableMetadata metadata)
@@ -400,6 +431,31 @@ public sealed class GovernedDataQueryServiceTests
         await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(
             new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 1001), Ctx()));
         await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OffsetAboveDefaultCap_Throws()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        var service = CreateService();
+
+        await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 10, Offset: 10_001), Ctx()));
+        await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OffsetAtCap_Allowed()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(0));
+        var service = CreateService();
+
+        var result = await service.ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 10, Offset: 10_000), Ctx());
+
+        result.Count.ShouldBe(0);
     }
 
     [Fact]

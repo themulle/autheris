@@ -2,8 +2,10 @@ namespace Autheris.GraphQL.Interceptors;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Autheris.Application.Analytics;
+using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
@@ -417,44 +419,135 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     int requestedLimit = -1;
                     bool limitIsVariable = false;
                     bool zeroLimit = false;
+
+                    // #318/#330: catalog table fields range-check first in the tree builder before any data access, so a value outside
+                    // [0, maxResponseRows] is a rejected request (priced as the minimal page), never a worst-case page. Other fields clamp or
+                    // ignore the value, so they keep the conservative pricing.
+                    bool treeField = fieldDef != null && IsTreePagedField(fieldDef);
+
+                    // The builder's real bounds: a root field is limited to maxResponseRows and defaults to min(100, maxResponseRows); a relation list
+                    // is limited to TreeSqlCompiler.MaxLimit and defaults to 100. A value is discounted only when the builder rejects it for that field.
+                    bool rootField = ReferenceEquals(currentType, schema.QueryType)
+                        || (currentType is not null && schema.QueryType is not null && string.Equals(currentType.Name, schema.QueryType.Name, StringComparison.Ordinal));
+                    int treeBound = rootField ? _maxResponseRows : TreeSqlCompiler.MaxLimit;
+                    int treeDefault = rootField ? Math.Min(DefaultTreePageSize, _maxResponseRows) : DefaultTreePageSize;
+                    bool rejectedAtExecution = false;
+                    bool limitArgumentPresent = false;
                     foreach (var arg in field.Arguments)
                     {
                         if (IsRowLimitArgument(arg.Name.Value))
                         {
-                            if (arg.Value is IntValueNode intVal && int.TryParse(intVal.Value, out var parsed))
+                            limitArgumentPresent = true;
+                            if (arg.Value is NullValueNode && treeField)
                             {
-                                requestedLimit = parsed;
-                                zeroLimit = parsed == 0;
+                                requestedLimit = treeDefault;
+                                break;
+                            }
+
+                            if (treeField && arg.Value is not (IntValueNode or VariableNode or NullValueNode))
+                            {
+                                // A non-Int literal (string, boolean, enum, list, object) is a type error HotChocolate rejects during
+                                // validation; it never executes, so it is priced minimal and the type error is what the caller sees.
+                                rejectedAtExecution = true;
+                                break;
+                            }
+
+                            if (arg.Value is IntValueNode intVal)
+                            {
+                                if (long.TryParse(intVal.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var literal))
+                                {
+                                    if (treeField && (literal < 0 || literal > treeBound))
+                                    {
+                                        rejectedAtExecution = true;
+                                    }
+                                    else if (literal <= int.MaxValue)
+                                    {
+                                        requestedLimit = (int)literal;
+                                        zeroLimit = literal == 0;
+                                    }
+                                }
+                                else if (treeField)
+                                {
+                                    rejectedAtExecution = true;
+                                }
+
                                 break;
                             }
 
                             if (arg.Value is VariableNode varNode)
                             {
                                 limitIsVariable = true;
-                                if (variableValues != null && variableValues.TryGetValue(varNode.Name.Value, out var val) && TryExtractPositiveInt(val, out var runtimeLimit))
-                                {
-                                    requestedLimit = runtimeLimit;
-                                    break;
-                                }
+                                var varName = varNode.Name.Value;
 
-                                // SEC-PG-07: a runtime value of 0 is a bounded query, never the worst case and never free.
-                                if (variableValues != null && variableValues.TryGetValue(varNode.Name.Value, out var zeroVal) && IsZeroLimit(zeroVal))
+                                // SEC-RG-05: a supplied value (even an explicit null) always wins over the declared default; the default
+                                // applies only to a variable that is absent from the variable values (GraphQL spec 6.1.2).
+                                if (variableValues != null && variableValues.TryGetValue(varName, out var runtimeValue))
                                 {
-                                    zeroLimit = true;
+                                    switch (ClassifyRuntimeLimit(runtimeValue, out var runtimeNumber))
+                                    {
+                                        case RuntimeLimit.Number when runtimeNumber == 0:
+                                            // SEC-PG-07: a runtime value of 0 is a bounded query, never the worst case and never free.
+                                            zeroLimit = true;
+                                            break;
+                                        case RuntimeLimit.Number when treeField && (runtimeNumber < 0 || runtimeNumber > treeBound):
+                                            rejectedAtExecution = true;
+                                            break;
+                                        case RuntimeLimit.Number when runtimeNumber > 0 && runtimeNumber <= int.MaxValue:
+                                            requestedLimit = (int)runtimeNumber;
+                                            break;
+                                        case RuntimeLimit.Number when treeField:
+                                            rejectedAtExecution = true;
+                                            break;
+                                        case RuntimeLimit.Null when treeField:
+                                            // An explicit null executes the field's default page (SEC-RG-06), never the declared variable default.
+                                            requestedLimit = treeDefault;
+                                            break;
+                                        default:
+                                            // Unparsable (or null on another field): the worst case (fail closed).
+                                            break;
+                                    }
+
                                     break;
                                 }
 
                                 if (variableDefinitions != null)
                                 {
-                                    var varDef = variableDefinitions.FirstOrDefault(v => string.Equals(v.Variable.Name.Value, varNode.Name.Value, StringComparison.Ordinal));
-                                    if (varDef?.DefaultValue is IntValueNode defInt && int.TryParse(defInt.Value, out var defParsed) && defParsed > 0)
+                                    var varDef = variableDefinitions.FirstOrDefault(v => string.Equals(v.Variable.Name.Value, varName, StringComparison.Ordinal));
+                                    if (varDef?.DefaultValue is IntValueNode defInt && long.TryParse(defInt.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var defParsed))
                                     {
-                                        requestedLimit = defParsed;
-                                        break;
+                                        if (defParsed == 0)
+                                        {
+                                            zeroLimit = true;
+                                            break;
+                                        }
+
+                                        if (defParsed > 0 && defParsed <= int.MaxValue)
+                                        {
+                                            requestedLimit = (int)defParsed;
+                                            break;
+                                        }
                                     }
+                                }
+
+                                if (treeField)
+                                {
+                                    // Absent and without a default: the field's own default page applies (the validation pass has no
+                                    // variable values; the runtime pass prices every supplied value).
+                                    requestedLimit = treeDefault;
                                 }
                             }
                         }
+                    }
+
+                    if (treeField && !limitArgumentPresent)
+                    {
+                        // An omitted page size is the field's default page (argument default), which is exactly what executes.
+                        requestedLimit = treeDefault;
+                    }
+
+                    if (rejectedAtExecution)
+                    {
+                        zeroLimit = true;
                     }
 
                     int effectiveRows;
@@ -465,7 +558,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     }
                     else if (requestedLimit > 0)
                     {
-                        effectiveRows = Math.Min(requestedLimit, _maxResponseRows);
+                        effectiveRows = Math.Min(requestedLimit, treeField && !rootField ? TreeSqlCompiler.MaxLimit : _maxResponseRows);
                     }
                     else if (string.Equals(field.Name.Value, "catalog", StringComparison.OrdinalIgnoreCase))
                     {
@@ -816,47 +909,80 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
     private static bool IsDistinctName(string? name) =>
         name is not ("COUNT" or "SUM" or "AVG" or "MIN" or "MAX");
 
-    private static bool IsZeroLimit(object? val) => val switch
-    {
-        int i => i == 0,
-        long l => l == 0,
-        short s => s == 0,
-        byte b => b == 0,
-        System.Text.Json.JsonElement je => je.ValueKind == System.Text.Json.JsonValueKind.Number
-            ? je.TryGetInt32(out var ji) && ji == 0
-            : je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out var js) && js == 0,
-        IntValueNode ivn => int.TryParse(ivn.Value, out var iv) && iv == 0,
-        _ => false
-    };
+    // The default page of a catalog table field (argument default of "first").
+    internal const int DefaultTreePageSize = 100;
 
-    private static bool TryExtractPositiveInt(object? val, out int result)
+    private enum RuntimeLimit
     {
-        result = 0;
-        if (val == null) return false;
-        if (val is int i) { result = i; return i > 0; }
-        if (val is long l && l <= int.MaxValue && l > 0) { result = (int)l; return true; }
-        if (val is short s && s > 0) { result = s; return true; }
-        if (val is byte b && b > 0) { result = b; return true; }
-        if (val is IntValueNode ivn && int.TryParse(ivn.Value, out var ivnParsed) && ivnParsed > 0) { result = ivnParsed; return true; }
-        if (val is System.Text.Json.JsonElement je)
+        /// <summary>Null or an explicit null node.</summary>
+        Null,
+
+        /// <summary>A value that is not an integer.</summary>
+        Unparsable,
+        Number
+    }
+
+    /// <summary>Catalog table fields (root and relation lists) are the fields with the where, orderBy, first and offset arguments.</summary>
+    private static bool IsTreePagedField(IOutputFieldDefinition fieldDef)
+    {
+        bool where = false, orderBy = false, first = false, offset = false;
+        foreach (var argument in fieldDef.Arguments)
         {
-            if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var ji) && ji > 0)
-            {
-                result = ji;
-                return true;
-            }
-            if (je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out var js) && js > 0)
-            {
-                result = js;
-                return true;
-            }
+            where |= string.Equals(argument.Name, "where", StringComparison.Ordinal);
+            orderBy |= string.Equals(argument.Name, "orderBy", StringComparison.Ordinal);
+            first |= string.Equals(argument.Name, "first", StringComparison.Ordinal);
+            offset |= string.Equals(argument.Name, "offset", StringComparison.Ordinal);
         }
-        if (int.TryParse(val.ToString(), out var parsed) && parsed > 0)
+
+        return where && orderBy && first && offset;
+    }
+
+    private static RuntimeLimit ClassifyRuntimeLimit(object? val, out long number)
+    {
+        number = 0;
+        switch (val)
         {
-            result = parsed;
-            return true;
+            case null:
+            case NullValueNode:
+                return RuntimeLimit.Null;
+            case int i:
+                number = i;
+                return RuntimeLimit.Number;
+            case long l:
+                number = l;
+                return RuntimeLimit.Number;
+            case short sh:
+                number = sh;
+                return RuntimeLimit.Number;
+            case byte b:
+                number = b;
+                return RuntimeLimit.Number;
+            case IntValueNode ivn:
+                if (long.TryParse(ivn.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out number))
+                {
+                    return RuntimeLimit.Number;
+                }
+
+                number = ivn.Value.StartsWith('-') ? long.MinValue : long.MaxValue;
+                return RuntimeLimit.Number;
+            case System.Text.Json.JsonElement je:
+                if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt64(out number))
+                {
+                    return RuntimeLimit.Number;
+                }
+
+                if (je.ValueKind == System.Text.Json.JsonValueKind.String
+                    && long.TryParse(je.GetString(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out number))
+                {
+                    return RuntimeLimit.Number;
+                }
+
+                return RuntimeLimit.Unparsable;
+            default:
+                return long.TryParse(val.ToString(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out number)
+                    ? RuntimeLimit.Number
+                    : RuntimeLimit.Unparsable;
         }
-        return false;
     }
 
     private int CalculateMaskingCost(

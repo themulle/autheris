@@ -11,11 +11,33 @@ namespace Autheris.GraphQL.Catalog;
 
 public static class GraphQlTreeBuilder
 {
+    /// <summary>Builds the tree; a page size or offset out of range throws <see cref="GatewayPageRangeException"/> (#330, SEC-RG-07).</summary>
     public static TreeQueryNode BuildTree(
         IResolverContext context,
         CatalogTableType rootTable,
         CatalogSchemaModel schema,
         int maxResponseRows)
+    {
+        var root = BuildTree(context, rootTable, schema, maxResponseRows, out var pageRangeViolated);
+        if (pageRangeViolated)
+        {
+            throw new GatewayPageRangeException();
+        }
+
+        return root;
+    }
+
+    /// <summary>
+    /// Builds the tree and reports an out-of-range page size or offset instead of throwing: the violating node is clamped to a zero-row page,
+    /// so the caller can run table authorization first and only then answer with <see cref="GatewayPageRangeException"/> (SEC-RG-08: a denied
+    /// table must answer identically for every page size).
+    /// </summary>
+    public static TreeQueryNode BuildTree(
+        IResolverContext context,
+        CatalogTableType rootTable,
+        CatalogSchemaModel schema,
+        int maxResponseRows,
+        out bool pageRangeViolated)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(rootTable);
@@ -32,9 +54,19 @@ public static class GraphQlTreeBuilder
             ? gqlOptions.Value.GraphQL.MaxAllowedOffset
             : 10_000;
 
-        var root = BuildNode(context, selection, operation, rootTable, schema, maxResponseRows, isRoot: true, maxAllowedOffset: maxAllowedOffset);
+        var tracker = new PageRangeTracker();
+        var root = BuildNode(context, selection, operation, rootTable, schema, maxResponseRows, isRoot: true, maxAllowedOffset: maxAllowedOffset, tracker: tracker);
         ValidateTreeBudget(root, maxBudget);
+        pageRangeViolated = tracker.Violated;
         return root;
+    }
+
+    /// <summary>The fixed client message of a page size or offset outside its allowed range; the only source is <see cref="GatewayPageRangeException"/>.</summary>
+    public const string PageRangeMessage = GatewayPageRangeException.FixedMessage;
+
+    private sealed class PageRangeTracker
+    {
+        public bool Violated { get; set; }
     }
 
     public const int MaxAggregateBudget = 50_000;
@@ -78,7 +110,8 @@ public static class GraphQlTreeBuilder
         int maxAllowedLimit,
         bool isRoot,
         int maxAllowedOffset = 10_000,
-        int depth = 0)
+        int depth = 0,
+        PageRangeTracker? tracker = null)
     {
         if (depth > 10)
         {
@@ -91,51 +124,62 @@ public static class GraphQlTreeBuilder
 
         int limit = isRoot ? Math.Min(100, maxAllowedLimit) : 100;
         int offset = 0;
+        bool pageRangeViolated = false;
 
+        // #318: a null or absent first is the default page (never unbounded); a null offset is 0. Coerced variable values of any
+        // stored representation are read. #330 (SEC-RG-07): the range check covers literals and variables alike and saturates on
+        // overflow, so an out-of-range value is a fixed page-range error, never an exception.
         if (currentSelection.Arguments.TryGetValue("first", out var firstArg) && firstArg?.ValueLiteral != null)
         {
-            var firstVal = ResolveValue(firstArg.ValueLiteral, context);
-            if (firstVal is int fInt) limit = fInt;
-            else if (firstVal is long fLng) limit = (int)fLng;
-            else if (int.TryParse(Convert.ToString(firstVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedFirst)) limit = parsedFirst;
-        }
-
-        // #302: first: 0 is a valid bounded page (zero rows); negative stays INVALID_QUERY.
-        if (limit < 0 || limit > maxAllowedLimit)
-        {
-            throw new GatewayInvalidQueryException($"The page size must be between 0 and {maxAllowedLimit}.");
+            var first = ReadPageNumber(firstArg.ValueLiteral, context);
+            if (first.Invalid)
+            {
+                pageRangeViolated = true;
+            }
+            else if (first.Value is { } firstValue)
+            {
+                if (firstValue < 0 || firstValue > maxAllowedLimit)
+                {
+                    pageRangeViolated = true;
+                }
+                else
+                {
+                    limit = (int)firstValue;
+                }
+            }
         }
 
         if (currentSelection.Arguments.TryGetValue("offset", out var offsetArg) && offsetArg?.ValueLiteral != null)
         {
-            var offsetVal = ResolveValue(offsetArg.ValueLiteral, context);
-            if (offsetVal is int oInt) offset = oInt;
-            else if (offsetVal is long oLng)
+            var offsetNumber = ReadPageNumber(offsetArg.ValueLiteral, context);
+            if (offsetNumber.Invalid)
             {
-                if (oLng < 0) throw new GatewayInvalidQueryException("The offset cannot be negative.");
-                if (oLng > maxAllowedOffset) throw new GatewayInvalidQueryException($"The offset cannot exceed {maxAllowedOffset}.");
-                offset = (int)oLng;
+                pageRangeViolated = true;
             }
-            else if (long.TryParse(Convert.ToString(offsetVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLongOffset))
+            else if (offsetNumber.Value is { } offsetValue)
             {
-                if (parsedLongOffset < 0) throw new GatewayInvalidQueryException("The offset cannot be negative.");
-                if (parsedLongOffset > maxAllowedOffset) throw new GatewayInvalidQueryException($"The offset cannot exceed {maxAllowedOffset}.");
-                offset = (int)parsedLongOffset;
-            }
-            else
-            {
-                throw new GatewayInvalidQueryException("The offset is invalid.");
+                if (offsetValue < 0 || offsetValue > maxAllowedOffset)
+                {
+                    pageRangeViolated = true;
+                }
+                else
+                {
+                    offset = (int)offsetValue;
+                }
             }
         }
 
-        if (offset < 0)
+        if (pageRangeViolated)
         {
-            throw new GatewayInvalidQueryException("The offset cannot be negative.");
-        }
+            if (tracker is null)
+            {
+                throw new GatewayPageRangeException();
+            }
 
-        if (offset > maxAllowedOffset)
-        {
-            throw new GatewayInvalidQueryException($"The offset cannot exceed {maxAllowedOffset}.");
+            // Clamp to a zero-row page so the caller can authorize before it answers (SEC-RG-08).
+            tracker.Violated = true;
+            limit = 0;
+            offset = 0;
         }
 
         if (!isRoot && offset > 0)
@@ -184,7 +228,8 @@ public static class GraphQlTreeBuilder
                     schema,
                     TreeSqlCompiler.MaxLimit,
                     isRoot: false,
-                    depth: depth + 1);
+                    depth: depth + 1,
+                    tracker: tracker);
 
                 relations.Add(new TreeRelationNode(
                     ResponseKey: sel.ResponseName,
@@ -256,6 +301,12 @@ public static class GraphQlTreeBuilder
                     foreach (var item in listNode.Items)
                     {
                         var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
+                        if (itemLiteral is NullValueNode)
+                        {
+                            // SEC-RG-11: a null member is rejected, never silently dropped.
+                            throw new GatewayInvalidQueryException("The 'and' filter members cannot be null.");
+                        }
+
                         if (itemLiteral is ObjectValueNode ovn)
                         {
                             var parsed = ParseObjectFilter(ovn, table, context);
@@ -283,16 +334,31 @@ public static class GraphQlTreeBuilder
                     else
                     {
                         var orItems = new List<TreeFilter>();
+                        var orIsNeutral = false;
                         foreach (var item in listNode.Items)
                         {
                             var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
+                            if (itemLiteral is NullValueNode)
+                            {
+                                // SEC-RG-11: a null member is rejected like 'or: null', never silently dropped.
+                                throw new GatewayInvalidQueryException("The 'or' filter members cannot be null.");
+                            }
+
                             if (itemLiteral is ObjectValueNode ovn)
                             {
                                 var parsed = ParseObjectFilter(ovn, table, context);
-                                if (parsed != null) orItems.Add(parsed);
+                                if (parsed != null)
+                                {
+                                    orItems.Add(parsed);
+                                }
+                                else
+                                {
+                                    // #319: an empty member matches every row, so the whole 'or' is neutral (TRUE OR x is TRUE).
+                                    orIsNeutral = true;
+                                }
                             }
                         }
-                        if (orItems.Count > 0) items.Add(new TreeOrFilter(orItems));
+                        if (!orIsNeutral && orItems.Count > 0) items.Add(new TreeOrFilter(orItems));
                     }
                 }
                 continue;
@@ -448,6 +514,38 @@ public static class GraphQlTreeBuilder
             return node;
         }
         return NullValueNode.Default;
+    }
+
+    /// <summary>A page-size or offset argument: null/absent, a number, or not readable as an integer.</summary>
+    private readonly record struct PageNumber(long? Value, bool Invalid);
+
+    private static PageNumber ReadPageNumber(IValueNode node, IResolverContext context)
+    {
+        switch (node)
+        {
+            case NullValueNode:
+                return default;
+            case IntValueNode iv:
+                return long.TryParse(iv.Value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var parsed)
+                    ? new PageNumber(parsed, false)
+                    : new PageNumber(iv.Value.StartsWith('-') ? long.MinValue : long.MaxValue, false);
+            case VariableNode vn:
+                return ReadVariablePageNumber(vn.Name.Value, context);
+            default:
+                return new PageNumber(null, true);
+        }
+    }
+
+    private static PageNumber ReadVariablePageNumber(string name, IResolverContext context)
+    {
+        var variables = context.Variables;
+        if (variables.TryGetValue<IValueNode>(name, out var literal) && literal != null)
+        {
+            return literal is VariableNode ? default : ReadPageNumber(literal, context);
+        }
+
+        // Absent or null: the declared default of the argument applies (handled by the caller as "no value").
+        return default;
     }
 
     private static object? ResolveValue(IValueNode node, IResolverContext context)

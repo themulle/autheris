@@ -23,6 +23,11 @@ public sealed class SqlCompilerErrorMapperTests
 {
     private const string HostileMarker = "A-17'--";
 
+    private sealed class SqliteLikeProviderException(string message) : System.Data.Common.DbException(message)
+    {
+        public int SqliteErrorCode => 1;
+    }
+
     private static TableAccessTarget Target(string table) => new("ds", "dbo", table, null, $"ds.dbo.{table}");
 
     public static TheoryData<string, Func<Exception>, int, string, string?> Rows => new()
@@ -66,6 +71,9 @@ public sealed class SqlCompilerErrorMapperTests
         // #312 (SEC-PG-10): the executor's classification of an unknown identifier answers like a denied column; an unrecognised provider error stays 502.
         { "governed-policy-denied", () => new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.Sqlite), 403, "SQL_POLICY_DENIED", null },
         { "governed-provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.Sqlite), 502, "SQL_PROVIDER_ERROR", null },
+        // #321 (SEC-RG-03): a set operation column-count mismatch (AST check and provider classification) is a 400, never a 502.
+        { "set-operation-degree", () => new SetOperationDegreeMismatchException(), 400, "SQL_SYNTAX_ERROR", null },
+        { "governed-syntax-error", () => new GovernedSqlException(GovernedSqlErrorCodes.SyntaxError, TargetSqlDialect.Sqlite), 400, "SQL_SYNTAX_ERROR", null },
         { "timezone-unavailable", () => new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneUnavailable), 503, "SQL_TIMEZONE_UNAVAILABLE", null },
         { "timezone-wrapped", () => new InvalidOperationException(HostileMarker, new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid)), 400, "SQL_TIMEZONE_INVALID", null },
         { "timezone-unknown-code", () => new SqlTimeZoneException("SQL_SOMETHING_ELSE"), 500, "SQL_COMPILER_INVARIANT", null },
@@ -92,6 +100,21 @@ public sealed class SqlCompilerErrorMapperTests
         mapping.Limit.ShouldBe(limit, row);
         mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage(code), row);
         mapping.Title.ShouldNotContain(HostileMarker);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SetOperationColumnCountProviderError_Maps400_NoProviderText()
+    {
+        var provider = new SqliteLikeProviderException(HostileMarker + " SELECTs to the left and right of UNION do not have the same number of result columns");
+        var mapped = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, provider);
+
+        SqlCompilerErrorMapper.TryMap(mapped, out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(400);
+        mapping.Code.ShouldBe("SQL_SYNTAX_ERROR");
+        mapping.Title.ShouldNotContain(HostileMarker);
+        mapping.Title.ShouldNotContain("UNION");
     }
 
     [Fact]

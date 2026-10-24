@@ -332,12 +332,22 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
                         $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
                 }
 
+                // #322 (SEC-RG-04): a window PARTITION BY / ORDER BY over a masked column answers with the window code before execution.
+                // A denied column in a window stays a filter-style denial (the existing hidden-column answer).
+                bool isUsedInWindow = metadata.WindowColumnReferences is { Count: > 0 } windowRefs &&
+                    windowRefs.Any(wc => ReferencesColumn(wc.TableOrAlias, wc.ColumnName, col.ColumnName, target));
+                if (isUsedInWindow && lvl == ColumnAccessLevel.Mask)
+                {
+                    throw new MaskedAggregationException();
+                }
+
                 bool isUsedInFilter = false;
                 if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
                 {
                     isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
                 }
 
+                isUsedInFilter |= isUsedInWindow;
                 if (isUsedInFilter)
                 {
                     string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
