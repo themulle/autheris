@@ -96,3 +96,59 @@ Mandatory tests (all `[Trait("Category","Security")]`, in `Issue279ReadOnlySubsc
 ## Changelog
 
 - 2026-10-23 (Phase 4, G-PLAN-REBASE drift): the registration file sits in `src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs` (not `.../DependencyInjection/`); the helper `GatewayGraphQlSubscriptionRegistration.cs` is in `Extensions/DependencyInjection/`. Multi-operation documents without `operationName` are already rejected by Hot Chocolate validation before the middleware runs; the middleware check remains as defence in depth. Optional integration tests (AC-4/AC-5) were not added. Test fixture subscription type is named `S`.
+
+## Addendum 2026-10-24: default off
+
+Owner decision 2026-10-24: `Gateway:GraphQL:Subscriptions:Enabled` defaults to `false` (fail closed; not in production, breaking change accepted). This supersedes the "defaults to true" parts of design item 1, test 7 and SEC-279-5. The 5xx known-gap policy stays strict; nothing changes there. Verified on `fix/subscriptions-default-off` @ `b9fac204`.
+
+**Where the default is defined or stated (all must say `false`):**
+- REQ-279-A1: `src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs:68`. Change `GraphQLSubscriptionOptions.Enabled` to `= false` and update the summary on line 67 to "Default false; when false the schema exposes no Subscription type (read once at startup)".
+- REQ-279-A2: `src/Autheris.Api/appsettings.json:82`. Change to `"Subscriptions": { "Enabled": false }`. Keep the key so operators can find it. `appsettings.Development.json` has no entry; leave it that way.
+- REQ-279-A3: `docs/configuration-guide.md:488`. Change the default column to `false`, and state that the root type and the in-memory provider are only registered when the value is `true`. This is a current-behaviour description, kept in the file's existing language.
+- REQ-279-A4: `docs/features/p05-subscriptions-realtime.md:50-58`. The example uses `Gateway:Subscriptions:Enabled`, which is not bound by any options class (only `RevocationWatchOptions` lives under that area). Add `Gateway:GraphQL:Subscriptions:Enabled: true` as the opt-in that is required, and drop or relabel the unbound `Enabled` key.
+- No occurrences in `deploy/helm`, `deploy/podman-compose*.yaml`, `.github` or any env template, so nothing changes there (default taken: do not add a Helm value).
+
+**Behaviour of the disabled path today (source of truth):**
+- REQ-279-A5: Schema. `GatewayGraphQlSubscriptionRegistration.AddGatewaySubscriptions` (`src/Autheris.Api/Extensions/DependencyInjection/GatewayGraphQlSubscriptionRegistration.cs:13-15`), called from `GatewayServiceCollectionExtensions.cs:650`, skips `AddSubscriptionType<Subscription>().AddInMemorySubscriptions()`. So `Schema.SubscriptionType` is null, and introspection returns `subscriptionType: null` with no `Subscription` type in the SDL. The Parity spec already expects this (`tests/Autheris.Tests.Parity/Spec/SpecGraphQlTests.cs:22,44`).
+- REQ-279-A6: HTTP POST or GET `/graphql` with `subscription { ... }`. Hot Chocolate document validation rejects it with the standard "operation not supported by schema" validation error before `ReadOnlyOperationMiddleware`, any cost analysis or any resolver runs (`QueryCostAnalyzerRule.cs:277` is null-guarded, SEC-279-6). There is no Autheris-specific code; the HC validation code is the stable code (SEC-279-7). The developer pins the observed `Errors[0].Code` as a constant in the test during the Red step.
+- REQ-279-A7: WebSocket (graphql-ws and graphql-transport-ws). The transport stays mapped through `MapGraphQL` (`GatewayApplicationBuilderExtensions.cs:164-167`). `WebSocketAuthInterceptor` stays registered (registration line 19, decision 5), so `connection_init` is still authenticated. A `subscribe` message gets the same validation error frame for its id; no topic subscription and no `CdcSubscriptionGovernor` slot is created. No change here.
+
+**Tests that rely on the old default:**
+- REQ-279-A8: `tests/Autheris.Tests.Unit/GraphQL/Issue279ReadOnlySubscriptionTests.cs`.
+  - Rename `GraphQLSubscriptionOptions_DefaultsToEnabled` (line 260) to `GraphQLSubscriptionOptions_DefaultsToDisabled` and assert `ShouldBeFalse`.
+  - Rename `GatewayOptions_Bind_SubscriptionsSectionAbsent_EnabledTrue` (line 266) to `..._EnabledFalse` and assert `ShouldBeFalse`.
+  - Replace `GatewayOptions_Bind_EnabledFalse_IsHonoured` (line 273) with `GatewayOptions_Bind_EnabledTrue_IsHonoured`.
+  - The other tests set `Enabled` explicitly or build their own executor with `AddSubscriptionType<S>()` (line 74), so they need no change.
+- REQ-279-A9: No WebApplicationFactory host executes a GraphQL subscription. `RealtimeStreamingSubscriptionTests` and `CdcWebhookEndToEndTests` use REST CDC and SSE, and there is no WebSocket client in `tests/`. `WebSocketReadOnlyMutationSecurityTests`, `CatalogGraphQlSchemaTests`, `StartedResponseGql2Tests` and the MCP tests (`CatalogGraphQlMapTests:137`, `McpDatasetToolWiringTests:233`) build their own executors or assert rejection. So no shared fixture needs `Enabled=true`.
+  - Rule for future host tests: set `Gateway:GraphQL:Subscriptions:Enabled=true` with `UseSetting` in the host's `NewHost` or constructor, the same way as the existing `Gateway:Authentication:EnableTestAuthHandler` setting.
+- REQ-279-A10: Phase 4 runs the full unit suite plus `Autheris.Tests.Parity` and `Autheris.Tests.Architecture` (CI) to catch any SDL snapshot that relies on the old default. There are no `.graphql` or `.snap` snapshots in `tests/` today.
+
+**WP-279-A (single lane, about 5 production LOC and 60 test LOC):** REQ-279-A1 to A4 and A8. New tests in `Issue279ReadOnlySubscriptionTests`, all `[Trait("Category","Security")]`:
+1. `GraphQLSubscriptionOptions_DefaultsToDisabled` and `GatewayOptions_Bind_SubscriptionsSectionAbsent_EnabledFalse` (A1).
+2. `AppSettings_GraphQLSubscriptionsEnabled_IsFalse`: parse `src/Autheris.Api/appsettings.json` and assert the value is false (A2, guards against drift).
+3. `AddGatewaySubscriptions_DefaultOptions_SchemaHasNoSubscriptionType_AndIntrospectionSubscriptionTypeNull`: use `new GraphQLOptions()` without an explicit flag, and assert `__schema { subscriptionType { name } }` returns null (A5).
+4. `AddGatewaySubscriptions_DefaultOptions_SubscriptionDocument_RejectedWithStableValidationCode_ResolverNotInvoked`: resolver counter stays 0, and the error contains the pinned HC code with no config value (A6, SEC-279-7 and SEC-279-8).
+5. `AddGatewaySubscriptions_DefaultOptions_WebSocketAuthInterceptor_StillRegistered` (A7).
+6. `GatewayOptions_Bind_EnabledTrue_IsHonoured` together with the existing `AddGatewaySubscriptions_Enabled_SchemaHasSubscriptionType` and `RegularPrincipal_Subscription_IsNotRejectedByMiddleware` (the enabled path is unchanged).
+
+### Phase 3 review of the addendum (csharp-security-expert, 2026-10-24)
+
+Verdict: APPROVED WITH CONDITIONS. Disabled means no Subscription root type (`AddSubscriptionType` not called, verified in `GatewayGraphQlSubscriptionRegistration.cs`), so no subscription operation can execute over HTTP POST/GET, SSE/multipart or WebSocket; no resolver, governor slot or topic is reachable.
+
+Decision on the WS transport (REQ-279-A7): acceptable to leave mapped. `/graphql` WebSocket also carries queries and mutations, so unmapping `MapGraphQL` WS or rejecting the upgrade would break legitimate traffic and gain no isolation. The upgrade request is already inside `RequireAuthorization` (or `AllowAnonymous` only in the Development anonymous mode), the interceptor authenticates `connection_init` and fail-closes, and `subscribe` dies at HC validation.
+
+- SEC-279-A1: The disabled path must add no Autheris code that special-cases subscriptions; rejection stays HC validation (no custom message embedding config keys, type names or stack data). The pinned `Errors[0].Code` and message must contain no internal type/path/option names beyond the generic HC text.
+- SEC-279-A2: `WebSocketAuthInterceptor` stays registered in both modes (REQ-279-A7). Disabled mode must not weaken `connection_init` auth, session expiry, revocation watch or the READ_ONLY propagation (`WebSocketAuthInterceptor.cs:174-178`).
+- SEC-279-A3: The default is `false` in code (A1) and in `appsettings.json` (A2); no environment/Helm/compose path may set it to `true`. A missing section, an empty value or an unparseable bool must resolve to `false` or fail startup, never `true` (the existing invalid-bool startup test stays green).
+- SEC-279-A4: The flag is read once at startup (`GatewayGraphQlSubscriptionRegistration`); no runtime toggle or per-request override (header, query string, tenant config) may be added. Enabling requires a restart.
+- SEC-279-A5: When enabled, `ReadOnlyOperationMiddleware` still rejects mutation/subscription-write attempts from read-only tokens with `READ_ONLY_TOKEN` (PR #288 behaviour) and `READ_ONLY_TOKEN` stays in `ErrorSanitizingFilter` allow-list (line 46); default-flip must not change that code or its message.
+- SEC-279-A6: Docs (A3/A4) must state that disabling removes the subscription root type only; WebSocket transport for queries/mutations remains and stays authenticated.
+
+Mandatory tests (all `[Trait("Category","Security")]`):
+- `Subscriptions_DefaultOptions_EnabledIsFalse` (bind with section absent, empty section, and appsettings.json value).
+- `Subscriptions_InvalidBoolValue_FailsStartup_NotEnabled`.
+- `Subscriptions_Disabled_HttpPostSubscription_RejectedByValidation_NoResolverRun` (asserts pinned code, no governor slot, message without internal names).
+- `Subscriptions_Disabled_HttpGetAndSseSubscription_Rejected`.
+- `Subscriptions_Disabled_WebSocketSubscribe_ErrorFrame_NoSubscriptionCreated` (graphql-transport-ws via host or interceptor-level with executor lacking the type; unauthenticated `connection_init` still rejected).
+- `Subscriptions_Disabled_Introspection_SubscriptionTypeNull`.
+- `Subscriptions_Enabled_ReadOnlyToken_Mutation_ReturnsReadOnlyTokenCode` (regression for #288 with `Enabled=true`).

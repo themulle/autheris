@@ -49,8 +49,10 @@ wscat -c ws://localhost:8080/graphql -s graphql-transport-ws
 ```json
 {
   "Gateway": {
+    "GraphQL": {
+      "Subscriptions": { "Enabled": true }
+    },
     "Subscriptions": {
-      "Enabled": true,
       "KeepAliveIntervalSeconds": 15,
       "ExecutionTimeoutSeconds": 60,
       "MaxActiveSubscriptionsPerUser": 25,
@@ -59,3 +61,5 @@ wscat -c ws://localhost:8080/graphql -s graphql-transport-ws
   }
 }
 ```
+
+GraphQL subscriptions are opt-in: `Gateway:GraphQL:Subscriptions:Enabled` defaults to `false` and is read once at startup (a restart is required to change it). When it is `false`, the schema has no `Subscription` root type and a subscription document is rejected by GraphQL validation before any resolver runs. Disabling removes only the subscription root type: the WebSocket transport on `/graphql` for queries and mutations stays mapped, and `connection_init` is still authenticated. Read-only tokens cannot execute subscriptions in either mode.

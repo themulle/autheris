@@ -234,6 +234,48 @@ public sealed class Issue279ReadOnlySubscriptionTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task Subscriptions_Disabled_GetSseAndWebSocketSubscribe_RejectedByValidation_NoSubscriptionCreated()
+    {
+        // All transports (GET, SSE, graphql-transport-ws subscribe) run the same executor; the schema has no root type to subscribe to.
+        S.Calls = 0;
+        var services = new ServiceCollection();
+        services.AddSingleton<WebSocketAuthInterceptor>(_ => null!);
+        var b = services.AddGraphQLServer().AddQueryType<Q>();
+        b.AddGatewaySubscriptions(new GraphQLOptions());
+        var ex = await b.BuildRequestExecutorAsync();
+
+        foreach (var doc in new[] { "subscription { onTick }", "subscription Named { onOpen }", "subscription { ...F } fragment F on Subscription { onTick }" })
+        {
+            var r = await ex.ExecuteAsync(OperationRequestBuilder.New().SetDocument(doc).AddGlobalState(nameof(ClaimsPrincipal), Principal(false)).Build());
+            var or = r.ShouldBeOfType<OperationResult>();
+            or.Errors.ShouldNotBeNull();
+            or.Errors.ShouldNotBeEmpty();
+        }
+        S.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Subscriptions_Enabled_ReadOnlyToken_Mutation_ReturnsReadOnlyTokenCode()
+    {
+        M.Calls = 0;
+        var services = new ServiceCollection();
+        services.AddSingleton<WebSocketAuthInterceptor>(_ => null!);
+        var b = services.AddGraphQLServer().AddQueryType<Q>().AddMutationType<M>();
+        b.AddGatewaySubscriptions(new GraphQLOptions { Subscriptions = new GraphQLSubscriptionOptions { Enabled = true } }); // SEC-279-A5
+        var ex = await b
+            .UseDocumentParser().UseDocumentValidation()
+            .UseRequest<ReadOnlyOperationMiddleware>()
+            .UseOperationResolver().UseOperationVariableCoercion().UseOperationExecution()
+            .BuildRequestExecutorAsync();
+
+        ex.Schema.SubscriptionType.ShouldNotBeNull();
+        ShouldBeRejected(await RunAsync(ex, "mutation { touch }", Principal(true)));
+        M.Calls.ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task Subscriptions_Disabled_ReadOnlyMutation_StillRejected()
     {
         M.Calls = 0;
@@ -257,26 +299,97 @@ public sealed class Issue279ReadOnlySubscriptionTests
     }
 
     [Fact]
-    public void GraphQLSubscriptionOptions_DefaultsToEnabled()
+    [Trait("Category", "Security")]
+    public void GraphQLSubscriptionOptions_DefaultsToDisabled()
     {
-        new GraphQLOptions().Subscriptions.Enabled.ShouldBeTrue();
+        new GraphQLOptions().Subscriptions.Enabled.ShouldBeFalse(); // SEC-279-A3
     }
 
     [Fact]
-    public void GatewayOptions_Bind_SubscriptionsSectionAbsent_EnabledTrue()
+    [Trait("Category", "Security")]
+    public void GatewayOptions_Bind_SubscriptionsSectionAbsent_EnabledFalse()
     {
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        GatewayServiceCollectionExtensions.BindGatewayOptions(cfg).GraphQL.Subscriptions.Enabled.ShouldBeFalse(); // SEC-279-A3
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void GatewayOptions_Bind_SubscriptionsEnabledEmptyValue_NeverEnabled()
+    {
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [$"{GatewaySections.Root}:GraphQL:Subscriptions:Enabled"] = ""
+        }).Build();
+        // SEC-279-A3: an empty value fails startup (binder) and never resolves to true.
+        Should.Throw<InvalidOperationException>(() => GatewayServiceCollectionExtensions.BindGatewayOptions(cfg));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void AppSettings_GraphQLSubscriptionsEnabled_IsFalse()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "src", "Autheris.Api", "appsettings.json")))
+        {
+            dir = dir.Parent;
+        }
+        dir.ShouldNotBeNull();
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            System.IO.File.ReadAllText(System.IO.Path.Combine(dir!.FullName, "src", "Autheris.Api", "appsettings.json")),
+            new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        doc.RootElement.GetProperty("Gateway").GetProperty("GraphQL").GetProperty("Subscriptions").GetProperty("Enabled")
+            .ValueKind.ShouldBe(System.Text.Json.JsonValueKind.False); // SEC-279-A3
+    }
+
+    [Fact]
+    public void GatewayOptions_Bind_EnabledTrue_IsHonoured()
+    {
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [$"{GatewaySections.Root}:GraphQL:Subscriptions:Enabled"] = "true"
+        }).Build();
         GatewayServiceCollectionExtensions.BindGatewayOptions(cfg).GraphQL.Subscriptions.Enabled.ShouldBeTrue();
     }
 
     [Fact]
-    public void GatewayOptions_Bind_EnabledFalse_IsHonoured()
+    [Trait("Category", "Security")]
+    public async Task AddGatewaySubscriptions_DefaultOptions_SchemaHasNoSubscriptionType_AndIntrospectionSubscriptionTypeNull()
     {
-        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            [$"{GatewaySections.Root}:GraphQL:Subscriptions:Enabled"] = "false"
-        }).Build();
-        GatewayServiceCollectionExtensions.BindGatewayOptions(cfg).GraphQL.Subscriptions.Enabled.ShouldBeFalse();
+        var services = new ServiceCollection();
+        services.AddSingleton<WebSocketAuthInterceptor>(_ => null!);
+        var b = services.AddGraphQLServer().AddQueryType<Q>();
+        b.AddGatewaySubscriptions(new GraphQLOptions());
+        var ex = await b.BuildRequestExecutorAsync();
+
+        ex.Schema.SubscriptionType.ShouldBeNull(); // SEC-279-A3
+        var r = (OperationResult)await ex.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ __schema { subscriptionType { name } } }").AllowIntrospection().Build());
+        (r.Errors ?? []).ShouldBeEmpty();
+        r.ToJson().Replace(" ", "").ShouldContain("\"subscriptionType\":null");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Subscriptions_Disabled_HttpPostSubscription_RejectedByValidation_NoResolverRun()
+    {
+        S.Calls = 0;
+        var services = new ServiceCollection();
+        services.AddSingleton<WebSocketAuthInterceptor>(_ => null!);
+        var b = services.AddGraphQLServer().AddQueryType<Q>()
+            .AddValidationRule<QueryCostAnalyzerRule>((_, _) => new QueryCostAnalyzerRule(maxAllowedCost: int.MaxValue));
+        b.AddGatewaySubscriptions(new GraphQLOptions());
+        var ex = await b.BuildRequestExecutorAsync();
+
+        var r = (OperationResult)await ex.ExecuteAsync("subscription { onTick }");
+        r.Errors.ShouldNotBeNull();
+        r.Errors.ShouldNotBeEmpty();
+        r.Errors[0].Code.ShouldNotBe("READ_ONLY_TOKEN");
+        S.Calls.ShouldBe(0);
+        // SEC-279-A1: generic Hot Chocolate text only, no config key or internal names.
+        var text = string.Join(" | ", r.Errors.Select(e => e.Message + e.Code));
+        text.ShouldNotContain("Gateway:");
+        text.ShouldNotContain("Subscriptions:Enabled");
+        text.ShouldNotContain("Autheris");
     }
 
     [Fact]
