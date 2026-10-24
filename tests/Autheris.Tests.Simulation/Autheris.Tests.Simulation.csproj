@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- REQ-SIMTEST: not part of Autheris.sln; run only by .github/workflows/simulation-nightly.yml (SEC-SIM-21).
+       This project never enables the test-auth build switch (SEC-SIM-03); only the Sim.ApiHost build command line does. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.SqlCompilerGate\Autheris.Tests.SqlCompilerGate.csproj" />
+    <ProjectReference Include="..\Autheris.Tests.Fuzz\Autheris.Tests.Fuzz.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,402 @@
+name: Simulation nightly
+
+# REQ-SIMTEST: simulation suites (tests/Autheris.Tests.Simulation, tests/Autheris.Tests.Fuzz, tests/Autheris.Sim.ApiHost; none is part of Autheris.sln).
+# This file must never get a pull_request, pull_request_target, push, workflow_run or issue_comment trigger (SEC-SIM-05).
+# No secrets, no retries, no token use. Inputs reach the shell only via env: and are validated before use (SEC-SIM-08).
+# Jobs run only on the owning repository, never on forks (SEC-SIM-22).
+# Scripts named below are delivered by WP1-3; the YAML stays stable while they are written.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+    - cron: '30 3 * * *'
+    - cron: '30 4 * * *'
+    - cron: '0 5 * * 0'
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Which nightly job to run'
+        type: choice
+        options:
+          - all
+          - corpus
+          - api
+          - parser
+        default: all
+      seed:
+        description: 'Optional simulation seed (up to 10 digits)'
+        type: string
+        default: ''
+      sample:
+        description: 'Optional corpus sample size (up to 5 digits, or all)'
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  sim-corpus:
+    name: Simulation corpus (sqllogictest)
+    if: github.event.repository.fork == false && (github.event.schedule == '0 3 * * *' || (github.event_name == 'workflow_dispatch' && (inputs.job == 'all' || inputs.job == 'corpus')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_SIM_RUN: '1'
+      AUTHERIS_SIM_REPORT_DIR: ${{ github.workspace }}/sim-report-corpus
+      SIM_JOB_INPUT: ${{ inputs.job }}
+      SIM_SEED_INPUT: ${{ inputs.seed }}
+      SIM_SAMPLE_INPUT: ${{ inputs.sample }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
+            echo "::error::seed input must be 1 to 10 digits"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SAMPLE_INPUT" || "$SIM_SAMPLE_INPUT" =~ ^[0-9]{1,5}$|^all$ ]]; then
+            echo "::error::sample input must be 1 to 5 digits or all"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: dotnet restore tests/Autheris.Tests.Simulation --locked-mode
+
+      - name: Fetch sqllogictest corpus (pinned commit, sha256 verified)
+        run: bash scripts/sim/fetch-sqllogictest.sh tests/Autheris.Tests.Simulation/Corpus/sqllogictest.manifest.json "$RUNNER_TEMP/slt"
+
+      - name: Corpus tests
+        env:
+          AUTHERIS_SIM_CORPUS_DIR: ${{ runner.temp }}/slt
+        run: |
+          set -euo pipefail
+          if [ -n "$SIM_SEED_INPUT" ]; then export AUTHERIS_SIM_SEED="$SIM_SEED_INPUT"; fi
+          if [ -n "$SIM_SAMPLE_INPUT" ]; then export AUTHERIS_SIM_SAMPLE="$SIM_SAMPLE_INPUT"; else export AUTHERIS_SIM_SAMPLE=5000; fi
+          dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Autheris.Tests.Simulation.Corpus" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
+
+      - name: Corpus report (baseline, fail-closed)
+        if: always()
+        run: python3 -I .github/scripts/sim-report.py "$AUTHERIS_SIM_REPORT_DIR/corpus-results.jsonl" tests/Autheris.Tests.Simulation/sim-baseline.json "$AUTHERIS_SIM_REPORT_DIR/corpus-report.md"
+
+      - name: Upload simulation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sim-report-corpus
+          path: ${{ github.workspace }}/sim-report-corpus
+          retention-days: 7
+          if-no-files-found: ignore
+
+  sim-api-fuzz:
+    name: Simulation API fuzz (Schemathesis)
+    if: github.event.repository.fork == false && (github.event.schedule == '30 3 * * *' || (github.event_name == 'workflow_dispatch' && (inputs.job == 'all' || inputs.job == 'api')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_SIM_RUN: '1'
+      AUTHERIS_SIM_REPORT_DIR: ${{ github.workspace }}/sim-report-api
+      SIM_JOB_INPUT: ${{ inputs.job }}
+      SIM_SEED_INPUT: ${{ inputs.seed }}
+      SIM_SAMPLE_INPUT: ${{ inputs.sample }}
+      SCHEMATHESIS_IMAGE: 'schemathesis/schemathesis:4.32.4@sha256:b501f25d00fa6e2b393ddd1b525a11bb560d593fd06268491595c2e439090bf0'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
+            echo "::error::seed input must be 1 to 10 digits"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SAMPLE_INPUT" || "$SIM_SAMPLE_INPUT" =~ ^[0-9]{1,5}$|^all$ ]]; then
+            echo "::error::sample input must be 1 to 5 digits or all"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: dotnet restore tests/Autheris.Sim.ApiHost --locked-mode
+
+      - name: Build API host (test auth only in this build, SEC-SIM-03)
+        run: dotnet build tests/Autheris.Sim.ApiHost -c Release --no-restore -p:AutherisIncludeTestAuth=true
+
+      - name: Checker self-test (fail-closed before fuzzing)
+        run: python3 -I .github/scripts/sim-api-report.py --self-test
+
+      - name: Pull pinned Schemathesis image
+        run: docker pull "$SCHEMATHESIS_IMAGE"
+
+      # run-api-fuzz.sh runs the read phase and the write phase (fresh data dir) against 127.0.0.1 only and writes
+      # raw HAR/JUnit to $RUNNER_TEMP/st/out and the merged canary list to $RUNNER_TEMP/sim-canaries.txt (never uploaded).
+      - name: API fuzz (read phase, then write phase)
+        run: |
+          set -euo pipefail
+          if [ -n "$SIM_SEED_INPUT" ]; then export AUTHERIS_SIM_SEED="$SIM_SEED_INPUT"; fi
+          bash scripts/sim/run-api-fuzz.sh
+
+      - name: API report (scrubbed output only)
+        if: always()
+        run: python3 -I .github/scripts/sim-api-report.py --har "$RUNNER_TEMP"/st/out/*.har --junit "$RUNNER_TEMP"/st/out/*.xml --canaries "$RUNNER_TEMP/sim-canaries.txt" --gaps tests/Autheris.Tests.Simulation/ApiFuzz/api-known-gaps.json --out "$AUTHERIS_SIM_REPORT_DIR"
+
+      - name: Upload simulation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sim-report-api
+          path: ${{ github.workspace }}/sim-report-api
+          retention-days: 7
+          if-no-files-found: ignore
+
+  sim-parser-fuzz:
+    name: Simulation parser fuzz (SharpFuzz and AFL++)
+    if: github.event.repository.fork == false && (github.event.schedule == '30 4 * * *' || (github.event_name == 'workflow_dispatch' && (inputs.job == 'all' || inputs.job == 'parser')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_SIM_RUN: '1'
+      AUTHERIS_SIM_REPORT_DIR: ${{ github.workspace }}/sim-report-parser
+      SIM_JOB_INPUT: ${{ inputs.job }}
+      SIM_SEED_INPUT: ${{ inputs.seed }}
+      SIM_SAMPLE_INPUT: ${{ inputs.sample }}
+      SIM_AFL_MEM_MB: '2048'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
+            echo "::error::seed input must be 1 to 10 digits"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SAMPLE_INPUT" || "$SIM_SAMPLE_INPUT" =~ ^[0-9]{1,5}$|^all$ ]]; then
+            echo "::error::sample input must be 1 to 5 digits or all"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: |
+          set -euo pipefail
+          dotnet restore tests/Autheris.Tests.Fuzz --locked-mode
+          dotnet restore tests/Autheris.Tests.Simulation --locked-mode
+
+      - name: Replay committed corpus and findings
+        run: dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Fuzz" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
+
+      - name: Install AFL++ (distro package, version logged)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends afl++
+          dpkg-query -W -f='afl++ ${Version}\n' afl++
+          apt-cache policy afl++
+
+      # run-parser-fuzz.sh publishes the harness, installs the pinned SharpFuzz.CommandLine tool, instruments only
+      # $RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll, runs afl-fuzz with a finite -m limit and replays crashes and hangs.
+      - name: Parser fuzz (SharpFuzz and AFL++, 300 s)
+        run: |
+          set -euo pipefail
+          if [ -n "$SIM_SEED_INPUT" ]; then export AUTHERIS_SIM_SEED="$SIM_SEED_INPUT"; fi
+          bash scripts/sim/run-parser-fuzz.sh 300
+
+      - name: Upload simulation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sim-report-parser
+          path: |
+            ${{ github.workspace }}/sim-report-parser
+            ${{ runner.temp }}/afl/default/crashes
+            ${{ runner.temp }}/afl/default/hangs
+          retention-days: 7
+          if-no-files-found: ignore
+
+  sim-corpus-weekly:
+    name: Simulation corpus, full run (weekly)
+    if: github.event.repository.fork == false && (github.event.schedule == '0 5 * * 0')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_SIM_RUN: '1'
+      AUTHERIS_SIM_REPORT_DIR: ${{ github.workspace }}/sim-report-corpus-weekly
+      SIM_JOB_INPUT: ${{ inputs.job }}
+      SIM_SEED_INPUT: ${{ inputs.seed }}
+      SIM_SAMPLE_INPUT: ${{ inputs.sample }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
+            echo "::error::seed input must be 1 to 10 digits"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SAMPLE_INPUT" || "$SIM_SAMPLE_INPUT" =~ ^[0-9]{1,5}$|^all$ ]]; then
+            echo "::error::sample input must be 1 to 5 digits or all"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: dotnet restore tests/Autheris.Tests.Simulation --locked-mode
+
+      - name: Fetch sqllogictest corpus (pinned commit, sha256 verified)
+        run: bash scripts/sim/fetch-sqllogictest.sh tests/Autheris.Tests.Simulation/Corpus/sqllogictest.manifest.json "$RUNNER_TEMP/slt"
+
+      - name: Corpus tests
+        env:
+          AUTHERIS_SIM_CORPUS_DIR: ${{ runner.temp }}/slt
+        run: |
+          set -euo pipefail
+          if [ -n "$SIM_SEED_INPUT" ]; then export AUTHERIS_SIM_SEED="$SIM_SEED_INPUT"; fi
+          if [ -n "$SIM_SAMPLE_INPUT" ]; then export AUTHERIS_SIM_SAMPLE="$SIM_SAMPLE_INPUT"; else export AUTHERIS_SIM_SAMPLE=all; fi
+          dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Autheris.Tests.Simulation.Corpus" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
+
+      - name: Corpus report (baseline, fail-closed)
+        if: always()
+        run: python3 -I .github/scripts/sim-report.py "$AUTHERIS_SIM_REPORT_DIR/corpus-results.jsonl" tests/Autheris.Tests.Simulation/sim-baseline.json "$AUTHERIS_SIM_REPORT_DIR/corpus-report.md"
+
+      - name: Upload simulation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sim-report-corpus-weekly
+          path: ${{ github.workspace }}/sim-report-corpus-weekly
+          retention-days: 7
+          if-no-files-found: ignore
+
+  sim-parser-fuzz-weekly:
+    name: Simulation parser fuzz, long run (weekly)
+    if: github.event.repository.fork == false && (github.event.schedule == '0 6 * * 0')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      AUTHERIS_SIM_RUN: '1'
+      AUTHERIS_SIM_REPORT_DIR: ${{ github.workspace }}/sim-report-parser-weekly
+      SIM_JOB_INPUT: ${{ inputs.job }}
+      SIM_SEED_INPUT: ${{ inputs.seed }}
+      SIM_SAMPLE_INPUT: ${{ inputs.sample }}
+      SIM_AFL_MEM_MB: '2048'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
+            echo "::error::seed input must be 1 to 10 digits"
+            exit 1
+          fi
+          if ! [[ -z "$SIM_SAMPLE_INPUT" || "$SIM_SAMPLE_INPUT" =~ ^[0-9]{1,5}$|^all$ ]]; then
+            echo "::error::sample input must be 1 to 5 digits or all"
+            exit 1
+          fi
+
+      - name: Restore with Locked Mode
+        run: |
+          set -euo pipefail
+          dotnet restore tests/Autheris.Tests.Fuzz --locked-mode
+          dotnet restore tests/Autheris.Tests.Simulation --locked-mode
+
+      - name: Replay committed corpus and findings
+        run: dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Fuzz" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
+
+      - name: Install AFL++ (distro package, version logged)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends afl++
+          dpkg-query -W -f='afl++ ${Version}\n' afl++
+          apt-cache policy afl++
+
+      # run-parser-fuzz.sh publishes the harness, installs the pinned SharpFuzz.CommandLine tool, instruments only
+      # $RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll, runs afl-fuzz with a finite -m limit and replays crashes and hangs.
+      - name: Parser fuzz (SharpFuzz and AFL++, 3600 s)
+        run: |
+          set -euo pipefail
+          if [ -n "$SIM_SEED_INPUT" ]; then export AUTHERIS_SIM_SEED="$SIM_SEED_INPUT"; fi
+          bash scripts/sim/run-parser-fuzz.sh 3600
+
+      - name: Upload simulation results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sim-report-parser-weekly
+          path: |
+            ${{ github.workspace }}/sim-report-parser-weekly
+            ${{ runner.temp }}/afl/default/crashes
+            ${{ runner.temp }}/afl/default/hangs
+          retention-days: 7
+          if-no-files-found: ignore
