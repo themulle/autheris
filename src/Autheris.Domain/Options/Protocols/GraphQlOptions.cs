@@ -64,8 +64,8 @@ public sealed class GraphQLOptions
 /// <summary>Issue #279: switch for the GraphQL subscription root type and its in-memory provider.</summary>
 public sealed class GraphQLSubscriptionOptions
 {
-    /// <summary>When false the schema exposes no Subscription type (read once at startup).</summary>
-    public bool Enabled { get; init; } = true;
+    /// <summary>Default false; when false the schema exposes no Subscription type (read once at startup).</summary>
+    public bool Enabled { get; init; } = false;
 }
 
 public enum GraphQlSchemaPartitioningMode
