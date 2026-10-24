@@ -197,4 +197,60 @@ public sealed class CatalogWebhookHandlerTests
             Arg.Is<TableIdentifier>(t => t.TableName == "accounts"),
             Arg.Any<CancellationToken>());
     }
+
+    private static async Task<(CatalogWebhookResult Result, IPolicyEpochRepository Repo)> SendPurviewAsync(string payload)
+    {
+        const string secret = "purview-secret";
+        var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { WebhookSecret = secret } });
+        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+        var syncService = Substitute.For<IDataCatalogSyncService>();
+        var handler = new CatalogWebhookHandler(options, epochRepo, syncService, NullLogger<CatalogWebhookHandler>.Instance);
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var signature = ComputeHmacSha256($"{timestamp.ToUnixTimeSeconds()}.{payload}", secret);
+        var result = await handler.HandleWebhookAsync(payload, signature, timestamp, provider: "Purview");
+        return (result, epochRepo);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ext17_PurviewWebhook_TargetsSameIdentifierAsSync()
+    {
+        const string qn = "mssql://sql01:1433/finance/sales/orders-ext17a";
+        var payload = "[{\"eventType\":\"Microsoft.Purview.ClassificationAdded\",\"data\":{\"qualifiedName\":\"" + qn + "\"}}]";
+
+        var (result, _) = await SendPurviewAsync(payload);
+
+        PurviewQualifiedName.TryParse(qn, out var expected).ShouldBeTrue();
+        result.AffectedTables.Count.ShouldBe(1);
+        result.AffectedTables[0].ShouldBe(expected);
+        result.AffectedTables[0].Schema.ShouldBe("sales");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ext17_UnparsableWebhookEvent_InvalidatesNothing()
+    {
+        var payload = "[{\"eventType\":\"e\",\"data\":{\"qualifiedName\":\"mssql://h/db/../x\"}},"
+            + "{\"eventType\":\"e\",\"data\":{\"qualifiedName\":\"a/b/c/d\"}},"
+            + "{\"eventType\":\"e\",\"data\":{\"qualifiedName\":\"only-one-segment-ext17b\"}}]";
+
+        var (result, repo) = await SendPurviewAsync(payload);
+
+        result.Status.ShouldBe("IGNORED_NO_RELEVANT_TABLES");
+        result.AffectedTables.Count.ShouldBe(0);
+        await repo.DidNotReceiveWithAnyArgs().IncrementTableEpochAsync(default, default);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Ext17_WebhookEventCapped()
+    {
+        var items = Enumerable.Range(0, 250).Select(i => "{\"eventType\":\"e\",\"data\":{\"qualifiedName\":\"db/t" + i + "\"}}");
+        var payload = "[" + string.Join(",", items) + "]";
+
+        var (result, _) = await SendPurviewAsync(payload);
+
+        result.AffectedTables.Count.ShouldBe(100);
+    }
 }

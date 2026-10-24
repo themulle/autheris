@@ -457,19 +457,36 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
             catch (JsonException) { }
 
-            var queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, cancellationToken).ConfigureAwait(false);
             var isMcpAuthBypassed = _options.Value.IsMcpAuthBypassed;
             bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
+            IReadOnlyList<GoldenQuery> queries;
 
-            if (_consentRepository != null && !isMcpAuthBypassed && !isAdmin)
+            if (isMcpAuthBypassed || isAdmin)
             {
-                var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
-                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
-                var visibleKeys = visibleTables.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
-                queries = queries.Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant()))).ToList();
+                // MCP-15: a null predicate still keeps the per-request cap.
+                queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, null, cancellationToken).ConfigureAwait(false);
             }
-            else if (!isMcpAuthBypassed && !isAdmin)
+            else if (_consentRepository != null)
+            {
+                // MCP-15: visibility is evaluated first and applied before the cap; any failure yields an empty list, never "all".
+                HashSet<(string Domain, string Table)>? visibleKeys = null;
+                try
+                {
+                    var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                    var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
+                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
+                    visibleKeys = visibleTables?.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                {
+                    visibleKeys = null;
+                }
+
+                queries = visibleKeys is null
+                    ? Array.Empty<GoldenQuery>()
+                    : await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant())), cancellationToken).ConfigureAwait(false);
+            }
+            else
             {
                 // MCP-15: fail closed - without a consent repository visibility cannot be evaluated (this also covers the anonymous client).
                 queries = Array.Empty<GoldenQuery>();

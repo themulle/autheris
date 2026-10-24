@@ -492,7 +492,7 @@ Entry format:
              downstream tokens also linger in memory (larger blast radius on a heap dump).
   Fix hint : Use a bounded MemoryCache (SizeLimit, absolute expiration = effectiveExp) or sweep expired entries on Set; cap entries.
 
-[INF-07] LOW | bug | Databricks 401/403 evicts the wrong token-cache entries (OBO tokens never evicted; M2M purge keyed on Auth.ClientId)
+[INF-07] LOW | bug | Databricks 401/403 evicts the wrong token-cache entries (OBO tokens never evicted; M2M purge keyed on Auth.ClientId)  [RESOLVED c0bed9ee]
   Location : src/Autheris.Infrastructure/Databricks/DatabricksStatementExecutionClient.cs:219-223
   Problem  : On 401/403 the client calls _tokenCache.Remove(db.Host, db.Auth.ClientId ?? ""). OBO entries are stored under
              obo.ClientId + assertion hash (DatabricksOboTokenProvider.cs:252), so a revoked/rejected OBO token stays cached and
@@ -1307,7 +1307,7 @@ Entry format:
              table identifier incl. tenant; drop the prefix fallback (exact name only, and deterministic precedence:
              Quarantined > Degraded > Healthy when several match).
 
-[GQL-14] LOW | security | dbt quarantine gate bypassable via fragments/variables; global "DataOwner" role sees failure details of any table
+[GQL-14] LOW | security | dbt quarantine gate bypassable via fragments/variables; global "DataOwner" role sees failure details of any table  [PARTIAL c0bed9ee]
   Location : src/Autheris.GraphQL/Interceptors/DbtHealthExecutionMiddleware.cs:80-86, 136-155, 202-236
   Problem  : (a) CollectModelsFromSelections only follows FieldNode children: selections inside inline fragments or named
              fragments, and table/name arguments passed as variables (not StringValueNode), are never checked, so a
@@ -1372,7 +1372,7 @@ Entry format:
   Fix hint : Use ICatalogVisibilityService (with ReBAC) for resources, golden queries and the four-eyes pre-check; generate resources lazily
              (list only URIs, paginate with cursor, render one resource on read), cache per visibility memo key.
 
-[MCP-15] LOW | security | Golden queries are matched by (domain, tableName) only - schema and tenant ignored; get_golden_queries fails open without a consent repository  [PARTIAL 0860f18c]
+[MCP-15] LOW | security | Golden queries are matched by (domain, tableName) only - schema and tenant ignored; get_golden_queries fails open without a consent repository  [PARTIAL 0860f18c, c0bed9ee]
   Location : src/Autheris.Application/Mcp/Services/GoldenQueryService.cs:53-77, src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs:417-446, src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs:~507 (describe_dataset examples), SemanticMcpCompiler.cs:~234
   Problem  : GoldenQuery has no schema or tenant. describe_dataset(sales.public.orders) and examples://sales/orders attach goldens registered
              for any sales.<schema>.orders; get_golden_queries filters by visible (domain, table) pairs, so a consent on sales.public.orders
@@ -1862,7 +1862,7 @@ Entry format:
              advertised as granted (agent then hits a deny on call_procedure).
   Fix hint : Check found.Table.IsActive in the bypass branch; return the computed accessStatus for procedures.
 
-[GQL-17] LOW | bug | #270 fix types HMAC-ruled numeric columns as String for ALL callers -> String filter/aggregate semantics on numeric SQL columns
+[GQL-17] LOW | bug | #270 fix types HMAC-ruled numeric columns as String for ALL callers -> String filter/aggregate semantics on numeric SQL columns  [PARTIAL c0bed9ee]
   Location : src/Autheris.GraphQL/Catalog/CatalogSchemaModel.cs:268-274 (b293f9d4) ; CatalogGraphQlTypeModule.cs:242, 396-406 ;
              GraphQlTreeBuilder.cs:466-475 ; AggregateResultMapper.cs:61-97
   Problem  : The column's GraphQL type is switched to String whenever the catalog rule is HMAC, independent of the caller's
@@ -2330,7 +2330,7 @@ Entry format:
              materialises a consent (or route approval through the decorator); evaluate attribute-table definitions of all tenants
              that point at the same datasource/table.
 
-[EXT-17] LOW | bug | Purview catalog client derives table identity from URI-style qualifiedName by splitting on '/' (domain "mssql:", empty schema) and drops column classifications
+[EXT-17] LOW | bug | Purview catalog client derives table identity from URI-style qualifiedName by splitting on '/' (domain "mssql:", empty schema) and drops column classifications  [PARTIAL c0bed9ee]
   Location : src/Autheris.Extensions/DataCatalog/PurviewDataCatalogClient.cs:185-213 (ParseAtlasSearchResponse);
              same pattern in CatalogWebhookHandler.cs:410-419 (Purview/EventGrid branch: domain = parts[0], schema "public")
   Problem  : Purview qualifiedNames are URIs (mssql://srv.database.windows.net/db/schema/table, https://acct.dfs.core.windows.net/...).

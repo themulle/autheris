@@ -81,7 +81,8 @@ internal static class DatabricksTestSupport
         DatabricksAuthMode mode = DatabricksAuthMode.OAuthM2M,
         string host = Host,
         long byteLimit = 26214400,
-        Action<Dictionary<string, DataSourceConnectionOptions>>? extra = null)
+        Action<Dictionary<string, DataSourceConnectionOptions>>? extra = null,
+        string? oboModeAuthClientId = null)
     {
         var connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
         {
@@ -103,6 +104,7 @@ internal static class DatabricksTestSupport
                         DatabricksAuthMode.OAuthObo => new DatabricksAuthOptions
                         {
                             Mode = DatabricksAuthMode.OAuthObo,
+                            ClientId = oboModeAuthClientId,
                             Obo = new DatabricksOboOptions
                             {
                                 TenantId = "tenant-123",

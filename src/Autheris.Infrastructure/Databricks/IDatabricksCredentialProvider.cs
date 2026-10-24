@@ -12,4 +12,10 @@ using Autheris.Domain.Options;
 public interface IDatabricksCredentialProvider
 {
     Task<string> AcquireTokenAsync(DatabricksDataSourceOptions db, DelegationContext? context, CancellationToken ct);
+
+    /// <summary>
+    /// INF-07: Evicts the cached token that <see cref="AcquireTokenAsync"/> would use for this caller after the
+    /// downstream rejected it (HTTP 401/403). Never purges by client id or host beyond the caller's own entry; never throws.
+    /// </summary>
+    void EvictToken(DatabricksDataSourceOptions db, DelegationContext? context);
 }
