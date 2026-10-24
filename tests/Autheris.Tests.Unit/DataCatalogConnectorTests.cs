@@ -213,6 +213,60 @@ public sealed class DataCatalogConnectorTests
         }
     }
 
+    private sealed class MessageCapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
+    private const string AtlasPageWithBadEntities = """
+        {
+          "entities": [
+            { "attributes": { "qualifiedName": "mssql://h/finance/sales/orders", "name": "ignored-display" } },
+            { "attributes": { "qualifiedName": "mssql://h/../../etc/passwd-secret", "name": "evil" } },
+            { "attributes": { "name": "no-qualified-name" } },
+            { "noAttributes": true },
+            { "attributes": { "qualifiedName": "finance/invoices" } }
+          ]
+        }
+        """;
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Ext17_OneBadEntity_DoesNotDropPage()
+    {
+        var logger = new MessageCapturingLogger();
+
+        var assets = PurviewDataCatalogClient.ParseAtlasSearchResponse(AtlasPageWithBadEntities, logger);
+
+        assets.Count.ShouldBe(2);
+        assets[0].Identifier.ShouldBe(new TableIdentifier("finance", "sales", "orders"));
+        assets[1].Identifier.ShouldBe(new TableIdentifier("finance", "dbo", "invoices"));
+        logger.Messages.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Ext17_BadEntity_LogDoesNotContainQualifiedName()
+    {
+        var logger = new MessageCapturingLogger();
+
+        PurviewDataCatalogClient.ParseAtlasSearchResponse(AtlasPageWithBadEntities, logger);
+
+        logger.Messages.ShouldNotBeEmpty();
+        logger.Messages.ShouldAllBe(m => !m.Contains("passwd-secret") && !m.Contains("etc") && !m.Contains("mssql"));
+    }
+
     private static Microsoft.Extensions.Hosting.IHostEnvironment DevEnv()
     {
         var env = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();

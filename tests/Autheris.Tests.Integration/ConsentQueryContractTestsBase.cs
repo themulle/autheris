@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
@@ -217,6 +218,12 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         ValidFrom = seed.Now.AddDays(fromDays), ValidTo = seed.Now.AddDays(toDays), CreatedBySid = new Sid("SYSTEM")
     };
 
+    private static Consent OffsetConsent(Seed seed, string sid, DateTimeOffset from, DateTimeOffset to, TimeSpan offset) => new()
+    {
+        TableId = seed.TableId, TableIdentifier = seed.Table, TenantId = TenantA, GranteeType = GranteeType.User, GranteeSid = new Sid(sid),
+        ValidFrom = from.ToOffset(offset), ValidTo = to.ToOffset(offset), CreatedBySid = new Sid("SYSTEM")
+    };
+
     [Fact]
     public async Task SEC_SC_03_GetActiveRoleConsents_MatchesRoleTenantAndTableOnly()
     {
@@ -330,19 +337,135 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150_AndAfterExpiry()
+    public async Task SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150()
     {
         if (!Available) return;
         var seed = await SeedAsync();
         var d150 = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-R150", null, TenantA, ConsentEffect.Allow, -150, 10));
-        var expired = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RExp", null, TenantA, ConsentEffect.Allow, -200, -1));
 
         await Repo.ExtendConsentExpiryAsync(d150.Id, seed.Now.AddDays(170));
-        await Repo.ExtendConsentExpiryAsync(expired.Id, seed.Now.AddDays(60));
 
         (await Repo.GetConsentByIdAsync(d150.Id))!.IsActive(seed.Now.AddDays(100)).ShouldBeTrue();
-        (await Repo.GetConsentByIdAsync(expired.Id))!.IsActive(seed.Now.AddDays(1)).ShouldBeTrue();
-        (await Repo.GetConsentByIdAsync(expired.Id))!.IsActive(seed.Now.AddDays(61)).ShouldBeFalse();
+    }
+
+    private async Task AssertExtendRejectedAsync(Seed seed, Guid consentId, DateTimeOffset newValidTo)
+    {
+        var before = await Repo.GetConsentByIdAsync(consentId);
+        var epochBefore = await Repo.GetTableEpochAsync(seed.Table);
+        var auditBefore = (await Repo.GetAuditLogEntriesAsync(1000)).Count(e => e.EventType == "CONSENT_EXPIRY_EXTENDED");
+
+        var ex = await Should.ThrowAsync<ConsentNotExtendableException>(() => Repo.ExtendConsentExpiryAsync(consentId, newValidTo));
+
+        ex.Message.ShouldNotContain(consentId.ToString());
+        var after = await Repo.GetConsentByIdAsync(consentId);
+        after?.ValidTo.ShouldBe(before!.ValidTo);
+        after?.ValidFrom.ShouldBe(before!.ValidFrom);
+        after?.RenewalCount.ShouldBe(before!.RenewalCount);
+        (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(epochBefore);
+        (await Repo.GetAuditLogEntriesAsync(1000)).Count(e => e.EventType == "CONSENT_EXPIRY_EXTENDED").ShouldBe(auditBefore);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_ExpiredConsent_IsRejected_RowAndRenewalCountUnchanged()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var expired = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RExp", null, TenantA, ConsentEffect.Allow, -200, -1));
+
+        await AssertExtendRejectedAsync(seed, expired.Id, seed.Now.AddDays(60));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_RevokedConsent_IsRejected()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RRev", null, TenantA, ConsentEffect.Allow, -1, 30));
+        await Repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-RRev"), "no longer needed");
+
+        await AssertExtendRejectedAsync(seed, consent.Id, seed.Now.AddDays(60));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_UnknownId_IsRejected_NoAuditNoEpoch()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var epochBefore = await Repo.GetTableEpochAsync(seed.Table);
+        var auditBefore = (await Repo.GetAuditLogEntriesAsync(1000)).Count(e => e.EventType == "CONSENT_EXPIRY_EXTENDED");
+
+        await Should.ThrowAsync<ConsentNotExtendableException>(() => Repo.ExtendConsentExpiryAsync(Guid.NewGuid(), seed.Now.AddDays(60)));
+
+        (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(epochBefore);
+        (await Repo.GetAuditLogEntriesAsync(1000)).Count(e => e.EventType == "CONSENT_EXPIRY_EXTENDED").ShouldBe(auditBefore);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_EqualOrEarlierValidTo_IsRejected(int deltaDays)
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-REq", null, TenantA, ConsentEffect.Allow, -1, 30));
+
+        await AssertExtendRejectedAsync(seed, consent.Id, consent.ValidTo.AddDays(deltaDays));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_Rejection_DoesNotBumpEpoch()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-REpoch", null, TenantA, ConsentEffect.Allow, -1, 30));
+        var epochBefore = await Repo.GetTableEpochAsync(seed.Table);
+
+        await Should.ThrowAsync<ConsentNotExtendableException>(() => Repo.ExtendConsentExpiryAsync(consent.Id, consent.ValidTo.AddDays(-1)));
+
+        (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(epochBefore);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_UsesServerTimeInTheUpdatePredicate()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RSrv", null, TenantA, ConsentEffect.Allow, -5, 0));
+
+        // valid_to was a moment ago when the UPDATE runs; the SQL predicate (not a caller-side check) must reject it.
+        await Should.ThrowAsync<ConsentNotExtendableException>(() => Repo.ExtendConsentExpiryAsync(consent.Id, seed.Now.AddDays(60)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_ExpiryAtExactNow_IsRejected()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RNow", null, TenantA, ConsentEffect.Allow, -5, 0));
+
+        await Should.ThrowAsync<ConsentNotExtendableException>(() => Repo.ExtendConsentExpiryAsync(consent.Id, seed.Now.AddDays(60)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Extend_NonUtcStoredValidTo_ComparesCorrectly()
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var plus14 = TimeSpan.FromHours(14);
+        var minus10 = TimeSpan.FromHours(-10);
+        var active = await Repo.CreateConsentAsync(OffsetConsent(seed, "S-1-5-21-RTzA", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddHours(1), plus14));
+        var expired = await Repo.CreateConsentAsync(OffsetConsent(seed, "S-1-5-21-RTzE", DateTimeOffset.UtcNow.AddDays(-2), DateTimeOffset.UtcNow.AddHours(-1), minus10));
+
+        await Repo.ExtendConsentExpiryAsync(active.Id, DateTimeOffset.UtcNow.AddDays(10).ToOffset(plus14));
+        await AssertExtendRejectedAsync(seed, expired.Id, DateTimeOffset.UtcNow.AddDays(10));
     }
 
     [Fact]

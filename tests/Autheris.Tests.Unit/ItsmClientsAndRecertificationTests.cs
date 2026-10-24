@@ -380,10 +380,56 @@ public class ItsmClientsAndRecertificationTests
             options,
             NullLogger<ConsentRecertificationWorkflowService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
 
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentNotExtendableException>(() =>
             workflow.ExtendConsentExpiryAsync(revokedConsent.Id, TimeSpan.FromDays(7), new Sid("S-1-5-21-approver"), "Legitimate reason"));
 
-        ex.Message.ShouldContain("revoked");
+        ex.ShouldBeAssignableTo<InvalidOperationException>();
+        ex.Message.ShouldNotContain(revokedConsent.Id.ToString());
+    }
+
+    private static Consent ActiveConsent(DateTimeOffset validTo) => new()
+    {
+        Id = Guid.NewGuid(),
+        TableId = Guid.NewGuid(),
+        TableIdentifier = new TableIdentifier("crm", "dbo", "customers"),
+        Effect = ConsentEffect.Allow,
+        GranteeType = GranteeType.User,
+        GranteeSid = new Sid("S-1-5-21-user-123"),
+        ValidFrom = DateTimeOffset.UtcNow.AddDays(-10),
+        ValidTo = validTo,
+        TenantId = new TenantId("tenant-primary")
+    };
+
+    private static ConsentRecertificationWorkflowService NewWorkflow(IConsentRepository consentRepo) => new(
+        consentRepo,
+        Substitute.For<IItsmOutboxRepository>(),
+        Options.Create(new GatewayOptions()),
+        NullLogger<ConsentRecertificationWorkflowService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+
+    [Fact]
+    public async Task WF_1_ExtendConsentExpiryAsync_ExpiredConsent_ThrowsConsentNotExtendable_AndNeverCallsRepository()
+    {
+        var consentRepo = Substitute.For<IConsentRepository>();
+        var expired = ActiveConsent(DateTimeOffset.UtcNow.AddMinutes(-1));
+        consentRepo.GetConsentByIdAsync(expired.Id, Arg.Any<CancellationToken>()).Returns(Task.FromResult<Consent?>(expired));
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentNotExtendableException>(() =>
+            NewWorkflow(consentRepo).ExtendConsentExpiryAsync(expired.Id, TimeSpan.FromDays(7), new Sid("S-1-5-21-approver"), "Legitimate reason"));
+
+        await consentRepo.DidNotReceive().ExtendConsentExpiryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WF_1_ExtendConsentExpiryAsync_RaceExpiredInStore_SurfacesConsentNotExtendable()
+    {
+        var consentRepo = Substitute.For<IConsentRepository>();
+        var active = ActiveConsent(DateTimeOffset.UtcNow.AddHours(2));
+        consentRepo.GetConsentByIdAsync(active.Id, Arg.Any<CancellationToken>()).Returns(Task.FromResult<Consent?>(active));
+        consentRepo.ExtendConsentExpiryAsync(active.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(active.Id));
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentNotExtendableException>(() =>
+            NewWorkflow(consentRepo).ExtendConsentExpiryAsync(active.Id, TimeSpan.FromDays(7), new Sid("S-1-5-21-approver"), "Legitimate reason"));
     }
 
     private sealed class StubEpochValidationService : IEpochValidationService

@@ -76,6 +76,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "ITSM_UNAVAILABLE",
         "INVALID_STATE",
         "CONSENT_ON_ATTRIBUTE_SOURCE",
+        "CONSENT_NOT_EXTENDABLE",
         "INDIVIDUAL_GRANT_REQUIRES_EXPIRY",
         "INDIVIDUAL_GRANT_EXPIRY_IN_PAST",
         "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM",
@@ -84,7 +85,10 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN",
         "INDIVIDUAL_GRANT_DISABLED_FOR_REALM",
         "INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION",
-        "INDIVIDUAL_GRANT_INDETERMINATE"
+        "INDIVIDUAL_GRANT_INDETERMINATE",
+        // #341: stable codes the resolvers already raised that were masked as INTERNAL_SERVER_ERROR; fixed messages only.
+        "SYNC_FAILED",
+        "GDPR_SUBJECT_SCOPE_UNRESOLVED"
     };
 
     /// <summary>
@@ -116,6 +120,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["ITSM_UNAVAILABLE"] = "The external ticketing system is unavailable; the request was not created.",
         ["INVALID_STATE"] = "The consent request is not in a state that allows this operation.",
         ["CONSENT_ON_ATTRIBUTE_SOURCE"] = "A consent on this table is not possible.",
+        ["CONSENT_NOT_EXTENDABLE"] = "The consent cannot be extended. Create a new consent.",
         ["INDIVIDUAL_GRANT_REQUIRES_EXPIRY"] = "An expiry date is required for this grant.",
         ["INDIVIDUAL_GRANT_EXPIRY_IN_PAST"] = "The expiry date must be in the future.",
         ["INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM"] = "The expiry date exceeds the maximum allowed for this grant.",
@@ -124,9 +129,13 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN"] = "This grant can only be renewed through a recertification campaign.",
         ["INDIVIDUAL_GRANT_DISABLED_FOR_REALM"] = "Individual grants are disabled for this realm.",
         ["INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION"] = "A justification is required for this grant.",
-        ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated."
+        ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated.",
+        ["SYNC_FAILED"] = "The synchronization failed.",
+        ["GDPR_SUBJECT_SCOPE_UNRESOLVED"] = "The report scope cannot be resolved: name the table that holds the data subject's data."
     };
 
+    internal const string MaskedCode = "MASKED";
+    internal const string MaskedMessage = "A requested column is masked for the current caller.";
     internal const string ValidationCode = "GRAPHQL_VALIDATION_FAILED";
     internal const string ValidationMessage = "The GraphQL request is invalid.";
     internal const string ComplexMessage = "The query exceeds the allowed complexity.";
@@ -180,7 +189,22 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
                 .WithCode(code);
         }
 
-        if (error.Code != null && FixedClientMessages.TryGetValue(error.Code, out var fixedMessage))
+        // #341: the governed SQL pipeline refused a table (unregistered, inactive, denied: one cause for the caller, like SQL_POLICY_DENIED on
+        // the SQL and OData channels). It answers the GraphQL denial code with the fixed text, never the exception message.
+        if (error.Exception is Autheris.Application.Sql.WebSqlTableDeniedException)
+        {
+            error = error
+                .WithMessage("Access denied.")
+                .WithCode("ACCESS_DENIED");
+        }
+
+        // GQL-17: ReportMasked (CatalogGraphQlTypeModule) code is matched exactly (ordinal) so MASKED_COLUMN or "masked" stay masked.
+        var isMaskedCode = string.Equals(error.Code, MaskedCode, StringComparison.Ordinal);
+        if (isMaskedCode)
+        {
+            error = error.WithMessage(MaskedMessage);
+        }
+        else if (error.Code != null && FixedClientMessages.TryGetValue(error.Code, out var fixedMessage))
         {
             error = error.WithMessage(fixedMessage);
         }
@@ -196,7 +220,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             _logger.LogError(error.Exception, "GraphQL Execution Error [{Code}] trace {TraceId}", error.Code, Activity.Current?.TraceId.ToString());
         }
 
-        var isWhitelisted = error.Code != null && WhitelistedSafeCodes.Contains(error.Code);
+        var isWhitelisted = isMaskedCode || (error.Code != null && WhitelistedSafeCodes.Contains(error.Code));
         if (!isWhitelisted && Classify(error) is { } classified)
         {
             error = classified;

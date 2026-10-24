@@ -407,7 +407,10 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         var connections = _options.DataSources?.Connections;
         if (connections == null || !connections.TryGetValue(sourceName, out var connOptions) || string.IsNullOrWhiteSpace(connOptions.ConnectionString))
         {
-            throw new InvalidOperationException($"The data source '{sourceName}' has no database connection.");
+            // #341: a catalog entry whose data source has no connection (unbacked entry, governance system table) cannot be queried. It
+            // answers like a denied table, after the access decision, and the cause stays in the server log only.
+            _logger?.LogWarning("GovernedTreeQueryService: the data source '{SourceName}' has no database connection; the request is refused.", sourceName);
+            throw new GatewayForbiddenException("Access denied.");
         }
 
         var provider = connOptions.Provider;

@@ -98,4 +98,72 @@ public sealed class ErrorSanitizingFilterCodeTests
         result.Message.ShouldNotBe("Thrower text.");
         result.Message.ShouldNotBeNullOrWhiteSpace();
     }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    public void Gql17_MaskedCode_PassesWithFixedMessage(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage("Column 'ssn' is masked.").SetCode("MASKED").Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("MASKED");
+        result.Message.ShouldBe(ErrorSanitizingFilter.MaskedMessage);
+    }
+
+    [Fact]
+    public void Gql17_MaskedMessage_ContainsNoValue()
+    {
+        var error = ErrorBuilder.New().SetMessage("Column 'ssn' value '123-45-6789' hash abc is masked.").SetCode("MASKED").Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Message.ShouldNotContain("ssn");
+        result.Message.ShouldNotContain("123-45-6789");
+        result.Message.ShouldNotContain("abc");
+    }
+
+    [Fact]
+    public void Gql17_MaskedCode_NotLoggedAtErrorLevel()
+    {
+        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ErrorSanitizingFilter>>();
+        logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        var filter = new ErrorSanitizingFilter(env, logger);
+
+        filter.OnError(ErrorBuilder.New().SetMessage("Column 'ssn' is masked.").SetCode("MASKED").Build());
+
+        logger.ReceivedCalls().Count(c => c.GetArguments().Length > 0
+            && c.GetArguments()[0] is Microsoft.Extensions.Logging.LogLevel l
+            && l >= Microsoft.Extensions.Logging.LogLevel.Error).ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void Gql17_UnlistedCode_StillMaskedAsInternal(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage("secret detail").SetCode("SOME_UNLISTED_CODE").Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("INTERNAL_SERVER_ERROR");
+        result.Message.ShouldNotContain("secret");
+    }
+
+    [Theory]
+    [InlineData("MASKED_COLUMN")]
+    [InlineData("masked")]
+    [InlineData("Masked")]
+    public void Gql17_SimilarCodes_StillMasked(string code)
+    {
+        var error = ErrorBuilder.New().SetMessage("Column 'ssn' is masked.").SetCode(code).Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Code.ShouldBe("INTERNAL_SERVER_ERROR");
+        result.Message.ShouldNotContain("ssn");
+    }
 }

@@ -68,10 +68,10 @@ public sealed class AppScopedTrustedDocumentsStartupTests
 
         root.ShouldNotBeNull();
         var chart = Path.Combine(root!.FullName, "deploy", "helm", "autheris");
-        File.ReadAllText(Path.Combine(chart, "values.yaml")).ShouldContain("blockAdminPath: true");
+        File.ReadAllText(Path.Combine(chart, "values.yaml")).ShouldContain("exposeAdmin: false");
 
         var ingress = File.ReadAllText(Path.Combine(chart, "templates", "ingress-traefik.yaml"));
-        ingress.ShouldContain("if $.Values.ingress.blockAdminPath");
+        ingress.ShouldContain("if $denyAdmin");
         ingress.ShouldContain("-admin-blocked");
 
         // The only chart file that may mention /api/admin is the guarded ingress deny rule; the target Service has no pod match.

@@ -23,6 +23,25 @@ public readonly record struct TableIdentifier : IEquatable<TableIdentifier>
         TableName = tableName.Trim();
     }
 
+    /// <summary>
+    /// Non-throwing variant of the constructor for caller-controlled text: false for a blank component or a component with a null byte,
+    /// line break or dot (the same rules the constructor enforces).
+    /// </summary>
+    public static bool TryCreate(string? domain, string? schema, string? tableName, out TableIdentifier id)
+    {
+        id = default;
+        if (!IsValidComponent(domain) || !IsValidComponent(schema) || !IsValidComponent(tableName))
+        {
+            return false;
+        }
+
+        id = new TableIdentifier(domain!, schema!, tableName!);
+        return true;
+    }
+
+    private static bool IsValidComponent(string? component) =>
+        !string.IsNullOrWhiteSpace(component) && component.AsSpan().IndexOfAny("\0\r\n.") < 0;
+
     private static void ValidateComponent(string component, string paramName)
     {
         if (component.Contains('\0') || component.Contains('\r') || component.Contains('\n') || component.Contains('.'))

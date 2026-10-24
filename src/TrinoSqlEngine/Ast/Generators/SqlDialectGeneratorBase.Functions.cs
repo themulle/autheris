@@ -522,7 +522,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(Convert.ToInt64(lit.Value, CultureInfo.InvariantCulture));
                 break;
             case LiteralType.Decimal:
-                builder.Append(Convert.ToString(lit.Value, CultureInfo.InvariantCulture));
+                builder.Append(Convert.ToString(RequireDecimalLiteral(lit), CultureInfo.InvariantCulture));
                 break;
             case LiteralType.String:
                 FormatStringLiteral(ref builder, lit.Value.ToString() ?? string.Empty, context);
@@ -535,6 +535,15 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 break;
         }
     }
+
+    /// <summary>
+    /// #343: the AST builder only produces a decimal literal whose value is a <see cref="decimal"/>. Any other value (a hand-built or
+    /// tampered node) is refused with a fixed message instead of being converted, which could overflow.
+    /// </summary>
+    private static decimal RequireDecimalLiteral(LiteralExpression lit) =>
+        lit.Value is decimal value
+            ? value
+            : throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "numeric literal");
 
     /// <summary>INV-4: a literal value reaches the database only as a bound parameter.</summary>
     private void FormatBoundLiteral(ref ValueStringBuilder builder, LiteralExpression lit, SqlEmitterContext context)
@@ -555,12 +564,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 break;
             case LiteralType.Decimal:
             {
-                decimal value = lit.Value switch
-                {
-                    decimal d => d,
-                    double dbl => (decimal)dbl,
-                    _ => decimal.Parse(Convert.ToString(lit.Value, CultureInfo.InvariantCulture)!, NumberStyles.Float, CultureInfo.InvariantCulture)
-                };
+                decimal value = RequireDecimalLiteral(lit);
                 builder.Append(context.BindValue(value, SqlParameterType.Decimal, ParameterOrigin.QueryLiteral, columnType));
                 break;
             }

@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Mcp;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -309,5 +310,154 @@ public sealed class GoldenQuerySecurityTests
         result.IsSuccess.ShouldBeTrue();
         var queryIds = ExtractQueryIds(result.ContentJson);
         queryIds.ShouldBeEmpty();
+    }
+
+    // ---- MCP-15: the per-request cap applies after the visibility filter ----
+
+    private static GoldenQueryService CappedService(int cap, string domain, string table, int hidden, int visible)
+    {
+        var demo = Substitute.For<IDemoDataSwitch>();
+        demo.Enabled.Returns(false);
+        var service = new GoldenQueryService(
+            Options.Create(new GatewayOptions { GoldenQueries = new GoldenQueryOptions { MaxResultsPerRequest = cap } }),
+            NullLogger<GoldenQueryService>.Instance,
+            demo);
+        for (var i = 0; i < hidden; i++)
+        {
+            service.RegisterGoldenQuery(new GoldenQuery($"hidden-{i}", "hr", "payroll", "t", "d", "query { hr { payroll { id } } }"));
+        }
+
+        for (var i = 0; i < visible; i++)
+        {
+            service.RegisterGoldenQuery(new GoldenQuery($"visible-{i}", domain, table, "t", "d", "query { x { y { id } } }"));
+        }
+
+        return service;
+    }
+
+    private AiDataGuardrailService GuardrailWith(IGoldenQueryService golden, bool withConsentRepo = true) => new(
+        _toolRegistry,
+        Options.Create(new GatewayOptions()),
+        NullLogger<AiDataGuardrailService>.Instance,
+        global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+        tableMetadataRepository: _metadataRepo,
+        goldenQueryService: golden,
+        consentRepository: withConsentRepo ? _consentRepo : null);
+
+    private static McpSessionContext Session(string sid, string role) => new(
+        SessionId: "sess-" + sid,
+        ServicePrincipalId: "sp-" + sid,
+        TenantId: "tenant-1",
+        CreatedAt: DateTimeOffset.UtcNow,
+        LastActiveAt: DateTimeOffset.UtcNow,
+        UserSid: "S-1-5-21-" + sid,
+        Roles: [role],
+        GroupSids: []);
+
+    private void AllowFinanceFor(string sid) =>
+        _consentRepo.GetAllActiveConsentsForSubjectsAsync(
+            Arg.Any<IEnumerable<Sid>>(),
+            Arg.Any<IEnumerable<string>?>(),
+            Arg.Any<DateTimeOffset?>(),
+            new TenantId("tenant-1"),
+            Arg.Any<CancellationToken>())
+            .Returns(new[]
+            {
+                new Consent
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = new TenantId("tenant-1"),
+                    TableIdentifier = _customersTable.Identifier,
+                    Effect = ConsentEffect.Allow,
+                    GranteeType = GranteeType.User,
+                    GranteeSid = new Sid("S-1-5-21-" + sid),
+                    RowFilters = [],
+                    ColumnRules = []
+                }
+            });
+
+    private static ValueTask<McpToolCallResult> CallGolden(AiDataGuardrailService guardrail, McpSessionContext session) =>
+        guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("get_golden_queries", "{}", session.SessionId), session);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp15_MoreGoldensThanCap_VisibleOnesStillReturned()
+    {
+        var session = Session("MCP15A", "AiAgent");
+        AllowFinanceFor("MCP15A");
+        var guardrail = GuardrailWith(CappedService(2, "finance", "customers", hidden: 10, visible: 1));
+
+        var result = await CallGolden(guardrail, session);
+
+        ExtractQueryIds(result.ContentJson).ShouldBe(["visible-0"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp15_CapStillLimitsFilteredResult()
+    {
+        var session = Session("MCP15B", "AiAgent");
+        AllowFinanceFor("MCP15B");
+        var guardrail = GuardrailWith(CappedService(2, "finance", "customers", hidden: 3, visible: 6));
+
+        var ids = ExtractQueryIds((await CallGolden(guardrail, session)).ContentJson);
+
+        ids.Count.ShouldBe(2);
+        ids.ShouldAllBe(id => id.StartsWith("visible-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp15_AdminPath_StillCapped()
+    {
+        var guardrail = GuardrailWith(CappedService(2, "finance", "customers", hidden: 3, visible: 3));
+
+        var ids = ExtractQueryIds((await CallGolden(guardrail, Session("MCP15C", "ClusterAdmin"))).ContentJson);
+
+        ids.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp15_NoConsentRepo_FailsClosedWithoutServiceCall()
+    {
+        var golden = Substitute.For<IGoldenQueryService>();
+        var guardrail = GuardrailWith(golden, withConsentRepo: false);
+
+        var result = await CallGolden(guardrail, Session("MCP15D", "AiAgent"));
+
+        ExtractQueryIds(result.ContentJson).ShouldBeEmpty();
+        golden.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp15_ConsentRepoThrows_ReturnsEmpty()
+    {
+        var golden = Substitute.For<IGoldenQueryService>();
+        _consentRepo.GetAllActiveConsentsForSubjectsAsync(
+            Arg.Any<IEnumerable<Sid>>(),
+            Arg.Any<IEnumerable<string>?>(),
+            Arg.Any<DateTimeOffset?>(),
+            Arg.Any<TenantId>(),
+            Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<Consent>>(_ => throw new InvalidOperationException("repo down"));
+        var guardrail = GuardrailWith(golden);
+
+        var result = await CallGolden(guardrail, Session("MCP15E", "AiAgent"));
+
+        ExtractQueryIds(result.ContentJson).ShouldBeEmpty();
+        golden.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp15_PredicateThrows_EntryExcluded()
+    {
+        var service = CappedService(10, "finance", "customers", hidden: 0, visible: 3);
+
+        var result = await service.GetGoldenQueriesAsync(null, null, q => q.Id == "visible-1" ? throw new InvalidOperationException("boom") : true, CancellationToken.None);
+
+        result.Select(q => q.Id).OrderBy(x => x).ShouldBe(["visible-0", "visible-2"]);
     }
 }

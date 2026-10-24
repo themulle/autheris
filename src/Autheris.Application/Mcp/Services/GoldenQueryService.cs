@@ -59,7 +59,14 @@ public sealed class GoldenQueryService : IGoldenQueryService
     public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(
         string? domain = null,
         string? tableName = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        GetGoldenQueriesAsync(domain, tableName, null, ct);
+
+    public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(
+        string? domain,
+        string? tableName,
+        Func<GoldenQuery, bool>? visible,
+        CancellationToken ct)
     {
         if (!_enabled)
         {
@@ -78,8 +85,26 @@ public sealed class GoldenQueryService : IGoldenQueryService
             query = query.Where(q => string.Equals(q.TableName, tableName, StringComparison.OrdinalIgnoreCase));
         }
 
+        if (visible is not null)
+        {
+            // MCP-15: visibility first, cap second; a throwing predicate excludes the entry (fail closed).
+            query = query.Where(q => IsVisible(visible, q));
+        }
+
         var results = query.Take(_maxResults).ToList();
         return ValueTask.FromResult<IReadOnlyList<GoldenQuery>>(results);
+    }
+
+    private static bool IsVisible(Func<GoldenQuery, bool> visible, GoldenQuery query)
+    {
+        try
+        {
+            return visible(query);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
     }
 
     public ValueTask<GoldenQuery?> GetByIdAsync(string id, CancellationToken ct = default)

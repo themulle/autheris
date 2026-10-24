@@ -1,4 +1,4 @@
-{{- if and .Values.ingress.enabled .Values.ingress.blockAdminPath }}
+{{- if and .Values.ingress.enabled (not (include "autheris.exposeAdmin" .)) }}
 # Intentionally without a pod match: no endpoints, so requests routed here by the ingress deny rule reach no pod.
 apiVersion: v1
 kind: Service

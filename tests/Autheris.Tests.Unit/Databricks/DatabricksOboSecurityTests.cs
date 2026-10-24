@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Databricks;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Claims;
@@ -373,6 +374,174 @@ public sealed class DatabricksOboSecurityTests
         provider.SourceEnforcesRowSecurity.ShouldBeTrue();
         provider.SourceEnforcesMasking.ShouldBeTrue();
         provider.SupportsCorrelationTag.ShouldBeTrue();
+    }
+
+    // ---- INF-07: 401/403 evicts exactly the cache entry the failed call used ----
+
+    private sealed class EvictionHarness
+    {
+        public Dictionary<string, int> Exchanges { get; } = [];
+        public Func<string, HttpStatusCode> StatementStatus { get; set; } = _ => HttpStatusCode.OK;
+        public DatabricksTokenCache Cache { get; } = new();
+        public CapturingLogger<DatabricksStatementExecutionClient> Logger { get; } = new();
+        public DatabricksStatementExecutionClient Client { get; }
+        public GatewayOptions Options { get; }
+
+        public EvictionHarness(DatabricksAuthMode mode, string? authClientId = null)
+        {
+            Options = DatabricksTestSupport.Options(mode, oboModeAuthClientId: authClientId);
+            var http = new HttpClient(new FakeHttpMessageHandler((req, ct) =>
+            {
+                var path = req.RequestUri!.AbsolutePath;
+                if (path.EndsWith("/oauth2/v2.0/token", StringComparison.OrdinalIgnoreCase) || path.EndsWith("/oidc/v1/token", StringComparison.OrdinalIgnoreCase))
+                {
+                    var body = req.Content is null ? string.Empty : req.Content.ReadAsStringAsync(ct).GetAwaiter().GetResult();
+                    var key = path.EndsWith("/oidc/v1/token", StringComparison.OrdinalIgnoreCase) ? "m2m" : ExtractAssertion(body);
+                    Exchanges[key] = Exchanges.GetValueOrDefault(key) + 1;
+                    var token = $"tok-{key.GetHashCode():x}-{Exchanges[key]}";
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"access_token\":\"" + token + "\",\"expires_in\":3600}", Encoding.UTF8, "application/json")
+                    });
+                }
+
+                var status = StatementStatus(req.Headers.Authorization?.Parameter ?? string.Empty);
+                return Task.FromResult(status == HttpStatusCode.OK
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Succeeded(StatementId, "[[\"1\",\"x\"]]"), Encoding.UTF8, "application/json") }
+                    : new HttpResponseMessage(status));
+            }));
+            Client = new DatabricksStatementExecutionClient(http, Microsoft.Extensions.Options.Options.Create(Options), Vault(), Env("Production"), Cache, Logger);
+        }
+
+        public Task ExecuteAsync(string? callerToken) => Client.ExecuteAsync(
+            new DatabricksStatementRequest("SELECT 1", ImmutableArray<DatabricksParameter>.Empty, "main", "default", TimeSpan.FromSeconds(30),
+                Delegation: callerToken is null ? null : new DelegationContext(CallerToken: callerToken)),
+            CancellationToken.None);
+
+        private static string ExtractAssertion(string body) =>
+            body.Split('&').FirstOrDefault(p => p.StartsWith("assertion=", StringComparison.Ordinal)) ?? "none";
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_Obo403_EvictsOnlyCallerEntry_NextCallReExchanges()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthObo);
+        var alice = CreateMockJwt("alice", DateTimeOffset.UtcNow.AddHours(1));
+        var denyOnce = true;
+        h.StatementStatus = _ => denyOnce ? HttpStatusCode.Forbidden : HttpStatusCode.OK;
+
+        var ex = await Should.ThrowAsync<DatabricksProviderException>(() => h.ExecuteAsync(alice));
+        ex.Code.ShouldBe(DatabricksErrorCodes.AuthFailed);
+        h.Cache.EntryCount.ShouldBe(0);
+
+        denyOnce = false;
+        await h.ExecuteAsync(alice);
+        h.Exchanges.Values.Single().ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_Obo403ForUserA_KeepsUserBCachedToken()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthObo);
+        var alice = CreateMockJwt("alice", DateTimeOffset.UtcNow.AddHours(1));
+        var bob = CreateMockJwt("bob", DateTimeOffset.UtcNow.AddHours(1));
+        await h.ExecuteAsync(bob);
+        h.StatementStatus = auth => auth == BobTokenOf(h, bob) ? HttpStatusCode.OK : HttpStatusCode.Forbidden;
+
+        await Should.ThrowAsync<DatabricksProviderException>(() => h.ExecuteAsync(alice));
+        h.Cache.EntryCount.ShouldBe(1);
+
+        h.StatementStatus = _ => HttpStatusCode.OK;
+        await h.ExecuteAsync(bob);
+        h.Exchanges.Count.ShouldBe(2);
+        h.Exchanges.Values.Sum().ShouldBe(2);
+    }
+
+    private static string BobTokenOf(EvictionHarness h, string bob) =>
+        $"tok-{$"assertion={Uri.EscapeDataString(bob)}".GetHashCode():x}-1";
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_M2M401_EvictsM2MEntry()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthM2M);
+        var deny = true;
+        h.StatementStatus = _ => deny ? HttpStatusCode.Unauthorized : HttpStatusCode.OK;
+
+        await Should.ThrowAsync<DatabricksProviderException>(() => h.ExecuteAsync(null));
+        h.Cache.EntryCount.ShouldBe(0);
+
+        deny = false;
+        await h.ExecuteAsync(null);
+        h.Exchanges["m2m"].ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_SameClientIdForAuthAndObo_DoesNotPurgeOtherCallers()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthObo, "obo-client-id");
+        var alice = CreateMockJwt("alice", DateTimeOffset.UtcNow.AddHours(1));
+        var bob = CreateMockJwt("bob", DateTimeOffset.UtcNow.AddHours(1));
+        await h.ExecuteAsync(bob);
+        await h.ExecuteAsync(alice);
+        h.Cache.EntryCount.ShouldBe(2);
+
+        var db = h.Options.DataSources.Connections["dbx"].Databricks!;
+        var provider = new DatabricksOboTokenProvider(new HttpClient(), Microsoft.Extensions.Options.Options.Create(h.Options), Vault(), Env("Production"), h.Cache);
+        provider.EvictToken(db, new DelegationContext(CallerToken: alice));
+
+        h.Cache.EntryCount.ShouldBe(1);
+        h.Exchanges.Values.Sum().ShouldBe(2);
+        await h.ExecuteAsync(bob);
+        h.Exchanges.Values.Sum().ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_EvictWithoutCallerToken_IsNoOp()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthObo);
+        await h.ExecuteAsync(CreateMockJwt("alice", DateTimeOffset.UtcNow.AddHours(1)));
+        var db = h.Options.DataSources.Connections["dbx"].Databricks!;
+        var provider = new DatabricksOboTokenProvider(new HttpClient(), Microsoft.Extensions.Options.Options.Create(h.Options), Vault(), Env("Production"), h.Cache);
+
+        provider.EvictToken(db, null);
+        provider.EvictToken(db, new DelegationContext(CallerToken: null));
+        provider.EvictToken(db, new DelegationContext(CallerToken: "   "));
+        provider.EvictToken(db, new DelegationContext(CallerToken: "Bearer "));
+
+        h.Cache.EntryCount.ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_EvictWithoutCallerToken_NeverPurgesByClientId()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthObo, "obo-client-id");
+        await h.ExecuteAsync(CreateMockJwt("alice", DateTimeOffset.UtcNow.AddHours(1)));
+        await h.ExecuteAsync(CreateMockJwt("bob", DateTimeOffset.UtcNow.AddHours(1)));
+        var db = h.Options.DataSources.Connections["dbx"].Databricks!;
+        var provider = new DatabricksOboTokenProvider(new HttpClient(), Microsoft.Extensions.Options.Options.Create(h.Options), Vault(), Env("Production"), h.Cache);
+
+        Should.NotThrow(() => provider.EvictToken(db, new DelegationContext(CallerToken: null)));
+
+        h.Cache.EntryCount.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Inf07_EvictionDoesNotLogAssertionHash()
+    {
+        var h = new EvictionHarness(DatabricksAuthMode.OAuthObo);
+        var alice = CreateMockJwt("alice", DateTimeOffset.UtcNow.AddHours(1));
+        h.StatementStatus = _ => HttpStatusCode.Forbidden;
+        await Should.ThrowAsync<DatabricksProviderException>(() => h.ExecuteAsync(alice));
+
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(alice)));
+        h.Logger.Lines.ShouldNotContain(l => l.Contains(hash, StringComparison.OrdinalIgnoreCase) || l.Contains(alice, StringComparison.Ordinal));
     }
 
     private sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler

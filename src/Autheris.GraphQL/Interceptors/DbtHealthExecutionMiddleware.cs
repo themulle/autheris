@@ -86,7 +86,13 @@ public sealed class DbtHealthExecutionMiddleware
         foreach (var modelName in referencedModels)
         {
             var tenant = principal.GetTenantId();
-            var tableId = new TableIdentifier(tenant.Value, "default", modelName);
+            // #341: a name argument is caller text (empty, dotted, with line breaks); it cannot name a dbt model, so it has no health
+            // state to disclose and the downstream resolver validates it.
+            if (!TableIdentifier.TryCreate(tenant.Value, "default", modelName, out var tableId))
+            {
+                continue;
+            }
+
             var health = await _circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted).ConfigureAwait(false);
             if (health.Status == DbtModelHealthStatus.Healthy && !string.Equals(tenant.Value, "default", StringComparison.OrdinalIgnoreCase))
             {
@@ -214,23 +220,52 @@ public sealed class DbtHealthExecutionMiddleware
     private static HashSet<string> ExtractReferencedModels(DocumentNode document)
     {
         var models = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fragments = new Dictionary<string, FragmentDefinitionNode>(StringComparer.Ordinal);
+
+        foreach (var definition in document.Definitions)
+        {
+            if (definition is FragmentDefinitionNode fragmentDef)
+            {
+                fragments[fragmentDef.Name.Value] = fragmentDef;
+            }
+        }
+
+        // GQL-14: the visited set is per document and bounds cycles and repeated spreads.
+        var visited = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var definition in document.Definitions)
         {
             if (definition is OperationDefinitionNode opDef)
             {
-                CollectModelsFromSelections(opDef.SelectionSet.Selections, models);
+                CollectModelsFromSelections(opDef.SelectionSet.Selections, models, fragments, visited);
             }
         }
 
         return models;
     }
 
-    private static void CollectModelsFromSelections(IEnumerable<ISelectionNode> selections, HashSet<string> models)
+    private static void CollectModelsFromSelections(
+        IEnumerable<ISelectionNode> selections,
+        HashSet<string> models,
+        Dictionary<string, FragmentDefinitionNode> fragments,
+        HashSet<string> visited)
     {
         foreach (var selection in selections)
         {
-            if (selection is FieldNode fieldNode)
+            // GQL-14: type-agnostic traversal; type conditions are never evaluated (over-collection fails closed).
+            if (selection is InlineFragmentNode inlineFragment)
+            {
+                CollectModelsFromSelections(inlineFragment.SelectionSet.Selections, models, fragments, visited);
+            }
+            else if (selection is FragmentSpreadNode spread)
+            {
+                var fragmentName = spread.Name.Value;
+                if (fragments.TryGetValue(fragmentName, out var fragmentDef) && visited.Add(fragmentName))
+                {
+                    CollectModelsFromSelections(fragmentDef.SelectionSet.Selections, models, fragments, visited);
+                }
+            }
+            else if (selection is FieldNode fieldNode)
             {
                 var name = fieldNode.Name.Value;
                 if (!name.StartsWith("__", StringComparison.Ordinal))
@@ -253,7 +288,7 @@ public sealed class DbtHealthExecutionMiddleware
                     // Traverse nested selections (e.g. finance { invoices { ... } })
                     if (fieldNode.SelectionSet != null)
                     {
-                        CollectModelsFromSelections(fieldNode.SelectionSet.Selections, models);
+                        CollectModelsFromSelections(fieldNode.SelectionSet.Selections, models, fragments, visited);
                     }
                 }
             }

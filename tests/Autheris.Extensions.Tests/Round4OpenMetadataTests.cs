@@ -88,7 +88,7 @@ public sealed class Round4OpenMetadataTests
 
     private static OpenMetadataEntityReference PolicyRef() => new() { Id = PolicyId, Name = "R4Policy" };
 
-    private static Consent SyncConsent(TableIdentifier table, GranteeType type, string grantee, ConsentEffect effect = ConsentEffect.Allow) => new()
+    private static Consent SyncConsent(TableIdentifier table, GranteeType type, string grantee, ConsentEffect effect = ConsentEffect.Allow, DateTimeOffset? validTo = null) => new()
     {
         Id = Guid.NewGuid(),
         TableIdentifier = table,
@@ -98,7 +98,7 @@ public sealed class Round4OpenMetadataTests
         Effect = effect,
         ConsentRequestId = OpenMetadataSyncService.OpenMetadataSyncConsentMarker,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-30),
-        ValidTo = DateTimeOffset.UtcNow.AddDays(300)
+        ValidTo = validTo ?? DateTimeOffset.UtcNow.AddDays(300)
     };
 
     private sealed class OmFixture
@@ -220,7 +220,7 @@ public sealed class Round4OpenMetadataTests
     {
         var rawOmRole = SyncConsent(OrdersId, GranteeType.Role, "RawOmRoleName");               // legacy consent on a raw OM role name
         var deletedUser = SyncConsent(new TableIdentifier("sales_svc", "dbo", "dropped_table"), GranteeType.User, "S-1-5-21-DELETED");
-        var stillGranted = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
+        var stillGranted = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(10));
 
         var f = CreateOm(Om(), [Orders()], existingSyncConsents: [rawOmRole, deletedUser, stillGranted]);
 
@@ -321,11 +321,97 @@ public sealed class Round4OpenMetadataTests
 
         await f.Service.SyncPermissionsAsync();
 
-        var limit = DateTimeOffset.UtcNow.AddMinutes(61);
-        await f.ConsentRepo.Received(1).ExtendConsentExpiryAsync(
-            existing.Id, Arg.Is<DateTimeOffset>(d => d <= limit), Arg.Any<CancellationToken>());
+        // PERS-04: an extension never shortens; the long-lived consent is revoked (audited) and recreated with the refresh window.
+        await f.ConsentRepo.DidNotReceive().ExtendConsentExpiryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        f.Revoked.ShouldHaveSingleItem().ShouldBe(existing.Id);
+        var created = f.Created.ShouldHaveSingleItem();
+        created.ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
+        created.RoleName.ShouldBe("OrderReaderRole");
+        created.ValidTo.ShouldBeLessThanOrEqualTo(DateTimeOffset.UtcNow.AddMinutes(61));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_ExpiredSyncConsent_IsRecreated_NeverExtended()
+    {
+        // Expired consents are never returned by GetActiveConsentsByConsentRequestIdAsync, so they fall to the create loop.
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: []);
+
+        await f.Service.SyncPermissionsAsync();
+
+        await f.ConsentRepo.DidNotReceive().ExtendConsentExpiryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        f.Created.ShouldHaveSingleItem().ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_ExtendRejectedByRace_CreatesOnce()
+    {
+        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
+
+        var result = await f.Service.SyncPermissionsAsync();
+
+        result.Success.ShouldBeTrue();
+        await f.ConsentRepo.Received(1).ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        f.Created.ShouldHaveSingleItem().RoleName.ShouldBe("OrderReaderRole");
         f.Revoked.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_ConcurrentlyRevokedConsent_IsNotRecreated()
+    {
+        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
+        f.ConsentRepo.GetConsentByIdAsync(existing.Id, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Consent?>(new Consent
+            {
+                Id = existing.Id,
+                TableIdentifier = existing.TableIdentifier,
+                GranteeType = existing.GranteeType,
+                RoleName = existing.RoleName,
+                ConsentRequestId = existing.ConsentRequestId,
+                ValidFrom = existing.ValidFrom,
+                ValidTo = existing.ValidTo,
+                IsRevoked = true,
+            }));
+
+        await f.Service.SyncPermissionsAsync();
+
         f.Created.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_RevokeReturnedFalse_DoesNotCreate()
+    {
+        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        f.ConsentRepo.RevokeSystemConsentAsync(existing.Id, Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(false));
+
+        await f.Service.SyncPermissionsAsync();
+
+        f.Created.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PERS_04_Sync_ActiveSyncConsent_IsStillExtended()
+    {
+        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+
+        await f.Service.SyncPermissionsAsync();
+
+        await f.ConsentRepo.Received(1).ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        f.Created.ShouldBeEmpty();
+        f.Revoked.ShouldBeEmpty();
     }
 
     // ------------------------------------------------------------------ E-06

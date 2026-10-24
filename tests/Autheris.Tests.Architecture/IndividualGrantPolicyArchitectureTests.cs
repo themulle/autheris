@@ -75,6 +75,27 @@ public class IndividualGrantPolicyArchitectureTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_P4R_5_OnlyWorkflowAndOpenMetadataSync_CallExtendConsentExpiry()
+    {
+        var src = Path.Combine(FindRepositoryRoot(), "src");
+        var callers = EnumerateSources(src)
+            .Select(file => Path.GetRelativePath(src, file).Replace('\\', '/'))
+            .Where(rel => !rel.Contains("/Persistence/", StringComparison.Ordinal) && !rel.EndsWith("IGovernanceRepository.cs", StringComparison.Ordinal))
+            .Where(rel => File.ReadAllText(Path.Combine(src, rel)).Contains(".ExtendConsentExpiryAsync(", StringComparison.Ordinal))
+            .ToList();
+
+        callers.ShouldBe(
+            [
+                "Autheris.Application/Identity/Attributes/AttributeValidatingConsentRepository.cs",
+                "Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs",
+                "Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"
+            ],
+            ignoreOrder: true,
+            "Extensions go through the workflow (grant policy cap) or the OpenMetadata sync; the decorator only delegates.");
+    }
+
+    [Fact]
     public void SEC_SC_20_Scanner_IsPerCallSite_NotPerFileText()
     {
         const string code = """

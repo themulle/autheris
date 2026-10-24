@@ -53,12 +53,17 @@ service:
 
 ingress:
   enabled: true
-  # Opt-out deny rule for the cluster-internal admin API (the admin path prefix, e.g. its trusted-documents API).
-  # When true (default) the ingress routes the admin prefix to an endpoint-less Service, so the controller
-  # answers 503 instead of forwarding it through the catch-all "/" path. Matching is by path prefix and case
-  # sensitive in most controllers; also enforce the block at your edge (WAF / controller) and keep NetworkPolicy on.
-  # Set to false only if the admin API is intentionally published (not recommended).
-  blockAdminPath: true
+  # The cluster-internal admin API (the admin API prefix) is denied at the ingress by default: the prefix is routed to an
+  # endpoint-less Service, so the controller answers 503 instead of forwarding it through the catch-all "/" path.
+  # Only the boolean true exposes it (any other value keeps the deny); set it only on an internal-only ingress and keep
+  # the NetworkPolicy. The application authorization (ClusterAdmin) stays the real control.
+  exposeAdmin: false
+  # nginx only (className: nginx): the deny rule is rendered with nginx.ingress.kubernetes.io/use-regex "true" so
+  # mixed-case admin paths match as well. WARNING: use-regex applies to the whole host: every Ingress object that shares a host with
+  # this one becomes case-insensitive regex, and all paths of this Ingress are treated as regex (paths with regex
+  # metacharacters fail the render). Set false to opt out; the deny then stays a case-sensitive prefix and mixed-case
+  # variants are blocked only by the application. A user annotation cannot switch use-regex off while this is true.
+  nginxCaseInsensitiveAdminDeny: true
   className: "traefik"
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
