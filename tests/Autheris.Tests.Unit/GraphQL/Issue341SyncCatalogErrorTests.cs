@@ -46,7 +46,7 @@ public sealed class Issue341SyncCatalogErrorTests
         var audit = Substitute.For<IAuditWriter>();
         var (accessor, logger) = Accessor();
 
-        var ex = await Should.ThrowAsync<GraphQLException>(() => new Mutation().SyncDataCatalogAsync(false, sync, accessor, audit));
+        var ex = await Should.ThrowAsync<GraphQLException>(() => new Mutation().SyncDataCatalogAsync(false, sync, accessor, audit, logger: logger));
 
         ex.Errors[0].Code.ShouldBe("SYNC_FAILED");
         ex.Errors[0].Message.ShouldNotContain("internal.example");

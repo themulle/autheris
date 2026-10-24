@@ -123,9 +123,10 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         body.ShouldNotContain("   at ");
     }
 
-    private async Task<(string Body, List<string> Codes, List<string> Messages)> SendAsync(string query, string roles)
+    private async Task<(string Body, List<string> Codes, List<string> Messages)> SendAsync(string query, string roles, WebApplicationFactory<Program>? host = null)
     {
-        using var factory = Create();
+        using var owned = host == null ? Create() : null;
+        var factory = host ?? owned!;
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-SIM");
         client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
@@ -151,7 +152,36 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         return (body, codes, messages);
     }
 
-    private WebApplicationFactory<Program> Create() =>
+    [Fact]
+    public async Task PolicyDeniedTable_AndUnbackedTable_AreIndistinguishableForTheSameCaller()
+    {
+        // The catalog entry is backed (source "default") and exists, but the caller has no grant and consent checks are on.
+        var id = new Autheris.Domain.Common.TableIdentifier("default", "main", "orders");
+        using (var seeding = Create(bypassConsent: false))
+        {
+            using var scope = seeding.Services.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>();
+            var tableId = Guid.NewGuid();
+            await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+            {
+                Table = new Autheris.Domain.Model.Table { Id = tableId, DisplayName = "orders", TableName = "orders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default", IsActive = true },
+                Identifier = id,
+                Columns = [new Autheris.Domain.Model.TableColumn { TableId = tableId, ColumnName = "id", DataType = "integer" }],
+            });
+        }
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using var host = Create(bypassConsent: false);
+        var denied = await SendAsync("{ default_main_orders(first: 1, offset: 0) { id } }", "Reader", host);
+        var unbacked = await SendAsync("{ finance_dbo_finance_items(first: 1, offset: 0) { id } }", "Reader", host);
+
+        denied.Codes.ShouldBe(["ACCESS_DENIED"], denied.Body);
+        unbacked.Codes.ShouldBe(denied.Codes);
+        unbacked.Messages.ShouldBe(denied.Messages);
+        unbacked.Messages.ShouldBe(["Access denied."]);
+    }
+
+    private WebApplicationFactory<Program> Create(bool bypassConsent = true) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
@@ -161,7 +191,7 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_dbFile}");
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
+            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", bypassConsent ? "true" : "false");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:OpenSchema", "true");
             b.UseSetting("Gateway:Tenancy:Mode", "Multi");

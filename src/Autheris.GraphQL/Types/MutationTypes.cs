@@ -1142,6 +1142,7 @@ public sealed class Mutation
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         [Service] Autheris.Application.Interfaces.IAuditLogRepository? auditLog = null,
+        [Service] ILogger<Mutation>? logger = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -1268,10 +1269,6 @@ public sealed class Mutation
         {
             // #341 (C341-6): the cause (an egress refusal, an unreachable source) is logged here, server side only; the caller gets the
             // same fixed code as SyncOpenMetadata.
-            var services = httpContextAccessor?.HttpContext?.RequestServices;
-            var logger = services != null
-                ? Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetService<ILogger<Mutation>>(services)
-                : null;
             logger?.LogError(ex, "Data catalog synchronization failed ({ExceptionType}).", ex.GetType().Name);
             await RecordSyncFailureAsync(auditWriter, auditLog, auditTenant, principal, dryRun, restrictToTenant, "Failed", ct).ConfigureAwait(false);
             throw new GraphQLException(ErrorBuilder.New()

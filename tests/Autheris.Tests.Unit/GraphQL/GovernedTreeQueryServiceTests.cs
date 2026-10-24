@@ -97,7 +97,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         Action<Dictionary<TableIdentifier, ResolvedTableAccess>>? configure = null,
         GatewayOptions? options = null,
         ITableReadConcurrencyGate? gate = null,
-        IColumnMaskingProvider? masking = null)
+        IColumnMaskingProvider? masking = null,
+        Microsoft.Extensions.Logging.ILogger<GovernedTreeQueryService>? logger = null,
+        bool unbackedBlogSource = false)
     {
         var access = new Dictionary<TableIdentifier, ResolvedTableAccess>
         {
@@ -128,10 +130,15 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             }
         };
 
+        if (unbackedBlogSource)
+        {
+            effectiveOptions.DataSources.Connections.Remove("blog");
+        }
+
         var audit = Substitute.For<IAuditLogRepository>();
         var factory = new CountingFactory(_connectionString);
         var service = new GovernedTreeQueryService(
-            resolver, factory, audit, masking ?? Substitute.For<IColumnMaskingProvider>(), Options.Create(effectiveOptions), gate);
+            resolver, factory, audit, masking ?? Substitute.For<IColumnMaskingProvider>(), Options.Create(effectiveOptions), gate, logger: logger);
         return new Fixture { Service = service, Resolver = resolver, Audit = audit, Factory = factory };
     }
 
@@ -200,6 +207,26 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
 
         fixture.Factory.Opened.ShouldBe(0);
         await fixture.Audit.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.TargetTable == Articles.ToString() && e.Decision == "DENY"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task UnbackedSource_DeniedCaller_DecisionAndAuditRunBeforeConnectionCheck()
+    {
+        // #341 (C341-1): the policy denial and its audit come first; the missing connection is neither reached nor logged.
+        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<GovernedTreeQueryService>>();
+        logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
+        var fixture = Create(
+            a => a[Authors] = a[Authors] with { Decision = TableAccessDecision.Denied(Authors, "no consent") },
+            logger: logger,
+            unbackedBlogSource: true);
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]), null));
+
+        ex.Message.ShouldBe("Access denied.");
+        await fixture.Audit.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.TargetTable == Authors.ToString() && e.Decision == "DENY"), Arg.Any<CancellationToken>());
+        logger.ReceivedCalls().Any(c => c.GetArguments().FirstOrDefault() is Microsoft.Extensions.Logging.LogLevel.Warning).ShouldBeFalse();
+        fixture.Factory.Opened.ShouldBe(0);
     }
 
     [Fact]
