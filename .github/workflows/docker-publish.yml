@@ -3,6 +3,9 @@ name: Build & Push Getting-Started Container
 on:
   push:
     tags: [ 'v*' ]
+  # Scan-only job for pull requests (no environment, no secrets, no push); keeps the code scanning configuration of main comparable.
+  pull_request:
+    branches: [ main ]
   workflow_run:
     workflows: [ "CI Build & Test" ]
     types: [ completed ]
@@ -20,6 +23,7 @@ jobs:
   build-and-push:
     name: Build, Scan & Push Container to GHCR
     if: >-
+      github.event_name != 'pull_request' &&
       (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
       (github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -183,3 +187,46 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp '^https://github\.com/themulle/autheris/\.github/workflows/docker-publish\.yml@refs/(heads/main|tags/v.+)$'
           echo "Published digest: ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+
+  pr-container-scan:
+    name: Container Scan (pull request)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build local image for scanning
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          tags: autheris:scan
+
+      - name: Trivy Container Vulnerability Scan (Gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: autheris:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: '1'
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy SARIF
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: trivy-results.sarif
+          category: .github/workflows/docker-publish.yml:build-and-push
