@@ -59,6 +59,9 @@ internal static class AggregateFailureMapper
         TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException or Autheris.Domain.Model.RequiredFilterColumnMissingException => AggregateErrors.Create("REQUIRED_FILTER_COLUMN_MISSING", "A required filter column is missing."),
         GatewayThrottledException => AggregateErrors.Create("TOO_MANY_REQUESTS", AggregateErrors.ThrottledMessage),
         GatewayInvalidQueryException or ArgumentException => AggregateErrors.ArgumentInvalid(),
+        // #333 (SEC-PGP-03): compiler refusals of planner output are fixed 4xx/UNAVAILABLE answers; no exception text, inner exception or SQL is passed on.
+        TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneUnavailable } => AggregateErrors.Create("UNAVAILABLE", "The database is currently unavailable."),
+        TrinoSqlEngine.SqlTimeZoneException or TrinoSqlEngine.Ast.Builder.AstBuildException or TrinoSqlEngine.SqlCompileNotSupportedException => AggregateErrors.ArgumentInvalid(),
         _ => ForDataAccess(ex)
     };
 

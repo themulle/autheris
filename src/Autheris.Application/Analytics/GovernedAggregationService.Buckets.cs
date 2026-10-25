@@ -179,11 +179,45 @@ public sealed partial class GovernedAggregationService
         return new ComputedBucket(groupKey, count, aggValues, sums, avgs, mins, maxs, bucketRows, isMergedOther);
     }
 
+    private const string PlannedBucketKeyFormat = "yyyy-MM-dd'T'HH:mm:ss";
+
+    private static bool IsTimeBucketColumn(IReadOnlyList<TimeBucketSpecification>? timeBuckets, string column)
+    {
+        if (timeBuckets is null)
+        {
+            return false;
+        }
+
+        foreach (var tb in timeBuckets)
+        {
+            if (string.Equals(tb.Column, column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// #333 (SEC-PGP-06): a driver temporal value of a bucketed column becomes the invariant, zone-local wall-clock text that the SQLite branch
+    /// returns. The kind is ignored on purpose (the bucket is already in the bucket zone); zoned columns are refused by the planner, so the
+    /// offset of a <see cref="DateTimeOffset"/> carries no information. Null and non-temporal values pass through unchanged.
+    /// </summary>
+    internal static object? NormalizePlannedBucketKey(object? value) => value switch
+    {
+        DateTime dt => dt.ToString(PlannedBucketKeyFormat, CultureInfo.InvariantCulture),
+        DateTimeOffset dto => dto.DateTime.ToString(PlannedBucketKeyFormat, CultureInfo.InvariantCulture),
+        DateOnly d => d.ToDateTime(TimeOnly.MinValue).ToString(PlannedBucketKeyFormat, CultureInfo.InvariantCulture),
+        _ => value
+    };
+
     private static List<ComputedBucket> BuildBucketsFromPlannedSqlResult(
         IReadOnlyList<IReadOnlyDictionary<string, object?>> sqlRows,
         IReadOnlyList<string> groupByColumns,
         IReadOnlyList<AggregateSelection> aggregates,
-        string countColumnAlias)
+        string countColumnAlias,
+        IReadOnlyList<TimeBucketSpecification>? timeBuckets = null)
     {
         var buckets = new List<ComputedBucket>(sqlRows.Count);
         foreach (var row in sqlRows)
@@ -191,7 +225,8 @@ public sealed partial class GovernedAggregationService
             var groupKey = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var gCol in groupByColumns)
             {
-                groupKey[gCol] = GetRowValue(row, gCol);
+                var keyValue = GetRowValue(row, gCol);
+                groupKey[gCol] = IsTimeBucketColumn(timeBuckets, gCol) ? NormalizePlannedBucketKey(keyValue) : keyValue;
             }
 
             long count = Convert.ToInt64(GetRowValue(row, countColumnAlias) ?? 0L, CultureInfo.InvariantCulture);

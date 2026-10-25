@@ -387,7 +387,7 @@ public sealed partial class GovernedAggregationService
                 bool sourceTruncated = sqlResult.Rows.Count > sqlLimit;
                 var plannedRows = sourceTruncated ? sqlResult.Rows.Take(sqlLimit).ToList() : sqlResult.Rows;
                 return new BucketRead(
-                    BuildBucketsFromPlannedSqlResult(plannedRows, groupByColumns, resolvedAggregates, planned.CountColumnAlias),
+                    BuildBucketsFromPlannedSqlResult(plannedRows, groupByColumns, resolvedAggregates, planned.CountColumnAlias, query.TimeBuckets),
                     sourceTruncated);
             }
 

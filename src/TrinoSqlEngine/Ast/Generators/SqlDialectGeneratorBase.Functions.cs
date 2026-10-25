@@ -413,7 +413,9 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         DateUnit.Day => "day",
         DateUnit.Week => "week",
         DateUnit.Month => "month",
-        _ => "year"
+        DateUnit.Quarter => "quarter",
+        DateUnit.Year => "year",
+        _ => throw new TrinoSqlEngine.Ast.Builder.AstBuildException("SQL construct with an unknown date unit is not supported.")
     };
 
     /// <summary>

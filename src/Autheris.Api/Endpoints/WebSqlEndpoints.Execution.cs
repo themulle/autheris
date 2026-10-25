@@ -237,7 +237,7 @@ public static partial class WebSqlEndpoints
                             w.WriteStartArray();
                             for (int i = 0; i < fieldCount; i++)
                             {
-                                WriteDbValue(w, reader.IsDBNull(i) ? null : reader.GetValue(i));
+                                WebSqlValueWriter.Write(w, reader.IsDBNull(i) ? null : reader.GetValue(i));
                             }
                             w.WriteEndArray();
                         }
@@ -247,7 +247,7 @@ public static partial class WebSqlEndpoints
                             for (int i = 0; i < fieldCount; i++)
                             {
                                 w.WritePropertyName(columnNames[i]);
-                                WriteDbValue(w, reader.IsDBNull(i) ? null : reader.GetValue(i));
+                                WebSqlValueWriter.Write(w, reader.IsDBNull(i) ? null : reader.GetValue(i));
                             }
                             w.WriteEndObject();
                         }
@@ -368,58 +368,6 @@ public static partial class WebSqlEndpoints
         catch (Exception ex)
         {
             await WriteWebSqlErrorAsync(httpContext, ex, logger, ct);
-        }
-    }
-
-    private static void WriteDbValue(Utf8JsonWriter writer, object? val)
-    {
-        if (val is null or DBNull)
-        {
-            writer.WriteNullValue();
-            return;
-        }
-
-        switch (val)
-        {
-            case bool b:
-                writer.WriteBooleanValue(b);
-                break;
-            case byte by:
-                writer.WriteNumberValue(by);
-                break;
-            case short s:
-                writer.WriteNumberValue(s);
-                break;
-            case int i:
-                writer.WriteNumberValue(i);
-                break;
-            case long l:
-                writer.WriteNumberValue(l);
-                break;
-            case float f:
-                writer.WriteNumberValue(f);
-                break;
-            case double d:
-                writer.WriteNumberValue(d);
-                break;
-            case decimal dec:
-                writer.WriteNumberValue(dec);
-                break;
-            case DateTime dt:
-                writer.WriteStringValue(dt.ToString("o"));
-                break;
-            case DateTimeOffset dto:
-                writer.WriteStringValue(dto.ToString("o"));
-                break;
-            case Guid g:
-                writer.WriteStringValue(g.ToString());
-                break;
-            case byte[] bytes:
-                writer.WriteBase64StringValue(bytes);
-                break;
-            default:
-                writer.WriteStringValue(val.ToString());
-                break;
         }
     }
 
