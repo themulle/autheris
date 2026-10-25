@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -12,14 +11,14 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
     private sealed class IpCounter
     {
         public int Count;
-        public long WindowStartTimestamp = Stopwatch.GetTimestamp();
+        public long WindowStartTimestamp;
         public readonly object Lock = new();
     }
 
     private sealed class TokenBucket
     {
         public double Tokens;
-        public long LastRefillTimestamp = Stopwatch.GetTimestamp();
+        public long LastRefillTimestamp;
         public readonly object Lock = new();
     }
 
@@ -29,10 +28,10 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
     private int _ipCount;
     private int _bucketCount;
 
-    private long _lastIpCleanup = Stopwatch.GetTimestamp();
+    private long _lastIpCleanup;
     private int _isCleaningUpIp;
 
-    private long _lastBucketCleanup = Stopwatch.GetTimestamp();
+    private long _lastBucketCleanup;
     private int _isCleaningUpBuckets;
 
     private readonly CancellationToken _stoppingToken;
@@ -45,18 +44,25 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
     private int _isEvictingBuckets;
     private int _isEvictingCost;
 
-    public InMemoryRateLimiterService(IHostApplicationLifetime? lifetime = null)
+    private readonly TimeProvider _timeProvider;
+
+    public InMemoryRateLimiterService(IHostApplicationLifetime? lifetime = null, TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        var now = _timeProvider.GetTimestamp();
+        _lastIpCleanup = now;
+        _lastBucketCleanup = now;
+        _lastCostCleanup = now;
         _stoppingToken = lifetime?.ApplicationStopping ?? CancellationToken.None;
     }
 
     public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default)
     {
-        var currentTimestamp = Stopwatch.GetTimestamp();
+        var currentTimestamp = _timeProvider.GetTimestamp();
         var windowDuration = TimeSpan.FromSeconds(options.WindowSeconds);
 
         if (Volatile.Read(ref _ipCount) > 5000 &&
-            Stopwatch.GetElapsedTime(_lastIpCleanup, currentTimestamp) > TimeSpan.FromSeconds(60) &&
+            _timeProvider.GetElapsedTime(_lastIpCleanup, currentTimestamp) > TimeSpan.FromSeconds(60) &&
             Interlocked.CompareExchange(ref _isCleaningUpIp, 1, 0) == 0)
         {
             _lastIpCleanup = currentTimestamp;
@@ -73,7 +79,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
                         {
                             ws = kvp.Value.WindowStartTimestamp;
                         }
-                        if (Stopwatch.GetElapsedTime(ws, Stopwatch.GetTimestamp()) > staleThreshold)
+                        if (_timeProvider.GetElapsedTime(ws, _timeProvider.GetTimestamp()) > staleThreshold)
                         {
                             if (_ipCounters.TryRemove(kvp.Key, out _))
                             {
@@ -98,7 +104,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
                 EvictOldest(_ipCounters, c => { lock (c.Lock) { return c.WindowStartTimestamp; } }, ref _ipCount, ref _isEvictingIp);
             }
 
-            var newCounter = new IpCounter();
+            var newCounter = new IpCounter { WindowStartTimestamp = currentTimestamp };
             if (_ipCounters.TryAdd(ip, newCounter))
             {
                 Interlocked.Increment(ref _ipCount);
@@ -114,7 +120,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
         lock (counter.Lock)
         {
-            var elapsed = Stopwatch.GetElapsedTime(counter.WindowStartTimestamp, currentTimestamp);
+            var elapsed = _timeProvider.GetElapsedTime(counter.WindowStartTimestamp, currentTimestamp);
             if (elapsed > windowDuration)
             {
                 counter.WindowStartTimestamp = currentTimestamp;
@@ -137,10 +143,10 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
     public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default)
     {
-        var currentTimestamp = Stopwatch.GetTimestamp();
+        var currentTimestamp = _timeProvider.GetTimestamp();
 
         if (Volatile.Read(ref _bucketCount) > 5000 &&
-            Stopwatch.GetElapsedTime(_lastBucketCleanup, currentTimestamp) > TimeSpan.FromSeconds(60) &&
+            _timeProvider.GetElapsedTime(_lastBucketCleanup, currentTimestamp) > TimeSpan.FromSeconds(60) &&
             Interlocked.CompareExchange(ref _isCleaningUpBuckets, 1, 0) == 0)
         {
             _lastBucketCleanup = currentTimestamp;
@@ -157,7 +163,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
                         {
                             lastRefill = kvp.Value.LastRefillTimestamp;
                         }
-                        if (Stopwatch.GetElapsedTime(lastRefill, Stopwatch.GetTimestamp()) > staleThreshold)
+                        if (_timeProvider.GetElapsedTime(lastRefill, _timeProvider.GetTimestamp()) > staleThreshold)
                         {
                             if (_buckets.TryRemove(kvp.Key, out _))
                             {
@@ -202,7 +208,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
         lock (bucket.Lock)
         {
-            var elapsedSeconds = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+            var elapsedSeconds = _timeProvider.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
             bucket.Tokens = Math.Min(options.TokenBucketCapacity, bucket.Tokens + (elapsedSeconds * options.TokensPerSecond));
             bucket.LastRefillTimestamp = currentTimestamp;
 
@@ -265,16 +271,16 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
     private readonly ConcurrentDictionary<string, TokenBucket> _costBuckets = new(StringComparer.OrdinalIgnoreCase);
     private int _costBucketCount;
-    private long _lastCostCleanup = Stopwatch.GetTimestamp();
+    private long _lastCostCleanup;
     private int _isCleaningUpCost;
     private const int MaxCostBuckets = 25000;
 
     public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
     {
-        var currentTimestamp = Stopwatch.GetTimestamp();
+        var currentTimestamp = _timeProvider.GetTimestamp();
 
         if (Volatile.Read(ref _costBucketCount) > 5000 &&
-            Stopwatch.GetElapsedTime(_lastCostCleanup, currentTimestamp) > TimeSpan.FromSeconds(60) &&
+            _timeProvider.GetElapsedTime(_lastCostCleanup, currentTimestamp) > TimeSpan.FromSeconds(60) &&
             Interlocked.CompareExchange(ref _isCleaningUpCost, 1, 0) == 0)
         {
             _lastCostCleanup = currentTimestamp;
@@ -291,7 +297,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
                         {
                             lastRefill = kvp.Value.LastRefillTimestamp;
                         }
-                        if (Stopwatch.GetElapsedTime(lastRefill, Stopwatch.GetTimestamp()) > staleThreshold)
+                        if (_timeProvider.GetElapsedTime(lastRefill, _timeProvider.GetTimestamp()) > staleThreshold)
                         {
                             if (_costBuckets.TryRemove(kvp.Key, out _))
                             {
@@ -327,7 +333,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
         lock (bucket.Lock)
         {
-            var elapsedSeconds = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+            var elapsedSeconds = _timeProvider.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
             bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + (elapsedSeconds * policy.TokenRefillRatePerSecond));
             bucket.LastRefillTimestamp = currentTimestamp;
 
@@ -356,7 +362,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
         if (reservedCost < 0) reservedCost = 0;
         if (actualCost < 0) actualCost = 0;
 
-        var currentTimestamp = Stopwatch.GetTimestamp();
+        var currentTimestamp = _timeProvider.GetTimestamp();
 
         if (!_costBuckets.TryGetValue(key, out var bucket))
         {
@@ -381,7 +387,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
             // SEC-GOV177-04: Monotonic time progression
             if (currentTimestamp > bucket.LastRefillTimestamp)
             {
-                var elapsedSeconds = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+                var elapsedSeconds = _timeProvider.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
                 bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + (elapsedSeconds * policy.TokenRefillRatePerSecond));
                 bucket.LastRefillTimestamp = currentTimestamp;
             }
@@ -400,8 +406,10 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
     public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
     {
         var capacity = policy.MaxTokensCapacity;
-        var refillRate = policy.TokenRefillRatePerSecond > 0 ? policy.TokenRefillRatePerSecond : 1.0;
-        var currentTimestamp = Stopwatch.GetTimestamp();
+        // SEC-GOV175B-F1: project with the real policy rate (never the retry-wait fallback), so the probe
+        // never reports more tokens than the consuming path would grant.
+        var refillRate = Math.Max(0.0, policy.TokenRefillRatePerSecond);
+        var currentTimestamp = _timeProvider.GetTimestamp();
 
         if (!_costBuckets.TryGetValue(key, out var bucket))
         {
@@ -410,7 +418,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
         lock (bucket.Lock)
         {
-            var elapsed = Stopwatch.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
+            var elapsed = _timeProvider.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
             var tokens = Math.Min(capacity, bucket.Tokens + (elapsed * refillRate));
             return Task.FromResult<CallerBucketState?>(new CallerBucketState(capacity, Math.Round(tokens, 2), refillRate));
         }
