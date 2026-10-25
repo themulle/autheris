@@ -283,6 +283,7 @@ public enum DateUnit
     Day,
     Week,
     Month,
+    Quarter,
     Year
 }
 

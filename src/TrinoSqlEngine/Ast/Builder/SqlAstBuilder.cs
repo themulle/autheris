@@ -1063,6 +1063,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         "week" => DateUnit.Week,
         "month" => DateUnit.Month,
         "year" => DateUnit.Year,
+        // #333 (SEC-PGP-04): quarter is accepted for date_trunc only; date_add and INTERVAL keep rejecting it.
+        "quarter" when function == "date_trunc" => DateUnit.Quarter,
         _ => throw Unsupported($"{function} unit '{unit}' (expected second, minute, hour, day, week, month or year)")
     };
 

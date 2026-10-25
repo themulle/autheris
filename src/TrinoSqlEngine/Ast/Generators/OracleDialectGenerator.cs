@@ -270,6 +270,7 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
             DateUnit.Day => "DD",
             DateUnit.Week => "IW",
             DateUnit.Month => "MM",
+            DateUnit.Quarter => "Q",
             DateUnit.Year => "YYYY",
             _ => throw UnsupportedDateFunction("date_trunc", unit, TargetDialect)
         };

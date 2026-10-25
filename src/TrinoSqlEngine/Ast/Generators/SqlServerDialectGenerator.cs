@@ -240,6 +240,31 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                 GenerateExpression(source, ref builder, context);
                 AppendStructural(ref builder, context, "), 1, 1) AS datetimeoffset)");
                 return;
+            case DateUnit.Hour:
+                // #333 (SEC-PGP-05): culture and session independent; no @@DATEFIRST, SET LANGUAGE, FORMAT or string conversions.
+                builder.Append("CAST(DATEADD(hour, DATEPART(hour, ");
+                GenerateExpression(source, ref builder, context);
+                builder.Append("), CAST(CAST(");
+                GenerateExpression(source, ref builder, context);
+                AppendStructural(ref builder, context, " AS date) AS datetime2)) AS datetimeoffset)");
+                return;
+            case DateUnit.Week:
+                // ISO Monday: 1900-01-01 was a Monday, so the distance modulo 7 does not depend on @@DATEFIRST or LANGUAGE.
+                builder.Append("CAST(DATEADD(day, -((DATEDIFF(day, CAST(");
+                AppendConstantFragment(ref builder, context, "'19000101'");
+                builder.Append(" AS date), CAST(");
+                GenerateExpression(source, ref builder, context);
+                AppendStructural(ref builder, context, " AS date)) % 7 + 7) % 7), CAST(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(" AS date)) AS datetimeoffset)");
+                return;
+            case DateUnit.Quarter:
+                builder.Append("CAST(DATEFROMPARTS(YEAR(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append("), (MONTH(");
+                GenerateExpression(source, ref builder, context);
+                AppendStructural(ref builder, context, ") - 1) / 3 * 3 + 1, 1) AS datetimeoffset)");
+                return;
             default:
                 throw UnsupportedDateFunction("date_trunc", unit, TargetDialect);
         }
