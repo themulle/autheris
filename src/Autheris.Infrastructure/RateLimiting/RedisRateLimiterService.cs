@@ -217,7 +217,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedSid = sid.Replace("{", "_").Replace("}", "_");
             var key = (RedisKey)$"{_prefix}ratelimit:sid:{sanitizedSid}";
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600; // 10 minutes idle expiry
 
             var res = (RedisResult[]?)await PreparedPostAuthSidScript.EvaluateAsync(
@@ -279,7 +279,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
 
             var res = (RedisResult[]?)await PreparedCostTokenBucketScript.EvaluateAsync(
@@ -338,7 +338,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
 
             var res = (RedisResult[]?)await PreparedCostTokenBucketSettleScript.EvaluateAsync(
