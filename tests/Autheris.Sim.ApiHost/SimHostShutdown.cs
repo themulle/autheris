@@ -109,7 +109,7 @@ public sealed class SimHostShutdown
     }
 
     /// <summary>A failing stderr must never hide the exit code or skip the cleanup.</summary>
-    private static void SafeWrite(TextWriter writer, string line)
+    public static void SafeWrite(TextWriter writer, string line)
     {
         try
         {

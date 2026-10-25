@@ -139,6 +139,7 @@ public static class SimApiHostMain
                         }
 
                         Console.WriteLine($"sim-api-host: ready on http://127.0.0.1:{port} (profile {options.Profile.ToString().ToLowerInvariant()})");
+                        // A SIGTERM during startup is only recorded; it is honoured here once the host is ready. The whole startup is bounded by stop_host's 30 s SIGKILL.
                         await shutdown.Requested.ConfigureAwait(false);
                     }
                 }
@@ -159,11 +160,18 @@ public static class SimApiHostMain
             {
                 try
                 {
-                    await DisposeFallbackAsync(factory).ConfigureAwait(false);
+                    // SEC-LB-06: bounded. A dispose timeout maps to the documented shutdown timeout code, any other failure to code 4.
+                    await DisposeFallbackAsync(factory).WaitAsync(DisposeTimeout).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    SimHostShutdown.SafeWrite(Console.Error, "sim-api-host: shutdown timed out while disposing after a startup failure");
+                    return SimHostShutdown.ExitShutdownTimeout;
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"sim-api-host: shutdown failed: {SimHostShutdown.Describe(ex)}");
+                    SimHostShutdown.SafeWrite(Console.Error, $"sim-api-host: shutdown failed: {SimHostShutdown.Describe(ex)}");
+                    return SimHostShutdown.ExitShutdownFailed;
                 }
 
                 return startCode;

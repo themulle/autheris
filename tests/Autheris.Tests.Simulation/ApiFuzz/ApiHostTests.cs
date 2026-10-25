@@ -159,6 +159,40 @@ public sealed class ApiHostTests : SimulationTestBase
         host.Stderr.ShouldNotContain("shutdown failed", Case.Insensitive);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    // SEC-LB-02, SEC-LB-05
+    public async Task ApiHost_StartupFailure_PortInUse_ExitsOne_WipesDataDir()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        var dataDir = Path.Combine(Path.GetTempPath(), "sim-startfail-" + Guid.NewGuid().ToString("N"), "data");
+        try
+        {
+            using var process = Process.Start(SimApiHostProcess.StartInfo(["--port", port.ToString(System.Globalization.CultureInfo.InvariantCulture), "--data-dir", dataDir, "--profile", "read"]))!;
+            _ = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            await process.WaitForExitAsync(cts.Token);
+
+            process.ExitCode.ShouldBe(1);
+            (await stderr).ShouldContain("startup failed");
+            Directory.Exists(dataDir).ShouldBeFalse();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(Path.GetDirectoryName(dataDir)!, true);
+            }
+            catch (IOException)
+            {
+                // best effort
+            }
+        }
+    }
+
     private static async Task<CapturedHost> StartCapturingAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "sim-apihost-" + Guid.NewGuid().ToString("N"));
