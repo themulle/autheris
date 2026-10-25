@@ -2,21 +2,21 @@
   "schema": 1,
   "description": "G8 allocation baseline of the SQL compiler (plan 9.3), frozen at the X1 cutover. The legacy numbers were measured on the pre-cutover head (c1a2af2); the legacy rewriter is deleted, so they can never be re-measured and this file is not regenerated on the legacy side. Time is never frozen: it is compared by ratio on the same runner.",
   "capturedOn": "2026-10-11",
-  "machine": "AMD Ryzen 7 8840U, 16 logical cores, 7.5 GB RAM under load, Linux (WSL2), .NET 10.0.12, ShortRun in-process; allocation only; AST side re-frozen 2026-10-11 after the G8 performance work (legacy numbers unchanged)",
+  "machine": "AMD Ryzen 7 8840U, 16 logical cores, 7.5 GB RAM under load, Linux (WSL2), .NET 10.0.12, ShortRun in-process; allocation only; AST side re-frozen 2026-10-11 after the G8 performance work (legacy numbers unchanged; AST allocation re-frozen again 2026-10-25 after WP-B2 (token text read as slices of the statement instead of one string per token in the token guards and the nesting check, lazy syntax-error cache), tightening only: 0.5KB 126969 to 122202, 4KB 1041873 to 946614, 64KB 16173528 to 14614414)",
   "buckets": {
     "0.5KB": {
       "legacyAllocatedBytesPerOp": 105290,
-      "astAllocatedBytesPerOp": 126969,
+      "astAllocatedBytesPerOp": 122202,
       "legacyGen2PerThousandOps": 0
     },
     "4KB": {
       "legacyAllocatedBytesPerOp": 997527,
-      "astAllocatedBytesPerOp": 1041873,
+      "astAllocatedBytesPerOp": 946614,
       "legacyGen2PerThousandOps": 0
     },
     "64KB": {
       "legacyAllocatedBytesPerOp": 15512901,
-      "astAllocatedBytesPerOp": 16173528,
+      "astAllocatedBytesPerOp": 14614414,
       "legacyGen2PerThousandOps": 250
     }
   }

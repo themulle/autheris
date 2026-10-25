@@ -130,6 +130,7 @@ Branch `fix/lane-b-sim-ci-fixes` (from `origin/main` 8cdd91de). No Phase 1 PRD: 
 
 ## Changelog (G-PLAN-REBASE drift log)
 - 2026-10-25: plan written against `8cdd91de`.
+- 2026-10-25 (WP-B2, measured at HEAD `570f9b48`): `Ast` 0.5 KB = 132,683 B/op (matches CI, ratio 1.260), 4 KB = 1,048,685, 64 KB = 16,212,168; the frozen AST values were 126,969 / 1,041,873 / 16,173,528. Drift: the plan assumed a fixed per-engine/per-compile cost of about 5 KB; attribution at HEAD (per-pass thread allocation hooks plus a GC allocation-tick type profile, no bisect) found the engine constructor at 2.9 KB (of which the eager `SyntaxErrorNegativeCache` 1.05 KB), cache key material 3.6 KB, and the dominant parse thread cost of about 90 KB, of which the token guards (`EnsureTokensAreSafe`, `EnsureNestingDepthWithinLimit`) materialized `IToken.Text` as a new string for every token including whitespace. Fix: both passes read the token characters as a slice of the statement (`TokenText`, same characters, no allocation; tokens outside the statement fall back to `IToken.Text`) and the syntax-error cache is created on the first remembered error (`LazyInitializer`, a null cache is a miss on lookup). Result: 0.5 KB 122,202 (ratio 1.161), 4 KB 946,614, 64 KB 14,614,414; baseline AST values re-frozen (tightening only, legacy untouched, threshold untouched).
 
 ## Phase 3 security conditions
 
