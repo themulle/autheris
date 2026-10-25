@@ -135,7 +135,7 @@ public sealed class ParitySqlServerHostFixture : IAsyncLifetime, IParityHost
         (string Name, string Type)[] columns =
         [
             ("id", "integer"), ("region_id", "integer"), ("region", "varchar"), ("product", "varchar"), ("qty", "integer"),
-            ("amount", "decimal"), ("sale_date", "date"), ("sold_at", "timestamp"), ("is_return", "boolean"), ("note", "varchar"),
+            ("amount", "decimal"), ("sale_date", "date"), ("sold_at", "datetime2"), ("is_return", "boolean"), ("note", "varchar"),
         ];
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {

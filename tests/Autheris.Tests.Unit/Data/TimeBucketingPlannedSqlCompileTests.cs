@@ -141,6 +141,16 @@ public sealed class TimeBucketingPlannedSqlCompileTests
         AggregateFailureMapper.ForAggregate(ex)!.Errors[0].Code.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-PGP-02")]
+    public void PlannedBucket_SqlServerTimestampIsRowversion_Throws400()
+    {
+        var ex = Should.Throw<ArgumentException>(() => Plan("SqlServer", "timestamp", "ts", TimeBucketInterval.Day, "UTC"));
+
+        AggregateFailureMapper.ForAggregate(ex)!.Errors[0].Code.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

@@ -36,7 +36,7 @@ public static class TimeBucketCells
         // Rows 13-15 are Sat/Sun/Mon 2025-03-01..03 at 00:00Z. In UTC the Monday row opens week 2025-03-03 (2025-02-24:2, 2025-03-03:1); in
         // America/New_York it is Sunday 2025-03-02 19:00, so all three rows fall into week 2025-02-24.
         new("tb_isoweek_zone_shift_new_york", "id: { in: [13, 14, 15] }", "sold_at", "WEEK", "America/New_York", [["2025-02-24", 3]]),
-        new("tb_hour_sold_at", "id: { in: [1, 8] }", "sold_at", "HOUR", "UTC", [["2023-03-15T10:00:00", 1], ["2024-07-20T15:00:00", 1]]),
+        new("tb_hour_sold_at", "id: { in: [1, 8] }", "sold_at", "HOUR", "UTC", [["2023-03-15T10:00:00.0000000Z", 1], ["2024-07-20T15:00:00.0000000Z", 1]]),
     ];
 
     public static IEnumerable<object[]> Ids() => All.Select(c => new object[] { c.Id });
