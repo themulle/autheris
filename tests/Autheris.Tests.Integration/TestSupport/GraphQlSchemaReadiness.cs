@@ -30,13 +30,29 @@ internal static class GraphQlSchemaReadiness
         // Subscribe before raising the change so no Created event is missed.
         var created = new SemaphoreSlim(0);
         using var subscription = events.Subscribe(new CreatedObserver(created));
-        await module.CheckForCatalogChangesAsync(CancellationToken.None);
-
         using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            await module.CheckForCatalogChangesAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException($"The GraphQL catalog check did not finish within {timeout.TotalSeconds:0} s.");
+        }
+
         List<string> missing;
         while (true)
         {
-            var executor = await provider.GetExecutorAsync(null, cts.Token);
+            IRequestExecutor executor;
+            try
+            {
+                executor = await provider.GetExecutorAsync(null, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new TimeoutException($"The GraphQL executor was not built within {timeout.TotalSeconds:0} s.");
+            }
+
             var fields = executor.Schema.QueryType.Fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
             missing = requiredQueryFields.Where(f => !fields.Contains(f)).ToList();
             if (missing.Count == 0)
