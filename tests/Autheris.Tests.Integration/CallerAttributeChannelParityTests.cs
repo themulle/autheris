@@ -61,6 +61,9 @@ INSERT INTO air_broken SELECT * FROM air1;";
             cmd.ExecuteNonQuery();
         }
 
+        protected override IReadOnlyCollection<string> RequiredGraphQlFields =>
+            [.. base.RequiredGraphQlFields, "default_main_air_broken"];
+
         protected override async Task SeedExtraGovernanceAsync(IGovernanceRepository repo)
         {
             var air1 = (await repo.GetTableMetadataAsync(Air1Id))!;
