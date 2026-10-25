@@ -179,7 +179,7 @@ public sealed class AggregateResultMapperTests
     [InlineData(AggregateFunction.Max)]
     public void Map_DateOnlyAggregate_MapsToMidnightUtcLikeTheDateTextOfOtherEngines(AggregateFunction fn)
     {
-        // Npgsql yields System.DateOnly for a PostgreSQL DATE; SQLite yields the text "2026-03-04".
+        // Npgsql 10.0.3 returns System.DateOnly from GetValue for a PostgreSQL DATE (proven with a protocol-level probe); SQLite yields the text "2026-03-04".
         var saleDate = Col("sale_date", CatalogFieldType.DateTime);
         var expected = new DateTimeOffset(2026, 3, 4, 0, 0, 0, TimeSpan.Zero);
 
@@ -203,6 +203,7 @@ public sealed class AggregateResultMapperTests
         dto.Groups.Single().Key["sale_date"].ShouldBe("2026-03-04T00:00:00.0000000Z");
     }
 
+    [Trait("Category", "Security")]
     [Fact]
     public void Map_TimeOnlyForDateTimeAggregate_StillRaisesTypeMismatch()
     {
