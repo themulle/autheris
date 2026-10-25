@@ -228,7 +228,7 @@ jobs:
           dotnet restore tests/Autheris.Tests.Simulation --locked-mode
 
       - name: Replay committed corpus and findings
-        run: dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Fuzz" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
+        run: dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Simulation.Meta.FuzzHarnessTests" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
 
       - name: Install AFL++ (distro package, version logged)
         run: |
@@ -374,7 +374,7 @@ jobs:
           dotnet restore tests/Autheris.Tests.Simulation --locked-mode
 
       - name: Replay committed corpus and findings
-        run: dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Fuzz" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
+        run: dotnet test tests/Autheris.Tests.Simulation -c Release --no-restore --filter "FullyQualifiedName~Simulation.Meta.FuzzHarnessTests" --logger "trx" --results-directory "$AUTHERIS_SIM_REPORT_DIR/trx" --verbosity normal
 
       - name: Install AFL++ (distro package, version logged)
         run: |
