@@ -4,7 +4,7 @@ using System;
 
 /// <summary>
 /// Single switch for everything Autheris ships as sample content: the seeded demo catalog (finance/hr/... tables and data
-/// owners), the demo GraphQL types (<c>finance</c>, <c>hr</c>, <c>InvoiceRecord</c>), the demo MCP tools
+/// owners), the demo MCP tools
 /// (<c>query_customers</c>, <c>query_invoices</c>) and the built-in golden queries.
 /// </summary>
 public interface IDemoDataSwitch

@@ -544,8 +544,7 @@ public static class GatewayServiceCollectionExtensions
 
     public static IServiceCollection AddGatewayGraphQL(
         this IServiceCollection services,
-        GatewayOptions gatewayOptions,
-        bool demoDataEnabled = true)
+        GatewayOptions gatewayOptions)
     {
         // RR-L3-05: In production without explicit opt-in, relaxed limits are capped to moderate thresholds
         var maxDepth = gatewayOptions.AreQueryLimitsRelaxed
@@ -610,14 +609,6 @@ public static class GatewayServiceCollectionExtensions
                 : TrustedDocumentStore.LoadFromDirectory(gatewayOptions.GraphQL.TrustedDocumentsDirectory, allowEmpty: gatewayOptions.GraphQL.AppScopedTrustedDocuments.Enabled);
             services.AddSingleton(trustedDocuments);
             gqlBuilder.UseRequest<TrustedDocumentsOnlyMiddleware>();
-        }
-
-        if (demoDataEnabled)
-        {
-            // Sample content (finance/hr root fields, InvoiceRecord): only with demo data enabled
-            gqlBuilder
-                .AddTypeExtension<DemoQueryExtensions>()
-                .AddTypeExtension<InvoiceRecordExtensions>();
         }
 
         gqlBuilder
