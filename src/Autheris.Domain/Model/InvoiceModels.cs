@@ -1,13 +1,5 @@
 namespace Autheris.Domain.Model;
 
-public class InvoiceRecord
-{
-    public string? Id { get; init; }
-    public decimal? Amount { get; init; }
-    public string? Vendor { get; init; }
-    public string? Email { get; init; }
-}
-
 public class InvoiceItemRecord
 {
     public string? Id { get; init; }

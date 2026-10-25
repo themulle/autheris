@@ -285,7 +285,7 @@ public sealed class DbtHealthExecutionMiddleware
                         }
                     }
 
-                    // Traverse nested selections (e.g. finance { invoices { ... } })
+                    // Traverse nested selections (e.g. table { jsonRows } under fragments)
                     if (fieldNode.SelectionSet != null)
                     {
                         CollectModelsFromSelections(fieldNode.SelectionSet.Selections, models, fragments, visited);

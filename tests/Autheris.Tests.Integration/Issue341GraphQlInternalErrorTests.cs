@@ -54,8 +54,6 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         "{ tableConsumers(domain: \"\", schema: \"\", tableName: \"\") { __typename } }",
         "{ gdprDataDisclosureReport(domain: \"\", schema: \"\", tableName: \"\", subjectSid: \"\") { __typename } }",
         "{ exportGdprDataDisclosureReportPdfBase64(domain: \"\", schema: \"\", tableName: \"\", subjectSid: \"\") }",
-        "{ finance { invoices(first: 0, after: 0) { jsonRows } } }",
-        "{ hr { employees(first: 0, after: 0) { jsonRows } } }",
     };
 
     public static TheoryData<string> UnknownIdMutations => new()

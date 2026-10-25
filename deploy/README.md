@@ -174,8 +174,7 @@ Der Lastgenerator bildet ein realistisches Anwendungsszenario ab:
   - GraphQL-Query: `table(domain: "finance", name: "invoices", schema: "public", first: 10..50, after: 0..500)`.
   - Testet RLS-Pushdown (`WHERE department = 'Finance'`) und dynamisches Column-Masking (`email`, `iban`, `salary`).
 - **20 % Komplexe Abfragen & Relationen**:
-  - GraphQL-Query: `finance.invoicesWithItems(first: 5..15) { id, amount, vendor, email, items { productName, price, sensitiveNote } }`.
-  - Nutzt GreenDonut `BatchDataLoader` zur Vermeidung des N+1 Problems bei 1:N-Relationen.
+  - GraphQL-Query: `table(domain: "finance", name: "invoices", first: 5..15) { tableName, totalCount, jsonRows }` mit Column-Masking.
   - Dynamische Katalogabfragen (`catalog { domain, schema, tableName, columns }`) mit Rollen-Filterung.
 - **10 % Mutationen & Idempotenz**:
   - Consent-Antragsflow (`requestTableAccess(...)`).

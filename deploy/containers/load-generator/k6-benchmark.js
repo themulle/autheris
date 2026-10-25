@@ -233,24 +233,15 @@ export default function () {
     const queryChoice = Math.random();
 
     if (queryChoice < 0.5) {
-      // Nested Items DataLoader Query
+      // Paged table query with masking
       const first = randInt(5, 15);
       const payload = JSON.stringify({
         query: `
-          query InvoicesWithItems($first: Int) {
-            finance {
-              invoicesWithItems(first: $first) {
-                id
-                amount
-                vendor
-                email
-                items {
-                  id
-                  productName
-                  price
-                  sensitiveNote
-                }
-              }
+          query InvoicesPaged($first: Int) {
+            table(domain: "finance", name: "invoices", first: $first) {
+              tableName
+              totalCount
+              jsonRows
             }
           }
         `,
@@ -260,7 +251,7 @@ export default function () {
       const res = http.post(TARGET_URL, payload, { headers: baseHeaders });
       check(res, {
         'complex query status is 200': (r) => r.status === 200,
-        'complex items present': (r) => r.body.includes('invoicesWithItems'),
+        'complex items present': (r) => r.body.includes('jsonRows'),
       });
       parseGraphQLResponse(res, latencyComplex);
     } else {
