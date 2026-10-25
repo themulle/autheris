@@ -64,8 +64,8 @@ jobs:
       - name: Validate inputs
         run: |
           set -euo pipefail
-          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
-            echo "::error::job input must be one of all, corpus, api, parser"
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser|weekly-corpus|weekly-parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser, weekly-corpus, weekly-parser"
             exit 1
           fi
           if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
@@ -133,8 +133,8 @@ jobs:
       - name: Validate inputs
         run: |
           set -euo pipefail
-          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
-            echo "::error::job input must be one of all, corpus, api, parser"
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser|weekly-corpus|weekly-parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser, weekly-corpus, weekly-parser"
             exit 1
           fi
           if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
@@ -210,8 +210,8 @@ jobs:
       - name: Validate inputs
         run: |
           set -euo pipefail
-          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
-            echo "::error::job input must be one of all, corpus, api, parser"
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser|weekly-corpus|weekly-parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser, weekly-corpus, weekly-parser"
             exit 1
           fi
           if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
@@ -287,8 +287,8 @@ jobs:
       - name: Validate inputs
         run: |
           set -euo pipefail
-          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
-            echo "::error::job input must be one of all, corpus, api, parser"
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser|weekly-corpus|weekly-parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser, weekly-corpus, weekly-parser"
             exit 1
           fi
           if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
@@ -356,8 +356,8 @@ jobs:
       - name: Validate inputs
         run: |
           set -euo pipefail
-          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser)$ ]]; then
-            echo "::error::job input must be one of all, corpus, api, parser"
+          if ! [[ -z "$SIM_JOB_INPUT" || "$SIM_JOB_INPUT" =~ ^(all|corpus|api|parser|weekly-corpus|weekly-parser)$ ]]; then
+            echo "::error::job input must be one of all, corpus, api, parser, weekly-corpus, weekly-parser"
             exit 1
           fi
           if ! [[ -z "$SIM_SEED_INPUT" || "$SIM_SEED_INPUT" =~ ^[0-9]{1,10}$ ]]; then
