@@ -28,3 +28,12 @@ The test consumes 150 of 1000 tokens with rate `0` and expects every probe to re
 ## Verification
 
 Old test looped under CPU load to reproduce; new and changed tests looped 200x under the same load plus the full unit suite.
+
+## Addendum: flaky `T_PROC152I2_14_UndeclaredSqlState_DbException_StaysOn500Path_NoMapCode`
+
+Seen on PR #355 CI (passes on `main`). `AssertNoDbText` asserts that no log message or state contains the database-text marker `4711`. `GovernedProcedureExecutionService` logs a trace id (`Activity.Current?.TraceId`, else `Guid.NewGuid().ToString("N")`): 32 random hex characters, which contain `4711` with a probability of about 29/65536 per id. The log in CI read `... (number (null), trace 4...`: the trace id itself contained the marker. Root cause is in the test: the leak marker is a string that legitimate random hex output can contain.
+
+- **F4 (test).** Leak markers in the procedure tests become collision-proof: a value marker that contains characters outside `[0-9a-f-]` (so no hex trace id, GUID or hash can contain it), asserted in full, plus the unchanged `dbo.Secret` table marker. Assertions keep their scope (every log message, every log state, audit details, exception and mapped messages).
+- **F5 (regression).** A deterministic test runs the failure path under an `Activity` whose trace id contains the old marker `4711` and shows that the assertions still hold (red with the old marker, green with the new one).
+- Other unit tests asserting `ShouldNotContain("4711")` are audited: where the checked text can contain a random hex id, the same marker change applies; otherwise they stay unchanged.
+- `SEC-PROC-F4`: no assertion is removed or narrowed; the marker change only removes false positives from random identifiers.
