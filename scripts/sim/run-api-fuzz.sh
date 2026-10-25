@@ -101,12 +101,25 @@ wait_for_file() {
 FAILED=0
 HOST_PID=""
 HOST_STATUS=0
+HOST_LOG=""
+
+# SEC-LB-04: exact integer match, no range and no ">128" rule. 0 is the graceful stop; 143 (128+SIGTERM) is accepted only by stop_host after
+# it sent SIGTERM itself to a live child. Everything else (1-5, 134, 137, empty, non-numeric) fails closed.
+host_exit_ok() {
+  case "${1:-}" in
+    0 | 143) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 stop_host() {
-  # SIGTERM must end the host with exit code 0 (graceful shutdown, data dir wiped). Any other code is a crash or abort and keeps the job red.
+  # SIGTERM must end the host gracefully (data dir wiped): exit 0, or 143 when the runtime default SIGTERM disposition won the race with the
+  # host's signal handler (warned, REQ-LB-06). Any other code is a crash or abort and keeps the job red.
   HOST_STATUS=0
+  local sent=0
   if [ -n "$HOST_PID" ]; then
     if kill -0 "$HOST_PID" 2>/dev/null; then
-      kill -TERM "$HOST_PID" 2>/dev/null || true
+      kill -TERM "$HOST_PID" 2>/dev/null && sent=1
       local i
       for ((i = 0; i < 30; i++)); do
         kill -0 "$HOST_PID" 2>/dev/null || break
@@ -117,9 +130,17 @@ stop_host() {
       echo "run-api-fuzz: the sim host had already exited before it was stopped" >&2
       HOST_STATUS=1
     fi
-    wait "$HOST_PID" 2>/dev/null || HOST_STATUS=$?
-    if [ "$HOST_STATUS" -ne 0 ]; then
-      echo "run-api-fuzz: the sim host exited with code $HOST_STATUS (see $RUNNER_TEMP/sim-host-*.log)" >&2
+    if [ "$HOST_STATUS" -eq 0 ]; then
+      wait "$HOST_PID" 2>/dev/null || HOST_STATUS=$?
+    else
+      wait "$HOST_PID" 2>/dev/null || true
+    fi
+    if [ "$HOST_STATUS" -eq 143 ] && [ "$sent" -eq 1 ]; then
+      echo "run-api-fuzz: warning: the sim host ended with 143 (default SIGTERM disposition, outside the handler window)" >&2
+    fi
+    if [ "$HOST_STATUS" -ne 0 ] && { [ "$sent" -ne 1 ] || ! host_exit_ok "$HOST_STATUS"; }; then
+      echo "run-api-fuzz: the sim host exited with code $HOST_STATUS" >&2
+      [ -z "$HOST_LOG" ] || safe_tail "$HOST_LOG" 40
       FAILED=1
     fi
   fi
@@ -134,6 +155,7 @@ start_host() {
   rm -rf "$DATA_DIR" "$READY_FILE"
   dotnet "$HOST_DLL" --port "$PORT" --data-dir "$DATA_DIR" --ready-file "$READY_FILE" --profile "$profile" >"$RUNNER_TEMP/sim-host-$profile.log" 2>&1 &
   HOST_PID=$!
+  HOST_LOG="$RUNNER_TEMP/sim-host-$profile.log"
   if ! wait_for_file "$READY_FILE" 180; then
     safe_tail "$RUNNER_TEMP/sim-host-$profile.log" 40
     die "the sim host ($profile) did not become ready"
@@ -238,6 +260,12 @@ self_test() {
   strip_servers "$tmp/in.json" "$tmp/out.json" || { rm -rf "$tmp"; echo "self-test: strip failed" >&2; return 1; }
   if grep -q 'servers\|evil' "$tmp/out.json"; then rm -rf "$tmp"; echo "self-test: servers entry survived" >&2; return 1; fi
   rm -rf "$tmp"
+  for ok in 0 143; do
+    host_exit_ok "$ok" || { echo "self-test: host exit code rejected: $ok" >&2; return 1; }
+  done
+  for bad in 1 2 3 4 5 134 137 142 144 255 "" abc "0 " "01" "-1" "143x"; do
+    if host_exit_ok "$bad"; then echo "self-test: host exit code accepted: '$bad'" >&2; return 1; fi
+  done
   echo "run-api-fuzz: self-test passed"
 }
 

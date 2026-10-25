@@ -313,6 +313,10 @@ internal static class AggregateValueConverter
                     _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
                 });
                 return true;
+            case DateOnly date:
+                // Npgsql yields DateOnly for a PostgreSQL DATE: midnight UTC, the same value as the ISO date text of SQLite.
+                value = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
+                return true;
             case string s:
                 return DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out value);
             default: value = default; return false;

@@ -33,6 +33,7 @@
        (the host project needs the test-auth build switch, which this project never sets, SEC-SIM-03). -->
   <ItemGroup>
     <Compile Include="..\Autheris.Sim.ApiHost\SimApiHostOptions.cs" Link="ApiFuzz\Linked\SimApiHostOptions.cs" />
+    <Compile Include="..\Autheris.Sim.ApiHost\SimHostShutdown.cs" Link="ApiFuzz\Linked\SimHostShutdown.cs" />
   </ItemGroup>
 
   <ItemGroup>
