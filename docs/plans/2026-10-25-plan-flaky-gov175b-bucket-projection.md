@@ -37,3 +37,4 @@ Seen on PR #355 CI (passes on `main`). `AssertNoDbText` asserts that no log mess
 - **F5 (regression).** A deterministic test runs the failure path under an `Activity` whose trace id contains the old marker `4711` and shows that the assertions still hold (red with the old marker, green with the new one).
 - Other unit tests asserting `ShouldNotContain("4711")` are audited: where the checked text can contain a random hex id, the same marker change applies; otherwise they stay unchanged.
 - `SEC-PROC-F4`: no assertion is removed or narrowed; the marker change only removes false positives from random identifiers.
+- 2026-10-25 (Phase 4): F4/F5 implemented in `ProcedureLimitsInc2Tests` and `ProcedureSecurityInc1Tests` (marker `zq4711qz`); the regression `..._SEC_PROC_F4_TraceIdContainingOldMarker_...` ran red with the old marker. Audit: Planner, KeySetLoader, ShadowingRedactionMisc14 and KeySetEntry tests check fixed or constant text and stay unchanged.
