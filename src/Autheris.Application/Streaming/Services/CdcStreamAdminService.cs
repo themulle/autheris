@@ -20,7 +20,8 @@ public enum CdcResyncStatus
 {
     Done = 1,
     NotFound = 2,
-    Unavailable = 3
+    Unavailable = 3,
+    KeyUnavailable = 4
 }
 
 public sealed record CdcResyncOutcome(CdcResyncStatus Status, int DiscardedEvents);
@@ -59,16 +60,35 @@ public sealed class CdcStreamAdminService(
         var discarded = 0;
         if (discardUnreadable)
         {
-            var unreadable = new List<string>();
-            foreach (var key in await keyStore.GetKeysAsync(id, ct).ConfigureAwait(false))
+            // INF-13 (A3-S1/S2): classify every DEK first, discard only when each one is proven readable or permanently unreadable.
+            if (!keyring.IsActiveKekAvailable())
             {
-                try
+                return new CdcResyncOutcome(CdcResyncStatus.KeyUnavailable, 0);
+            }
+
+            IReadOnlyList<CdcWrappedKey> keys;
+            try
+            {
+                keys = await keyStore.GetKeysAsync(id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return new CdcResyncOutcome(CdcResyncStatus.KeyUnavailable, 0);
+            }
+
+            var unreadable = new List<string>();
+            foreach (var key in keys)
+            {
+                ct.ThrowIfCancellationRequested();
+                switch (keyring.ClassifyDek(key, ct))
                 {
-                    System.Security.Cryptography.CryptographicOperations.ZeroMemory(await keyring.GetDekAsync(id, key.DekId, ct).ConfigureAwait(false));
-                }
-                catch (CdcStreamKeyUnavailableException)
-                {
-                    unreadable.Add(key.DekId);
+                    case CdcDekClassification.Readable:
+                        break;
+                    case CdcDekClassification.Unreadable:
+                        unreadable.Add(key.DekId);
+                        break;
+                    default:
+                        return new CdcResyncOutcome(CdcResyncStatus.KeyUnavailable, 0);
                 }
             }
 

@@ -54,6 +54,77 @@ public sealed class Issue341ErrorMappingTests
         result.Message.ShouldNotContain("finance");
     }
 
+    private const string Canary = "column secret_canary_col in table hr.dbo.salaries";
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void GatewayInvalidQueryException_MapsToInvalidQuery_FixedMessage_NoInputEcho(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage(Canary).SetException(new Autheris.Domain.Exceptions.GatewayInvalidQueryException(Canary))
+            .SetExtension("detail", Canary).Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("INVALID_QUERY");
+        result.Message.ShouldNotContain("secret_canary_col");
+        result.Message.ShouldNotContain("salaries");
+        result.Extensions!.ContainsKey("detail").ShouldBeFalse();
+        result.Extensions.Values.ShouldNotContain(v => v != null && v.ToString()!.Contains("secret_canary_col"));
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void GatewayPageRangeException_MapsToInvalidQuery_PageRangeFixedMessage(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage("x").SetException(new Autheris.Domain.Exceptions.GatewayPageRangeException()).Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("INVALID_QUERY");
+        result.Message.ShouldBe(Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage);
+        // A1-S4: the enumeration shield still recognizes the page-range error.
+        GraphQlEnumerationShieldMiddleware.IsPageRangeError(result).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void GatewayNotImplementedException_MapsToNotImplemented_FixedMessage(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage(Canary)
+            .SetException(new Autheris.Domain.Exceptions.GatewayNotImplementedException("No executor for DataSourceType 'LakehouseDelta'. " + Canary)).Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("NOT_IMPLEMENTED");
+        result.Message.ShouldBe("The requested feature or data source capability is not implemented.");
+        result.Message.ShouldNotContain("LakehouseDelta");
+    }
+
+    [Fact]
+    public void NotImplementedCode_IsWhitelisted_WithFixedMessage()
+    {
+        var error = ErrorBuilder.New().SetMessage(Canary).SetCode("NOT_IMPLEMENTED").SetException(new InvalidOperationException(Canary)).Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Code.ShouldBe("NOT_IMPLEMENTED");
+        result.Message.ShouldBe("The requested feature or data source capability is not implemented.");
+    }
+
+    [Fact]
+    public void TreePathGraphQlException_InvalidQuery_MessageUnchanged()
+    {
+        var error = ErrorBuilder.New().SetMessage("The page size or offset is out of range.").SetCode("INVALID_QUERY").Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Code.ShouldBe("INVALID_QUERY");
+        result.Message.ShouldBe("The page size or offset is out of range.");
+    }
+
     [Fact]
     public void WebSqlPolicyViolation_IsStillMasked()
     {
