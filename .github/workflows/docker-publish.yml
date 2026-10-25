@@ -201,6 +201,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Publish Autheris
+        run: |
+          dotnet publish src/Autheris.Api/Autheris.Api.csproj \
+            -c Release \
+            --no-restore \
+            -p:AutherisIncludeTestAuth=false \
+            -o ./dist/publish
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
