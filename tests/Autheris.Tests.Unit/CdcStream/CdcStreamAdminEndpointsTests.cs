@@ -172,6 +172,63 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
         await _auditRepo.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
     }
 
+    private CdcStreamAdminService DiscardService(ICdcStreamStore store) => new(store, _keys, _keyring, _restarter);
+
+    [Fact]
+    public async Task Resync_KeyUnavailable_Returns503StableCode_AuditsRefusal()
+    {
+        _keks.Add("k2", active: false).MakeUnavailable("k2");
+        _keys.Keys.Add(new CdcWrappedKey(Id, "transient", CdcKeyPurpose.Payload, "k2", new byte[60], DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        var store = Substitute.For<ICdcStreamStore>();
+        store.GetStreamAsync(Id, Arg.Any<CancellationToken>()).Returns(_store.Descriptor);
+
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("GovernanceAdmin"), DiscardService(store), Audit(), default);
+
+        Status(result).ShouldBe(503);
+        JsonSerializer.Serialize(((IValueHttpResult)result).Value).ShouldBe("{\"error\":\"CDC_KEY_UNAVAILABLE\"}");
+        await store.DidNotReceiveWithAnyArgs().DiscardUnreadableAsync(default, default!, default);
+        await _restarter.DidNotReceiveWithAnyArgs().RestartAsync(default, default);
+        await _auditRepo.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.CdcStreamResync
+                && e.DetailsJson!.Contains("\"refused\":\"CDC_KEY_UNAVAILABLE\"")
+                && e.DetailsJson.Contains("\"discardedEvents\":0")
+                && e.DetailsJson.Contains("\"restarted\":false")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Resync_Discard_ResponseAndAudit_ContainNoKekIdOrExceptionText()
+    {
+        _keks.Add("canary-kek-id", active: false).ThrowFor("canary-kek-id", "canary-exception-text");
+        _keys.Keys.Add(new CdcWrappedKey(Id, "canary-dek-id", CdcKeyPurpose.Payload, "canary-kek-id", new byte[60], DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        var store = Substitute.For<ICdcStreamStore>();
+        store.GetStreamAsync(Id, Arg.Any<CancellationToken>()).Returns(_store.Descriptor);
+
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("GovernanceAdmin"), DiscardService(store), Audit(), default);
+
+        var body = JsonSerializer.Serialize(((IValueHttpResult)result).Value);
+        var audit = (string)_auditRepo.ReceivedCalls().Select(c => c.GetArguments()[0]).OfType<AuditLogEntry>().Single().DetailsJson!;
+        foreach (var canary in new[] { "canary-kek-id", "canary-exception-text", "canary-dek-id" })
+        {
+            body.ShouldNotContain(canary);
+            audit.ShouldNotContain(canary);
+        }
+    }
+
+    [Fact]
+    public async Task Resync_Discard_KeyUnavailable_WrongConfirmStreamId_RejectedBeforeClassification()
+    {
+        var keyStore = Substitute.For<ICdcStreamKeyStore>();
+        var store = Substitute.For<ICdcStreamStore>();
+        var service = new CdcStreamAdminService(store, keyStore, _keyring, _restarter);
+
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, "fedcba9876543210fedcba9876543210", Ctx("GovernanceAdmin"), service, Audit(), default);
+
+        Status(result).ShouldBe(400);
+        await keyStore.DidNotReceiveWithAnyArgs().GetKeysAsync(default, default);
+        await _auditRepo.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
+    }
+
     [Fact]
     public async Task RotateImageKey_CreatesNewImageKey_AndAudits()
     {

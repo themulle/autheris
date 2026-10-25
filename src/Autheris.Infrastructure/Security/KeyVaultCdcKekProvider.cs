@@ -57,31 +57,38 @@ public sealed class KeyVaultCdcKekProvider : ICdcKeyEncryptionKeyProvider
         }
     }
 
-    public bool TryGetKek(string kekId, out ReadOnlyMemory<byte> key)
+    public bool TryGetKek(string kekId, out ReadOnlyMemory<byte> key) => ResolveKek(kekId, out key) == CdcKekLookup.Available;
+
+    public CdcKekLookup ResolveKek(string kekId, out ReadOnlyMemory<byte> key)
     {
         key = default;
         if (string.IsNullOrEmpty(kekId))
         {
-            return false;
+            return CdcKekLookup.Unavailable;
         }
 
         var enc = _options.CurrentValue.CdcStream.Encryption;
         if (enc.Keks.Count == 0 && _environment.IsDevelopment() && string.Equals(kekId, EphemeralKekId, StringComparison.Ordinal))
         {
             key = Ephemeral();
-            return true;
+            return CdcKekLookup.Available;
         }
 
         if (_cache.TryGetValue(kekId, out var cached))
         {
             key = cached;
-            return true;
+            return CdcKekLookup.Available;
         }
 
         var reference = enc.Keks.FirstOrDefault(k => string.Equals(k.Id, kekId, StringComparison.Ordinal));
-        if (reference is null || IsReservedSecret(reference.SecretRef))
+        if (reference is null)
         {
-            return false;
+            return CdcKekLookup.Unknown;
+        }
+
+        if (IsReservedSecret(reference.SecretRef))
+        {
+            return CdcKekLookup.Unavailable;
         }
 
         try
@@ -90,17 +97,17 @@ public sealed class KeyVaultCdcKekProvider : ICdcKeyEncryptionKeyProvider
             var secret = _secrets.GetSecretBytes(reference.SecretRef);
             if (secret is not { Length: >= MinSecretBytes })
             {
-                return false;
+                return CdcKekLookup.Unavailable;
             }
 
             var derived = HKDF.DeriveKey(HashAlgorithmName.SHA256, secret, 32, salt: [], info: HkdfInfo);
             key = _cache.GetOrAdd(kekId, derived);
-            return true;
+            return CdcKekLookup.Available;
         }
         catch (Exception)
         {
             // Unresolvable key: unavailable (fail closed). The exception text may reference the secret name, so it is not surfaced.
-            return false;
+            return CdcKekLookup.Unavailable;
         }
     }
 
