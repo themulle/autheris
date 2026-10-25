@@ -1,11 +1,4 @@
 {
   "v": 1,
-  "gaps": [
-    {
-      "id": "SIM-GAP-101",
-      "kind": "SchemaNonConformance",
-      "class": "ST108 Response violates schema | null is not of type '?'",
-      "draft": "SIM-GAP-101.md"
-    }
-  ]
+  "gaps": []
 }
