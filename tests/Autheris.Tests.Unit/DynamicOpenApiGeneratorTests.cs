@@ -153,6 +153,7 @@ public sealed class DynamicOpenApiGeneratorTests
     {
         // A4-S1: the generator takes no caller, consent or masking input, so the schema of a table must not depend
         // on column sensitivity or metadata that drives masking (Mask / NULLIFY rules); every non-key column is nullable.
+        // Structural test: it varies only IsSensitive on all non-key columns (plain vs. sensitive tables) and compares the emitted types.
         var plain = CreateSampleTables();
         var masked = CreateSampleTables();
         masked[0] = WithColumns(masked[0], [.. masked[0].Columns.Select(c => c.ColumnName == "id" ? c : new TableColumn { ColumnName = c.ColumnName, DataType = c.DataType, IsSensitive = true })]);

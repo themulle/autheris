@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using HotChocolate;
 using HotChocolate.Execution;
@@ -18,6 +19,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     }
 
     private const string NotImplementedMessage = "The requested feature or data source capability is not implemented.";
+
+    private static IError MapGatewayOutcome(IError error, string message, string code) =>
+        error.WithExtensions(ImmutableDictionary<string, object?>.Empty).WithMessage(message).WithCode(code);
 
     private static readonly HashSet<string> WhitelistedSafeCodes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -213,17 +217,17 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayPageRangeException)
         {
             gatewayOutcome = true;
-            error = error.WithExtensions(System.Collections.Immutable.ImmutableDictionary<string, object?>.Empty).WithMessage(Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage).WithCode("INVALID_QUERY");
+            error = MapGatewayOutcome(error, Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage, "INVALID_QUERY");
         }
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayInvalidQueryException)
         {
             gatewayOutcome = true;
-            error = error.WithExtensions(System.Collections.Immutable.ImmutableDictionary<string, object?>.Empty).WithMessage("The query is invalid.").WithCode("INVALID_QUERY");
+            error = MapGatewayOutcome(error, "The query is invalid.", "INVALID_QUERY");
         }
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayNotImplementedException)
         {
             gatewayOutcome = true;
-            error = error.WithExtensions(System.Collections.Immutable.ImmutableDictionary<string, object?>.Empty).WithMessage(NotImplementedMessage).WithCode("NOT_IMPLEMENTED");
+            error = MapGatewayOutcome(error, NotImplementedMessage, "NOT_IMPLEMENTED");
         }
 
         // GQL-17: ReportMasked (CatalogGraphQlTypeModule) code is matched exactly (ordinal) so MASKED_COLUMN or "masked" stay masked.

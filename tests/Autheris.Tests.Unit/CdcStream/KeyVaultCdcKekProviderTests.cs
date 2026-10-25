@@ -77,6 +77,7 @@ public sealed class KeyVaultCdcKekProviderTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public void ResolveKek_SecretProviderThrows_Unavailable()
     {
         _secrets.GetSecretBytes("boom").Returns(_ => throw new InvalidOperationException("vault down"));
@@ -84,6 +85,7 @@ public sealed class KeyVaultCdcKekProviderTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public void ResolveKek_UnknownId_Unknown()
     {
         _secrets.GetSecretBytes("s1").Returns(RandomNumberGenerator.GetBytes(32));
@@ -94,6 +96,7 @@ public sealed class KeyVaultCdcKekProviderTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public void ResolveKek_ShortSecret_Unavailable()
     {
         _secrets.GetSecretBytes("short").Returns(new byte[16]);

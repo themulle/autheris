@@ -323,6 +323,7 @@ public sealed class CdcStreamKeyring : IDisposable
                     dek, DekAad(key.StreamId, key.Purpose, key.DekId));
                 return CdcDekClassification.Readable;
             }
+            // Residual risk A3-S6: a rotated or stale secret of valid length also yields Unreadable; gated by discardUnreadable + confirmStreamId.
             catch (AuthenticationTagMismatchException)
             {
                 return CdcDekClassification.Unreadable;
