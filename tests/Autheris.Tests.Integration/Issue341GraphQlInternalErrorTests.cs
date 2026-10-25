@@ -181,6 +181,36 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         unbacked.Messages.ShouldBe(["Access denied."]);
     }
 
+    [Fact]
+    public async Task LegacyTable_SourceTypeWithoutExecutor_IsNotImplemented_NotInternalError()
+    {
+        var id = new Autheris.Domain.Common.TableIdentifier("default", "main", "lakeorders");
+        using var host = Create();
+        using (var scope = host.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>();
+            var tableId = Guid.NewGuid();
+            await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+            {
+                Table = new Autheris.Domain.Model.Table
+                {
+                    Id = tableId, DisplayName = "lakeorders", TableName = "lakeorders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default",
+                    IsActive = true, DataSourceType = (Autheris.Domain.Model.DataSourceType)99, // no executor registered for this type
+                },
+                Identifier = id,
+                Columns = [new Autheris.Domain.Model.TableColumn { TableId = tableId, ColumnName = "id", DataType = "integer" }],
+            });
+        }
+
+        var result = await SendAsync("{ table(domain: \"default\", name: \"lakeorders\", schema: \"main\") { jsonRows } }", "Reader", host);
+
+        result.Codes.ShouldBe(["NOT_IMPLEMENTED"], result.Body);
+        result.Messages.ShouldBe(["The requested feature or data source capability is not implemented."]);
+        result.Body.ShouldNotContain("DataSourceType");
+        result.Body.ShouldNotContain("executor");
+        result.Body.ShouldNotContain("INTERNAL_SERVER_ERROR");
+    }
+
     private WebApplicationFactory<Program> Create(bool bypassConsent = true) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {

@@ -17,6 +17,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         _logger = logger;
     }
 
+    private const string NotImplementedMessage = "The requested feature or data source capability is not implemented.";
+
     private static readonly HashSet<string> WhitelistedSafeCodes = new(StringComparer.OrdinalIgnoreCase)
     {
         "FORBIDDEN",
@@ -29,6 +31,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "QUERY_TOO_COMPLEX",
         "BAD_REQUEST",
         "INVALID_QUERY",
+        "NOT_IMPLEMENTED",
         "ALREADY_PROCESSED",
         "VALIDATION_ERROR",
         "RESPONSE_TOO_LARGE",
@@ -100,6 +103,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,
+        ["NOT_IMPLEMENTED"] = NotImplementedMessage,
         ["INVALID_JSON"] = InvalidJsonMessage,
         ["MISSING_REQUIRED_FIELD"] = MissingFieldMessage,
         ["REQUIRED_FILTER_COLUMN_MISSING"] = "A required filter column is missing.",
@@ -198,6 +202,30 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
                 .WithCode("ACCESS_DENIED");
         }
 
+        // A1 (legacy table/finance path): gateway client/capability outcomes map by exception type only. Message, ErrorCode, inner
+        // exceptions and extensions never reach the client. The page-range subclass is checked before its base type.
+        // Only code-less errors (an unhandled resolver exception); an error that already carries a stable code keeps its own mapping.
+        var gatewayOutcome = false;
+        if (error.Code != null)
+        {
+            // keep the stable code and its fixed message (handled below)
+        }
+        else if (error.Exception is Autheris.Domain.Exceptions.GatewayPageRangeException)
+        {
+            gatewayOutcome = true;
+            error = error.WithExtensions(System.Collections.Immutable.ImmutableDictionary<string, object?>.Empty).WithMessage(Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage).WithCode("INVALID_QUERY");
+        }
+        else if (error.Exception is Autheris.Domain.Exceptions.GatewayInvalidQueryException)
+        {
+            gatewayOutcome = true;
+            error = error.WithExtensions(System.Collections.Immutable.ImmutableDictionary<string, object?>.Empty).WithMessage("The query is invalid.").WithCode("INVALID_QUERY");
+        }
+        else if (error.Exception is Autheris.Domain.Exceptions.GatewayNotImplementedException)
+        {
+            gatewayOutcome = true;
+            error = error.WithExtensions(System.Collections.Immutable.ImmutableDictionary<string, object?>.Empty).WithMessage(NotImplementedMessage).WithCode("NOT_IMPLEMENTED");
+        }
+
         // GQL-17: ReportMasked (CatalogGraphQlTypeModule) code is matched exactly (ordinal) so MASKED_COLUMN or "masked" stay masked.
         var isMaskedCode = string.Equals(error.Code, MaskedCode, StringComparison.Ordinal);
         if (isMaskedCode)
@@ -210,7 +238,12 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         }
 
         // Server-side logging keeps the full exception (never sent to the client).
-        if (error.Exception != null && error.Code != null && ExpectedOutcomeCodes.Contains(error.Code))
+        if (gatewayOutcome)
+        {
+            // A1-S2: type name and path only; the exception message carries caller column text.
+            _logger.LogInformation("GraphQL gateway outcome {ExceptionType} at {Path}.", error.Exception!.GetType().Name, error.Path?.Print());
+        }
+        else if (error.Exception != null && error.Code != null && ExpectedOutcomeCodes.Contains(error.Code))
         {
             // A refused or lost decision is a normal outcome: no Error entry (the denial itself is audited by the resolver).
             _logger.LogInformation("GraphQL request refused [{Code}].", error.Code);
