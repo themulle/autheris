@@ -7,7 +7,7 @@
 #   run-parser-fuzz.sh --check-paths  validate RUNNER_TEMP and the derived paths, print them, exit 0 (no build, no AFL)
 #
 # Environment: RUNNER_TEMP (required, absolute, no spaces), AUTHERIS_SIM_SEED (1 to 10 digits, default UTC date),
-# SIM_AFL_MEM_MB (1024 to 8192, default 2048; the afl-fuzz memory limit is always finite, never none), AUTHERIS_SIM_REPORT_DIR (drafts).
+# SIM_AFL_MEM_MB (1024 to 8192, default 4096; the afl-fuzz memory limit is always finite, never none), AUTHERIS_SIM_REPORT_DIR (drafts).
 #
 # Safety (SEC-SIM-09, SEC-SIM-16, SEC-SIM-20): only the copy $RUNNER_TEMP/fuzz-bin/TrinoSqlEngine.dll is instrumented and every path the
 # script writes or deletes must resolve under $RUNNER_TEMP (symlinks are resolved first). The tool version is pinned. The instrumented
@@ -61,7 +61,7 @@ done
 
 SEED="${AUTHERIS_SIM_SEED:-$(date -u +%Y%m%d)}"
 [[ "$SEED" =~ $SEED_REGEX ]] || die "AUTHERIS_SIM_SEED must be 1 to 10 digits"
-SIM_AFL_MEM_MB="${SIM_AFL_MEM_MB:-2048}"
+SIM_AFL_MEM_MB="${SIM_AFL_MEM_MB:-4096}"
 [[ "$SIM_AFL_MEM_MB" =~ $MEM_REGEX ]] || die "SIM_AFL_MEM_MB must be 4 digits (1024 to 8192); the memory limit must be finite"
 (( 10#$SIM_AFL_MEM_MB >= 1024 && 10#$SIM_AFL_MEM_MB <= 8192 )) || die "SIM_AFL_MEM_MB must be between 1024 and 8192"
 
