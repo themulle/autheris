@@ -78,10 +78,47 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
         var body = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.ShouldNotBe(HttpStatusCode.InternalServerError, body);
-        response.StatusCode.ShouldNotBe(HttpStatusCode.OK, body);
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, body);
         body.ShouldNotContain("jsonRows\":[");
         body.ShouldNotContain("Exception");
         body.ShouldNotContain("   at ");
+    }
+
+    [Fact]
+    public async Task Table_Unauthenticated_IsRejected()
+    {
+        // RDF-S6: parity for the deleted FinanceAndHrQuery_Unauthenticated_ThrowsUnauthorized on the generic table field.
+        using var factory = Create();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
+
+        using var response = await Post(client, "{ table(domain: \"finance\", schema: \"dbo\", name: \"finance_table_1\", first: 5) { jsonRows } }");
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, body);
+        body.ShouldNotContain("jsonRows\":[");
+    }
+
+    [Theory]
+    [InlineData("{ finance { invoices { jsonRows } } }")]
+    [InlineData("{ hr { employees { jsonRows } } }")]
+    public async Task FinanceRootSelection_InTrustedDocumentsOnlyMode_IsRejectedWithoutRows(string query)
+    {
+        using var factory = Create(trustedDocumentsOnly: true);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-SIM");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_sim");
+        client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
+
+        using var response = await Post(client, query);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldNotBe(HttpStatusCode.InternalServerError, body);
+        body.ShouldNotContain("jsonRows\":[");
+        body.ShouldNotContain("Exception");
+        body.ShouldNotContain("   at ");
+        body.ShouldContain("errors");
     }
 
     private static async Task<HttpResponseMessage> Post(HttpClient client, string query)
@@ -90,7 +127,7 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
         return await client.PostAsync(new Uri("/graphql", UriKind.Relative), content);
     }
 
-    private WebApplicationFactory<Program> Create() =>
+    private WebApplicationFactory<Program> Create(bool trustedDocumentsOnly = false) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
@@ -103,6 +140,12 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:Tenancy:Mode", "Multi");
+            if (trustedDocumentsOnly)
+            {
+                b.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
+                b.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
+            }
+
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataFile}");
         });

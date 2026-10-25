@@ -68,3 +68,8 @@ Remove the `finance` and `hr` root fields and the GraphQL types that only they r
 - **RDF-S9 (docs/k6):** The k6 rewrite uses `table(...first: $first)` within the cost budget (no limit increases, no relaxed-limits environment flag).
 
 **Mandatory tests** (`[Trait("Category","Security")]`): `Schema_HasNoFinanceOrHrRootFields`, `FinanceOrHrRootSelection_FailsValidation` (unit, theory incl. unauthenticated and fragment-wrapped selections), `FinanceRootSelection_AsReader_ReturnsValidationErrorNotInternalError`, `FinanceRootSelection_Unauthenticated_NoRowsNoException` (integration), `MaxExecutionDepth_ExceedingDepthLimit6_FailsOnAstValidation` (kept, on `table`, asserts depth error), `QueryCostAnalyzer_*` (kept, on `table`, assert `QUERY_TOO_COMPLEX`), `Table_Unauthenticated_IsRejected` (or name of the existing equivalent), `Table_SensitiveMasking_EndToEnd` (or existing equivalent).
+
+## Phase 4/5 outcome (2026-10-25)
+- **RDF-S6 covering tests (table path):** `WalkingSkeletonIntegrationTests.GraphQL_AnonymousRequest_ReturnsUnauthorizedChallenge` (anonymous 401), `DemoRootFieldsRemovedIntegrationTests.Table_Unauthenticated_IsRejected` (anonymous `table(...)` 401), `WalkingSkeletonIntegrationTests.GraphQLQuery_WithConsent_ReturnsData_AndMasksSensitiveColumns` and the M2M masking test in `M2mIdentityIntegrationTests` (sensitive masking on `table`), `OddBatchDataLoaderEvaluationTests` (odd-batch governance, application layer).
+- **Trusted-documents-only mode (RDF-S5):** `FinanceRootSelection_InTrustedDocumentsOnlyMode_IsRejectedWithoutRows`.
+- **Follow-ups:** the orphaned `LoadInvoiceItemsBatchAsync` / `InvoiceItemRecord` path (Q1) can be removed in a later work package; the `docs/plans/security.txt` GQL-02 entry must be updated after Lane A merges.
