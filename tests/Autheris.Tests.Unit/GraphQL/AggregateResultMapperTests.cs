@@ -174,6 +174,46 @@ public sealed class AggregateResultMapperTests
         byAlias["ct"].IntValue.ShouldBe(9L);
     }
 
+    [Theory]
+    [InlineData(AggregateFunction.Min)]
+    [InlineData(AggregateFunction.Max)]
+    public void Map_DateOnlyAggregate_MapsToMidnightUtcLikeTheDateTextOfOtherEngines(AggregateFunction fn)
+    {
+        // Npgsql yields System.DateOnly for a PostgreSQL DATE; SQLite yields the text "2026-03-04".
+        var saleDate = Col("sale_date", CatalogFieldType.DateTime);
+        var expected = new DateTimeOffset(2026, 3, 4, 0, 0, 0, TimeSpan.Zero);
+
+        AggregateValueDto Run(object raw) => AggregateResultMapper.Map(
+            Result([Row(new Dictionary<string, object?>(), 1, new Dictionary<string, object?> { ["d"] = raw })]),
+            TableOf(saleDate), [], [Agg("d", fn, saleDate)]).Groups.Single().Aggregates.Single();
+
+        Run(new DateOnly(2026, 3, 4)).DateTimeValue.ShouldBe(expected);
+        Run("2026-03-04").DateTimeValue.ShouldBe(expected);
+        Run(new DateTime(2026, 3, 4, 0, 0, 0, DateTimeKind.Unspecified)).DateTimeValue.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void Map_DateOnlyGroupKey_IsTypedLikeSqliteDateText()
+    {
+        var saleDate = Col("sale_date", CatalogFieldType.DateTime);
+        var dto = AggregateResultMapper.Map(
+            Result([Row(new Dictionary<string, object?> { ["sale_date"] = new DateOnly(2026, 3, 4) }, 1, new Dictionary<string, object?> { ["count"] = 1L })]),
+            TableOf(saleDate), [saleDate], [Agg("count", AggregateFunction.Count, null)]);
+
+        dto.Groups.Single().Key["sale_date"].ShouldBe("2026-03-04T00:00:00.0000000Z");
+    }
+
+    [Fact]
+    public void Map_TimeOnlyForDateTimeAggregate_StillRaisesTypeMismatch()
+    {
+        var saleDate = Col("sale_date", CatalogFieldType.DateTime);
+        var ex = Should.Throw<GraphQLException>(() => AggregateResultMapper.Map(
+            Result([Row(new Dictionary<string, object?>(), 1, new Dictionary<string, object?> { ["d"] = new TimeOnly(1, 2) })]),
+            TableOf(saleDate), [], [Agg("d", AggregateFunction.Max, saleDate)]));
+        ex.Errors.Single().Code.ShouldBe("AGGREGATION_RESULT_TYPE_MISMATCH");
+        ex.Message.ShouldNotContain("01:02");
+    }
+
     [Fact]
     public void Map_GroupKeys_AreTypedLikeTheEntityFields()
     {
