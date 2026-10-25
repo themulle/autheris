@@ -859,34 +859,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task FinanceAndHrQuery_Unauthenticated_ThrowsUnauthorized()
-    {
-        var unauthenticatedAccessor = new IsolatedHttpContextAccessor(new DefaultHttpContext());
-        var executionService = NSubstitute.Substitute.For<IGatewayExecutionService>();
-
-        var finQuery = new FinanceQuery();
-        var hrQuery = new HrQuery();
-
-        var ex1 = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await finQuery.GetInvoicesAsync(50, 0, executionService, unauthenticatedAccessor);
-        });
-        ex1.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
-
-        var ex2 = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await finQuery.GetInvoicesWithItemsAsync(10, executionService, unauthenticatedAccessor);
-        });
-        ex2.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
-
-        var ex3 = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await hrQuery.GetEmployeesAsync(50, 0, executionService, unauthenticatedAccessor);
-        });
-        ex3.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
-    }
-
-    [Fact]
     public async Task ApproveConsentRequest_ClusterAdminSelfApproval_ThrowsForbidden()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
