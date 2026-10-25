@@ -7,15 +7,6 @@ type Query {
   "Execute a generic query against any cataloged table, subject to resolved Data-Owner-Consent"
   genericTable(catalogName: String!, schemaName: String!, tableName: String!): [Any]
 
-  "Sample Finance domain records with automatic column masking and row filtering"
-  financeRecords: [FinanceRecord!]!
-
-  "Finance domain queries supporting selective nested relationships"
-  finance: FinanceQuery!
-
-  "Sample HR domain records with salary redaction and PII masking"
-  hrEmployees: [HrEmployee!]!
-
   "List all registered tables and their current policy epochs in the governance catalog"
   catalogTables: [Table!]!
 
@@ -62,22 +53,6 @@ type Mutation {
   reloadSchema: Boolean!
 }
 
-type FinanceRecord {
-  transactionId: String!
-  amount: Float!
-  vendor: String!
-  email: String
-  iban: String
-}
-
-type HrEmployee {
-  employeeId: String!
-  firstName: String!
-  lastName: String!
-  salary: Float!
-  ssn: String
-}
-
 type Table {
   id: String!
   catalogName: String!
@@ -107,30 +82,6 @@ type ConsentRequest {
   status: String!
   justification: String!
   createdAt: String!
-}
-
-type FinanceQuery {
-  "Fetch flat invoices"
-  invoices(first: Int = 50, after: Int = 0): TableRecordPayload!
-
-  "Fetch invoices with nested child items resolved via Batch DataLoader"
-  invoicesWithItems(first: Int = 10): [InvoiceRecord!]!
-}
-
-type InvoiceRecord {
-  id: String!
-  amount: Float!
-  vendor: String!
-  email: String
-  items: [InvoiceItemRecord!]
-}
-
-type InvoiceItemRecord {
-  id: String!
-  invoiceId: String!
-  productName: String!
-  price: Float!
-  sensitiveNote: String
 }
 
 type TableRecordPayload {

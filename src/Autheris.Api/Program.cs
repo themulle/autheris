@@ -65,7 +65,7 @@ builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment);
 // One switch for all sample content (demo catalog, finance/hr GraphQL types, demo MCP tools, golden queries)
 var demoDataEnabled = Autheris.Domain.Options.DemoDataSwitch.Resolve(gatewayOptions, builder.Environment.EnvironmentName);
 builder.Services.AddSingleton<Autheris.Domain.Options.IDemoDataSwitch>(new Autheris.Domain.Options.DemoDataSwitch(demoDataEnabled));
-builder.Services.AddGatewayGraphQL(gatewayOptions, demoDataEnabled);
+builder.Services.AddGatewayGraphQL(gatewayOptions);
 builder.Services.AddPlan9Services(builder.Configuration);
 
 // 4. Build and Pipeline Configuration

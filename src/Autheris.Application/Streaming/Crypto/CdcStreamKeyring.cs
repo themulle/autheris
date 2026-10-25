@@ -12,6 +12,14 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
+/// <summary>Result of <see cref="CdcStreamKeyring.ClassifyDek"/> (INF-13).</summary>
+public enum CdcDekClassification
+{
+    Readable = 0,
+    Unreadable = 1,
+    Indeterminate = 2
+}
+
 /// <summary>A data-encryption key checked out of the keyring. <see cref="Key"/> is a private copy owned by the caller, who zeroes it after use.</summary>
 public readonly record struct CdcDek(string DekId, byte[] Key);
 
@@ -259,6 +267,85 @@ public sealed class CdcStreamKeyring : IDisposable
 
         Cache(id, dekId, dek);
         return new CdcDek(dekId, (byte[])dek.Clone());
+    }
+
+    /// <summary>True only when the active KEK is positively resolved at full length. Any failure (including exceptions) is false (INF-13).</summary>
+    public bool IsActiveKekAvailable()
+    {
+        try
+        {
+            var active = _keks.ActiveKekId;
+            return active is not null && _keks.ResolveKek(active, out _) == CdcKekLookup.Available;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// INF-13: classifies a wrapped DEK without surfacing key material. <see cref="CdcDekClassification.Unreadable"/> only when the loss is
+    /// proven permanent (KEK id removed while the active KEK resolves, malformed blob, or AES-GCM failure under a fully resolved KEK);
+    /// everything else, including every unexpected exception, is <see cref="CdcDekClassification.Indeterminate"/>. Cancellation propagates.
+    /// </summary>
+    public CdcDekClassification ClassifyDek(CdcWrappedKey key, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            if (!IsActiveKekAvailable())
+            {
+                return CdcDekClassification.Indeterminate;
+            }
+
+            if (key.WrappedKey is null || key.WrappedKey.Length < NonceSize + TagSize)
+            {
+                return CdcDekClassification.Unreadable;
+            }
+
+            switch (_keks.ResolveKek(key.KekId, out var kek))
+            {
+                case CdcKekLookup.Unknown:
+                    return CdcDekClassification.Unreadable;
+                case CdcKekLookup.Available when kek.Length > 0:
+                    break;
+                default:
+                    return CdcDekClassification.Indeterminate;
+            }
+
+            var dek = new byte[key.WrappedKey.Length - NonceSize - TagSize];
+            try
+            {
+                using var aes = new AesGcm(kek.Span, TagSize);
+                aes.Decrypt(
+                    key.WrappedKey.AsSpan(0, NonceSize), key.WrappedKey.AsSpan(NonceSize + TagSize), key.WrappedKey.AsSpan(NonceSize, TagSize),
+                    dek, DekAad(key.StreamId, key.Purpose, key.DekId));
+                return CdcDekClassification.Readable;
+            }
+            // Residual risk A3-S6: a rotated or stale secret of valid length also yields Unreadable; gated by discardUnreadable + confirmStreamId.
+            catch (AuthenticationTagMismatchException)
+            {
+                return CdcDekClassification.Unreadable;
+            }
+            catch (CryptographicException)
+            {
+                // A KEK of an unexpected size or other crypto failure is not proof of permanent loss.
+                return CdcDekClassification.Indeterminate;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dek);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return CdcDekClassification.Indeterminate;
+        }
     }
 
     private byte[] Unwrap(CdcWrappedKey key)

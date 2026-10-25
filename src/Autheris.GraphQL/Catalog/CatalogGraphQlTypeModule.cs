@@ -41,7 +41,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     // One volatile reference so readers never observe a fingerprint paired with another build's omissions.
     private volatile BuiltState _built = new(null, []);
     private long _builtStructureVersion = -1;
-    private int _checking;
+    private readonly SemaphoreSlim _checkGate = new(1, 1);
 
     private readonly GraphQLOptions _graphQlOptions;
 
@@ -111,11 +111,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
     internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
     {
-        if (Interlocked.Exchange(ref _checking, 1) == 1)
-        {
-            return false;
-        }
-
+        // Serialize instead of dropping: a caller that starts after a completed catalog write always runs its own
+        // check and so observes that write. The wait is cancellable; a cancelled wait never took the semaphore.
+        await _checkGate.WaitAsync(ct).ConfigureAwait(false);
+        var changed = false;
         try
         {
             var builtVer = Volatile.Read(ref _builtStructureVersion);
@@ -151,14 +150,21 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 return false;
             }
 
-            _logger?.LogInformation("GraphQL catalog changed; rebuilding the GraphQL schema.");
-            TypesChanged?.Invoke(this, EventArgs.Empty);
-            return true;
+            changed = true;
         }
         finally
         {
-            Interlocked.Exchange(ref _checking, 0);
+            _checkGate.Release();
         }
+
+        // Raised outside the semaphore so a re-entrant TypesChanged handler cannot deadlock on it.
+        if (changed)
+        {
+            _logger?.LogInformation("GraphQL catalog changed; rebuilding the GraphQL schema.");
+            TypesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        return changed;
     }
 
     private void EnsureRefreshTimer()

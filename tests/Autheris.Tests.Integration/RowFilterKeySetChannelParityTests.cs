@@ -153,6 +153,9 @@ INSERT INTO air_or SELECT * FROM air1;";
             _scenarios["air_or"] = Ids(connection, $"SELECT a.id FROM air_or a WHERE {David} OR a.id = 13");
         }
 
+        protected override IReadOnlyCollection<string> RequiredGraphQlFields =>
+            [.. base.RequiredGraphQlFields, "default_main_air_empty", "default_main_air_deny", "default_main_air_or"];
+
         protected override async Task SeedExtraGovernanceAsync(IGovernanceRepository repo)
         {
             async Task<TableMetadata> Register(string name) => await RegisterTableAsync(repo, new TableIdentifier("default", "main", name),

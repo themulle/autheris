@@ -311,6 +311,9 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         public Dictionary<string, string> ExtraHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Hook for variants: more governance records (called after the base records were written).</summary>
+        /// <summary>Query fields that must be served before the first request: every table the fixture registers.</summary>
+        protected virtual IReadOnlyCollection<string> RequiredGraphQlFields => ["default_main_air1", "default_main_client", "default_main_crane"];
+
         protected virtual Task SeedExtraGovernanceAsync(IGovernanceRepository repo) => Task.CompletedTask;
 
         public const string DavidSid = "S-1-5-21-LWE-DAVID";
@@ -374,7 +377,8 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             });
 
             await SeedGovernanceAsync();
-            await RefreshGraphQlSchemaAsync();
+            await TestSupport.GraphQlSchemaReadiness.AwaitCatalogSchemaAsync(
+                _factory.Services, RequiredGraphQlFields, TestSupport.GraphQlSchemaReadiness.DefaultTimeout);
         }
 
         public Task DisposeAsync()
@@ -403,27 +407,15 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         {
             var c = Client();
             c.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
-            for (int attempt = 0; ; attempt++)
+            var r = await c.PostAsJsonAsync("/graphql", new { query });
+            var body = await r.Content.ReadAsStringAsync();
+            var doc = JsonDocument.Parse(body);
+            if (r.StatusCode != HttpStatusCode.OK || doc.RootElement.TryGetProperty("errors", out _))
             {
-                var r = await c.PostAsJsonAsync("/graphql", new { query });
-                var body = await r.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(body);
-
-                // HotChocolate swaps the rebuilt schema in asynchronously.
-                if (body.Contains("does not exist", StringComparison.Ordinal) && attempt < 50)
-                {
-                    doc.Dispose();
-                    await Task.Delay(200);
-                    continue;
-                }
-
-                if (r.StatusCode != HttpStatusCode.OK || doc.RootElement.TryGetProperty("errors", out _))
-                {
-                    throw new ShouldAssertException($"HTTP {(int)r.StatusCode}: {body}");
-                }
-
-                return doc;
+                throw new ShouldAssertException($"HTTP {(int)r.StatusCode}: {body}");
             }
+
+            return doc;
         }
 
         private static void SeedData(string path)
@@ -611,14 +603,5 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             ColumnRules = meta.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList(),
             RowFilters = rowFilters
         };
-
-        /// <summary>The catalog was written after start-up; rebuild the GraphQL schema now instead of waiting for the refresh timer.</summary>
-        private async Task RefreshGraphQlSchemaAsync()
-        {
-            var module = _factory!.Services.GetRequiredService<Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule>();
-            var check = typeof(Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule).GetMethod(
-                "CheckForCatalogChangesAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-            await (Task<bool>)check.Invoke(module, [System.Threading.CancellationToken.None])!;
-        }
     }
 }

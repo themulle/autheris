@@ -21,6 +21,8 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:GraphQL:MaxAllowedExecutionDepth", "6");
             builder.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "250");
+            // The depth test walks a schema-introspection path; introspection is not a limit and stays unrelated to the defenses.
+            builder.UseSetting("Gateway:GraphQL:EnableIntrospection", "true");
         });
     }
 
@@ -42,14 +44,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         {
             query = @"
                 query GetInvoices {
-                    finance {
-                        invoicesWithItems(first: 5) {
-                            id
-                            amount
-                            vendor
-                            email
-                        }
-                    }
+                    table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"", first: 5) { jsonRows }
                 }"
         };
 
@@ -57,6 +52,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var content = await response.Content.ReadAsStringAsync();
         content.ShouldNotContain("QUERY_TOO_COMPLEX");
+        content.ShouldNotContain("GRAPHQL_VALIDATION_FAILED"); // RDF-S4: the rewritten query resolves against the schema
     }
 
     [Fact]
@@ -69,14 +65,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         {
             query = @"
                 query GetMassiveInvoices {
-                    finance {
-                        invoicesWithItems(first: 5000) {
-                            id
-                            amount
-                            vendor
-                            email
-                        }
-                    }
+                    table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"", first: 5000) { jsonRows }
                 }"
         };
 
@@ -91,19 +80,18 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
     {
         var client = CreateClient();
 
-        // Query with no first/last pagination argument defaults to MaxResponseRows worst case
+        // Each aliased selection without first/last is priced at the default page (50 rows); none of them exceeds the budget (250) alone,
+        // only their sum does.
         var payload = new
         {
             query = @"
                 query GetAllInvoicesWithoutLimit {
-                    finance {
-                        invoicesWithItems {
-                            id
-                            amount
-                            vendor
-                            email
-                        }
-                    }
+                    t1: table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"") { jsonRows }
+                    t2: table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"") { jsonRows }
+                    t3: table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"") { jsonRows }
+                    t4: table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"") { jsonRows }
+                    t5: table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"") { jsonRows }
+                    t6: table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"") { jsonRows }
                 }"
         };
 
@@ -117,20 +105,18 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
     {
         var client = CreateClient();
 
-        // Query exceeding depth 6
+        // Query exceeding depth 6: a real schema-introspection path of depth 7 (the static schema has no deeper object nesting).
         var payload = new
         {
             query = @"
                 query DeepQuery {
-                    finance {
-                        invoicesWithItems(first: 1) {
-                            items {
-                                invoice {
-                                    items {
-                                        invoice {
-                                            items {
-                                                id
-                                            }
+                    __type(name: ""Query"") {
+                        fields {
+                            type {
+                                ofType {
+                                    ofType {
+                                        ofType {
+                                            name
                                         }
                                     }
                                 }
@@ -155,17 +141,10 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         {
             query = @"
                 query MassiveQueryViaFragment {
-                    finance {
-                        ...HeavyFragment
-                    }
+                    ...HeavyFragment
                 }
-                fragment HeavyFragment on FinanceQueries {
-                    invoicesWithItems(first: 5000) {
-                        id
-                        amount
-                        vendor
-                        email
-                    }
+                fragment HeavyFragment on Query {
+                    table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"", first: 5000) { jsonRows }
                 }"
         };
 
@@ -184,15 +163,8 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         {
             query = @"
                 query MassiveQueryViaInlineFragment {
-                    finance {
-                        ... on FinanceQueries {
-                            invoicesWithItems(first: 5000) {
-                                id
-                                amount
-                                vendor
-                                email
-                            }
-                        }
+                    ... on Query {
+                        table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"", first: 5000) { jsonRows }
                     }
                 }"
         };
@@ -248,14 +220,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         {
             query = @"
                 query GetInvoicesWithDefault($n: Int = 1) {
-                    finance {
-                        invoicesWithItems(first: $n) {
-                            id
-                            amount
-                            vendor
-                            email
-                        }
-                    }
+                    table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"", first: $n) { jsonRows }
                 }",
             variables = new { n = 5000 }
         };
@@ -276,14 +241,7 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         {
             query = @"
                 query GetInvoicesWithinBudget($n: Int = 1) {
-                    finance {
-                        invoicesWithItems(first: $n) {
-                            id
-                            amount
-                            vendor
-                            email
-                        }
-                    }
+                    table(domain: ""finance"", schema: ""dbo"", name: ""finance_table_1"", first: $n) { jsonRows }
                 }",
             variables = new { n = 3 }
         };
@@ -293,5 +251,6 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         var content = await response.Content.ReadAsStringAsync();
         content.ShouldNotContain("QUERY_COST_QUOTA_EXCEEDED");
         content.ShouldNotContain("QUERY_TOO_COMPLEX");
+        content.ShouldNotContain("GRAPHQL_VALIDATION_FAILED"); // RDF-S4: the rewritten query resolves against the schema
     }
 }

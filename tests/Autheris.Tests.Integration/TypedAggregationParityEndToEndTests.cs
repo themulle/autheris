@@ -29,6 +29,9 @@ public sealed class TypedAggregationParityEndToEndTests : IClassFixture<TypedAgg
     {
         private static readonly TableIdentifier MaskedId = new("default", "main", "masked_t");
 
+        protected override IReadOnlyCollection<string> RequiredGraphQlFields =>
+            [.. base.RequiredGraphQlFields, "default_main_air1_aggregate", "default_main_masked_t", "default_main_masked_t_aggregate"];
+
         protected override void SeedExtraData(SqliteConnection connection)
         {
             using var cmd = connection.CreateCommand();
@@ -65,18 +68,8 @@ INSERT INTO masked_t VALUES (1,'EU',10),(2,'EU',20),(3,'EU',30),(4,'EU',40),(5,'
     {
         var client = _fixture.Client();
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
-        for (var attempt = 0; ; attempt++)
-        {
-            var response = await client.PostAsJsonAsync("/graphql", new { query });
-            var body = await response.Content.ReadAsStringAsync();
-            if (body.Contains("does not exist", StringComparison.Ordinal) && attempt < 50)
-            {
-                await Task.Delay(200);
-                continue;
-            }
-
-            return JsonDocument.Parse(body);
-        }
+        var response = await client.PostAsJsonAsync("/graphql", new { query });
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     }
 
     private static string ErrorCode(JsonDocument doc) =>

@@ -170,7 +170,6 @@ internal static class DevPortalAssets
                 </div>
                 <div>
                   <a href="/graphql" target="_blank" class="btn">Open GraphQL IDE</a>
-                  <a href="/graphql/finance" target="_blank" class="btn btn-secondary">Finance Scope</a>
                 </div>
               </div>
 

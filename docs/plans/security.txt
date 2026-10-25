@@ -1930,7 +1930,7 @@ Entry format:
              (MinGroupSize, SmallGroupStrategy, Visibility, Tags, Location, PhysicalDatabaseName, EnforcementMode) through Merge;
              add a regression test "catalog sync keeps required filter columns".
 
-[INF-13] LOW | bug | CDC resync "discardUnreadable" permanently deletes events when the KEK/key store is only transiently unavailable
+[INF-13] LOW | bug | CDC resync "discardUnreadable" permanently deletes events when the KEK/key store is only transiently unavailable  [RESOLVED 3a845108]
   Location : src/Autheris.Application/Streaming/Services/CdcStreamAdminService.cs:51-66; Crypto/CdcStreamKeyring.cs (SafeGetKeysAsync,
              Unwrap -> CdcStreamKeyUnavailableException); Infrastructure/Security/KeyVaultCdcKekProvider.cs:93-98 (TryGetKek returns
              false on any secret-provider exception)
