@@ -145,8 +145,13 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
         mockRepo.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
             .Returns(new CatalogVersion(1, 1), new CatalogVersion(2, 1));
 
-        await using var eventBus = new InProcessChannelEventBus();
+        Func<object, Task>? handler = null;
+        var subscription = Substitute.For<IDisposable>();
+        var eventBus = Substitute.For<IEventBus>();
+        eventBus.Subscribe<object>(ICatalogVersionProvider.CatalogChangedEventChannel, Arg.Do<Func<object, Task>>(h => handler = h))
+            .Returns(subscription);
         var provider = new DbCatalogVersionProvider(mockRepo, eventBus, ttl: TimeSpan.FromSeconds(60));
+        handler.ShouldNotBeNull();
 
         // First call loads from repo
         var v1 = await provider.GetCatalogVersionAsync();
@@ -157,18 +162,16 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
         v2.StructureVersion.ShouldBe(1);
         await mockRepo.Received(1).GetCatalogVersionAsync(Arg.Any<CancellationToken>());
 
-        // Publish event to invalidate
-        await eventBus.PublishAsync(
-            ICatalogVersionProvider.CatalogChangedEventChannel,
-            new CatalogChangedEvent(2, 1, DateTimeOffset.UtcNow));
-
-        // Small delay for event channel dispatch
-        await Task.Delay(50);
+        // Deliver the catalog:changed event to the registered handler directly (no async bus involved)
+        await handler(new CatalogChangedEvent(2, 1, DateTimeOffset.UtcNow));
 
         // Third call reloads fresh version
         var v3 = await provider.GetCatalogVersionAsync();
         v3.StructureVersion.ShouldBe(2);
         await mockRepo.Received(2).GetCatalogVersionAsync(Arg.Any<CancellationToken>());
+
+        provider.Dispose();
+        subscription.Received(1).Dispose();
     }
 
     [Fact]
