@@ -108,3 +108,33 @@ Changes:
 2. A3: a KEK id removed from configuration while the active KEK resolves counts as permanent, because that is the documented KEK-loss signal (SEC-CDC99-18; `confirmStreamId` still required).
 3. A4: primary-key columns stay non-null. If masking can ever null a key, file a new sim gap rather than weaken CSDL.
 4. A2/P2: implement only if its Red test fails on the current HotChocolate 16.6.8 behaviour.
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-25)
+Verdict: APPROVED WITH CONDITIONS. No plan change required. All tests below carry `[Trait("Category","Security")]`.
+
+### A1 (GraphQL error mapping)
+- A1-S1: `OnError` maps by `error.Exception` type only. Message, `ErrorCode`, `Extensions` and inner exceptions of the gateway exceptions must never reach the client; clear `Extensions` of mapped errors. Check order: `GatewayPageRangeException` before `GatewayInvalidQueryException` (subclass).
+- A1-S2: The Information log for both types must not log `ex.Message` (it carries caller column text); log the type name and the operation path only.
+- A1-S3: `NOT_IMPLEMENTED` text must not name the `DataSourceType` or executor. The legacy `table`/`finance` path must stay behind the existing authz/row-filter checks; the mapping only changes the error, never skips a check.
+- A1-S4: Existing `GraphQlEnumerationShieldMiddleware` page-range detection (matches `FixedMessage`) must keep working; add a test.
+- Tests: the five unit tests and the integration test listed in A1, plus `LegacyTable_UnknownColumn_NoColumnNameEcho` (integration, canary column name absent from the response body).
+
+### A2 (schema refresh race)
+- A2-S1: `SemaphoreSlim.WaitAsync(ct)` released in `finally`; a cancelled wait must not release a semaphore it never took. The timer and the gate callers must not block request threads; no lock held across `CreateTypesAsync` event raising that could deadlock a re-entrant `TypesChanged` handler (if `_recheckAfterBuild` is implemented, re-run once, never in a loop: bound the re-check at 1 per build).
+- A2-S2: A check failure (repository throws) must keep the previously served schema and fail closed; never publish a partial or empty catalog schema, and never log row or catalog content beyond the exception type.
+- A2-S3: Test helpers and `InternalsVisibleTo` are limited to `Autheris.Tests.Integration`; no production default changes, no relaxation of `ErrorSanitizingFilter` for tests.
+- Tests: `CheckForCatalogChanges_WhileAnotherCheckRuns_ObservesTheLaterWrite`, `CheckForCatalogChanges_RepositoryThrows_KeepsPreviousSchema_ReleasesSemaphore`, `CheckForCatalogChanges_CancelledWaiter_DoesNotReleaseSemaphore`.
+
+### A3 (CDC resync, fail closed)
+- A3-S1: Anything not positively proven permanent is `Indeterminate`. `ClassifyDekAsync` must wrap every exception (except OperationCanceledException) as `Indeterminate`; unknown exception types, store timeouts and cancellation never map to `Unreadable`. Cancellation propagates, it is not `KeyUnavailable`.
+- A3-S2: The AES-GCM-failure rule applies only when the KEK secret was resolved at full length from the provider in this call. `Unavailable` and `Unknown` for the active KEK abort the whole resync before any delete. Classification of all DEKs completes before the first discard (two-phase: classify all, then discard); a mixed set aborts with zero deletes.
+- A3-S3: `TryGetKek` default stays `== Available`; no existing caller may start treating `Unknown` as success. Add a test that all other `TryGetKek` call sites in `CdcStreamKeyring` still fail closed on `Unavailable`.
+- A3-S4: 503 body is only the stable code `CDC_KEY_UNAVAILABLE`; no KEK ids, secret names, exception text or DEK ids in the response, log or audit. The audit entry is written on the refusal path, also when `confirmStreamId` passed, and must record the refusal without key material. `confirmStreamId` and the existing authorization remain required before classification starts (no oracle for unauthenticated or wrong-stream callers).
+- A3-S5: `KeyUnavailable` is never reported as `Done`/200; the endpoint switch must have no default branch that maps unknown statuses to success.
+- A3-S6: Document the residual risk: a Key Vault returning a wrong (rotated or stale) secret of valid length yields an auth failure and thus `Unreadable`. This is only discardable with the explicit `discardUnreadable` plus `confirmStreamId`; keep both.
+- Tests: the twelve listed tests, plus `Resync_Discard_ClassificationThrowsUnexpectedException_Indeterminate_NoDiscard`, `Resync_Discard_Cancelled_NoDiscard_PropagatesCancellation`, `Resync_Discard_ResponseAndAudit_ContainNoKekIdOrExceptionText` (canary), `Resync_Discard_KeyUnavailable_WrongConfirmStreamId_RejectedBeforeClassification`.
+
+### A4 (OpenAPI nullability)
+- A4-S1: Schema generation takes no caller, consent or masking input; the document stays cache-keyed by structure version only. `EntitySchema_NullabilityIndependentOfMaskingRules` is mandatory and must also cover a consent `Mask` column rule.
+- A4-S2: Primary-key columns stay non-null and `required`. Nullable change applies to schemas only, never loosens request-parameter or filter validation, and `required` lists must not shrink for non-key columns beyond current behaviour.
+- A4-S3: Removing the SIM-GAP-101 entry is allowed only together with the generator change in the same commit; the strict xfail run must stay green.
