@@ -22,6 +22,8 @@ on:
           - corpus
           - api
           - parser
+          - weekly-corpus
+          - weekly-parser
         default: all
       seed:
         description: 'Optional simulation seed (up to 10 digits)'
@@ -260,7 +262,7 @@ jobs:
 
   sim-corpus-weekly:
     name: Simulation corpus, full run (weekly)
-    if: github.event.repository.fork == false && (github.event.schedule == '0 5 * * 0')
+    if: github.event.repository.fork == false && (github.event.schedule == '0 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-corpus'))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -328,7 +330,7 @@ jobs:
 
   sim-parser-fuzz-weekly:
     name: Simulation parser fuzz, long run (weekly)
-    if: github.event.repository.fork == false && (github.event.schedule == '0 6 * * 0')
+    if: github.event.repository.fork == false && (github.event.schedule == '0 6 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-parser'))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
