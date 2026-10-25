@@ -193,7 +193,7 @@ jobs:
       SIM_JOB_INPUT: ${{ inputs.job }}
       SIM_SEED_INPUT: ${{ inputs.seed }}
       SIM_SAMPLE_INPUT: ${{ inputs.sample }}
-      SIM_AFL_MEM_MB: '2048'
+      SIM_AFL_MEM_MB: '4096'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -339,7 +339,7 @@ jobs:
       SIM_JOB_INPUT: ${{ inputs.job }}
       SIM_SEED_INPUT: ${{ inputs.seed }}
       SIM_SAMPLE_INPUT: ${{ inputs.sample }}
-      SIM_AFL_MEM_MB: '2048'
+      SIM_AFL_MEM_MB: '4096'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
