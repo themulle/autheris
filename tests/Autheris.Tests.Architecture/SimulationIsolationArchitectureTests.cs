@@ -239,7 +239,7 @@ public sealed partial class SimulationIsolationArchitectureTests
             }
         }
 
-        foreach (var required in new[] { "^(all|corpus|api|parser)$", "^[0-9]{1,10}$", "^[0-9]{1,5}$|^all$" })
+        foreach (var required in new[] { "^(all|corpus|api|parser|weekly-corpus|weekly-parser)$", "^[0-9]{1,10}$", "^[0-9]{1,5}$|^all$" })
         {
             if (!workflow.Contains(required, StringComparison.Ordinal))
             {

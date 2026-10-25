@@ -95,7 +95,7 @@ The **GqlGateway Benchmark & Simulation Suite** validated that the governance la
 Traffic distribution follows the realistic 40/25/15/10/10 mix:
 - **40% Simple Paged Queries**: `table(domain: "finance", name: "invoices", first: 10..50)` on PostgreSQL with active RLS row filters and masking.
 - **25% Cross-Database Queries**: Unified GraphQL operations querying PostgreSQL (`finance.invoices`), SQLite (`hr.hr_table_1`), and Microsoft SQL Server (`crm.orders`) concurrently in a single payload.
-- **15% Complex Nested Queries**: Nested `invoicesWithItems` utilizing `BatchDataLoader` and joined relations.
+- **15% Complex Nested Queries**: Paged `table` queries (5..15 rows) with column masking.
 - **10% Mutations**: Four-Eyes consent approval requests and idempotent duplicate replay.
 - **10% Deliberately Invalid Requests**: Query complexity violations, response size limits, and security probes.
 
