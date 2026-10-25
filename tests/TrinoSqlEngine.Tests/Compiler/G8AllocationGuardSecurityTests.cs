@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Security;
+using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Visitors;
@@ -220,5 +221,36 @@ public class G8AllocationGuardSecurityTests
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneInvalid,
             TimeZoneTestSupport.Rejected(dialect, "SELECT CONVERT_TIMEZONE('Mars/Base', 'UTC', e.OccurredAtTz) FROM dbo.Events e"));
         Assert.NotNull(TimeZoneTestSupport.Compile(dialect, "SELECT e.Id FROM dbo.Events e"));
+    }
+
+    public static IEnumerable<object[]> TokenCorpus() => new[]
+    {
+        "SELECT Email, ORDERS.Id FROM Orders WHERE Status = 'open'",
+        "sElEcT \"Quoted Id\", `back.tick` FROM \"Orders\"",
+        "SELECT 'a\\b', 'x${y}', E'q', U&'d\\0041' FROM t",
+        "SELECT \u00e9t\u00e9, '\ud83d\ude00', \"\ud83d\ude00\" FROM t",
+        "SELECT a[1], b[2] FROM t WHERE x = ARRAY[1, 2]",
+        "SELECT transform(a, x -> x + 1) FROM t",
+        "SELECT a /* c1 */ FROM t -- tail comment",
+        "SELECT /* nested /* inner */ a FROM t",
+        "SELECT 1 +",
+        "   ",
+        string.Empty
+    }.Select(sql => new object[] { sql });
+
+    [Theory, MemberData(nameof(TokenCorpus))]
+    public void TokenText_Slice_EqualsTokenText_ForEveryToken(string sql)
+    {
+        var lexer = new SqlBaseLexer(new ZeroCopyCaseInsensitiveStream(sql.AsMemory()));
+        lexer.RemoveErrorListeners();
+        var tokens = new CommonTokenStream(lexer);
+        tokens.Fill();
+
+        foreach (var token in tokens.GetTokens())
+        {
+            var slice = FastSqlEngine.TokenText(token, sql.AsSpan(), out bool hasText);
+            Assert.Equal(token.Text is not null, hasText);
+            Assert.Equal(token.Text ?? string.Empty, slice.ToString());
+        }
     }
 }

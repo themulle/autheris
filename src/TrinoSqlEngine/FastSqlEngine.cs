@@ -495,7 +495,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     /// The characters of a lexer token as a slice of the statement, identical to <see cref="IToken.Text"/> (which allocates a string per
     /// call). A token whose interval is not inside the statement (the EOF token) falls back to <see cref="IToken.Text"/>.
     /// </summary>
-    private static ReadOnlySpan<char> TokenText(IToken token, ReadOnlySpan<char> source, out bool hasText)
+    internal static ReadOnlySpan<char> TokenText(IToken token, ReadOnlySpan<char> source, out bool hasText)
     {
         int start = token.StartIndex;
         int stop = token.StopIndex;
