@@ -49,7 +49,7 @@ public sealed class DialectStructureTests : ParityTestBase
     public void Dialect_TimeBucketCellsCoverSqlServerAndPostgres()
     {
         var cellIds = TimeBucketCells.All.Select(c => c.Id).ToList();
-        cellIds.ShouldBe(["tb_week_sale_date", "tb_quarter_sale_date", "tb_isoweek_year_boundary_utc", "tb_isoweek_year_boundary_berlin", "tb_hour_sold_at"]);
+        cellIds.ShouldBe(["tb_week_sale_date", "tb_quarter_sale_date", "tb_isoweek_year_boundary_utc", "tb_isoweek_year_boundary_berlin", "tb_month_year_boundary_berlin", "tb_isoweek_zone_shift_new_york", "tb_hour_sold_at"]);
         cellIds.Distinct().Count().ShouldBe(cellIds.Count);
         TimeBucketCells.All.Single(c => c.Id == "tb_week_sale_date").Expected.Sum(r => (int)r[1]!).ShouldBe(Seed.ParitySeed.Sales.Count);
         TimeBucketCells.All.Single(c => c.Id == "tb_quarter_sale_date").Expected.Sum(r => (int)r[1]!).ShouldBe(Seed.ParitySeed.Sales.Count);

@@ -38,16 +38,24 @@ public sealed class ParitySqlServerHostFixture : IAsyncLifetime, IParityHost
         _workDir = Path.Combine(Path.GetTempPath(), "autheris-parity-mssql-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_workDir);
         _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").WithPassword(NewPassword()).Build();
-        await _container.StartAsync();
-        await SeedAsync(_container.GetConnectionString());
-
-        using (var seeding = NewHost(_container.GetConnectionString()))
+        try
         {
-            await RegisterCatalogAsync(seeding);
-        }
+            await _container.StartAsync();
+            await SeedAsync(_container.GetConnectionString());
 
-        _factory = NewHost(_container.GetConnectionString());
-        _ = _factory.Server;
+            using (var seeding = NewHost(_container.GetConnectionString()))
+            {
+                await RegisterCatalogAsync(seeding);
+            }
+
+            _factory = NewHost(_container.GetConnectionString());
+            _ = _factory.Server;
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
     public async Task DisposeAsync()
@@ -63,7 +71,7 @@ public sealed class ParitySqlServerHostFixture : IAsyncLifetime, IParityHost
         {
             Directory.Delete(_workDir, true);
         }
-        catch (IOException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // best effort
         }
