@@ -48,6 +48,34 @@ public sealed class UnknownGatewayKeyGuardTests
         ex.Message.ShouldContain("Gateway__Insecure__danger_bypass_mcp_authh");
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("LocalOnnxModelPath")]
+    [InlineData("LocalOnnxModelSha256")]
+    [InlineData("OllamaModel")]
+    [InlineData("OllamaBaseUrl")]
+    [InlineData("ModelName")]
+    public void CatalogSearch_Alias_Keys_Are_Unknown(string alias)
+    {
+        // L8 / DEF-SC-15: the removed compat aliases are rejected by the unknown-key guard, not silently ignored.
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(($"Gateway:CatalogSearch:{alias}", "SECRET-VALUE"))));
+
+        ex.Message.ShouldContain($"Gateway:CatalogSearch:{alias}");
+        ex.Message.ShouldNotContain("SECRET-VALUE");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Gateway:Itsm:LegacyGlobalWebhookSecret")]
+    [InlineData("Gateway:Catalog:AllowLegacyPayloadOnlySignature")]
+    public void Removed_Legacy_Webhook_Options_Are_Unknown(string key)
+    {
+        // L4/L5: the global ITSM webhook secret fallback and the payload-only catalog signature are removed.
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config((key, "false"))));
+
+        ex.Message.ShouldContain(key);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public void ARCH_MNT_06_T_01_UnknownKey_IsNotBypassedByTheLegacyConfigSwitch()

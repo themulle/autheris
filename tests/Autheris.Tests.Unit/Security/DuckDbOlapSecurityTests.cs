@@ -331,7 +331,7 @@ public sealed class DuckDbOlapSecurityTests
         // Unauthenticated user
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // IsAuthenticated = false
 
-        var options = Options.Create(new GatewayOptions { Profile = "Strict" });
+        var options = Options.Create(new GatewayOptions());
         var engine = new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance);
 
         // Act
@@ -360,7 +360,7 @@ public sealed class DuckDbOlapSecurityTests
         var invalidJsonBytes = System.Text.Encoding.UTF8.GetBytes("{ broken json: ");
         httpContext.Request.Body = new System.IO.MemoryStream(invalidJsonBytes);
 
-        var options = Options.Create(new GatewayOptions { Profile = "Strict" });
+        var options = Options.Create(new GatewayOptions());
         var engine = new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance);
 
         // Act

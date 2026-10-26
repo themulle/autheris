@@ -28,12 +28,12 @@ public sealed class ItsmWebhookRetryExt13Ext14Tests
 
     private static IOptions<GatewayOptions> BypassOptions() => Options.Create(new GatewayOptions
     {
-        Itsm = new ItsmOptions { Enabled = true },
+        // The instance is bound to a tenant (an unbound instance is rejected; there is no default-tenant fallback).
+        Itsm = new ItsmOptions { Enabled = true, InstanceToTenantMap = { ["snow"] = "tenant-a" } },
         Insecure = new InsecureGettingStartedOptions
         {
             danger_bypass_webhook_signature_validation = true,
-            warn_ignore_webhook_timestamp_tolerance = true,
-            warn_fallback_default_tenant_for_webhooks = true
+            warn_ignore_webhook_timestamp_tolerance = true
         }
     });
 
@@ -49,7 +49,7 @@ public sealed class ItsmWebhookRetryExt13Ext14Tests
     {
         var request = Request("PENDING_EXTERNAL_APPROVAL");
         var repo = Substitute.For<IConsentApprovalRepository>();
-        repo.GetConsentRequestByTicketIdAsync("CHG1", Arg.Any<CancellationToken>()).Returns(request);
+        repo.GetConsentRequestByTicketIdAsync("CHG1", new TenantId("tenant-a"), Arg.Any<CancellationToken>()).Returns(request);
         var approved = Request("APPROVED");
         var calls = 0;
         repo.ApproveConsentRequestStepAsync(request.Id, Arg.Any<Sid>(), true, Arg.Any<string?>(), Arg.Any<CancellationToken>())
@@ -75,7 +75,7 @@ public sealed class ItsmWebhookRetryExt13Ext14Tests
     {
         var request = Request("APPROVED");
         var repo = Substitute.For<IConsentApprovalRepository>();
-        repo.GetConsentRequestByTicketIdAsync("CHG1", Arg.Any<CancellationToken>()).Returns(request);
+        repo.GetConsentRequestByTicketIdAsync("CHG1", new TenantId("tenant-a"), Arg.Any<CancellationToken>()).Returns(request);
 
         var handler = new ItsmWebhookHandler(
             new NoSecrets(), repo, BypassOptions(), NullLogger<ItsmWebhookHandler>.Instance,

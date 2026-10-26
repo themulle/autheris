@@ -28,7 +28,6 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
             builder.UseSetting("Gateway:Insecure:danger_bypass_webhook_signature_validation", "true");
             builder.UseSetting("Gateway:Insecure:danger_allow_untrusted_certificates", "true");
             builder.UseSetting("Gateway:Insecure:warn_ignore_webhook_timestamp_tolerance", "true");
-            builder.UseSetting("Gateway:Insecure:warn_fallback_default_tenant_for_webhooks", "true");
             builder.UseSetting("Gateway:Insecure:warn_mock_external_systems_if_unreachable", "true");
             builder.UseSetting("Gateway:Insecure:warn_allow_all_cors_origins", "true");
             builder.UseSetting("Gateway:Insecure:warn_disable_rate_limiting", "true");
