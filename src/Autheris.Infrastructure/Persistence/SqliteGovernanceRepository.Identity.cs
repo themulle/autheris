@@ -74,6 +74,9 @@ public partial class SqliteGovernanceRepository : IIdentityStoreRepository
     public Task<IReadOnlyList<ScimLock>> GetLocksAsync(TenantId tenantId, string realmId, CancellationToken ct = default) =>
         IdentityStoreInstance.GetLocksAsync(tenantId, realmId, ct);
 
+    public Task<ScimLockWindow> CountLocksSinceAsync(TenantId tenantId, string realmId, IReadOnlyList<string> sources, DateTimeOffset sinceUtc, int cap, CancellationToken ct = default) =>
+        IdentityStoreInstance.CountLocksSinceAsync(tenantId, realmId, sources, sinceUtc, cap, ct);
+
     public Task RemoveLockAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default) =>
         IdentityStoreInstance.RemoveLockAsync(tenantId, realmId, userKey, ct);
 }

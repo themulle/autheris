@@ -44,4 +44,24 @@ public sealed class ScimRealmSecretOptions
 public sealed class ScimOptions
 {
     public List<string> AllowedIpRanges { get; set; } = [];
+
+    /// <summary>Authentication:Realms:Scim:MassChangeProtection. Throttle on SCIM-originated user deprovisioning (06-FU-02).</summary>
+    public ScimMassChangeProtectionOptions MassChangeProtection { get; set; } = new();
+}
+
+/// <summary>
+/// Rate guard against a compromised or buggy IdP mass-deactivating users through SCIM. Counts distinct users locked by SCIM per
+/// tenant and realm in a sliding window (shared lock table, cluster-wide); beyond the limit SCIM deprovisioning answers 429.
+/// Admin and manual locks are never counted or blocked. <c>Enabled=false</c> is an explicit opt-out.
+/// </summary>
+public sealed class ScimMassChangeProtectionOptions
+{
+    public const int MaxOperationsLowerBound = 1;
+    public const int MaxOperationsUpperBound = 100_000;
+    public const int WindowMinutesLowerBound = 1;
+    public const int WindowMinutesUpperBound = 1440;
+
+    public bool Enabled { get; set; } = true;
+    public int MaxDestructiveOperations { get; set; } = 100;
+    public int WindowMinutes { get; set; } = 60;
 }

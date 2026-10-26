@@ -17,13 +17,16 @@ public sealed class ScimService : IScimService
     private readonly IIdentityDeprovisioningService _deprovisioningService;
     private readonly ScimGroupMembershipValidator? _membershipValidator;
     private readonly IRoleResolverCache? _roleCache;
+    private readonly ScimMassChangeGuard? _massChangeGuard;
 
     public ScimService(
         IIdentityStoreRepository repository,
         IIdentityDeprovisioningService deprovisioningService,
         ScimGroupMembershipValidator? membershipValidator = null,
-        IRoleResolverCache? roleCache = null)
+        IRoleResolverCache? roleCache = null,
+        ScimMassChangeGuard? massChangeGuard = null)
     {
+        _massChangeGuard = massChangeGuard;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _deprovisioningService = deprovisioningService ?? throw new ArgumentNullException(nameof(deprovisioningService));
         _membershipValidator = membershipValidator;
@@ -73,6 +76,7 @@ public sealed class ScimService : IScimService
 
         if (existing.Active && !updated.Active)
         {
+            await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PUT", ct).ConfigureAwait(false);
         }
@@ -127,6 +131,7 @@ public sealed class ScimService : IScimService
         if (existing.Active && !activeStatus)
         {
             // SEC-SC-14: Deprovisioning Lock flow
+            await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PATCH", ct).ConfigureAwait(false);
 
@@ -153,6 +158,7 @@ public sealed class ScimService : IScimService
             return false;
         }
 
+        await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
         await _deprovisioningService.DeprovisionAndLockSubjectAsync(
             tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_DELETE", ct).ConfigureAwait(false);
 
@@ -160,6 +166,9 @@ public sealed class ScimService : IScimService
         _roleCache?.Invalidate(realmId, userKey);
         return true;
     }
+
+    private Task EnsureMassChangeAllowedAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct) =>
+        _massChangeGuard?.EnsureAllowedAsync(tenantId, realmId, userKey, ct) ?? Task.CompletedTask;
 
     public async Task<ScimListResponse<ScimUser>> ListUsersAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default)
     {

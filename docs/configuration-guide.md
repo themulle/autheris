@@ -175,6 +175,17 @@ Unterstützt moderne OIDC/OAuth2-Bearer-Token aus Microsoft Entra ID (Azure AD) 
 
 ---
 
+#### 2.2.5 `Authentication:Realms:Scim:MassChangeProtection` (SCIM mass-deprovisioning guard)
+Throttles SCIM-originated user deprovisioning (PUT/PATCH `active=false` and DELETE on `/scim/v2/{realm}/Users`) so a compromised or buggy IdP token cannot deactivate every user at once. The guard counts distinct users locked by SCIM per tenant and realm within the window, using the shared lock table (cluster-wide). Admin and manual locks are never counted or blocked. A repeat on an already-locked user is neither counted again nor blocked. Group deletes are not counted.
+
+| Key | Type | Range | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Enabled` | `bool` | `true \| false` | `true` | `false` is an explicit opt-out and logs a startup warning. |
+| `MaxDestructiveOperations` | `int` | 1 - 100000 | `100` | Distinct users SCIM may lock per realm within the window. |
+| `WindowMinutes` | `int` | 1 - 1440 | `60` | Sliding window length. |
+
+Out-of-range values fail startup. Above the limit the endpoint answers `429` with a fixed SCIM error body and a `Retry-After` header (seconds until the oldest counted lock leaves the window); nothing is changed for the blocked user. The first block per realm and window writes the required audit event `SCIM_MASS_CHANGE_BLOCKED` (tenant, realm, count, limit, window only) and one warning log line. If the count query fails, the SCIM operation fails (fail closed); admin deprovisioning is unaffected. Concurrent nodes may overshoot the limit by at most the number of in-flight requests.
+
 ### 2.3 `GovernanceDb` (Katalog- & Consent-Datenbank)
 
 Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen und Audit-Logs.

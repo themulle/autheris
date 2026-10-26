@@ -44,6 +44,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();
         services.AddHostedService<Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService>();
         services.AddSingleton<Autheris.Application.Identity.Services.IIdentityDeprovisioningService, Autheris.Application.Identity.Services.IdentityDeprovisioningService>();
+        services.AddSingleton<Autheris.Application.Identity.Services.ScimMassChangeGuard>();
         services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
         services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
         services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
