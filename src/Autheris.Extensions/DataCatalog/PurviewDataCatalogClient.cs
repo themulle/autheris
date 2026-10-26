@@ -26,9 +26,8 @@ public sealed class PurviewDataCatalogClient : IDataCatalogClient
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<PurviewDataCatalogClient> _logger;
 
-    private static string? _cachedToken;
-    private static DateTimeOffset _tokenExpiry = DateTimeOffset.MinValue;
-    private static readonly SemaphoreSlim TokenLock = new(1, 1);
+    private const string DevMockToken = "purview-dev-mock-bearer-token";
+    private readonly PurviewTokenCache _tokenCache;
 
     public DataCatalogProviderType ProviderType => DataCatalogProviderType.MicrosoftPurview;
 
@@ -40,8 +39,10 @@ public sealed class PurviewDataCatalogClient : IDataCatalogClient
         IOptions<GatewayOptions> options,
         ILogger<PurviewDataCatalogClient> logger,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null)
+        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        PurviewTokenCache? tokenCache = null)
     {
+        _tokenCache = tokenCache ?? new PurviewTokenCache(TimeProvider.System);
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -105,70 +106,54 @@ public sealed class PurviewDataCatalogClient : IDataCatalogClient
 
     private async Task<string> AcquireTokenAsync(PurviewOptions opts, CancellationToken ct)
     {
-        if (_cachedToken != null && DateTimeOffset.UtcNow < _tokenExpiry.AddMinutes(-5))
-        {
-            return _cachedToken;
-        }
+        var isDev = _environment != null &&
+                    string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
 
-        await TokenLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        if (string.IsNullOrWhiteSpace(opts.TenantId) || string.IsNullOrWhiteSpace(opts.ClientId) || string.IsNullOrWhiteSpace(opts.ClientSecret))
         {
-            if (_cachedToken != null && DateTimeOffset.UtcNow < _tokenExpiry.AddMinutes(-5))
+            if (!isDev)
             {
-                return _cachedToken;
+                throw new System.Security.SecurityException(
+                    "Microsoft Purview credentials (TenantId, ClientId, ClientSecret) must be configured in non-Development environment.");
             }
 
-            var isDev = _environment != null &&
-                        string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
-
-            if (string.IsNullOrWhiteSpace(opts.TenantId) || string.IsNullOrWhiteSpace(opts.ClientId) || string.IsNullOrWhiteSpace(opts.ClientSecret))
-            {
-                if (!isDev)
-                {
-                    throw new System.Security.SecurityException(
-                        "Microsoft Purview credentials (TenantId, ClientId, ClientSecret) must be configured in non-Development environment.");
-                }
-
-                // Fallback for mocked/dev environment only
-                _cachedToken = "purview-dev-mock-bearer-token";
-                _tokenExpiry = DateTimeOffset.UtcNow.AddHours(1);
-                return _cachedToken;
-            }
-
-            var resolvedSecret = Autheris.Application.Security.SecretReferenceResolver.Resolve(
-                _secretProvider,
-                opts.ClientSecret,
-                _environment,
-                allowPlaintextInDevelopment: true,
-                logger: _logger,
-                secretDescription: "Purview ClientSecret");
-
-            var tokenEndpoint = $"https://login.microsoftonline.com/{opts.TenantId}/oauth2/v2.0/token";
-            using var tokenReq = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint);
-            var form = new Dictionary<string, string>
-            {
-                ["grant_type"] = "client_credentials",
-                ["client_id"] = opts.ClientId,
-                ["client_secret"] = resolvedSecret ?? opts.ClientSecret,
-                ["scope"] = "https://purview.azure.net/.default"
-            };
-            tokenReq.Content = new FormUrlEncodedContent(form);
-
-            using var tokenResp = await _httpClient.SendAsync(tokenReq, ct).ConfigureAwait(false);
-            tokenResp.EnsureSuccessStatusCode();
-
-            using var doc = JsonDocument.Parse(await CatalogHttpContent.ReadBoundedStringAsync(tokenResp, "Purview token endpoint", ct).ConfigureAwait(false));
-            var root = doc.RootElement;
-            _cachedToken = root.GetProperty("access_token").GetString()!;
-            var expiresIn = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 3600;
-            _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(expiresIn);
-
-            return _cachedToken;
+            // Fallback for mocked/dev environment only; a constant that is never cached.
+            return DevMockToken;
         }
-        finally
+
+        var key = PurviewTokenCache.ComputeKey(opts.TenantId, opts.ClientId, opts.ClientSecret);
+        return await _tokenCache.GetOrFetchAsync(key, innerCt => FetchTokenAsync(opts, innerCt), ct).ConfigureAwait(false);
+    }
+
+    private async Task<(string Token, TimeSpan ExpiresIn)> FetchTokenAsync(PurviewOptions opts, CancellationToken ct)
+    {
+        var resolvedSecret = Autheris.Application.Security.SecretReferenceResolver.Resolve(
+            _secretProvider,
+            opts.ClientSecret,
+            _environment,
+            allowPlaintextInDevelopment: true,
+            logger: _logger,
+            secretDescription: "Purview ClientSecret");
+
+        var tokenEndpoint = $"https://login.microsoftonline.com/{opts.TenantId}/oauth2/v2.0/token";
+        using var tokenReq = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint);
+        var form = new Dictionary<string, string>
         {
-            TokenLock.Release();
-        }
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = opts.ClientId,
+            ["client_secret"] = resolvedSecret ?? opts.ClientSecret,
+            ["scope"] = "https://purview.azure.net/.default"
+        };
+        tokenReq.Content = new FormUrlEncodedContent(form);
+
+        using var tokenResp = await _httpClient.SendAsync(tokenReq, ct).ConfigureAwait(false);
+        tokenResp.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await CatalogHttpContent.ReadBoundedStringAsync(tokenResp, "Purview token endpoint", ct).ConfigureAwait(false));
+        var root = doc.RootElement;
+        var token = root.GetProperty("access_token").GetString()!;
+        var expiresIn = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 3600;
+        return (token, TimeSpan.FromSeconds(expiresIn));
     }
 
     internal static IReadOnlyList<CatalogTableAsset> ParseAtlasSearchResponse(string json, ILogger logger)

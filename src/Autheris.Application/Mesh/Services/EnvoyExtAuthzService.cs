@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -28,7 +27,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
     private static readonly char[] CrlfChars = new[] { '\r', '\n' };
 
     // API version path segment (v1, v2, V10, ...), see ExtractResourceFromPath.
-    private static readonly Regex VersionSegment = new(@"^v[0-9]+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private readonly Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? _virtualFilters;
 
@@ -308,7 +306,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         int idx = 0;
         while (idx < segments.Length &&
                (segments[idx].Equals("api", StringComparison.OrdinalIgnoreCase) ||
-                VersionSegment.IsMatch(segments[idx])))
+                EnvoyExportValidation.IsVersionSegment(segments[idx])))
         {
             idx++;
         }
@@ -436,25 +434,22 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         return sb.ToString();
     }
 
-    private static readonly Regex DnsLabelRegex = new("^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-    private static readonly Regex AuthzPathRegex = new("^/[A-Za-z0-9/_.-]{0,200}$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-
     /// <summary>
     /// G3: Export parameters are written into YAML unescaped, so they are restricted to DNS labels / numeric values.
     /// </summary>
     internal static void ValidateExportOptions(EnvoyFilterExportOptions opts)
     {
-        if (opts.MeshNamespace is null || !DnsLabelRegex.IsMatch(opts.MeshNamespace))
+        if (opts.MeshNamespace is null || !EnvoyExportValidation.IsDnsLabel(opts.MeshNamespace))
         {
             throw new ArgumentException("Invalid namespace: must be a DNS label.", nameof(opts));
         }
 
-        if (opts.FilterName is null || !DnsLabelRegex.IsMatch(opts.FilterName))
+        if (opts.FilterName is null || !EnvoyExportValidation.IsDnsLabel(opts.FilterName))
         {
             throw new ArgumentException("Invalid filter name: must be a DNS label.", nameof(opts));
         }
 
-        if (opts.ServiceHost is null || opts.ServiceHost.Length > 253 || !opts.ServiceHost.Split('.').All(l => DnsLabelRegex.IsMatch(l)))
+        if (opts.ServiceHost is null || opts.ServiceHost.Length > 253 || !opts.ServiceHost.Split('.').All(l => EnvoyExportValidation.IsDnsLabel(l)))
         {
             throw new ArgumentException("Invalid host: must be a DNS name.", nameof(opts));
         }
@@ -464,7 +459,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             throw new ArgumentException("Invalid port.", nameof(opts));
         }
 
-        if (opts.AuthzPath is null || !AuthzPathRegex.IsMatch(opts.AuthzPath))
+        if (opts.AuthzPath is null || !EnvoyExportValidation.IsAuthzPath(opts.AuthzPath))
         {
             throw new ArgumentException("Invalid authorization path.", nameof(opts));
         }
