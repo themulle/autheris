@@ -53,13 +53,8 @@ public sealed class CatalogSearchOptions
     /// <summary>Gewichtungen für einzelne Metadaten-Felder.</summary>
     public CatalogSearchFieldWeights FieldWeights { get; set; } = new();
 
-    // Legacy/compatibility properties
+    /// <summary>Dimension of the embedding vectors (LocalOnnx, Ollama).</summary>
     public int EmbeddingDimensions { get; set; } = 384;
-    public string ModelName { get; set; } = "all-MiniLM-L6-v2";
-    public string? LocalOnnxModelPath { get => ModelPath; set => ModelPath = value; }
-    public string? LocalOnnxModelSha256 { get => ModelSha256; set => ModelSha256 = value; }
-    public string? OllamaModel { get => OllamaModelName; set => OllamaModelName = value; }
-    public string? OllamaBaseUrl { get => OllamaEndpoint; set => OllamaEndpoint = value; }
 }
 
 public sealed class CatalogSearchFieldWeights

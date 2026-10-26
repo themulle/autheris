@@ -5,6 +5,7 @@ using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -310,7 +311,7 @@ public partial class SqliteGovernanceRepository
         var conn = scope.Connection;
         {
             TableIdentifier? tableId = null;
-            TenantId tenantId = TenantId.LegacySingleTenant;
+            string? rawTenant = null;
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
@@ -323,13 +324,25 @@ public partial class SqliteGovernanceRepository
                 if (await reader.ReadAsync(ct))
                 {
                     tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-                    tenantId = reader.IsDBNull(3) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(3));
+                    rawTenant = reader.IsDBNull(3) ? null : reader.GetString(3);
                 }
             }
 
             if (!tableId.HasValue)
             {
                 return false;
+            }
+
+            // DEF-02: the tenant of the audit row is the locked row's tenant; an invalid value refuses the revoke (nothing written yet) and is audited.
+            TenantId tenantId;
+            try
+            {
+                tenantId = ConsentGrantSqlCore.ResolveConsentTenant(rawTenant, consentId, tableId.Value.ToString());
+            }
+            catch (ConsentTenantIntegrityException refusal)
+            {
+                await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
+                throw;
             }
 
             using (var cmd = conn.CreateCommand())
@@ -356,7 +369,7 @@ public partial class SqliteGovernanceRepository
                 EventType = "CONSENT_REVOKED",
                 ActorSid = revokedBySid,
                 TargetTable = tableId.Value.ToString(),
-                Decision = "REVOKED",
+                Decision = ConsentGrantSqlCore.RevokedDecision,
                 TraceId = Guid.NewGuid().ToString("N"),
                 DetailsJson = JsonSerializer.Serialize(new
                 {
@@ -1764,125 +1777,6 @@ public partial class SqliteGovernanceRepository
         }
     }
 
-    public async Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
-    {
-        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
-        var conn = scope.Connection;
-        {
-            TableIdentifier? tableId = null;
-            bool isGranteeSelf = false;
-            TenantId revokeTenant = TenantId.LegacySingleTenant;
-
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = @"SELECT COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name, c.grantee_type, c.grantee_sid, c.tenant_id
-                                    FROM CONSENTS c
-                                    JOIN TABLES t ON c.table_id = t.id
-                                    LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
-                                    WHERE c.id = @id";
-                cmd.Parameters.AddWithValue("@id", consentId.ToString());
-                using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (await reader.ReadAsync(ct))
-                {
-                    tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-                    var gType = reader.GetString(3);
-                    var gSid = reader.IsDBNull(4) ? null : reader.GetString(4);
-                    if (!reader.IsDBNull(5))
-                    {
-                        revokeTenant = new TenantId(reader.GetString(5));
-                    }
-
-                    if (string.Equals(gType, "User", StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(gSid, revokedBySid.Value, StringComparison.OrdinalIgnoreCase))
-                    {
-                        isGranteeSelf = true;
-                    }
-                }
-            }
-
-            if (!tableId.HasValue)
-            {
-                throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
-            }
-
-            if (!isGranteeSelf)
-            {
-                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(conn, tableId.Value, revokedBySid, ct);
-                if (!isAuthorized)
-                {
-                    throw new UnauthorizedAccessException($"User '{revokedBySid}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
-                }
-            }
-
-            // PERS-05: the revocation, the epoch bump and the audit row are one transaction: a failing audit or epoch write rolls the
-            // revocation back, and a consent that is already revoked is left untouched (no second audit event, no epoch bump).
-            using var tx = conn.BeginTransaction();
-            try
-            {
-                using (var check = conn.CreateCommand())
-                {
-                    check.Transaction = tx;
-                    check.CommandText = "SELECT is_revoked FROM CONSENTS WHERE id = @id";
-                    check.Parameters.AddWithValue("@id", consentId.ToString());
-                    var current = await check.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                    if (current is null || current == DBNull.Value || Convert.ToInt32(current) == 1)
-                    {
-                        await tx.RollbackAsync(ct).ConfigureAwait(false);
-                        return;
-                    }
-                }
-
-                using (var cmd = conn.CreateCommand())
-                {
-                    cmd.Transaction = tx;
-                    cmd.CommandText = @"UPDATE CONSENTS
-                                        SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason
-                                        WHERE id = @id AND is_revoked = 0";
-                    cmd.Parameters.AddWithValue("@id", consentId.ToString());
-                    cmd.Parameters.AddWithValue("@by", revokedBySid.Value);
-                    cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
-                    cmd.Parameters.AddWithValue("@reason", reason);
-                    var affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                    if (affected != 1)
-                    {
-                        await tx.RollbackAsync(ct).ConfigureAwait(false);
-                        return;
-                    }
-                }
-
-                await IncrementTableEpochInternalAsync(conn, tableId.Value, tx, ct).ConfigureAwait(false);
-
-                var auditEntry = new AuditLogEntry
-                {
-                    TenantId = revokeTenant,
-                    EventType = "CONSENT_REVOKED",
-                    ActorSid = revokedBySid,
-                    TargetTable = tableId.Value.ToString(),
-                    Decision = "REVOKED",
-                    TraceId = Guid.NewGuid().ToString("N"),
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        ConsentId = consentId,
-                        Reason = reason
-                    })
-                };
-                await RecordAuditEventInternalAsync(conn, auditEntry, ct, tx).ConfigureAwait(false);
-
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-                OnTransactionCommitted(tx);
-
-                // Post-commit: invalidate the in-memory epoch cache immediately.
-                await _epochValidationService.InvalidateEpochAsync(tableId.Value, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
-                OnTransactionRolledBack(tx);
-                throw;
-            }
-        }
-    }
-
     public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
@@ -1952,7 +1846,7 @@ public partial class SqliteGovernanceRepository
         var conn = scope.Connection;
         {
             TableIdentifier? tableId = null;
-            TenantId extendTenant = TenantId.LegacySingleTenant;
+            TenantId extendTenant = default;
             var newValidFrom = DateTimeOffset.UtcNow;
             using (var cmd = conn.CreateCommand())
             {
@@ -1966,10 +1860,7 @@ public partial class SqliteGovernanceRepository
                 {
                     newValidFrom = ConsentSubjectFilter.RenewalPeriodStart(reader.GetString(4), DateTimeOffset.UtcNow);
                     tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-                    if (!reader.IsDBNull(3))
-                    {
-                        extendTenant = new TenantId(reader.GetString(3));
-                    }
+                    extendTenant = ConsentGrantSqlCore.ResolveConsentTenant(reader.IsDBNull(3) ? null : reader.GetString(3), consentId, tableId.Value.ToString());
                 }
             }
 

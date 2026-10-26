@@ -75,12 +75,6 @@ public sealed class DataCatalogOptions
     /// </summary>
     public IReadOnlyList<string> SharedTables { get; init; } = [];
 
-    /// <summary>
-    /// SEC M-34: Allows (backward-compatible) catalog webhook signatures over the payload only instead of
-    /// "{unixTimestamp}.{payload}". Default: false.
-    /// </summary>
-    public bool AllowLegacyPayloadOnlySignature { get; init; } = false;
-
     /// <summary>Issue #111: maximum number of catalog tags per dataset (all sources together). Valid range 1-256, default 32.</summary>
     public int MaxTagsPerDataset { get; init; } = 32;
 

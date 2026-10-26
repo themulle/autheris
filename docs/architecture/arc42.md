@@ -274,7 +274,7 @@ sequenceDiagram
 ### 8.8 Hot Chocolate Fusion Subgraph Federation
 - **Federated Query Router**: Composes distributed microservice subgraphs into a unified supergraph schema.
 - **Zero-Trust Context Forwarding**: `SubgraphSecurityDelegatingHandler` securely forwards caller identity and SIDs to downstream subgraphs.
-- **In-Memory Result Masking**: `SubgraphResultMaskingMiddleware` enforces masking rules across aggregated federated response trees.
+- **In-Memory Result Masking**: `SubgraphFieldMaskingTypeInterceptor` enforces masking rules at the field level of federated subgraph results.
 
 ### 8.9 Model Context Protocol (MCP) AI Gateway & Semantic Guardrails
 - **Model Context Protocol Server**: Exposes GraphQL schemas and parameterized queries as AI Agent Tools via Stdio and Streamable HTTP (`/mcp`, official MCP C# SDK, stateless, OAuth protected resource metadata).

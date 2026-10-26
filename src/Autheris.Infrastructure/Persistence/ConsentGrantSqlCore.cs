@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 
 /// <summary>The consent row a revoke acts on, read under the dialect's row lock; the tenant is resolved from this locked row.</summary>
@@ -27,6 +28,9 @@ internal static class ConsentGrantSqlCore
     public const string SelectValidTo = "SELECT valid_to FROM CONSENTS WHERE id = @id AND tenant_id = @t AND is_revoked = 0";
 
     public const string UpdateDescription = "UPDATE CONSENTS SET description = @d WHERE id = @id AND tenant_id = @t AND is_revoked = 0";
+
+    /// <summary>Audit decision of every consent revoke path in every dialect (DEF-03, DEF-SC-07). A <c>const</c>, so the literal stays in the IL and in the goldens.</summary>
+    public const string RevokedDecision = "REVOKED";
 
     public const string MarkRevoked = @"UPDATE CONSENTS SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason
                                 WHERE id = @id AND is_revoked = 0";
@@ -138,5 +142,19 @@ internal static class ConsentGrantSqlCore
         cmd.AddBound("@now", clock.GetUtcNow().ToString("O"));
         cmd.AddBound("@reason", reason);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The only tenant parse of the revoke and extend paths (DEF-SC-01): NULL, empty, whitespace, over-length and regex-invalid values throw
+    /// the governed <see cref="ConsentTenantIntegrityException"/> (fixed message, no raw value, no inner exception). Never defaults.
+    /// </summary>
+    public static TenantId ResolveConsentTenant(string? raw, Guid consentId, string? targetTable)
+    {
+        if (TenantId.TryParse(raw, out var tenant))
+        {
+            return tenant;
+        }
+
+        throw new ConsentTenantIntegrityException(consentId, targetTable);
     }
 }

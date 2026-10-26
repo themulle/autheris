@@ -3,10 +3,8 @@ using Microsoft.Extensions.Configuration;
 namespace Autheris.Api.Configuration;
 
 /// <summary>
-/// ADR-012 / concept phase 4: the domain-local <c>warn_</c> / <c>danger_</c> duplicates were removed; every such
-/// switch now lives only in <c>Gateway:Insecure</c>. A removed key that is still set to <c>true</c> would silently
-/// stop relaxing anything, so startup fails with the replacement key instead. A value of <c>false</c> changes nothing
-/// and is tolerated.
+/// ADR-012 / concept phase 4 and the no-legacy sweep: removed keys fail startup on <b>presence</b>, whatever their value (<c>false</c> included),
+/// instead of being ignored or merely warned about. Messages name the key and its replacement, never a value (DEF-SC-11).
 /// </summary>
 public static class LegacySwitchGuard
 {
@@ -29,7 +27,6 @@ public static class LegacySwitchGuard
             ["OpenMetadata:danger_allow_untrusted_certificates"] = "Insecure:danger_allow_untrusted_certificates",
             ["Itsm:danger_bypass_webhook_signature_validation"] = "Insecure:danger_bypass_webhook_signature_validation",
             ["Itsm:warn_ignore_webhook_timestamp_tolerance"] = "Insecure:warn_ignore_webhook_timestamp_tolerance",
-            ["Itsm:warn_fallback_default_tenant_for_webhooks"] = "Insecure:warn_fallback_default_tenant_for_webhooks",
             ["Itsm:warn_mock_external_systems_if_unreachable"] = "Insecure:warn_mock_external_systems_if_unreachable",
             ["Itsm:danger_allow_untrusted_certificates"] = "Insecure:danger_allow_untrusted_certificates",
             ["Mcp:warn_allow_unmasked_ai_access"] = "Insecure:warn_allow_unmasked_ai_access",
@@ -38,14 +35,26 @@ public static class LegacySwitchGuard
             ["Lakehouse:danger_bypass_lakehouse_auth"] = "Insecure:danger_bypass_lakehouse_auth",
             ["Dbt:danger_bypass_webhook_signature_validation"] = "Insecure:danger_bypass_webhook_signature_validation",
             ["WebSql:warn_allow_dml"] = "WebSql:AllowDml",
-            ["WebSql:danger_bypass_sql_governance"] = "Insecure:danger_bypass_websql_governance"
+            ["Insecure:warn_allow_websql_dml"] = "WebSql:AllowDml",
+            ["WebSql:danger_bypass_sql_governance"] = "Insecure:danger_bypass_websql_governance",
+            ["Profile"] = "Dev:Preset"
         };
 
-    /// <summary>Returns one message per removed key that is still set to <c>true</c>.</summary>
+    /// <summary>Removed keys (relative to <c>Gateway:</c>) without a replacement: the behaviour they enabled no longer exists.</summary>
+    public static IReadOnlyCollection<string> Removed { get; } =
+    [
+        "Itsm:warn_fallback_default_tenant_for_webhooks",
+        "Insecure:warn_fallback_default_tenant_for_webhooks"
+    ];
+
+    /// <summary>Returns one message per removed key that is present (any value).</summary>
     public static IReadOnlyList<string> FindViolations(IConfiguration configuration) =>
         Replacements
-            .Where(r => bool.TryParse(configuration[G + r.Key], out var on) && on)
-            .Select(r => $"'{G}{r.Key}' was removed (ADR-012 phase 4); use '{G}{r.Value}' instead.")
+            .Where(r => configuration.GetSection(G + r.Key).Exists())
+            .Select(r => $"'{G}{r.Key}' was removed; use '{G}{r.Value}' instead.")
+            .Concat(Removed
+                .Where(k => configuration.GetSection(G + k).Exists())
+                .Select(k => $"'{G}{k}' was removed together with the behaviour it enabled (an unbound webhook is always rejected); delete the key."))
             .ToList();
 
     public static void ThrowIfLegacyKeysSet(IConfiguration configuration)
@@ -54,7 +63,7 @@ public static class LegacySwitchGuard
         if (violations.Count > 0)
         {
             throw new InvalidOperationException(
-                "Removed insecure-switch keys are still configured:" + Environment.NewLine + string.Join(Environment.NewLine, violations));
+                "Removed configuration keys are still configured:" + Environment.NewLine + string.Join(Environment.NewLine, violations));
         }
     }
 }

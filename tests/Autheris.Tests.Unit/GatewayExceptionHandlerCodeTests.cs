@@ -24,6 +24,19 @@ public sealed class GatewayExceptionHandlerCodeTests
     }
 
     [Fact]
+    public async Task Revoke_Invalid_Tenant_Returns_Governed_Problem_Without_Echo()
+    {
+        // DEF-T-04 / DEF-SC-01: 403 with the governed code, fixed title, and neither the consent tenant value nor the exception message in the body.
+        var (status, body, raw) = await HandleAsync(new ConsentTenantIntegrityException(Guid.NewGuid(), "Sales.Crm.Orders"));
+
+        status.ShouldBe(403);
+        body.GetProperty("code").GetString().ShouldBe("CONSENT_TENANT_INVALID");
+        body.GetProperty("title").GetString().ShouldBe("Access denied.");
+        raw.ShouldNotContain("tenant value");
+        raw.ShouldNotContain("Sales.Crm.Orders");
+    }
+
+    [Fact]
     public async Task BadHttpRequest_Is400BadRequest_WithFixedMessage_SEC_PG_14()
     {
         var (status, body, raw) = await HandleAsync(

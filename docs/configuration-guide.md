@@ -26,7 +26,7 @@ Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensi
 | **NF-SEC-03** | Außerhalb von Development: `!string.IsNullOrWhiteSpace(HmacSecretKeyVaultRef)` und nicht gleich Test-Defaults | HMAC-Salts müssen in Staging/Produktion aus einem sicheren Secret-Store stammen. |
 | **NF-SEC-04** | Außerhalb von Development: BasicAuth Benutzer müssen zwingend das gesalzene PBKDF2-Format (`$pbkdf2$...`) verwenden | Klartext- und ungesalzene SHA-256-Passwörter sind in Staging/Produktion verboten und werden zur Laufzeit mit `401 Unauthorized` abgewiesen. |
 | **R-DEP-2** | Outside Development: Secret keys (`DataMasking.HmacSecretKeyVaultRef`, `GovernanceDb.AuditHmacKeyVaultRef`, `Authentication.ForwardAuth.SharedSecret`) must be at least 32 bytes in UTF-8 representation | Cryptographic keys shorter than 32 UTF-8 bytes are rejected fail-closed during startup validation. |
-| **R-API-1** | Outside Development: `Itsm.LegacyGlobalWebhookSecret = true` and all `DANGER:` bypass flags strictly prohibited | Setting `Itsm.LegacyGlobalWebhookSecret = true` or any `DANGER:` flags causes an immediate `ValidationException` process startup crash outside `Development`. |
+| **R-API-1** | Outside Development: all `DANGER:` bypass flags strictly prohibited; ITSM webhooks are verified with per-instance secrets only | Any `DANGER:` flag causes an immediate `ValidationException` process startup crash outside `Development`. |
 | **F-6 / POL-1** | When `Casbin:Enabled = true`: `Casbin:ModelPath` and `Casbin:PolicyPath` are mandatory and must satisfy `CasbinModelContract` | Missing configuration or failure of mandatory probes (M1–M8) or wildcard safety probes (W2–W6) causes immediate startup failure. |
 
 > [!IMPORTANT]
@@ -780,10 +780,10 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 
 > [!CAUTION]
 > **Production & Staging Warning (DANGER Switches & R-API-1 Migration Notice)**:
-> All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_fallback_default_tenant_for_webhooks`, `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `Catalog.OpenSchema`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
+> All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `Catalog.OpenSchema`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
 > 
 > **Migration Notice (R-API-1 / API-1)**:
-> Setting `Itsm.LegacyGlobalWebhookSecret = true` is classified as `DANGER:` and strictly prevents application startup outside `Development`. Deployments relying on the legacy shared global ITSM webhook secret will not boot in Staging or Production. Operators must configure instance-specific webhook secrets (`itsm:webhook-secret:<instanceId>`) via Key Vault or environment variables.
+> The shared global ITSM webhook secret is no longer accepted in any environment; webhooks are verified with instance-specific secrets (`itsm:webhook-secret:<instanceId>`) only, configured via Key Vault or environment variables. An ITSM instance without a tenant mapping (`Itsm:InstanceToTenantMap`) is always rejected.
 
 | Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
@@ -813,7 +813,7 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 
 | Property | Type | Default | Class | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Preset` | `string` | `Standard` | A/B | `Standard`, `Quickstart` (adds `warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests`, `OpenSchema`) or `Strict` (no test auth, no introspection). Replaces the deprecated `Gateway:Profile`. |
+| `Preset` | `string` | `Standard` | A/B | `Standard`, `Quickstart` (adds `warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests`, `OpenSchema`) or `Strict` (no test auth, no introspection). The former `Gateway:Profile` key was removed and fails startup. |
 | `Banner` | `bool` | `true` | A | Startup banner with links and personas. |
 | `VerboseErrors` | `bool` | `true` | A | Diagnostic `problem+json` for 403 and unhandled exceptions. |
 | `PersonaLogin` | `bool` | `true` | A | `/api/dev/personas` and `/api/dev/login/{persona}`. |
