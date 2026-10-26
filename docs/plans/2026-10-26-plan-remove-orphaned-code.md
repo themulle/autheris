@@ -63,3 +63,14 @@ Binding conditions
 - **ORC-S4:** Residual grep (plan Verification) must be empty in `src/ tests/ benchmarks/ deploy/ scripts/` and `dotnet build -warnaserror` must pass; if any DI/reflection reference surfaces, stop and re-plan rather than keep a stub.
 
 Mandatory tests: no new tests (pure deletion). Existing `[Trait("Category","Security")]` suites named in ORC-S1 must pass in the Unit run.
+
+## Addendum 2026-10-26: Q2 changed to YES (owner)
+The items of the "Uncertain" list for `IChunkedQueryExecutor`/`ChunkedQueryExecutor`, its DI registration, `GraphQlOptions.MaxInClauseBatchSize` (appsettings, configuration guide), the `chunkedQueryExecutor` ctor parameter (both ctors, DI factory, test call sites) are now in the delete table (D3-D7). Deleted with it: `ChunkedQueryExecutorTests`, `OddBatchDataLoaderEvaluationTests`, `ParameterBudgetChunkerTests`, and benchmark section [6] (composite key batching) in `ScaleCatalogBenchmark`. `IParameterBudgetProvider` stays (used by `CrossSourceRelationResolver`). `CHILD_RELATION_CHECK` stays (emitted on every access check). ADR-008/ADR-009 carry a removal note instead of a rewrite.
+
+| # | File | Action |
+|---|---|---|
+| D3 | `Interfaces/IChunkedQueryExecutor.cs`, `Services/ChunkedQueryExecutor.cs` | delete (incl. `ParameterBudget` record, used only by the executor and the benchmark) |
+| D4 | `GatewayExecutionServiceExtensions.cs` | remove singleton registration and factory argument |
+| D5 | `GraphQlOptions.MaxInClauseBatchSize` | remove option and config rows |
+| D6 | `GatewayExecutionService` | remove `chunkedQueryExecutor` ctor parameter |
+| D7 | unit tests / benchmark | delete executor tests; fix ctor call sites; drop benchmark section [6] |

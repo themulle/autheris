@@ -98,6 +98,7 @@ Entry format:
   Fix hint : Never read from rawRows after governance. Resolve the join key before projection on the same filtered row object
              (or carry it alongside), and treat a denied/masked join/id column as "relation not resolvable" (fail closed, like
              RELATION_KEY_MASKED in the catalog path).
+  Note     : Moot: code removed (`InvoiceItemDataLoader` in #356, `BatchRelationLoader` in this PR); no live path remains, so the fix is not relocated.
 
 [GQL-02] LOW | bug | finance.invoicesWithItems fabricates values for masked/denied/non-decimal columns  [RESOLVED 91cd0127]
   Location : src/Autheris.GraphQL/Types/QueryTypes.cs:789-795
@@ -106,6 +107,7 @@ Entry format:
              masked/denied value from real data, and a random Guid key makes the child DataLoader return nothing.
   Scenario : amount is masked ("****") or the connector returns double; the API answers amount: 1500.00 for every invoice.
   Fix hint : Map nullable fields (decimal?/string?) and return null for masked/denied/unparsable values; never synthesize ids.
+  Note     : Moot: the `finance` root field and its `invoicesWithItems` mapping were removed in #356 (no live path remains).
 
 [EXT-02] LOW | security | OData authorized-tables cache keyed only by tenant+SID (ignores roles/groups/consents; null SID collides)  [RESOLVED a79ac587]
   Location : src/Autheris.Extensions/OData/ODataHandler.cs:139-143, :199-203

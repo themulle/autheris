@@ -185,7 +185,7 @@ sequenceDiagram
     participant Engine as ConsentResolutionEngine
     participant DB as Target Database
 
-    Client->>GW: POST /graphql (Query FinanceRecords)
+    Client->>GW: POST /graphql (Query table(domain, name))
     GW->>Cache: GetOrCreateResolvedPolicy(UserSid, GroupSids, TableId)
     alt Cache Hit (Epoch Valid)
         Cache-->>GW: Return ResolvedConsent

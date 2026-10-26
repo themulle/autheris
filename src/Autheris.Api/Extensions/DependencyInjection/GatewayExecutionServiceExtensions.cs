@@ -45,10 +45,6 @@ public static class GatewayExecutionServiceExtensions
         GatewayOptions gatewayOptions,
         IHostEnvironment? environment = null)
     {
-        services.AddSingleton<IChunkedQueryExecutor>(sp => new ChunkedQueryExecutor(
-            gatewayOptions.GraphQL.MaxInClauseBatchSize,
-            sp.GetRequiredService<IParameterBudgetProvider>()));
-
         // Standardisiertes Connector-SPI (F-ARCH-10 nach Trino-Muster)
         services.AddSingleton<IAutherisConnectorRegistry>(sp =>
         {
@@ -81,7 +77,6 @@ public static class GatewayExecutionServiceExtensions
             sp.GetRequiredService<IConsentResolutionService>(),
             sp.GetRequiredService<IConsentCacheService>(),
             sp.GetRequiredService<IColumnMaskingProvider>(),
-            sp.GetRequiredService<IChunkedQueryExecutor>(),
             sp.GetService<IOptions<GatewayOptions>>(),
             sp.GetService<ITrafficDrainController>(),
             sp.GetServices<IDataSourceExecutor>(),
