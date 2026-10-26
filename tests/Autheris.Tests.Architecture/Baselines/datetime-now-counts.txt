@@ -105,7 +105,6 @@ src/Autheris.Extensions/Backstage/BackstageCatalogExportService.cs|1
 src/Autheris.Extensions/Cdc/CustomQuery/CustomQueryPollerService.cs|5
 src/Autheris.Extensions/Cdc/DebeziumCdcParser.cs|1
 src/Autheris.Extensions/DataCatalog/CatalogWebhookHandler.cs|2
-src/Autheris.Extensions/DataCatalog/PurviewDataCatalogClient.cs|4
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|4
 src/Autheris.Extensions/Dbt/DbtWebhookReceiver.cs|3
 src/Autheris.Extensions/Itsm/ItsmWebhookHandler.cs|2
