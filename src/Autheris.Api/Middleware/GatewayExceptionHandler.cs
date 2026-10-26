@@ -72,7 +72,9 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         else
         {
             (status, title, retryAfter) = Map(exception);
-            code = CodeForStatus(status);
+            code = (exception as GatewaySecurityException) is { } denied
+                ? GatewayDenialStatusMapper.SpecificCode(denied) ?? CodeForStatus(status)
+                : CodeForStatus(status);
         }
 
         if (status >= StatusCodes.Status500InternalServerError)

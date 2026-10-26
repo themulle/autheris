@@ -23,6 +23,17 @@ internal static class GatewayDenialStatusMapper
     };
 
     /// <summary>
+    /// DT-A-2: the governed code of the two tenant-resolution denials, chosen by exception type only (never from exception data,
+    /// SEC-PG-14). <c>null</c> for every other denial, which keeps the status-derived code.
+    /// </summary>
+    internal static string? SpecificCode(GatewaySecurityException exception) => exception switch
+    {
+        TenantUnresolvedException => Autheris.Api.Errors.ApiErrorCodes.TenantUnresolved,
+        TenantClaimInvalidException => Autheris.Api.Errors.ApiErrorCodes.TenantClaimInvalid,
+        _ => null
+    };
+
+    /// <summary>
     /// The WebSQL response of a denial: the status of <see cref="Map"/> with a generic message. Only the code and the
     /// exception type are logged, never the exception object: the inner exception of a key source failure may quote
     /// data values (C-8, SEC-11).

@@ -22,6 +22,12 @@ public sealed class TenancyOptions
     public const string SectionName = "Gateway:Tenancy";
 
     /// <summary>
+    /// <c>Gateway:Tenancy:DefaultTenantId</c> (DT-A-1): the tenant of principals without a tenant claim. Absent or null means no default;
+    /// an empty or unusable value fails start-up. Read only by the tenant resolver and option validation (DT-SC-01).
+    /// </summary>
+    public string? DefaultTenantId { get; init; }
+
+    /// <summary>
     /// <c>Single</c> or <c>Multi</c> (names only, case-insensitive). Empty or unset means <see cref="TenancyMode.Multi"/>.
     /// Kept as text so an explicit setting can be told apart from the default and an unknown value fails start-up validation.
     /// </summary>

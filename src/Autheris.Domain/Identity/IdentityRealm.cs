@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Security;
 using System.Security.Claims;
+using Autheris.Domain.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
 
@@ -38,7 +39,10 @@ public enum RealmProvisioningMode
 public enum TenantBindingKind
 {
     Fixed = 1,
-    ClaimMapped = 2
+    ClaimMapped = 2,
+
+    /// <summary>DT-A-5: the realm names no tenant; token tenant claims are ignored and the configured default tenant applies.</summary>
+    Unbound = 3
 }
 
 public sealed record TenantBindingSpecification(
@@ -52,6 +56,40 @@ public sealed record TenantBindingSpecification(
 
     public static TenantBindingSpecification ClaimMapped(string claimName, IReadOnlyDictionary<string, TenantId> mapping) =>
         new(TenantBindingKind.ClaimMapped, ClaimName: claimName, Mapping: mapping);
+
+    public static TenantBindingSpecification Unbound() => new(TenantBindingKind.Unbound);
+
+    /// <summary>
+    /// DT-A-5: the realm's tenant statement as a <see cref="ClaimTenant"/>. <c>Unbound</c> and a ClaimMapped realm whose claim is absent
+    /// say nothing (Absent: the default tenant applies); a present but unmapped claim, a reserved tenant and a malformed binding are
+    /// Invalid (fail closed, no value echo). Additive: <see cref="ResolveTenant"/> is unchanged until the ingress cutover.
+    /// </summary>
+    public ClaimTenant ResolveClaim(ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        switch (Kind)
+        {
+            case TenantBindingKind.Unbound:
+                return ClaimTenant.Absent;
+            case TenantBindingKind.Fixed:
+                return FixedTenantId is { } fixedTenant && !TenantId.IsReserved(fixedTenant)
+                    ? ClaimTenant.Valid(fixedTenant)
+                    : ClaimTenant.Invalid;
+            case TenantBindingKind.ClaimMapped when !string.IsNullOrWhiteSpace(ClaimName) && Mapping is not null:
+                var raw = principal.FindFirst(ClaimName)?.Value;
+                if (raw is null)
+                {
+                    return ClaimTenant.Absent;
+                }
+
+                return Mapping.TryGetValue(raw, out var mapped) && mapped.Value is not null && !TenantId.IsReserved(mapped)
+                    ? ClaimTenant.Valid(mapped)
+                    : ClaimTenant.Invalid;
+            default:
+                return ClaimTenant.Invalid;
+        }
+    }
 
     public TenantId ResolveTenant(ClaimsPrincipal principal)
     {

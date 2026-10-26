@@ -16,6 +16,7 @@ public static class AuditEventTypes
     public const string TokenRevokedHit = "TOKEN_REVOKED_HIT";
     public const string TenantCollisionDenied = "TENANT_COLLISION_DENIED";
     public const string TenantCollisionResolved = "TENANT_COLLISION_RESOLVED";
+    public const string TenancyDefaultTenantConfigured = "TENANCY_DEFAULT_TENANT_CONFIGURED";
 
     // Catalog & Metadata Reads (Tier B)
     public const string CatalogRead = "CATALOG_READ";
