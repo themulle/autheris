@@ -121,7 +121,6 @@ public sealed class OlapStagingService(
                 return new OlapStagingOutcome(
                     rejected.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400,
                     rejected.Message,
-                    isDev ? rejected.Message : null,
                     ErrorCode: rejected.Code);
             case TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException:
                 logger.LogWarning("OLAP request rejected: required filter column missing.");
@@ -140,7 +139,7 @@ public sealed class OlapStagingService(
                 return new OlapStagingOutcome(403, "Access denied.", ErrorCode: "OLAP_ACCESS_DENIED");
             default:
                 logger.Error(ex, "OLAP request failed. ({Code})", "OLAP_FAILED");
-                return new OlapStagingOutcome(502, "The analytical request could not be completed.", isDev ? ex.Message : null, ErrorCode: "OLAP_FAILED");
+                return new OlapStagingOutcome(502, "The analytical request could not be completed.", ErrorCode: "OLAP_FAILED");
         }
     }
 
@@ -253,7 +252,7 @@ public sealed class OlapStagingService(
         catch (OlapSqlRejectedException ex)
         {
             logger.LogWarning("OLAP SQL rejected before table resolution: {Code}", ex.Code);
-            return new OlapStagingOutcome(400, ex.Message, isDev ? ex.Message : null, ErrorCode: ex.Code);
+            return new OlapStagingOutcome(400, ex.Message, ErrorCode: ex.Code);
         }
 
         var sources = new List<OlapTableSource>();
@@ -536,12 +535,12 @@ public sealed class OlapStagingService(
             logger.LogWarning("OLAP engine rejected the SQL: {Code}", ex.Code);
             await tryAudit("OLAP_QUERY_FAILED", string.Join(",", stagedCounts.Keys), "DENY", FailureDetails(ex.Code)).ConfigureAwait(false);
             return new OlapStagingOutcome(
-                ex.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400, ex.Message, isDev ? ex.Message : null, ErrorCode: ex.Code);
+                ex.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400, ex.Message, ErrorCode: ex.Code);
         }
         catch (InvalidOperationException ex) when (HasCode(ex, DuckDbOlapEngine.CodeStagedRows))
         {
             logger.Warning(ex, "Max staged rows limit exceeded in OLAP query. ({Code})", DuckDbOlapEngine.CodeStagedRows);
-            return new OlapStagingOutcome(400, ex.Message);
+            return new OlapStagingOutcome(400, "The requested tables exceed the maximum allowed staging size.", ErrorCode: "OLAP_STAGING_TOO_LARGE");
         }
         catch (SecurityException ex) when (HasCode(ex, DuckDbOlapEngine.CodeCapacity))
         {
@@ -551,7 +550,7 @@ public sealed class OlapStagingService(
         catch (SecurityException ex) when (HasCode(ex, DuckDbOlapEngine.CodeResultSize))
         {
             logger.Warning(ex, "OLAP query result byte budget exceeded. ({Code})", DuckDbOlapEngine.CodeResultSize);
-            return new OlapStagingOutcome(400, isDev ? ex.Message : "OLAP query result exceeded maximum allowed memory size.");
+            return new OlapStagingOutcome(400, "OLAP query result exceeded maximum allowed memory size.", ErrorCode: "OLAP_RESULT_TOO_LARGE");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -561,9 +560,7 @@ public sealed class OlapStagingService(
                 await tryAudit("OLAP_QUERY_FAILED", string.Join(",", stagedCounts.Keys), "ALLOW", FailureDetails("EXECUTION_FAILED")).ConfigureAwait(false);
             }
 
-            return isDev || gatewayOptions.Value.IsQuickstartProfile
-                ? new OlapStagingOutcome(400, "Analytical query execution failed.", ex.Message)
-                : new OlapStagingOutcome(400, "Analytical query execution failed.");
+            return new OlapStagingOutcome(400, "Analytical query execution failed.");
         }
 
         object FailureDetails(string reason) => new

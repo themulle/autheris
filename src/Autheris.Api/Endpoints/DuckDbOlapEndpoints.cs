@@ -1,3 +1,4 @@
+using Autheris.Api.Errors;
 using Autheris.Application.Common;
 using System;
 using System.Security.Claims;
@@ -103,26 +104,23 @@ public static class DuckDbOlapEndpoints
             }
             catch (Exception ex)
             {
-                // Same contract as before the extraction: a failure while writing the result is a 400 with a generic error.
+                // A failure while writing the result is a 400 with a fixed problem body in every environment (ARCH-MNT-08).
                 // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote data values.
                 logger.Error(ex, "Error executing DuckDB OLAP query. TraceId={TraceId}", httpContext.TraceIdentifier);
                 if (!httpContext.Response.HasStarted)
                 {
                     httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    if (isDev || gatewayOptions.Value.IsQuickstartProfile)
-                    {
-                        await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed.", details = ex.Message }, ct);
-                    }
-                    else
-                    {
-                        await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed." }, ct);
-                    }
+                    var problem = ApiProblems.CreateProblemDetails(
+                        StatusCodes.Status400BadRequest, ApiErrorCodes.OlapQueryFailed, "Analytical query execution failed.", httpContext);
+                    httpContext.Response.ContentType = "application/problem+json";
+                    await httpContext.Response.WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json", ct);
+                }
+                else
+                {
+                    // A partial stream is already on the wire: never append an error string, abort the connection instead.
+                    httpContext.Abort();
                 }
             }
-        }
-        else if (outcome.Details != null)
-        {
-            await httpContext.Response.WriteAsJsonAsync(new { error = outcome.Error, code = outcome.ErrorCode, details = outcome.Details }, ct);
         }
         else if (outcome.ErrorCode != null)
         {

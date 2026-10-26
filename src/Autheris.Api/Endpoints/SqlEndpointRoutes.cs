@@ -422,21 +422,20 @@ public static class SqlEndpointRoutes
         }
         catch (ArgumentException argEx)
         {
-            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
+            logger.LogWarning(argEx, "Invalid request when executing endpoint '{EndpointName}'.", name);
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             await httpContext.Response.WriteAsJsonAsync(new
             {
-                error = !isProd ? argEx.Message : WebSqlEndpoints.GenericBadRequestMessage
+                error = WebSqlEndpoints.GenericBadRequestMessage
             }, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
-            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
             await httpContext.Response.WriteAsJsonAsync(new
             {
-                error = (!isProd && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage
+                error = WebSqlEndpoints.GenericForbiddenMessage
             }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -505,21 +504,20 @@ public static class SqlEndpointRoutes
         }
         catch (ArgumentException argEx)
         {
-            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
+            logger.LogWarning(argEx, "Invalid request when executing endpoint '{EndpointName}'.", name);
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             await httpContext.Response.WriteAsJsonAsync(new
             {
-                error = !isProd ? argEx.Message : WebSqlEndpoints.GenericBadRequestMessage
+                error = WebSqlEndpoints.GenericBadRequestMessage
             }, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
-            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
             await httpContext.Response.WriteAsJsonAsync(new
             {
-                error = (!isProd && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage
+                error = WebSqlEndpoints.GenericForbiddenMessage
             }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -531,11 +529,11 @@ public static class SqlEndpointRoutes
     }
 
     /// <summary>REQ-SQL-128 C-15: a list error answers 400 with its stable code and the fixed message of that code (no count, no name, no value), in every environment.</summary>
-    private static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
+    internal static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
     {
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(error, out var mapped);
         httpContext.Response.StatusCode = mapped.Status == 0 ? StatusCodes.Status400BadRequest : mapped.Status;
-        await httpContext.Response.WriteAsJsonAsync(new { error = mapped.Title ?? error.Message, code = error.Code }, ct).ConfigureAwait(false);
+        await httpContext.Response.WriteAsJsonAsync(new { error = mapped.Title ?? "The request is invalid.", code = error.Code }, ct).ConfigureAwait(false);
     }
 
     private static (bool Requested, IParquetExportService? Service) ResolveParquetService(HttpContext httpContext)

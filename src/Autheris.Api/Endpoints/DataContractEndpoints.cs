@@ -1,8 +1,10 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
@@ -21,50 +23,7 @@ public static class DataContractEndpoints
     public static IEndpointRouteBuilder MapDataContractEndpoints(this IEndpointRouteBuilder app)
     {
         // 1. Declarative Data Contract Apply API
-        app.MapPost("/api/v1/governance/contracts/apply", async (
-            HttpContext context,
-            IDataContractEngine contractEngine) =>
-        {
-            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User);
-            if (!isPrivileged)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                10 * 1024 * 1024,
-                "Contract payload exceeds maximum allowed size (10 MB).",
-                context.RequestAborted);
-            if (payload == null)
-            {
-                return tooLarge!;
-            }
-
-            try
-            {
-                var contract = JsonSerializer.Deserialize<DataContract>(payload, CaseInsensitiveOptions);
-
-                if (contract == null)
-                {
-                    return Results.BadRequest(new { error = "Invalid contract payload." });
-                }
-
-                await contractEngine.RegisterContractAsync(contract, context.RequestAborted);
-                return Results.Ok(new
-                {
-                    success = true,
-                    contractId = contract.Id,
-                    table = contract.Table.ToString(),
-                    assertionsCount = contract.Assertions.Count,
-                    isHealthy = contract.IsHealthy
-                });
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        app.MapPost("/api/v1/governance/contracts/apply", HandleApplyAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
           .WithRequestBodyLimit(10 * 1024 * 1024)
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
@@ -100,5 +59,51 @@ public static class DataContractEndpoints
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
+    }
+
+    internal static async Task<IResult> HandleApplyAsync(
+        HttpContext context,
+        IDataContractEngine contractEngine)
+    {
+        var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User);
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            10 * 1024 * 1024,
+            "Contract payload exceeds maximum allowed size (10 MB).",
+            context.RequestAborted);
+        if (payload == null)
+        {
+            return tooLarge!;
+        }
+
+        try
+        {
+            var contract = JsonSerializer.Deserialize<DataContract>(payload, CaseInsensitiveOptions);
+
+            if (contract == null)
+            {
+                return Results.BadRequest(new { error = "Invalid contract payload." });
+            }
+
+            await contractEngine.RegisterContractAsync(contract, context.RequestAborted);
+            return Results.Ok(new
+            {
+                success = true,
+                contractId = contract.Id,
+                table = contract.Table.ToString(),
+                assertionsCount = contract.Assertions.Count,
+                isHealthy = contract.IsHealthy
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or JsonException or ValidationException)
+        {
+            ApiProblems.LogFailure(context, ex, ApiErrorCodes.DataContractInvalid);
+            return ApiProblems.BadRequest(ApiErrorCodes.DataContractInvalid, "The data contract is invalid.", context);
+        }
     }
 }

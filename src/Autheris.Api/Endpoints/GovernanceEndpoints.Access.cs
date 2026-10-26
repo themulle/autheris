@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
 using Autheris.Application.Governance.Grants;
@@ -180,11 +181,10 @@ public static partial class GovernanceEndpoints
             }
             catch (Exception ex)
             {
-                SafeErrorResults.LogFailure(context, ex, "ROW_FILTER_SYNTAX_INVALID");
-                var isDevelopment = context.RequestServices?.GetService<IHostEnvironment>()?.IsDevelopment() ?? false;
+                SafeErrorResults.LogFailure(context, ex, ApiErrorCodes.RowFilterSyntaxInvalid);
                 return SafeErrorResults.BadRequest(
-                    "ROW_FILTER_SYNTAX_INVALID",
-                    isDevelopment ? $"Invalid row filter syntax: {ex.Message}" : "The row filter predicate is not valid SQL.",
+                    ApiErrorCodes.RowFilterSyntaxInvalid,
+                    "The row filter predicate is not valid SQL.",
                     context);
             }
         }
@@ -337,7 +337,7 @@ public static partial class GovernanceEndpoints
                     TraceId = context.TraceIdentifier,
                     DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
                     {
-                        reason = ex.Message,
+                        reasonType = ex.GetType().Name,
                         tenant = tenantId.Value,
                         subject = trimmedSubject
                     })
@@ -616,7 +616,7 @@ public static partial class GovernanceEndpoints
                     TraceId = context.TraceIdentifier,
                     DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
                     {
-                        reason = ex.Message,
+                        reasonType = ex.GetType().Name,
                         tenant = tenantId.Value,
                         profileId = id.ToString()
                     })
