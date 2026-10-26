@@ -141,8 +141,6 @@ src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs|9
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|15
-src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.ConsentGrants.cs|2
-src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Outbox.cs|2
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Schema.cs|1
 src/Autheris.Infrastructure/Persistence/RecertificationStore.cs|1
 src/Autheris.Infrastructure/Persistence/RightsAndPoliciesStore.cs|1
@@ -151,15 +149,11 @@ src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|4
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs|9
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|15
-src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.ConsentGrants.cs|2
-src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Outbox.cs|2
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Schema.cs|1
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|5
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|9
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs|12
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.ConsentGrants.cs|2
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Outbox.cs|2
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Schema.cs|2
 src/Autheris.Infrastructure/Persistence/TenantRegistryStore.cs|1
 src/Autheris.Infrastructure/Plugins/PluginManager.cs|2
