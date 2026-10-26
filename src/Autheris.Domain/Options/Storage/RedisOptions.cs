@@ -85,7 +85,6 @@ public sealed class L1MemoryCacheOptions
 {
     [Range(16, 4096)] public int SizeLimitMb { get; init; } = 512;
     [Range(1, 120)] public int DefaultTtlMinutes { get; init; } = 10;
-    [Range(1, 600)] public int SensitiveTableTtlSeconds { get; init; } = 60;
     [Range(0, 5000)] public int AccessProfileEpochCacheMilliseconds { get; init; } = 1000;
 }
 

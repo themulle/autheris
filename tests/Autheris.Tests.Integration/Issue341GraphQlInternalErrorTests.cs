@@ -214,7 +214,6 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
-            b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:MaxCostPerMinute", "1000000");
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");

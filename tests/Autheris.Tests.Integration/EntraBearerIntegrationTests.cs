@@ -33,9 +33,6 @@ public sealed class EntraBearerIntegrationTests : IClassFixture<WebApplicationFa
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            builder.UseSetting("Gateway:Authentication:Entra:TenantId", TenantId);
-            builder.UseSetting("Gateway:Authentication:Entra:ClientId", ClientId);
-            builder.UseSetting("Gateway:Authentication:Entra:Audience", ClientId);
 
             builder.ConfigureServices(services =>
             {

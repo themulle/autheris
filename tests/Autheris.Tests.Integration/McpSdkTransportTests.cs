@@ -180,13 +180,11 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
                 b.UseEnvironment("Production");
                 b.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={tempDb}");
-                b.UseSetting("Gateway:GovernanceDb:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
                 b.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "false");
-                b.UseSetting("Gateway:Mcp:AllowAnonymousDiscovery", "false");
                 // MISC-05: Production fails closed without a container memory limit or an explicit OLAP budget (CI runners have no cgroup limit).
                 b.UseSetting("Gateway:DuckDbOlap:MemoryBudgetBytes", "2147483648");
                 b.ConfigureServices(services =>

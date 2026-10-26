@@ -69,7 +69,6 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseSetting("Gateway:GraphQL:EnableBananaCakePop", "true");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:Backstage:Enabled", "true");
-            builder.UseSetting("Gateway:DevPortal:Enabled", "true");
         });
     }
 

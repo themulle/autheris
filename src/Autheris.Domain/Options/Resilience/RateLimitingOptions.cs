@@ -49,5 +49,4 @@ public sealed class PostAuthSidRateLimitOptions
 {
     [Range(10, 100000)] public int TokenBucketCapacity { get; init; } = 500;
     [Range(1, 10000)] public int TokensPerSecond { get; init; } = 50;
-    [Range(100, 1000000)] public int MaxCostPerMinute { get; init; } = 10000;
 }

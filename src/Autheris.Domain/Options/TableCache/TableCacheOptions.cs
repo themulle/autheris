@@ -24,7 +24,6 @@ public sealed class TableCacheOptions
 
     public int DefaultTtlSeconds { get; init; } = 3600;
 
-    public bool AllowStaleOnOutage { get; init; } = false;
 
     public int MaxStaleSurvivalSeconds { get; init; } = 86400; // 24 hours default, hard safety ceiling 7 days
 

@@ -46,7 +46,6 @@ public sealed class Issue143RestrictedScopeParityTests : IClassFixture<Issue143R
             // One caller sends four requests per channel (and GraphQL costs by complexity): keep the per-SID budget out of the comparison.
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
-            builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:MaxCostPerMinute", "1000000");
         }
 
         protected override async Task SeedExtraGovernanceAsync(IGovernanceRepository repo)
