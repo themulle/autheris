@@ -66,7 +66,7 @@ builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment);
 var demoDataEnabled = Autheris.Domain.Options.DemoDataSwitch.Resolve(gatewayOptions, builder.Environment.EnvironmentName);
 builder.Services.AddSingleton<Autheris.Domain.Options.IDemoDataSwitch>(new Autheris.Domain.Options.DemoDataSwitch(demoDataEnabled));
 builder.Services.AddGatewayGraphQL(gatewayOptions);
-builder.Services.AddPlan9Services(builder.Configuration);
+builder.Services.AddAsyncJobsAndDatasourceTesting(builder.Configuration);
 
 // 4. Build and Pipeline Configuration
 var app = builder.Build();
