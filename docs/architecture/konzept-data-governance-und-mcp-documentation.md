@@ -677,12 +677,6 @@ Die Konfiguration der Säule 2 erfolgt zentral im Bereich `Gateway:Classificatio
           "maxConsentTtlDays": 7,
           "defaultMaskingRuleName": "NULLIFY_STRICT"
         }
-      ],
-      "AutoMaskingPolicyMatrix": [
-        { "piiType": "PII_DIRECT", "namePattern": "iban|bank_account", "ruleName": "IBAN_STANDARD_4_4" },
-        { "piiType": "PII_DIRECT", "namePattern": "email|mail_address", "ruleName": "EMAIL_DOMAIN_RETAIN" },
-        { "piiType": "PII_INDIRECT", "namePattern": "latitude|longitude|geo_pos", "ruleName": "GEO_DISTRICT_500M" },
-        { "piiType": "AUTH_SECRET", "namePattern": "password|secret|token|api_key", "ruleName": "NULLIFY_STRICT" }
       ]
     },
     "DocumentationLake": {

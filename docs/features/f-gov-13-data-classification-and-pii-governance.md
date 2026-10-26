@@ -87,7 +87,7 @@ Sensitivity levels are fully declarative and configurable via `GatewayOptions.Cl
 | `NON_SENSITIVE` | Technical Primary Keys (`id`), Status Flags, Timestamps | No Masking (Plaintext) | - |
 
 > [!NOTE]
-> The mapping between categories and masking algorithms is customizable through the catalog column masking rules (`ColumnMaskingRules` in the table metadata). The `AutoMaskingPolicyMatrix` maps specific combinations of PII type, SQL datatype, and column name regex patterns to target masking transformations.
+> The mapping between categories and masking algorithms is customizable through the catalog column masking rules (`ColumnMaskingRules` in the table metadata).
 
 ---
 
