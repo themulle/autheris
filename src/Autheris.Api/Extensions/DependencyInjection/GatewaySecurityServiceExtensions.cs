@@ -92,9 +92,11 @@ public static class GatewaySecurityServiceExtensions
                 ? new RedisRebacStore(
                     multiplexer,
                     opts,
-                    sp.GetRequiredService<ILogger<RedisRebacStore>>())
+                    sp.GetRequiredService<ILogger<RedisRebacStore>>(),
+                    sp.GetService<TimeProvider>())
                 : new InMemoryRebacStore(
-                    sp.GetRequiredService<ILogger<InMemoryRebacStore>>());
+                    sp.GetRequiredService<ILogger<InMemoryRebacStore>>(),
+                    sp.GetService<TimeProvider>());
         });
         services.AddSingleton<IRebacEvaluator, ZanzibarRebacEvaluator>();
         services.AddScoped<IRebacBatchDataLoader, RebacBatchDataLoader>();
