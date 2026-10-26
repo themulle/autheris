@@ -52,6 +52,7 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
     /// member really is used outside the defining file(s) and the heuristic still reports the property (otherwise the line is stale).
     /// </summary>
     [Fact]
+    [Trait("Category", "Security")]
     public void IndirectConsumers_AreReadOutsideTheDefiningFile()
     {
         var entries = ParseIndirect(RepositoryScan.ReadBaseline("options-consumed-indirectly.txt"));
@@ -61,6 +62,7 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
     }
 
     [Fact]
+    [Trait("Category", "Security")]
     public void IndirectConsumerCheck_FailsClosed_OnStaleMissingOrMalformedEntries()
     {
         var files = new List<RepositoryScan.SourceFile>
@@ -79,6 +81,9 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
         Should.Throw<InvalidDataException>(() => ParseIndirect(["no-separator"]));
         Should.Throw<InvalidDataException>(() => ParseIndirect(["A.B|"]));
     }
+
+    private static string StripCommentsAndStrings(string text) =>
+        Regex.Replace(text, "//[^\\n]*|/\\*.*?\\*/|@\"(?:[^\"]|\"\")*\"|\"(?:[^\"\\\\\\n]|\\\\.)*\"", " ", RegexOptions.Singleline | RegexOptions.CultureInvariant);
 
     private sealed record IndirectEntry(string Property, string TypeName, string PropertyName, string Consumer);
 
@@ -123,7 +128,7 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
 
             var declaring = index.Declaring.GetValueOrDefault(type.Name) ?? [];
             var usage = new Regex(@"(?:\.|\bnew\s+|<)\s*" + Regex.Escape(entry.Consumer) + @"\b|\b" + Regex.Escape(entry.Consumer) + @"\s*\.", RegexOptions.CultureInvariant);
-            if (!files.Any(f => !declaring.Contains(f.RelativePath) && usage.IsMatch(f.Text)))
+            if (!files.Any(f => !declaring.Contains(f.RelativePath) && usage.IsMatch(StripCommentsAndStrings(f.Text))))
             {
                 problems.Add($"{entry.Property}: the consuming member '{entry.Consumer}' is not used outside the file(s) declaring {type.Name}; the option is dead.");
             }

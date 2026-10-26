@@ -32,7 +32,7 @@ public sealed class DeadSecurityOptionsRemovedTests
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
-        var session = new Autheris.Domain.Model.McpSessionContext("sess-1", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var session = new Autheris.Domain.Model.McpSessionContext("sess-1", "agent-principal", "tenant-alpha", new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new Autheris.Domain.Model.McpToolCallRequest("query_customers", "{}"), session);
 

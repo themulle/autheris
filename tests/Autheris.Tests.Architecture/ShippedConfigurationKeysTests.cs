@@ -11,6 +11,7 @@ namespace Autheris.Tests.Architecture;
 /// appsettings*.json, <c>Gateway__*</c> environment variables in Helm, compose files, Dockerfiles, deploy and benchmark scripts, and the
 /// <c>Gateway:*</c> settings that the test hosts inject. A deleted option left behind in any of them would stop that deployment from starting.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed partial class ShippedConfigurationKeysTests
 {
     private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules", ".git", "plans"];
