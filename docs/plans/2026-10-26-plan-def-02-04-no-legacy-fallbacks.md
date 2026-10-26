@@ -91,3 +91,48 @@ Counts: this PR 14 (A 3, B 11); follow-up 5 groups (F1-F5, ~55 sites); DT ~170 s
 - P-3: Is the `IntegrityAuditTenant` bucket (decision 3; today the single-tenant id, replaced by the default-tenant lane) acceptable for an integrity refusal, given audit chains are per tenant?
 - P-5: L6/L13/L14 turn silent acceptance into rejection; confirm the governed codes and no value echo. F2 (`EnvoyExtAuthzService`) is rated high: move it from FU-2 into this PR?
 - P-4: Confirm the `RevokeConsentAsync` reroute (decision 1) keeps the PERS-05 guarantees (audit and epoch in the same transaction, already-revoked is a no-op without audit).
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-26)
+
+**Verdict: APPROVED WITH CONDITIONS.** DEF-01..04 and L1-L14 are fail-closed improvements; nothing weakens an existing control. F2 moves INTO this PR (small, see P-5); F1, F3-F5 stay follow-ups. Facts verified: `EnvoyExtAuthzEndpoints` check route uses `RequireAuthorization()`, so F2 is defence in depth in the service today (not remotely exploitable through the shipped route), but the service itself defaults tenant to `default` and user to `anonymous`.
+
+### Rulings
+- **P-1 (403 vs 409/500): keep 403** via the existing mapper, code `CONSENT_TENANT_INVALID`. 409 invites caller retry/repair, 500 leaks "bug" semantics and trips availability alarms; the refusal is a deliberate deny, the operator signal is the audit row plus the Warning log. No new status mapping.
+- **P-2 (read-committed approver read): sufficient, no `FOR SHARE`/`HOLDLOCK`.** Revoke only reduces access, so a demotion committing after the approver read is linearisable as "revoke ran before demotion"; a stale-positive window is the width of one transaction and grants nothing new. It holds only if the approver query runs on the same connection/transaction AFTER the consent row lock, as its own statement (no snapshot/repeatable-read established earlier).
+- **P-3 (`IntegrityAuditTenant`): accepted as the interim explicit platform bucket.** Writing to the (invalid) consent tenant is impossible, and the platform chain is not corrupted if the normal chained audit writer is used. It must never be used as a tenant for any non-audit decision.
+- **P-4 (PERS-05): reroute is accepted** under DEF-SC-05.
+- **P-5 (codes): accepted** (`CONSENT_TENANT_INVALID` 403, `INVALID_TENANT_ID` 400, `ACCESS_PROFILE_TENANT_INVALID` 403 via the governed mapper). **F2 is pulled in**: delete the `contextExtensions` tenant/user branches and the `default`/`anonymous` defaults, and deny when `caller` is unauthenticated (about -25 LOC, no default-tenant design needed because the unauthenticated branch disappears). F1, F3-F5 stay out.
+
+### Binding conditions
+- **DEF-SC-01** `ResolveConsentTenant` is the only tenant parse in revoke/extend paths (nine revoke sites plus extend). NULL, empty, whitespace, over-length, regex-invalid all throw; exception message fixed, no raw value, no inner exception, not in `ToString()`/Data/logs.
+- **DEF-SC-02** On tenant refusal the transaction is rolled back before the refusal audit is written; no `is_revoked`, epoch, metadata-cache or `CONSENT_REVOKED` effect. The refusal audit is written only when the consent row was actually found (no audit amplification for unknown ids), via the standard chained audit writer, `DetailsJson` = ConsentId + Code only, ConsentId length-bounded.
+- **DEF-SC-03** Audit failure on the refusal propagates (`AuditUnavailableException`); the original refusal must not be downgraded to success or swallowed.
+- **DEF-SC-04** `IntegrityAuditTenant` is used only by the refusal audit (arch test: single reference); one place for the default-tenant lane to replace.
+- **DEF-SC-05** PERS-05: in `RevokeConsentAsync` the UPDATE, the `CONSENT_REVOKED` audit row and the epoch/outbox work share one transaction; already-revoked is a no-op with no audit row, no epoch bump, no cache eviction, no event; post-commit invalidation only after commit (never on rollback); order is lock (`FOR UPDATE`/`UPDLOCK`/write scope) then approver check then update. Existing PERS-05 tests stay unchanged and green.
+- **DEF-SC-06** Approver check inside the transaction in all dialects; unauthorized approver gives `UnauthorizedAccessException`, no state change; old non-transactional overload is made private/removed from revoke paths (arch test: revoke methods call only the `(conn, tx, ...)` overload).
+- **DEF-SC-07** `RevokedDecision` is a `const`; no `"REVOKE"` literal in any consent method; `"CONSENT_REVOKED"` event type unchanged.
+- **DEF-SC-08** DEF-03 literal `"REVOKED"` approved (past-participle vocabulary, no reader). Release note states that existing audit rows keep `REVOKE`, and that any external SIEM rule filtering `Decision == "REVOKE"` must be updated. Hash chain of old rows is untouched.
+- **DEF-SC-09 (golden commit)** Separate commit, message lists every changed golden line. Allowed diff exactly: `REVOKE` to `REVOKED` in PG/MSSQL ConsentGrants goldens, plus unavoidable new literal lines for the new tenant/audit constants. Reviewer must reject any changed SQL fragment line, any removed `FOR UPDATE`/`UPDLOCK`/tenant predicate, or any golden outside `*.ConsentGrants.txt`. The approve env var must not be set in CI and the commit is made with the filtered test only. Code change and golden commit must not be squashed with test deletions.
+- **DEF-SC-10 (F2)** `EnvoyExtAuthzService` returns deny (401/403 generic body) when `caller?.Identity?.IsAuthenticated != true`; `sourcePrincipal`/`contextExtensions["tenant"|"user"]` never select identity; authenticated path with missing SID denies instead of `ANONYMOUS`.
+- **DEF-SC-11 (L1-L3,L6)** `LegacySwitchGuard`/Serilog guard fail on key PRESENCE regardless of value (`false` included); message names the key, never the value.
+- **DEF-SC-12 (L4-L6)** Webhook rejections use the same generic status/body as an unknown instance (no instance/tenant enumeration oracle), are audited/logged without secrets, and run before any DB state change.
+- **DEF-SC-13 (L13)** The tuple tenant is validated BEFORE the tuple mutation; invalid gives 400 `INVALID_TENANT_ID` with no echo and no state change (not only in the audit helper, which today falls back to the caller tenant).
+- **DEF-SC-14 (L14)** Unparsable stored tenant never becomes `fallbackTenant` (that would expose a foreign/corrupt row to the caller tenant). Throw `ACCESS_PROFILE_TENANT_INVALID` (a `GatewaySecurityException`) with no echo; if the loading query is not tenant-filtered, skip the row with a Warning (code and id only) instead of aborting the whole load.
+- **DEF-SC-15 (L8,L12)** Removed aliases must be rejected, not ignored: `CatalogSearch_Alias_Keys_Are_Unknown` proves the ARCH-MNT-06 guard covers the `CatalogSearch` section; `@mcpTool(table:)` yields a schema error.
+- **DEF-SC-16 (L9-L11)** Deletions must not remove a route guard or the `DomainScope` trust check; only the legacy key is dropped and `X-Domain-Scope` handling is unchanged.
+
+### Mandatory tests (all `[Trait("Category","Security")]`)
+- **DEF-T-01** `Revoke_Invalid_Tenant_Value_Fails_Closed_All_Dialects` (plan section 3 data, three entry points plus extend path, SQLite unit, PG/MSSQL integration).
+- **DEF-T-02** `Revoke_Audit_Decision_Literal_Is_Identical_Across_Dialects` (runtime plus IL).
+- **DEF-T-03** `Revoke_Approver_Demoted_Before_Lock_Is_Rejected` (both entry points, PG/MSSQL interleaving variant).
+- **DEF-T-04** `Revoke_Invalid_Tenant_Returns_Governed_Problem_Without_Echo`.
+- **DEF-T-05** `Revoke_Already_Revoked_Is_NoOp_Without_Audit_Epoch_Or_Eviction` (PERS-05, all dialects).
+- **DEF-T-06** `Revoke_Refusal_Audit_Failure_Propagates_And_Revoke_Stays_Refused`.
+- **DEF-T-07** `Revoke_Refusal_Audit_Not_Written_For_Unknown_Consent`.
+- **DEF-T-08** `Revoke_Unauthorized_Approver_Leaves_No_State_Change_All_Dialects`.
+- **DEF-T-09** `ReplaceConsents_Sqlite_Evicts_MetadataCache`; `Revoke_Entry_Points_Share_One_Core_Per_Dialect`; rewritten T-03/T-09 as in section 4.
+- **DEF-T-10** `ExtAuthz_Unauthenticated_Is_Denied` and `ExtAuthz_ContextExtensions_Cannot_Select_Tenant_Or_User`.
+- **DEF-T-11** One test per sweep item as listed in section 5, plus `Legacy_Switch_Guard_Fails_On_Presence_Even_When_False`, `Itsm_Webhook_Rejections_Are_Indistinguishable_From_Unknown_Instance`, `Rebac_Tuple_Invalid_Tenant_Rejected_Before_Mutation`.
+
+### Out of scope (confirmed)
+F1 (FU-1), F3-F5 (FU-3), all class D/DT sites, O-1..O-6. O-4 (`X-Tenant-ID` for unauthenticated principal) and O-2 (Redis revocation fail-open in Development) are security-relevant: keep as high-priority owner items for the default-tenant lane.
