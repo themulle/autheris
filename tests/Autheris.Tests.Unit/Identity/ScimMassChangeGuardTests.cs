@@ -181,6 +181,19 @@ public sealed class ScimMassChangeGuardTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task WAVE3_SCIM_T04_AuditFailure_DoesNotConsumeTheWindow_NextBlockWritesAudit()
+    {
+        Count(3);
+        _audit.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("audit down")), Task.CompletedTask);
+        var guard = Create();
+        await Should.ThrowAsync<InvalidOperationException>(() => guard.EnsureAllowedAsync(Tenant, Realm, User));
+        await Should.ThrowAsync<ScimMassChangeBlockedException>(() => guard.EnsureAllowedAsync(Tenant, Realm, User));
+        await _audit.Received(2).RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task WAVE3_SCIM_T05_Block_NoLockNoDeactivationNoRevocation_AllThreeCallSites()
     {
         Count(3);

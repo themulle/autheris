@@ -96,6 +96,7 @@ public sealed class ScimMassChangeGuard
     {
         // At most one audit event and one log line per realm per window, so a flood of blocked requests cannot flood either.
         var key = (tenantId.Value, realmId);
+        DateTimeOffset? previous = null;
         while (true)
         {
             if (_lastReported.TryGetValue(key, out var last))
@@ -107,6 +108,7 @@ public sealed class ScimMassChangeGuard
 
                 if (_lastReported.TryUpdate(key, now, last))
                 {
+                    previous = last;
                     break;
                 }
             }
@@ -136,6 +138,23 @@ public sealed class ScimMassChangeGuard
                 window_minutes = settings.WindowMinutes
             })
         };
-        await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+        try
+        {
+            await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The window's first audit must not be lost: release the claim so the next block retries the audit.
+            if (previous is { } prior)
+            {
+                _lastReported.TryUpdate(key, prior, now);
+            }
+            else
+            {
+                _lastReported.TryRemove(new KeyValuePair<(string Tenant, string Realm), DateTimeOffset>(key, now));
+            }
+
+            throw;
+        }
     }
 }
