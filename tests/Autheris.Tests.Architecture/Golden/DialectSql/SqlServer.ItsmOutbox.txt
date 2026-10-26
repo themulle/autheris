@@ -1,0 +1,70 @@
+## set
+\n            INSERT INTO ITSM_OUTBOX (\n                id, request_id, tenant_id, event_type, payload_json, preferred_system,\n                status, retry_count, max_retries, created_at, next_retry_at, last_error\n            ) VALUES (\n                @id, @requestId, @tenantId, @eventType, @payloadJson, @preferredSystem,\n                @status, @retryCount, @maxRetries, @createdAt, @nextRetryAt, @lastError\n            );
+\n            SELECT TOP (@batchSize) id, request_id, tenant_id, event_type, payload_json, preferred_system,\n                   status, retry_count, max_retries, created_at, next_retry_at, last_error\n            FROM ITSM_OUTBOX\n            WHERE status IN (0, 1)\n              AND (next_retry_at IS NULL OR next_retry_at <= @now)\n            ORDER BY created_at ASC;
+\n            SELECT TOP (@limit) id, request_id, tenant_id, event_type, payload_json, preferred_system,\n                   status, retry_count, max_retries, created_at, next_retry_at, last_error\n            FROM ITSM_OUTBOX\n            WHERE status = @status\n            ORDER BY created_at DESC;
+\n            UPDATE ITSM_OUTBOX\n            SET status = @status,\n                last_error = NULL\n            WHERE id = @id;
+\n            UPDATE ITSM_OUTBOX\n            SET status = @status,\n                retry_count = retry_count + 1,\n                next_retry_at = @nextRetryAt,\n                last_error = @lastError\n            WHERE id = @id;
+@batchSize
+@createdAt
+@eventType
+@id
+@lastError
+@limit
+@maxRetries
+@nextRetryAt
+@now
+@payloadJson
+@preferredSystem
+@requestId
+@retryCount
+@status
+@tenantId
+O
+Unknown error
+id
+message
+## method EnqueueAsync(ItsmOutboxMessage)
+message
+\n            INSERT INTO ITSM_OUTBOX (\n                id, request_id, tenant_id, event_type, payload_json, preferred_system,\n                status, retry_count, max_retries, created_at, next_retry_at, last_error\n            ) VALUES (\n                @id, @requestId, @tenantId, @eventType, @payloadJson, @preferredSystem,\n                @status, @retryCount, @maxRetries, @createdAt, @nextRetryAt, @lastError\n            );
+@id
+@requestId
+@tenantId
+@eventType
+@payloadJson
+@preferredSystem
+@status
+@retryCount
+@maxRetries
+@createdAt
+O
+@nextRetryAt
+O
+@lastError
+## set_Transaction 0
+## method GetPendingMessagesAsync
+O
+\n            SELECT TOP (@batchSize) id, request_id, tenant_id, event_type, payload_json, preferred_system,\n                   status, retry_count, max_retries, created_at, next_retry_at, last_error\n            FROM ITSM_OUTBOX\n            WHERE status IN (0, 1)\n              AND (next_retry_at IS NULL OR next_retry_at <= @now)\n            ORDER BY created_at ASC;
+@now
+@batchSize
+## set_Transaction 0
+## method MarkCompletedAsync
+id
+\n            UPDATE ITSM_OUTBOX\n            SET status = @status,\n                last_error = NULL\n            WHERE id = @id;
+@status
+@id
+## set_Transaction 0
+## method MarkFailedAsync
+id
+O
+\n            UPDATE ITSM_OUTBOX\n            SET status = @status,\n                retry_count = retry_count + 1,\n                next_retry_at = @nextRetryAt,\n                last_error = @lastError\n            WHERE id = @id;
+@status
+@nextRetryAt
+@lastError
+Unknown error
+@id
+## set_Transaction 0
+## method GetDeadLetterMessagesAsync
+\n            SELECT TOP (@limit) id, request_id, tenant_id, event_type, payload_json, preferred_system,\n                   status, retry_count, max_retries, created_at, next_retry_at, last_error\n            FROM ITSM_OUTBOX\n            WHERE status = @status\n            ORDER BY created_at DESC;
+@status
+@limit
+## set_Transaction 0
