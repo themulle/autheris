@@ -112,6 +112,25 @@ public sealed class HelmHighAvailabilityWiringTests
     [Fact]
     public void Render_NonNumericShutdown_Fails() => AssertRenderFails("--set-string gateway.shutdownTimeoutSeconds=abc", "gateway.shutdownTimeoutSeconds must be a positive");
 
+    [Theory]
+    [InlineData("gateway.drainDelaySeconds=31", "gateway.drainDelaySeconds must be between 1 and 30")]
+    [InlineData("gateway.queryTimeoutSeconds=121", "gateway.queryTimeoutSeconds must be between 5 and 120")]
+    [InlineData("gateway.shutdownTimeoutSeconds=181", "gateway.shutdownTimeoutSeconds must be between 10 and 180")]
+    [InlineData("terminationGracePeriodSeconds=301", "terminationGracePeriodSeconds must be between 20 and 300")]
+    public void Render_ValueAboveApplicationRange_Fails(string set, string expected) => AssertRenderFails("--set " + set, expected);
+
+    [Fact]
+    public void Template_DeclaresApplicationRanges_MatchingHighAvailabilityOptions()
+    {
+        // HighAvailabilityOptions [Range] attributes: drain 1..30, query 5..120, shutdown 10..180, grace 20..300
+        var wiring = Read("templates/_helpers.tpl") + Read("templates/deployment.yaml");
+
+        wiring.ShouldContain("\"value\" .Values.gateway.drainDelaySeconds \"min\" 1 \"max\" 30");
+        wiring.ShouldContain("\"value\" .Values.gateway.queryTimeoutSeconds \"min\" 5 \"max\" 120");
+        wiring.ShouldContain("\"value\" .Values.gateway.shutdownTimeoutSeconds \"min\" 10 \"max\" 180");
+        wiring.ShouldContain("\"value\" .Values.terminationGracePeriodSeconds \"min\" 20 \"max\" 300");
+    }
+
     [Fact]
     public void VerifyHardeningScript_AssertsHaWiring()
     {

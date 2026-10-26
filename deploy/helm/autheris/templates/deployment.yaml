@@ -34,7 +34,7 @@ spec:
       automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken | default false }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      terminationGracePeriodSeconds: {{ include "autheris.haSeconds" (dict "key" "terminationGracePeriodSeconds" "value" .Values.terminationGracePeriodSeconds) }}
+      terminationGracePeriodSeconds: {{ include "autheris.haSeconds" (dict "key" "terminationGracePeriodSeconds" "value" .Values.terminationGracePeriodSeconds "min" 20 "max" 300) }}
       {{- if .Values.topologySpreadConstraints.enabled }}
       topologySpreadConstraints:
         - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
@@ -59,7 +59,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["sh", "-c", "sleep {{ include "autheris.haSeconds" (dict "key" "gateway.drainDelaySeconds" "value" .Values.gateway.drainDelaySeconds) }}"]
+                command: ["sh", "-c", "sleep {{ include "autheris.haSeconds" (dict "key" "gateway.drainDelaySeconds" "value" .Values.gateway.drainDelaySeconds "min" 1 "max" 30) }}"]
           ports:
             - name: http
               containerPort: {{ .Values.service.targetPort }}

@@ -215,6 +215,10 @@ if command -v helm >/dev/null 2>&1; then
     expect_failure "grace period too short" "NF-HA-01b" "${BASE[@]}" "${ENTRA[@]}" --set terminationGracePeriodSeconds=30
     expect_failure "shutdown below query + 10" "NF-HA-01a" "${BASE[@]}" "${ENTRA[@]}" --set gateway.queryTimeoutSeconds=40
     expect_failure "non-positive drain" "gateway.drainDelaySeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set gateway.drainDelaySeconds=0
+    expect_failure "drain above application range" "gateway.drainDelaySeconds must be between 1 and 30" "${BASE[@]}" "${ENTRA[@]}" --set gateway.drainDelaySeconds=31
+    expect_failure "query timeout above application range" "gateway.queryTimeoutSeconds must be between 5 and 120" "${BASE[@]}" "${ENTRA[@]}" --set gateway.queryTimeoutSeconds=121
+    expect_failure "shutdown above application range" "gateway.shutdownTimeoutSeconds must be between 10 and 180" "${BASE[@]}" "${ENTRA[@]}" --set gateway.shutdownTimeoutSeconds=181
+    expect_failure "grace above application range" "terminationGracePeriodSeconds must be between 20 and 300" "${BASE[@]}" "${ENTRA[@]}" --set terminationGracePeriodSeconds=301
     expect_failure "non-numeric shutdown" "gateway.shutdownTimeoutSeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set-string gateway.shutdownTimeoutSeconds=abc
     expect_failure "unset query timeout" "gateway.queryTimeoutSeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set gateway.queryTimeoutSeconds=null
 else
