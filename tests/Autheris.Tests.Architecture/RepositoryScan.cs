@@ -145,7 +145,7 @@ internal static class RepositoryScan
         throw new DirectoryNotFoundException("Could not locate the repo root (Autheris.sln) from " + AppContext.BaseDirectory);
     }
 
-    /// <summary>Strips string-free comment-only lines; shared by the line based ratchets.</summary>
+    /// <summary>Trimmed, non-empty lines that do not start with "//" (block comments and trailing comments are not stripped).</summary>
     public static IEnumerable<string> CodeLines(string text) =>
         Regex.Split(text, "\r\n|\r|\n")
             .Select(l => l.Trim())

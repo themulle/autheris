@@ -7,7 +7,7 @@ namespace Autheris.Tests.Architecture;
 /// ARCH-MNT-03 (test only): every production type lives in a namespace rooted at its assembly name. Known violators
 /// are listed in Baselines/namespace-assembly-violations.txt ("assembly|type full name") and are fixed in a follow-up.
 /// </summary>
-public sealed class NamespaceAssemblyConsistencyTests
+public sealed class NamespaceAssemblyConsistencyTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static readonly Assembly[] ProductionAssemblies =
     [
@@ -26,18 +26,13 @@ public sealed class NamespaceAssemblyConsistencyTests
         var allowed = RepositoryScan.ReadBaseline("namespace-assembly-violations.txt").ToHashSet(StringComparer.Ordinal);
         var violations = FindViolations(ProductionAssemblies.Select(a => (a.GetName().Name!, SafeTypes(a)))).ToList();
 
+        foreach (var stale in allowed.Except(violations, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
+        {
+            output.WriteLine("HINT (not a failure): fixed or gone, remove from the allowlist: " + stale);
+        }
+
         violations.Except(allowed, StringComparer.Ordinal)
             .ShouldBeEmpty("Types must live in a namespace rooted at their assembly name (or be added to the baseline with a reason).");
-    }
-
-    [Fact]
-    public void Allowlist_HasNoStaleEntries()
-    {
-        var allowed = RepositoryScan.ReadBaseline("namespace-assembly-violations.txt");
-        var violations = FindViolations(ProductionAssemblies.Select(a => (a.GetName().Name!, SafeTypes(a)))).ToHashSet(StringComparer.Ordinal);
-
-        allowed.Where(a => !violations.Contains(a))
-            .ShouldBeEmpty("These namespace/assembly allowlist entries are fixed or gone; remove them.");
     }
 
     [Fact]

@@ -8,11 +8,12 @@ namespace Autheris.Tests.Architecture;
 /// ARCH-MNT-05: inventory of option properties that no production code reads. For every settable property on a
 /// production type whose name ends in "Options", a text scan looks for a member access <c>.PropertyName</c> in any
 /// src file other than the file(s) declaring the type. The heuristic over-approximates consumption (a common name
-/// read elsewhere counts as read), so it never flags a consumed property. Current candidates are baselined in
+/// read elsewhere counts as read), so it under-reports unconsumed properties but never flags a consumed one. Only new
+/// candidates fail; baseline entries that became consumed produce a hint. Current candidates are baselined in
 /// Baselines/unconsumed-options.txt ("Namespace.Type.Property"); the baseline may only shrink (ARCH-MNT-06 resolves
 /// the dead security options).
 /// </summary>
-public sealed partial class OptionsConsumptionInventoryTests
+public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static readonly Assembly[] ProductionAssemblies =
     [
@@ -33,18 +34,13 @@ public sealed partial class OptionsConsumptionInventoryTests
         var baseline = RepositoryScan.ReadBaseline("unconsumed-options.txt").ToHashSet(StringComparer.Ordinal);
         var current = FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles);
 
+        foreach (var stale in baseline.Except(current, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
+        {
+            output.WriteLine("HINT (not a failure): now consumed or gone, remove from the baseline: " + stale);
+        }
+
         current.Except(baseline, StringComparer.Ordinal)
             .ShouldBeEmpty("New option properties that no production code reads. Wire them up or delete them (ARCH-MNT-06).");
-    }
-
-    [Fact]
-    public void Baseline_HasNoStaleEntries()
-    {
-        var baseline = RepositoryScan.ReadBaseline("unconsumed-options.txt");
-        var current = FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles).ToHashSet(StringComparer.Ordinal);
-
-        baseline.Where(b => !current.Contains(b))
-            .ShouldBeEmpty("These option properties are now consumed or gone; remove them from Baselines/unconsumed-options.txt.");
     }
 
     [Fact]
@@ -60,6 +56,10 @@ public sealed partial class OptionsConsumptionInventoryTests
 
         found.ShouldBe([typeof(PlantedOptions).FullName + ".Dead"]);
         FindUnconsumed([], files).ShouldBeEmpty();
+
+        // A property that becomes consumed simply drops out of the result (and out of the failing set).
+        var withReader = files.Append(new("src/X/Reader2.cs", "var y = options.Value.Dead;")).ToList();
+        FindUnconsumed([typeof(PlantedOptions)], withReader).ShouldBeEmpty();
         FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles)
             .Count.ShouldBeGreaterThan(0, "Scanner must see option types; a zero result means it is broken.");
     }

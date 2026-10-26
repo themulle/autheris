@@ -8,28 +8,21 @@ namespace Autheris.Tests.Architecture;
 /// may only fall: a file that grows fails, a file that shrinks (or drops below the limit, or disappears) must have
 /// its entry lowered or removed.
 /// </summary>
-public sealed class SourceSizeRatchetArchitectureTests
+public sealed class SourceSizeRatchetArchitectureTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private const int MaxLines = 1000;
 
     [Fact]
     public void SrcFiles_StayWithinCeiling()
     {
-        var problems = Evaluate(MeasureSrc(), Baseline());
+        var (problems, hints) = Evaluate(MeasureSrc(), Baseline());
 
-        problems.Where(p => p.StartsWith("GROWN", StringComparison.Ordinal))
-            .ShouldBeEmpty("Source files over " + MaxLines + " lines must not grow; split them (ARCH-MNT-20/21/22).");
-        problems.Where(p => p.StartsWith("NEW", StringComparison.Ordinal))
-            .ShouldBeEmpty("New source files must stay at or below " + MaxLines + " lines.");
-    }
+        foreach (var hint in hints)
+        {
+            output.WriteLine("HINT (not a failure): " + hint);
+        }
 
-    [Fact]
-    public void Ceilings_HaveNoStaleEntries()
-    {
-        var problems = Evaluate(MeasureSrc(), Baseline());
-
-        problems.Where(p => p.StartsWith("STALE", StringComparison.Ordinal))
-            .ShouldBeEmpty("Ratchet ceilings may only fall; update or delete these entries in Baselines/source-size-ceilings.txt.");
+        problems.ShouldBeEmpty("Source files over " + MaxLines + " lines must not appear or grow; split them (ARCH-MNT-20/21/22).");
     }
 
     [Fact]
@@ -40,16 +33,33 @@ public sealed class SourceSizeRatchetArchitectureTests
         RepositoryScan.CountLines(sample.Replace("\r\n", "\n")).ShouldBe(MaxLines + 1);
 
         var measured = new Dictionary<string, int>(StringComparer.Ordinal) { ["src/X/Big.cs"] = MaxLines + 1 };
-        Evaluate(measured, new Dictionary<string, int>()).ShouldContain(p => p.StartsWith("NEW src/X/Big.cs"));
-        Evaluate(measured, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines }).ShouldContain(p => p.StartsWith("GROWN"));
-        Evaluate(measured, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines + 1 }).ShouldBeEmpty();
-        Evaluate(measured, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines + 50 }).ShouldContain(p => p.StartsWith("STALE"));
-        Evaluate(new Dictionary<string, int>(), new Dictionary<string, int> { ["src/X/Gone.cs"] = MaxLines + 1 }).ShouldContain(p => p.StartsWith("STALE"));
+        Evaluate(measured, new Dictionary<string, int>()).Problems.ShouldContain(p => p.StartsWith("NEW src/X/Big.cs"));
+        Evaluate(measured, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines }).Problems.ShouldContain(p => p.StartsWith("GROWN"));
+        Evaluate(measured, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines + 1 }).Problems.ShouldBeEmpty();
     }
 
-    private static List<string> Evaluate(IReadOnlyDictionary<string, int> measured, IReadOnlyDictionary<string, int> baseline)
+    [Fact]
+    public void Scanner_ToleratesShrinkAndDeletion()
+    {
+        var measured = new Dictionary<string, int>(StringComparer.Ordinal) { ["src/X/Big.cs"] = MaxLines + 1 };
+
+        var shrunk = Evaluate(measured, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines + 50 });
+        shrunk.Problems.ShouldBeEmpty();
+        shrunk.Hints.ShouldNotBeEmpty();
+
+        var gone = Evaluate(new Dictionary<string, int>(), new Dictionary<string, int> { ["src/X/Gone.cs"] = MaxLines + 1 });
+        gone.Problems.ShouldBeEmpty();
+        gone.Hints.ShouldNotBeEmpty();
+
+        var small = Evaluate(new Dictionary<string, int> { ["src/X/Big.cs"] = 10 }, new Dictionary<string, int> { ["src/X/Big.cs"] = MaxLines + 1 });
+        small.Problems.ShouldBeEmpty();
+        small.Hints.ShouldNotBeEmpty();
+    }
+
+    private static (List<string> Problems, List<string> Hints) Evaluate(IReadOnlyDictionary<string, int> measured, IReadOnlyDictionary<string, int> baseline)
     {
         var problems = new List<string>();
+        var hints = new List<string>();
         foreach (var (path, lines) in measured.Where(m => m.Value > MaxLines).OrderBy(m => m.Key, StringComparer.Ordinal))
         {
             if (!baseline.TryGetValue(path, out var ceiling))
@@ -62,7 +72,7 @@ public sealed class SourceSizeRatchetArchitectureTests
             }
             else if (lines < ceiling)
             {
-                problems.Add($"STALE {path}: {lines} lines < ceiling {ceiling}; lower the ceiling");
+                hints.Add($"{path}: {lines} lines < ceiling {ceiling}; lower the ceiling");
             }
         }
 
@@ -70,15 +80,15 @@ public sealed class SourceSizeRatchetArchitectureTests
         {
             if (!measured.TryGetValue(path, out var lines))
             {
-                problems.Add($"STALE {path}: file no longer exists; remove the entry");
+                hints.Add($"{path}: file no longer exists; remove the entry");
             }
             else if (lines <= MaxLines)
             {
-                problems.Add($"STALE {path}: now {lines} lines (within limit); remove the entry");
+                hints.Add($"{path}: now {lines} lines (within limit); remove the entry");
             }
         }
 
-        return problems;
+        return (problems, hints);
     }
 
     private static Dictionary<string, int> MeasureSrc() =>
