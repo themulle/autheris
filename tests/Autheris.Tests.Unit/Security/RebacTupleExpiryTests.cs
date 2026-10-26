@@ -67,7 +67,8 @@ public sealed class RebacTupleExpiryTests
     }
 
     [Fact]
-    public async Task RebacTuple_ExpiredAtBoundary_IsDenied()
+    [Trait("Category", "Security")]
+    public async Task WAVE3_TIME_SC_02_RebacTuple_ExpiredAtBoundary_IsDenied()
     {
         await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddSeconds(10) });
 
@@ -79,7 +80,8 @@ public sealed class RebacTupleExpiryTests
     }
 
     [Fact]
-    public async Task Evaluator_CachedDecisionPastExpiry_Reevaluated()
+    [Trait("Category", "Security")]
+    public async Task WAVE3_TIME_SC_02_Evaluator_CachedDecisionPastExpiry_Reevaluated()
     {
         await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddMinutes(5) });
         var evaluator = Evaluator();
@@ -92,7 +94,8 @@ public sealed class RebacTupleExpiryTests
     }
 
     [Fact]
-    public async Task Stores_NullTimeProvider_UsesSystem()
+    [Trait("Category", "Security")]
+    public async Task WAVE3_TIME_SC_01_Stores_NullTimeProvider_UsesSystem()
     {
         var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance, timeProvider: null);
         await store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5) });

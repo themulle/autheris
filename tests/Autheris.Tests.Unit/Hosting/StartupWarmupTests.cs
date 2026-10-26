@@ -342,6 +342,7 @@ public sealed class StartupWarmupTests
         lock (lockObj)
         {
             var instruments = recorded.Select(r => r.Instrument).Distinct().ToList();
+            // The overall duration carries no per-run tag, so this only proves the instrument exists; per-run attribution is via the unique step names below.
             instruments.ShouldContain("autheris.startup.warmup.duration");
             instruments.ShouldContain("autheris.startup.warmup.step.duration");
             recorded.Where(r => r.Instrument.EndsWith("step.duration", StringComparison.Ordinal) && (Equals(r.Tags["step"], okName) || Equals(r.Tags["step"], badName)))

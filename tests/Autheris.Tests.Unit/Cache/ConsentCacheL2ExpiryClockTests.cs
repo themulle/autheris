@@ -19,7 +19,8 @@ using Xunit;
 public sealed class ConsentCacheL2ExpiryClockTests
 {
     [Fact]
-    public void ConsentCache_L2EnvelopeExpired_IsMiss()
+    [Trait("Category", "Security")]
+    public void WAVE3_TIME_SC_02_ConsentCache_L2EnvelopeExpired_IsMiss()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
