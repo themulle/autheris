@@ -33,7 +33,7 @@ using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.DependencyInjection;
 
-public static class GatewayGovernanceServiceExtensions
+public static partial class GatewayGovernanceServiceExtensions
 {
     /// <summary>
     /// Registers the hosted service that migrates and initializes the governance store (WP-ARC-B-12, decision G-8). Must be called
@@ -49,53 +49,23 @@ public static class GatewayGovernanceServiceExtensions
         this IServiceCollection services,
         GatewayOptions gatewayOptions)
     {
-        services.AddSingleton<Autheris.Application.Audit.IAuditWriter, Autheris.Application.Audit.AuditWriter>();
+        AddAuditRetention(services);
+        AddCatalogAndRowFilterAdministration(services);
+        AddGovernanceStateAndStores(services, gatewayOptions);
+        AddVirtualFiltersAndCallerAttributes(services);
+        AddTypedRowPolicy(services);
+        AddRestrictedScopesAndConsentResolution(services);
+        AddOpenApiCatalogAndEnterpriseMoats(services);
+        AddItsmConsentRequests(services, gatewayOptions);
+        AddLineageGdprAndConsumerUsage(services);
+        AddTriageContractsAndDataHub(services);
+        AddIdentityAndAccessGovernance(services);
 
-        services.AddOptions<AuditRetentionOptions>()
-            .BindConfiguration(GatewaySections.AuditRetention)
-            .ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AuditRetentionOptions>, AuditRetentionOptionsValidator>();
-        services.AddHostedService<AuditRetentionPurgeWorker>();
+        return services;
+    }
 
-        // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
-        // (runs with the GatewayOptions ValidateOnStart; SEC-RF107-16).
-        services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
-
-        // Issue #111: the only writer of dataset tags and catalog visibility tiers (REST, manifest and MCP admin tool).
-        services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
-        services.AddSingleton<CatalogVisibilityMetrics>();
-        services.AddSingleton<ICatalogVisibilityMetrics>(sp => sp.GetRequiredService<CatalogVisibilityMetrics>());
-        services.AddHostedService<CatalogGovernanceHostedService>();
-        services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
-            sp.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>(),
-            sp.GetService<Autheris.Application.Interfaces.IDataOwnershipRepository>(),
-            sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
-            sp.GetService<TimeProvider>(),
-            sp.GetService<ICatalogVisibilityMetrics>()));
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
-        // Issue #107 (WP-C): the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,
-        // SEC-RF107-16); every other option is read per statement by the stage through IOptionsMonitor.
-        services.AddSingleton<TrinoSqlEngine.Governance.IPolicyKeyQueryCompiler>(sp =>
-            sp.GetRequiredService<TrinoSqlEngine.ISqlEngine>() as TrinoSqlEngine.Governance.IPolicyKeyQueryCompiler ?? new TrinoSqlEngine.Governance.PolicyKeyQueryCompiler());
-        services.AddSingleton(sp =>
-        {
-            var keySets = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.RowFilters.KeySetCache;
-            var cache = new Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetCache(
-                keySets.SizeLimitBytes, keySets.MaxConcurrentKeyQueries, sp.GetService<TimeProvider>(),
-                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetCache>>());
-            Autheris.Domain.Diagnostics.GatewayDiagnostics.Meter.CreateObservableGauge(
-                "autheris.rowfilter.keyset.cache.size_bytes", () => cache.CurrentEstimatedSize, "By", "Estimated bytes of the row-filter key-set cache");
-            return cache;
-        });
-        services.AddSingleton<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader>();
-        services.AddSingleton<Autheris.Application.Sql.Policy.RowFilterKeySets.IRowFilterKeySetLoader>(sp =>
-            sp.GetRequiredService<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetLoader>());
-        services.AddSingleton<Autheris.Application.Sql.Policy.RowFilterKeySets.IRowFilterKeySetStage, Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetStage>();
-        services.AddHostedService<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetStartupReporter>();
-        services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitOptions>();
-        services.AddSingleton<Autheris.Application.Auditing.AuditGroupCommitSink>();
-
+    private static void AddGovernanceStateAndStores(IServiceCollection services, GatewayOptions gatewayOptions)
+    {
         // WP-ARC-A-03: the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
 
@@ -149,194 +119,6 @@ public static class GatewayGovernanceServiceExtensions
                     registry.MaxTrackedIssuers)));
             services.AddHostedService<TenantRegistryPreseedService>();
         }
-
-        services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
-        services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
-        services.AddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
-        services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
-
-        services.AddSingleton<VirtualFilterAdministrationService>();
-        services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
-        // REQ-GOV-129: caller attribute registry and its administration (four-eyes).
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ClaimsAttributeProvider>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ServiceAttributeProvider>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.AttributeTableProvider>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator, Autheris.Application.Identity.Attributes.ClaimsAttributeDefinitionValidator>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator, Autheris.Application.Identity.Attributes.AttributeTableDefinitionValidator>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeResolver>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeSimulationService>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeResolver>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.CallerAttributeResolver>());
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeCacheInvalidator>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.CallerAttributeResolver>());
-        services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry, Autheris.Application.Identity.Attributes.CallerAttributeRegistry>();
-        services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService>(sp => new Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService(
-            sp.GetRequiredService<Autheris.Domain.Interfaces.ICallerAttributeRepository>(),
-            sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
-            sp.GetRequiredService<Autheris.Application.Interfaces.IAuditLogRepository>(),
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
-            sp.GetService<TimeProvider>() ?? TimeProvider.System,
-            sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
-        // Issue #281: runtime-managed, app-scoped trusted GraphQL documents (registry polls the generation row; the admin service invalidates it).
-        services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.ITrustedDocumentAppRegistry, Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAppRegistry>();
-        services.AddSingleton<Autheris.Application.Governance.TrustedDocuments.TrustedDocumentAdministrationService>();
-        services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
-        services.AddSingleton<MandatoryRowFilterResolver>();
-        services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
-        services.AddSingleton<IEffectiveFilterInspector, EffectiveFilterInspector>();
-        services.AddScoped<Autheris.Application.Governance.IOpenApiIngestionUseCase, Autheris.Application.Governance.OpenApiIngestionUseCase>();
-        // F-GOV-14 (M4, SEC-10): authorized key sets from the SQL key source, in a dedicated size-limited cache.
-        services.AddSingleton<Autheris.Application.VirtualFilters.Federation.VirtualFilterKeySetCache>();
-        services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();
-        // F-GOV-14 (WI-6): without this registration a WebSQL cross-source query over a protected HTTP table is denied.
-        services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterFederationPlanner, Autheris.Application.VirtualFilters.Federation.VirtualFilterFederationPlanner>();
-        services.AddSingleton<IConsentCacheService, ConsentCacheService>();
-
-        // WP-X0e: typed row policy. The renderer and the parser are stateless (the parser caches shapes), so one instance serves all.
-        services.AddSingleton<Autheris.Application.Sql.Policy.IPolicyPredicateRenderer, Autheris.Application.Sql.Policy.PolicyPredicateRenderer>();
-        services.AddSingleton<TrinoSqlEngine.Governance.IPolicyExpressionParser, TrinoSqlEngine.Governance.PolicyExpressionParser>();
-        services.AddSingleton<Autheris.Application.Policy.RowPolicyFactory>();
-        services.AddSingleton<Autheris.Application.Sql.Masking.SqlDataMaskingProvider>();
-        services.AddSingleton<Autheris.Application.Policy.ColumnMaskPolicyFactory>();
-        services.AddSingleton<Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard>(sp =>
-            new Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard(
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.Plugins.Auth,
-                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard>>(),
-                sp.GetService<Autheris.Application.Audit.IAuditWriter>()));
-        services.AddSingleton<Autheris.Infrastructure.Plugins.Auth.GuardedPluginInvoker>();
-        services.AddSingleton<Autheris.Application.Plugins.Auth.IAuthPluginHost, Autheris.Infrastructure.Plugins.Auth.AuthPluginHost>();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Plugins.Auth.AuthPluginOptionsValidator>();
-        services.AddSingleton<Autheris.Application.Policy.TypedPolicySources>();
-        // WP-X0l: assembles the typed GovernancePolicy of a statement (no caller until X1). The catalog provider is registered with the storage.
-        services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();
-        services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
-        services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
-        // REQ-GOV-143 (D-1/D-15): restricted scopes. Bound once (IOptions, not reloadable) and validated at startup.
-        services.AddOptions<Autheris.Domain.Options.RestrictedScopeOptions>()
-            .BindConfiguration(Autheris.Domain.Options.RestrictedScopeOptions.SectionName)
-            .ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.RestrictedScopeOptions>, Autheris.Application.Policy.RestrictedScopeOptionsValidator>();
-        services.AddSingleton<Autheris.Domain.Security.IRestrictedScopePolicy>(sp =>
-            Autheris.Domain.Security.RestrictedScopePolicy.FromOptions(
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.RestrictedScopeOptions>>().Value));
-        services.AddSingleton<IConsentResolutionService, ConsentResolutionService>();
-        services.AddSingleton<IIdentitySubjectResolver, IdentitySubjectResolver>();
-        // WP-0 (PLAN-GOV-113): only a person decides consent requests. The resolvers resolve the guard with GetRequiredService (no fallback).
-        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.IConsentDecisionGuard, Autheris.Application.Governance.ConsentRequests.ConsentDecisionGuard>();
-        services.AddSingleton<Autheris.Application.Governance.ConsentRequests.IConsentDecisionDenialRecorder, Autheris.Application.Governance.ConsentRequests.ConsentDecisionDenialRecorder>();
-        services.AddSingleton<IKeyVaultSecretProvider, DefaultEnvironmentSecretProvider>();
-        services.AddSingleton<IColumnMaskingProvider, ColumnMaskingProvider>();
-
-        // Outbound SSRF protection (HIGH-03 / SEC-02) & OpenAPI ingestion (P1).
-        services.AddHttpClient<IAuditWormExportService, AuditWormExportService>().AddSecureOutboundHandlers(EgressIntegrations.AuditWorm);
-        services.AddSingleton<IOpenApiIngestionService, OpenApiIngestionService>();
-        services.AddAutherisCatalog();
-
-        // Strategic Enterprise Moats (P10, P11, P12)
-        services.AddSingleton<IPolicySimulationService, PolicySimulationService>();
-        services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
-        services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
-        services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
-        services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
-        services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // WP-SC-16
-            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
-                Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(Autheris.Domain.Options.IndividualGrantOptions.SectionName), o))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-        services.AddOptions<Autheris.Domain.Options.GovernanceTextOptions>() // PLAN-GOV-158-INC1
-            .BindConfiguration(Autheris.Domain.Options.GovernanceTextOptions.SectionName)
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-        Autheris.Application.Governance.Grants.IndividualGrantServiceCollectionExtensions.AddIndividualGrantPolicy(services);
-        services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
-
-        // ITSM orchestration (dispatcher, recertification, outbox workers)
-        services.AddScoped<ItsmWorkflowDispatcher>();
-        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestDispatcher, Autheris.Application.ConsentRequests.ItsmConsentRequestDispatcher>();
-        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
-        services.AddScoped<IConsentRecertificationService, ConsentRecertificationWorkflowService>();
-        if (gatewayOptions.Itsm.Enabled)
-        {
-            services.AddHostedService<ItsmOutboxDispatcherHostedService>();
-            services.AddHostedService<ConsentRecertificationHostedService>();
-        }
-
-        // Lineage Graph Store, Impact Analyzer & GDPR Exporter
-        services.AddSingleton<ILineageGraphStore, LineageGraphStore>();
-        services.AddOptions<Autheris.Domain.Options.GdprReportOptions>() // MISC-11
-            .BindConfiguration(Autheris.Domain.Options.GdprReportOptions.SectionName)
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-        services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
-        services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
-        services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>(sp =>
-        {
-            var env = sp.GetService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-            var isDev = env?.EnvironmentName == Microsoft.Extensions.Hosting.Environments.Development;
-            var gatewayOptions = sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
-            var entraIdOptions = gatewayOptions?.Authentication?.EntraId;
-            var config = sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
-
-            string? secret = config?["Gateway:Audit:ActorPseudonymizationKey"]
-                ?? config?["Gateway:GovernanceDb:AuditHmacKey"]
-                ?? config?["Gateway:Audit:AuditHmacKey"]
-                ?? config?["Gateway:Cluster:Secret"];
-
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                var secretProvider = sp.GetService<Autheris.Application.Interfaces.IKeyVaultSecretProvider>();
-                var auditRef = gatewayOptions?.GovernanceDb?.AuditHmacKeyVaultRef ?? gatewayOptions?.DataMasking?.HmacSecretKeyVaultRef;
-                if (secretProvider != null && !string.IsNullOrWhiteSpace(auditRef))
-                {
-                    try
-                    {
-                        var bytes = secretProvider.GetSecretBytes(auditRef);
-                        if (bytes != null && bytes.Length > 0)
-                        {
-                            secret = Convert.ToHexString(bytes);
-                        }
-                    }
-                    catch { }
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                secret = isDev
-                    ? "autheris-default-cluster-telemetry-secret-key-2026"
-                    : Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
-            }
-            var callerProvider = sp.GetService<ICallerContextProvider>();
-            return new Autheris.Infrastructure.Observability.ConsumerUsageRecorder(secret, callerProvider);
-        });
-        services.AddSingleton<IConsumerUsageRecorder>(sp => sp.GetRequiredService<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>());
-        services.AddHostedService<Autheris.Infrastructure.Observability.ConsumerUsageFlushWorker>();
-
-        // AI Assisted Governance (Triage)
-        services.AddScoped<IJustificationTriageService, JustificationTriageService>();
-
-        // Dynamic Schema Contracts (@tag / @inaccessible) (F-GOV-08)
-        services.AddSingleton<ISchemaContractManager, SchemaContractManager>();
-
-        // Governance Data Classification Engine & Workflows
-        services.AddAutherisDataClassification();
-
-        // DataHub & Data Contract Engine (REQ-DATAHUB-01)
-        services.AddSingleton<IDataContractEngine, InMemoryDataContractEngine>();
-        services.AddScoped<IDataHubCatalogClient, DataHubCatalogClient>();
-
-        // Wave 2: Identity & Access Governance
-        services.AddSingleton<Autheris.Application.Identity.IIdentityRealmRegistry, Autheris.Application.Identity.IdentityRealmRegistry>();
-        services.AddSingleton<Autheris.Application.Identity.Caching.IRoleResolverCache, Autheris.Application.Identity.Caching.RoleResolverCache>();
-        services.AddSingleton<Autheris.Application.Identity.IRoleResolver, Autheris.Application.Identity.RoleResolver>();
-        services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();
-        services.AddHostedService<Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService>();
-        services.AddSingleton<Autheris.Application.Identity.Services.IIdentityDeprovisioningService, Autheris.Application.Identity.Services.IdentityDeprovisioningService>();
-        services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
-        services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
-        services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
-        services.AddSingleton<Autheris.Application.Governance.Recertification.IRecertificationService, Autheris.Application.Governance.Recertification.RecertificationService>();
-        services.AddHostedService<Autheris.Application.Governance.Recertification.RecertificationGovernorHostedService>();
-
-        return services;
     }
 
     private static void RegisterGovernanceAggregateStores<TRepository, TMigrationRunner>(
