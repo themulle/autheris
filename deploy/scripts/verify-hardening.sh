@@ -204,6 +204,19 @@ if command -v helm >/dev/null 2>&1; then
         echo "ERROR: nginx render with exposeAdmin=true failed or contains a snippet annotation" >&2
         FAILURES=$((FAILURES + 1))
     fi
+
+    # NF-HA-01 wiring (WAVE3-STARTUP-SC-03/04): the four Gateway__HighAvailability__* env vars come from values, and the render fails
+    # when an inequality is violated or a value is unset, non-numeric or not positive.
+    for ha_out in "${DEFOUT}" "${POSITIVE}"; do
+        for ha_key in DrainDelaySeconds ShutdownTimeoutSeconds QueryTimeoutSeconds TerminationGracePeriodSeconds; do
+            grep -q "name: Gateway__HighAvailability__${ha_key}\$" <<<"${ha_out}" || { echo "ERROR: Helm render is missing Gateway__HighAvailability__${ha_key}" >&2; FAILURES=$((FAILURES + 1)); }
+        done
+    done
+    expect_failure "grace period too short" "NF-HA-01b" "${BASE[@]}" "${ENTRA[@]}" --set terminationGracePeriodSeconds=30
+    expect_failure "shutdown below query + 10" "NF-HA-01a" "${BASE[@]}" "${ENTRA[@]}" --set gateway.queryTimeoutSeconds=40
+    expect_failure "non-positive drain" "gateway.drainDelaySeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set gateway.drainDelaySeconds=0
+    expect_failure "non-numeric shutdown" "gateway.shutdownTimeoutSeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set-string gateway.shutdownTimeoutSeconds=abc
+    expect_failure "unset query timeout" "gateway.queryTimeoutSeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set gateway.queryTimeoutSeconds=null
 else
     echo "--> helm not installed; skipping Helm render checks (CI job helm-render runs them)."
 fi

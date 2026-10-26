@@ -174,8 +174,9 @@ topologySpreadConstraints:
   whenUnsatisfiable: DoNotSchedule
 
 gateway:
-  drainDelaySeconds: 5          # preStop sleep only (not forwarded to the gateway)
-  shutdownTimeoutSeconds: 30    # not rendered by any chart template
+  drainDelaySeconds: 5          # preStop sleep and Gateway__HighAvailability__DrainDelaySeconds
+  shutdownTimeoutSeconds: 30    # Gateway__HighAvailability__ShutdownTimeoutSeconds
+  queryTimeoutSeconds: 20       # Gateway__HighAvailability__QueryTimeoutSeconds
   production:
     enforceRequiredSettings: false   # true in values.production.yaml
   authentication:
@@ -206,9 +207,9 @@ monitoring:
     enabled: true
 ```
 
-`values.production.yaml` additionally sets `replicaCount: 3`, `image.requireDigest: true`, `gateway.drainDelaySeconds: 10`, `gateway.shutdownTimeoutSeconds: 45` and `terminationGracePeriodSeconds: 75`.
+`values.production.yaml` additionally sets `replicaCount: 3`, `image.requireDigest: true`, `gateway.drainDelaySeconds: 10`, `gateway.shutdownTimeoutSeconds: 45`, `gateway.queryTimeoutSeconds: 35` and `terminationGracePeriodSeconds: 75`.
 
-The Helm values `gateway.drainDelaySeconds` and `gateway.shutdownTimeoutSeconds` are not passed to the gateway process: `drainDelaySeconds` only sets the `preStop` sleep and `shutdownTimeoutSeconds` is not rendered by any template. The in-process drain is configured through `Gateway:HighAvailability:DrainDelaySeconds`, `ShutdownTimeoutSeconds` and `TerminationGracePeriodSeconds` (validated by NF-HA-01; see the configuration guide), which must fit inside the pod `terminationGracePeriodSeconds`.
+The deployment renders `gateway.drainDelaySeconds`, `gateway.shutdownTimeoutSeconds`, `gateway.queryTimeoutSeconds` and `terminationGracePeriodSeconds` as the environment variables `Gateway__HighAvailability__DrainDelaySeconds`, `__ShutdownTimeoutSeconds`, `__QueryTimeoutSeconds` and `__TerminationGracePeriodSeconds`; `drainDelaySeconds` also sets the `preStop` sleep. The values are numbers only (no free text). `helm template` fails when a value is unset, non-numeric or not positive, and when an NF-HA-01 inequality is violated: `shutdownTimeoutSeconds >= queryTimeoutSeconds + 10`, and `terminationGracePeriodSeconds >= 2 * drainDelaySeconds + shutdownTimeoutSeconds + 10`. The grace budget is stricter than the in-process check (`DrainDelay + ShutdownTimeout + 10`, see the configuration guide) because the kubelet grace period also covers the `preStop` sleep. Both `values.yaml` and `values.production.yaml` satisfy the inequalities.
 
 ### 5.3 Production Render Guards
 

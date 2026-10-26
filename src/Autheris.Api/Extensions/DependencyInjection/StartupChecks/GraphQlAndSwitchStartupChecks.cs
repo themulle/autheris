@@ -100,7 +100,7 @@ internal static class GraphQlAndSwitchStartupChecks
         // Security switch semantics: DANGER = blocked outside Development (see below), WARN = permitted everywhere
         // but reported loudly at startup, regular options = no message (see GatewayOptions.GetAllActiveBypasses).
         var dangerBypasses = context.DangerBypasses;
-        var warnings = context.Warnings;
+        var warnings = context.ExtraWarnings.Count == 0 ? context.Warnings : [.. context.Warnings, .. context.ExtraWarnings];
         if (options.IsWebSqlGovernanceBypassed)
         {
             // X1: there is one WebSQL code path and the former bypass no longer exists. The flag is inert but still a DANGER switch, so it
