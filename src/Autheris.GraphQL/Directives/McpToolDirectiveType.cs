@@ -18,6 +18,5 @@ public sealed class McpToolDirectiveType : DirectiveType
         descriptor.Argument("name").Type<NonNullType<StringType>>().Description("Name of the MCP tool.");
         descriptor.Argument("description").Type<StringType>().Description("Human/LLM-readable description of the tool.");
         descriptor.Argument("targetTable").Type<StringType>().Description("Explicit target table identifier in 'domain.schema.table' format.");
-        descriptor.Argument("table").Type<StringType>().Description("Alias for targetTable.");
     }
 }

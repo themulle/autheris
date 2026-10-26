@@ -10,13 +10,12 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Rewrites domain-scoped GraphQL requests (<c>/graphql/{domain}</c>) to <c>/graphql</c> and populates
-/// <c>HttpContext.Items["Autheris.DomainScope"]</c>, <c>HttpContext.Items["DomainScope"]</c>, and <c>X-Autheris-Domain</c>
+/// <c>HttpContext.Items["Autheris.DomainScope"]</c> and <c>X-Autheris-Domain</c>
 /// BEFORE authentication, authorization, rate limiting, and audit middlewares execute (WP-ARC-C-04 / ARC-A-10).
 /// </summary>
 public sealed partial class DomainScopeRewriteMiddleware
 {
     public const string DomainScopeItemKey = "Autheris.DomainScope";
-    public const string LegacyDomainScopeItemKey = "DomainScope";
     public const string DomainHeaderName = "X-Autheris-Domain";
 
     private readonly RequestDelegate _next;
@@ -78,7 +77,6 @@ public sealed partial class DomainScopeRewriteMiddleware
                 }
 
                 context.Items[DomainScopeItemKey] = subPath;
-                context.Items[LegacyDomainScopeItemKey] = subPath;
                 context.Request.Headers[DomainHeaderName] = subPath;
                 context.Request.Path = _graphQlEndpoint;
             }

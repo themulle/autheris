@@ -25,6 +25,9 @@ public sealed class TableRecordPayload
 
 public sealed class Query
 {
+    /// <summary>The item key written by <c>DomainScopeRewriteMiddleware</c> (kept equal by a unit test; the GraphQL project cannot reference the API project).</summary>
+    private const string DomainScopeItemKey = "Autheris.DomainScope";
+
     public async Task<TableRecordPayload> GetTableAsync(
         string domain,
         string name,
@@ -342,7 +345,7 @@ public sealed class Query
 
         if (string.IsNullOrWhiteSpace(domain))
         {
-            if (httpContext?.Items.TryGetValue("DomainScope", out var ds) == true && ds is string scopeStr && !string.IsNullOrWhiteSpace(scopeStr))
+            if (httpContext?.Items.TryGetValue(DomainScopeItemKey, out var ds) == true && ds is string scopeStr && !string.IsNullOrWhiteSpace(scopeStr))
             {
                 domain = scopeStr;
             }
