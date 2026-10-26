@@ -132,14 +132,50 @@ Value and risk: H/M/L. Size: S/M/L. BP means behaviour-preserving.
   - Stage 0 measures DFA state count growth over the fuzz and SQL corpus (needs PR #360 merged).
   - Stage 1 gives every pooled parser and lexer its own `ParserATNSimulator`/`LexerATNSimulator` with a private `DFA[]` and `PredictionContextCache`, built in `ParserPooledObjectPolicy.Create`. `Return` discards an instance whose state count is over a cap or which has served more than N uses. Total memory is then bounded by pool size times the cap, without a global lock. The two raw `new SqlBaseLexer` sites move to a pooled lexer.
   - Alternative: a global `ClearDFA()` under a reader/writer lock when the summed states exceed a cap. It is simpler, but every parse waits during a reset.
-- **Security conditions needed (Phase 3 must issue them):**
-  - Corpus equivalence: identical trees and errors with warm, cold and reset caches.
-  - No DFA object shared across threads (concurrency stress test).
-  - The SLL-to-LL fallback, ARC-S-09 token-mismatch finality and time budgets stay unchanged.
-  - Any failure in the reset path rejects the parse (fail-closed) and never skips `AstSecurityVisitor`.
-  - A memory-bound test with N distinct adversarial statements.
-  - No SQL text in metrics or logs.
-  - Cold-cache latency gated with `SqlGate.BenchCheck`.
+#### Phase 3 binding conditions (csharp-security-expert, 2026-10-26)
+
+**Verdict: APPROVED WITH CONDITIONS.**
+
+**Threat.** `decisionToDFA` and `sharedContextCache` are process-wide statics that only grow. An authenticated caller sending many distinct statements (each at most `MaxQueryLength` 65,536) adds DFA and prediction-context states for the life of the process. This leads to OOM and a denial of service for all tenants. Fail-closed does not apply to the OOM itself; the control must be a bound, not a rejection. Code facts verified: `new SqlBaseLexer(` has five sites, not two. They are `FastSqlEngine.cs:415` (per parse), `SqlParameterExtractor.cs:48`, `AstSecurityVisitor.Support.cs:281`, `Application/Analytics/AggregationNegationGuard.cs:108` and `Application/Diagnostics/Shadowing/PiiShadowingRedactor.cs:329`. `ParserPooledObjectPolicy.Create` builds the parser with the static `Interpreter`.
+
+**Chosen approach: generation swap (not per-instance DFA, not global `ClearDFA`).**
+- Per-instance private DFA is rejected: it multiplies memory by pool size, every instance re-learns (cold latency on each), and per-parse lexers would need pooling too.
+- Global `ClearDFA()` under a lock is rejected: it stalls all parses and `ClearDFA` racing with in-flight prediction is not a documented-safe operation.
+- Chosen: one immutable-reference `AntlrCacheGeneration` holds `DFA[]` for parser and lexer plus a `PredictionContextCache`. Each parse or lex binds its simulator to the generation current at rent time. When the state count exceeds the cap, a fresh generation is published with `Interlocked.CompareExchange` (one winner). In-flight work keeps the old generation, which the GC collects after the last reference drops. No lock on the parse path, no stall, DFA objects stay in the shape ANTLR already shares across threads.
+- The count (sum of `DFA.states.Count` plus cache size) is checked at `Return` and at lexer release, at most every K uses (K configurable), never per token.
+
+**Binding conditions**
+- ARCH-MNT-15-SC-01: All `SqlBaseLexer` and `SqlBaseParser` construction goes through one factory that binds the current generation. All five lexer sites move to it; an architecture test forbids `new SqlBaseLexer(` and `new SqlBaseParser(` elsewhere in `src`.
+- ARCH-MNT-15-SC-02: A generation is never mutated by anyone except ANTLR's own prediction. Nothing calls `ClearDFA()` on a generation that any parse or lexer still references. Swap is a single reference publish.
+- ARCH-MNT-15-SC-03: The cap is a total-state cap per generation (parser plus lexer DFA states plus context-cache entries), counted deterministically. A single parse that exceeds the cap mid-parse completes on its generation; the swap happens afterwards. Peak memory is thus at most about two generations plus in-flight ones; document this.
+- ARCH-MNT-15-SC-04: Options `MaxDfaStatesPerGeneration` and `GenerationCheckInterval` are validated at startup (`ValidateOnStart`): both greater than 0, with an upper bound for the cap. Invalid or missing values fail startup. No silent default override at runtime and no "0 means unlimited".
+- ARCH-MNT-15-SC-05: Fail-closed. Any exception while binding, counting or swapping rejects that parse with the existing generic parse-error path (the instance is discarded, not returned to the pool). The swap path must not catch and continue with a half-bound simulator. Never a fallback to the old static arrays.
+- ARCH-MNT-15-SC-06: `AstSecurityVisitor`, `SqlSecurityValidator` and all downstream validation run on every parse regardless of generation state, swap, rebind or error recovery. Swap code has no early-return path past them.
+- ARCH-MNT-15-SC-07: Parse results are independent of cache state. SLL-first then LL fallback (`FastSqlEngine` ~465), ARC-S-09 token-mismatch finality, per-statement time budgets and `MaxQueryLength` stay unchanged. The swap adds no new timeout or retry that could change the accept/reject decision.
+- ARCH-MNT-15-SC-08: A rebound parser (after a swap) has its `ParserATNSimulator` rebuilt with `PredictionMode.SLL` and its error listeners, error strategy and `Reset()` state restored exactly as `ParserPooledObjectPolicy.Create` and `Return` do today. A parser never leaves the pool in LL mode (existing check kept).
+- ARCH-MNT-15-SC-09: No SQL text, statement hash, tenant or principal in metrics, logs or exceptions from the swap. Only counters and gauges: generation number, state count, swap count. Metric tags are fixed, low-cardinality, never user-derived.
+- ARCH-MNT-15-SC-10: Swap events are rate-limited by the cap itself and by `GenerationCheckInterval`; an adversary cannot force a swap per request to degrade throughput below cold-parse speed. A minimum number of parses between swaps (`MinParsesPerGeneration`, validated greater than 0) is enforced.
+- ARCH-MNT-15-SC-11: Cold-cache latency, with the cap forced low, is gated with `SqlGate.BenchCheck`; the default cap is calibrated from the Stage 0 corpus measurement and written into the options default with a comment citing the measurement.
+
+**Mandatory tests** (all `[Trait("Category","Security")]` unless noted; names are binding)
+- ARCH-MNT-15-T-01 `Parse_CorpusTreesAndErrors_IdenticalAcrossWarmColdAndSwappedGenerations`: SQL corpus plus negative corpus; compare serialized tree and error codes.
+- ARCH-MNT-15-T-02 `Generation_StateCount_StaysBoundedForDistinctStatements`: generate N (for example 5,000) distinct statements deterministically from a fixed seed with a low cap; assert the max observed state count at every swap check is at most cap plus a stated per-parse slack, and that the swap count is at least 1. Count states, no wall-clock, no GC measurement.
+- ARCH-MNT-15-T-03 `Generation_ConcurrentParsesDuringSwap_NoExceptionsAndEquivalentResults`: parallel parses (at least 16 tasks) with a tiny cap that forces many swaps; all results equal the single-threaded baseline.
+- ARCH-MNT-15-T-04 `Generation_OldGenerationNotCleared_WhileParseInFlight`: hold a parse (gate) on generation 1, force a swap, release; assert it completes correctly and generation 1 is unreachable afterwards (`WeakReference` after forced GC, `Category=Unit`).
+- ARCH-MNT-15-T-05 `Swap_FaultInjected_RejectsParse_DoesNotReturnInstanceToPool`: failing count or bind seam; assert a parse rejection, a discarded instance and no use of static arrays.
+- ARCH-MNT-15-T-06 `AstSecurityVisitor_RunsOnEveryParse_IncludingFirstParseAfterSwap`: forbidden statement is rejected on the parse that triggers the swap and the one right after.
+- ARCH-MNT-15-T-07 `Parser_AfterRebind_UsesSllModeAndSameListeners`.
+- ARCH-MNT-15-T-08 `Options_InvalidCapIntervalOrMinParses_FailStartup` (zero, negative, above upper bound, missing).
+- ARCH-MNT-15-T-09 `SwapMetricsAndLogs_ContainNoSqlTextOrTenantIdentifiers`: capture log and `MeterListener` output while parsing a statement with a unique marker; assert the marker is absent and tags are the fixed set.
+- ARCH-MNT-15-T-10 `Swap_AdversarialDistinctStatements_RespectsMinParsesPerGeneration`.
+- ARCH-MNT-15-T-11 (architecture, `Category=Architecture`) `SqlBaseLexerAndParser_AreConstructedOnlyThroughTheFactory`; coordinate with the guardrail test project.
+- ARCH-MNT-15-T-12 `SqlGate.BenchCheck` cold-cache case (SC-11).
+
+**Size.** Medium: about 250 to 350 lines of source (generation type, factory, policy changes, options with validator, metrics, five call-site moves) and about 450 lines of tests. One PR, one work package, Phase 4 Sonnet.
+
+**Dependency on PR #360.** The implementation and tests T-01 to T-11 do not need #360; T-02 generates its own statements. Only SC-11 default calibration (Stage 0) benefits from the #360 fuzz corpus. If #360 is not merged, ship a conservative default and record the measurement as a follow-up, which does not block the implementation. It must not start before PR 1 (guardrails) merges only if T-11 is placed there.
+
+**Blocker.** None.
 
 ## 4. Proposed PR cut
 
