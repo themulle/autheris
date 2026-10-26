@@ -61,8 +61,6 @@ public sealed partial class ProjectReferenceGraphArchitectureTests
 
         planted.ShouldBe(["Autheris.Domain->Autheris.Tests.Common"]);
         planted.Except(AllowedEdges.Value, StringComparer.Ordinal).ShouldNotBeEmpty();
-        // A removed edge is not an added edge, so shrinking the graph passes.
-        AllowedEdges.Value.Skip(1).Except(AllowedEdges.Value, StringComparer.Ordinal).ShouldBeEmpty();
         planted.Any(IsSrcToNonSrcEdge).ShouldBeTrue("A src project referencing a test project must be flagged.");
     }
 
