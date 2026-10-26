@@ -529,11 +529,11 @@ public static class SqlEndpointRoutes
     }
 
     /// <summary>REQ-SQL-128 C-15: a list error answers 400 with its stable code and the fixed message of that code (no count, no name, no value), in every environment.</summary>
-    private static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
+    internal static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
     {
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(error, out var mapped);
         httpContext.Response.StatusCode = mapped.Status == 0 ? StatusCodes.Status400BadRequest : mapped.Status;
-        await httpContext.Response.WriteAsJsonAsync(new { error = mapped.Title ?? error.Message, code = error.Code }, ct).ConfigureAwait(false);
+        await httpContext.Response.WriteAsJsonAsync(new { error = mapped.Title ?? "The request is invalid.", code = error.Code }, ct).ConfigureAwait(false);
     }
 
     private static (bool Requested, IParquetExportService? Service) ResolveParquetService(HttpContext httpContext)

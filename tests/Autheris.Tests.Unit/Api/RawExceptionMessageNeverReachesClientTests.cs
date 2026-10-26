@@ -512,4 +512,17 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         text.ShouldNotContain(Sentinel);
         text.ShouldNotContain("InvalidOperationException");
     }
+
+    [Fact]
+    public async Task RawExceptionMessage_NeverReachesTheClient_SqlListError_UnmappedCode_UsesFixedText()
+    {
+        var ctx = Ctx(development: true);
+
+        await SqlEndpointRoutes.WriteListErrorAsync(ctx, new TrinoSqlEngine.Ast.Emit.ClientListException(Sentinel), CancellationToken.None);
+
+        var c = Read(ctx);
+        c.Status.ShouldBe(400);
+        // The code is an engine constant (never caller data); the human-readable text must be fixed and free of the marker.
+        c.Json.GetProperty("error").GetString()!.ShouldNotContain(Sentinel);
+    }
 }

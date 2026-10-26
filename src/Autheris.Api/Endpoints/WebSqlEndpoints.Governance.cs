@@ -157,10 +157,10 @@ public static partial class WebSqlEndpoints
     /// <summary>Database command timeouts (e.g. SqlException "Execution Timeout Expired") and TimeoutExceptions.</summary>
     private static bool IsExecutionTimeout(Exception ex)
     {
-        for (var e = ex; e != null; e = e.InnerException)
+        for (var current = ex; current != null; current = current.InnerException)
         {
-            if (e is TimeoutException ||
-                (e is DbException && e.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase)))
+            if (current is TimeoutException ||
+                (current is DbException && current.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }

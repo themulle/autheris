@@ -12,7 +12,7 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
 {
     private static readonly string[] ScannedDirectories = ["src/Autheris.Api/Endpoints", "src/Autheris.Api/Mcp"];
 
-    [GeneratedRegex(@"\b\w*(?:ex|Ex|exception|Exception)\.(?:Message|InnerException|StackTrace|ToString\(\))(?!\s*\.\s*Contains)|\b(?:e)\.Message\b(?!\s*\.\s*Contains)")]
+    [GeneratedRegex(@"\b(?:e\d*|err|error|inner|\w*ex\d*|\w*[Ee]xception\d*)\.(?:Message|InnerException|StackTrace|ToString\(\))(?!\s*\.\s*Contains)")]
     private static partial Regex ExceptionMessageAccess();
 
     [Fact]
@@ -47,6 +47,10 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
         FindOccurrences("S.cs", "return Results.Json(new { error = sex.Message }, statusCode: 403);").Count.ShouldBe(1);
         FindOccurrences("S.cs", "reason = ex.InnerException,").Count.ShouldBe(1);
         FindOccurrences("S.cs", "var t = ex.ToString();").Count.ShouldBe(1);
+        FindOccurrences("S.cs", "x = err.Message;").Count.ShouldBe(1);
+        FindOccurrences("S.cs", "x = error.Message;").Count.ShouldBe(1);
+        FindOccurrences("S.cs", "x = ex2.Message;").Count.ShouldBe(1);
+        FindOccurrences("S.cs", "x = inner.Message;").Count.ShouldBe(1);
         FindOccurrences("S.cs", "reason = ex.GetType().Name,").ShouldBeEmpty();
         FindOccurrences("S.cs", "catch (ArgumentException ex) when (ex.Message.Contains(\"X\"))").ShouldBeEmpty();
     }
