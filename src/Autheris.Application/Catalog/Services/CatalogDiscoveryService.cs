@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -71,7 +72,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _procedureExecutionService = procedureExecutionService;
     }
 
-    private TenancyMode TenancyMode => _gatewayOptions.Tenancy.EffectiveMode;
+    private TenantId? CatalogOwner => TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
 
     public async Task<IReadOnlyList<CatalogDatasetSummary>> ListDatasetsAsync(RequestContext context, CancellationToken ct = default)
     {
@@ -386,9 +387,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ct.ThrowIfCancellationRequested();
 
         // Administrator metadata (endpoint URLs, authentication state): only the administrator classes get an answer; everybody else
-        // (including a claim-less GovernanceAdmin in Multi mode) gets the empty list. A tenant-scoped GovernanceAdmin sees the data
+        // (including a GovernanceAdmin without a resolvable tenant) gets the empty list. A tenant-scoped GovernanceAdmin sees the data
         // sources of the tables of its tenant-confined set, grouped per table, so a foreign table in the same domain never leaks its BaseUrl.
-        var scope = CallerScopeResolver.Resolve(context.User, TenancyMode);
+        var scope = CallerScopeResolver.Resolve(context.User, CatalogOwner);
         if (!CallerScopeResolver.IsAdminView(scope))
         {
             CallerScopeDiagnostics.ReportIfClaimlessAdmin(_logger, context.User, scope);

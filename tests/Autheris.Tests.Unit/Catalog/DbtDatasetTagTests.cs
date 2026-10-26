@@ -114,7 +114,7 @@ public sealed class DbtDatasetTagTests
         """, TenantId.LegacySingleTenant);
 
         captured!.Table.Tags.ShouldBeEmpty();
-        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", "semantic", "orders"),
+        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(TenantId.LegacySingleTenant), "orders"),
             Arg.Is<IEnumerable<string?>>(t => t.SequenceEqual(new string?[] { "dbt", "semantic-model" })), Arg.Any<CancellationToken>());
     }
 }

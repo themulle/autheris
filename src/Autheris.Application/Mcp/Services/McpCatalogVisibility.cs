@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,7 +32,7 @@ internal static class McpCatalogVisibility
 
     /// <summary>
     /// Same rule with the deployment tenancy setting: <paramref name="options"/> supplies <c>Gateway:Tenancy:Mode</c> and
-    /// <c>Gateway:Catalog:SharedTables</c>. Without options the mode is <see cref="TenancyMode.Multi"/> (confined view).
+    /// <c>Gateway:Catalog:SharedTables</c>. Without options there is no catalog owner (confined view).
     /// </summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
@@ -59,7 +60,7 @@ internal static class McpCatalogVisibility
             SafeTenantId(principal),
             consentRepo,
             contract: null,
-            options?.Tenancy.EffectiveMode ?? TenancyMode.Multi,
+            TenantResolver.EffectiveDefaultOf(options?.Tenancy),
             options?.Catalog.SharedTables,
             CatalogSurface.DataAccess,
             ct).ConfigureAwait(false);

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -37,7 +38,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private readonly IGovernedSqlExecutionService? _sqlExecutionService;
     private readonly IDynamicOpenApiGenerator? _openApiGenerator;
     private readonly ILogger<ApiDispatcherService>? _logger;
-    private readonly TenancyMode _tenancyMode;
+    private readonly TenantId? _catalogOwner;
     private readonly IReadPathSwitches? _switches;
 
     // PLAN-SEC-115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
@@ -56,7 +57,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         IReadPathSwitches? switches = null)
     {
         _switches = switches;
-        _tenancyMode = gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
+        _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _dataQueryService = dataQueryService;
         _catalogDiscoveryService = catalogDiscoveryService;
         _sqlExecutionService = sqlExecutionService;
@@ -176,11 +177,11 @@ public sealed class ApiDispatcherService : IApiDispatcherService
 
             // Data sources disclose endpoint URLs and authentication state: administrator view only. The class comes from the
             // principal through the canonical resolver; the anonymous default context resolves to "no caller".
-            var scope = CallerScopeResolver.Resolve(effectiveContext.User, _tenancyMode);
+            var scope = CallerScopeResolver.Resolve(effectiveContext.User, _catalogOwner);
             if (!CallerScopeResolver.IsAdminView(scope))
             {
-                return SerializeError("Forbidden", 403, scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(effectiveContext.User)
-                    ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
+                return SerializeError("Forbidden", 403, scope == CallerScope.None && CallerScopeResolver.HoldsGovernanceAdminRole(effectiveContext.User) && effectiveContext.User?.Identity?.IsAuthenticated == true
+                    ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:DefaultTenantId."
                     : "Listing data sources requires a governance administrator.");
             }
 

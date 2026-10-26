@@ -56,7 +56,9 @@ public class DataPathSecurityTests : IDisposable
             gatewayOptions,
             dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         _query = new Query();
-        _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_repository, _repository);
+        _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
+            _repository, _repository,
+            new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" }, Rebac = new Autheris.Domain.Options.RebacOptions { Enabled = false } });
     }
 
     public void Dispose()

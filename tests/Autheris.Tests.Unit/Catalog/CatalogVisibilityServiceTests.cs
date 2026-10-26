@@ -194,7 +194,7 @@ public sealed class CatalogVisibilityServiceTests
         var mode = tenant == null ? TenancyMode.Single : TenancyMode.Multi;
         var service = Svc(tables, consents, rebac, Opts(mode, rebacEnabled: true));
 
-        CallerScopeResolver.Resolve(principal, mode).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(principal, mode.Owner()).ShouldBe(CallerScope.None);
         (await service.GetVisibleAsync(Caller(principal))).Tables.ShouldBeEmpty();
         (await service.FindVisibleAsync(Caller(principal), T1)).ShouldBeNull();
         (await service.FilterVisibleAsync(Caller(principal), [T1])).ShouldBeEmpty();
@@ -622,14 +622,14 @@ public sealed class CatalogVisibilityServiceTests
         var set = await Svc(Wp0.Tables(row), consents).GetVisibleAsync(Caller(principal));
 
         set.IsAdminView.ShouldBe(admin);
-        set.IsAdminView.ShouldBe(CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(principal, TenancyMode.Multi)));
+        set.IsAdminView.ShouldBe(CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(principal, TenancyMode.Multi.Owner())));
         set.Tables.Count.ShouldBe(1);
         set.ShapeOf(T1).ShouldBe(CatalogOutputShape.Full);
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Multi_Mode_NoTenantClaim_NeverUnrestricted_ConsentPathOnly()
+    public async Task Multi_Mode_NoTenantClaim_HasNoCatalogStanding()
     {
         var rows = new[] { Row(T1), Row(T2) };
         var consents = Wp0.Consents(Wp0.Allow(T1, "S-GOV", TenantId.LegacySingleTenant, "id"));
@@ -637,21 +637,20 @@ public sealed class CatalogVisibilityServiceTests
 
         var set = await Svc(Wp0.Tables(rows), consents, options: Opts(TenancyMode.Multi)).GetVisibleAsync(Caller(claimless));
 
-        set.Scope.ShouldBe(CallerScope.Claimless);
-        set.Scope.ShouldNotBe(CallerScope.Unrestricted);
+        set.Scope.ShouldBe(CallerScope.None);
         set.IsAdminView.ShouldBeFalse();
-        set.Tables.Select(t => t.Identifier).ShouldNotContain(T2);
+        set.Tables.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Single_Mode_GovernanceAdminWithoutTenant_Unrestricted_SeesWholeCatalog()
+    public async Task Single_Mode_GovernanceAdminWithoutTenant_CatalogOwner_SeesWholeCatalog()
     {
         var rows = new[] { Row(T1), Row(T2) };
         var admin = Wp0.User("S-GOV", null, ["GovernanceAdmin"]);
 
         var set = await Svc(Wp0.Tables(rows), Wp0.Consents(), options: Opts(TenancyMode.Single)).GetVisibleAsync(Caller(admin));
 
-        set.Scope.ShouldBe(CallerScope.Unrestricted);
+        set.Scope.ShouldBe(CallerScope.CatalogOwner);
         set.Tables.Count.ShouldBe(2);
         set.IsAdminView.ShouldBeTrue();
     }

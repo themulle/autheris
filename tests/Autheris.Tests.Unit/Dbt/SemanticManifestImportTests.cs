@@ -71,7 +71,7 @@ public sealed class SemanticManifestImportTests
     private static string Manifest(string filter) => ManifestWithFilter.Replace("FILTER", filter);
 
     [Fact]
-    public async Task Import_StoresManifestAndWritesVirtualTableInSingleSchema_InSingleMode()
+    public async Task Import_StoresManifestAndWritesVirtualTableInTenantSchema_ForTheDefaultTenant()
     {
         var rig = NewRig(TenancyMode.Single);
 
@@ -79,7 +79,7 @@ public sealed class SemanticManifestImportTests
 
         (await rig.Catalog.GetMetricAsync("revenue", TenantId.LegacySingleTenant)).ShouldNotBeNull();
         var table = rig.Upserts.Single();
-        table.Identifier.ShouldBe(new TableIdentifier("semantic", "semantic", "orders"));
+        table.Identifier.ShouldBe(new TableIdentifier("semantic", SemanticVirtualTables.TenantSchema(TenantId.LegacySingleTenant), "orders"));
         SemanticVirtualTables.IsVirtualTable(table).ShouldBeTrue();
     }
 
@@ -116,12 +116,12 @@ public sealed class SemanticManifestImportTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Import_LegacyTenantInMulti_IsForbidden_BeforeAnySideEffect()
+    public async Task Import_UnsetTenant_IsForbidden_BeforeAnySideEffect()
     {
         var rig = NewRig(TenancyMode.Multi);
 
         await Should.ThrowAsync<GatewayForbiddenException>(() =>
-            rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantId.LegacySingleTenant));
+            rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), default));
 
         rig.Upserts.ShouldBeEmpty();
     }
@@ -255,25 +255,25 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public void SemanticStore_NoSid_EmptyInBothModes(TenancyMode mode)
     {
-        new SemanticTenancy(mode).ResolveCallerTenant(Principal(withSid: false, tenant: "tenant-a")).ShouldBeNull();
-        new SemanticTenancy(mode).ResolveCallerTenant(null).ShouldBeNull();
+        new SemanticTenancy(mode.Owner()).ResolveCallerTenant(Principal(withSid: false, tenant: "tenant-a")).ShouldBeNull();
+        new SemanticTenancy(mode.Owner()).ResolveCallerTenant(null).ShouldBeNull();
     }
 
     [Fact]
     [Trait("Category", "Security")]
     public void SemanticStore_NoSid_Multi_NoAccess() =>
-        new SemanticTenancy(TenancyMode.Multi).ResolveCallerTenant(Principal(false, "tenant-a", "GovernanceAdmin")).ShouldBeNull();
+        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(false, "tenant-a", "GovernanceAdmin")).ShouldBeNull();
 
     [Fact]
     [Trait("Category", "Security")]
     public void SemanticStore_MultiMode_ClaimlessImport_403()
     {
-        new SemanticTenancy(TenancyMode.Multi).ResolveCallerTenant(Principal(true, null)).ShouldBeNull();
-        new SemanticTenancy(TenancyMode.Multi).ResolveCallerTenant(Principal(true, null, "GovernanceAdmin")).ShouldBeNull();
-        new SemanticTenancy(TenancyMode.Multi).ResolveCallerTenant(Principal(true, "tenant-a")).ShouldBe(TenantA);
+        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(true, null)).ShouldBeNull();
+        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(true, null, "GovernanceAdmin")).ShouldBeNull();
+        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(true, "tenant-a")).ShouldBe(TenantA);
     }
 
     [Fact]
     public void SemanticStore_SingleMode_ClaimlessCallerHasStanding() =>
-        new SemanticTenancy(TenancyMode.Single).ResolveCallerTenant(Principal(true, null)).ShouldBe(TenantId.LegacySingleTenant);
+        new SemanticTenancy(TenancyMode.Single.Owner()).ResolveCallerTenant(Principal(true, null)).ShouldBe(TenantId.LegacySingleTenant);
 }

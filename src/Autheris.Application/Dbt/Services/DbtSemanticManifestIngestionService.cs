@@ -147,10 +147,10 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         return result;
     }
 
-    /// <summary>SEC-112-17: the importer's own scope. Single mode is unrestricted; Multi sees only tables the tenant holds consents on or that are shared.</summary>
+    /// <summary>SEC-112-17: the importer's own scope. The catalog owner (default tenant) is unrestricted (physical metadata); every other tenant sees only tables it holds consents on or that are shared.</summary>
     private async Task<Func<TableMetadata, bool>?> BuildVisibilityAsync(TenantId tenantId, CancellationToken ct)
     {
-        if (_tenancy.Mode == TenancyMode.Single)
+        if (_tenancy.IsCatalogOwner(tenantId))
         {
             return null;
         }
@@ -463,10 +463,10 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
 
                 var tableMeta = new TableMetadata
                 {
-                    Identifier = SemanticVirtualTables.IdentifierFor(tenantId, _tenancy.Mode, model.Name),
+                    Identifier = SemanticVirtualTables.IdentifierFor(tenantId, model.Name),
                     Table = new Table
                     {
-                        SchemaName = SemanticVirtualTables.SchemaFor(tenantId, _tenancy.Mode),
+                        SchemaName = SemanticVirtualTables.SchemaFor(tenantId),
                         TableName = model.Name,
                         DisplayName = model.Name,
                         Description = model.Description,

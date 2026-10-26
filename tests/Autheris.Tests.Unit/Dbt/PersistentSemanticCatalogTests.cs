@@ -170,7 +170,7 @@ public sealed class PersistentSemanticCatalogTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_SingleMode_AllPrincipalsShareLegacyRow()
+    public async Task SemanticStore_SingleMode_TenantsAreIsolated_DefaultTenantIncluded()
     {
         var store = new FakeSemanticManifestStore();
         var catalog = Create(store, TenancyMode.Single);
@@ -178,48 +178,49 @@ public sealed class PersistentSemanticCatalogTests
         await catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), TenantId.LegacySingleTenant);
 
         store.Peek(TenantId.LegacySingleTenant).ShouldNotBeNull();
-        (await catalog.GetMetricAsync("m1", TenantA)).ShouldNotBeNull();
-        (await catalog.GetMetricAsync("m1", TenantB)).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("m1", TenantId.LegacySingleTenant)).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("m1", TenantA)).ShouldBeNull();
+        (await catalog.GetMetricAsync("m1", TenantB)).ShouldBeNull();
         await catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v2", "m2"), TenantA);
-        store.Peek(TenantA).ShouldBeNull();
-        (await catalog.GetMetricAsync("m2", TenantId.LegacySingleTenant)).ShouldNotBeNull();
+        store.Peek(TenantA).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("m2", TenantId.LegacySingleTenant)).ShouldBeNull();
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData(TenancyMode.Multi)]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_UnsetOrUnknownMode_BehavesAsMulti(TenancyMode? mode)
+    public async Task SemanticStore_UnsetOrUnknownMode_UnsetTenantIsRejected(TenancyMode? mode)
     {
         var catalog = Create(new FakeSemanticManifestStore(), mode);
 
         await Should.ThrowAsync<GatewayForbiddenException>(() =>
-            catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), TenantId.LegacySingleTenant));
-        (await catalog.GetMetricAsync("m1", TenantId.LegacySingleTenant)).ShouldBeNull();
+            catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), default));
+        (await catalog.GetMetricAsync("m1", default)).ShouldBeNull();
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_UnknownModeText_BehavesAsMulti()
+    public async Task SemanticStore_UnknownModeText_UnsetTenantIsRejected()
     {
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Banana" } });
         var catalog = new PersistentSemanticCatalog(new FakeSemanticManifestStore(), Options.Create(new SemanticOptions()), options);
 
         await Should.ThrowAsync<GatewayForbiddenException>(() =>
-            catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), TenantId.LegacySingleTenant));
+            catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), default));
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_MultiMode_LegacyTenantPrincipal_Rejected()
+    public async Task SemanticStore_MultiMode_UnsetTenant_Rejected()
     {
         var store = new FakeSemanticManifestStore();
         store.Put(new StoredSemanticManifest(TenantId.LegacySingleTenant, "v1", new string('a', 64), 1, 0, 1, "{}", "x", DateTimeOffset.UtcNow));
         var catalog = Create(store);
 
-        (await catalog.ListMetricsAsync(null, TenantId.LegacySingleTenant)).ShouldBeEmpty();
+        (await catalog.ListMetricsAsync(null, default)).ShouldBeEmpty();
         await Should.ThrowAsync<GatewayForbiddenException>(() =>
-            catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), TenantId.LegacySingleTenant));
+            catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), default));
         store.GetCount.ShouldBe(0); // a rejected tenant never reaches the store
     }
 }

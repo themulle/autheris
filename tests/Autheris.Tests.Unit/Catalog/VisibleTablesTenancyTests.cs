@@ -30,7 +30,7 @@ public sealed class VisibleTablesTenancyTests
             Wp0.Allow(OrdersA.Identifier, "S-A-OWNER", Wp0.TenantA),
             Wp0.Allow(Countries.Identifier, "S-CLAIMLESS", TenantId.LegacySingleTenant));
         return CatalogVisibility.VisibleTablesAsync(
-            [OrdersA, InvoicesB, Countries], user, new TenantId(tenantForConsents), consents, contract: null, mode,
+            [OrdersA, InvoicesB, Countries], user, new TenantId(tenantForConsents), consents, contract: null, mode.Owner(),
             sharedTables: ["ref.dbo.countries"], default);
     }
 
@@ -43,8 +43,8 @@ public sealed class VisibleTablesTenancyTests
         => Names(await VisibleAsync(Wp0.User("S-B-ADMIN", "tenant-b", ["GovernanceAdmin"]), mode, "tenant-b")).ShouldBe(["countries", "invoices_b"]);
 
     [Fact]
-    public async Task ClaimlessGovernanceAdmin_Multi_TakesTheConsentPathOnly()
-        => Names(await VisibleAsync(Wp0.User("S-CLAIMLESS", null, ["GovernanceAdmin"]), TenancyMode.Multi)).ShouldBe(["countries"]);
+    public async Task ClaimlessGovernanceAdmin_Multi_SeesNothing()
+        => Names(await VisibleAsync(Wp0.User("S-CLAIMLESS", null, ["GovernanceAdmin"]), TenancyMode.Multi)).ShouldBeEmpty();
 
     [Fact]
     public async Task ClaimlessGovernanceAdmin_Single_SeesEverything()

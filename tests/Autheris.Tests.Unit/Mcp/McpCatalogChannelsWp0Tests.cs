@@ -131,6 +131,19 @@ public sealed class McpCatalogChannelsWp0Tests
         (await h.Dispatcher.InvokeApiAsync("/api/v1/catalog/datasets", "GET", context: spoof)).ShouldNotContain("invoices_b");
     }
 
+    [Fact]
+    public async Task InvokeApi_ListDatasources_AdminWithoutResolvableTenant_NamesTheDefaultTenantOption()
+    {
+        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var noTenantAdmin = Wp0.Context(Wp0.User("S-ADM", null, ["GovernanceAdmin"]));
+
+        var result = await h.Dispatcher.InvokeApiAsync("/api/v1/catalog/datasources", "GET", context: noTenantAdmin);
+
+        result.ShouldContain("Forbidden");
+        result.ShouldContain("Gateway:Tenancy:DefaultTenantId");
+        result.ShouldNotContain("a.internal");
+    }
+
     // T-W0-5
     [Fact]
     public async Task ListDatasources_AllChannels_AreAdminOnly()
@@ -143,7 +156,10 @@ public sealed class McpCatalogChannelsWp0Tests
         var forbidden = await ToolAsync(h, user, McpDatasetTools.ListDatasources);
         forbidden.ShouldContain("Forbidden");
         forbidden.ShouldNotContain("a.internal");
-        (await ToolAsync(h, claimlessAdmin, McpDatasetTools.ListDatasources)).ShouldContain("Gateway:Tenancy:Mode=Single");
+        // DT-A-7: "legacy-single-tenant" is an ordinary tenant id; its GovernanceAdmin is a tenant administrator confined to its own tables.
+        var legacyTenantAdmin = await ToolAsync(h, claimlessAdmin, McpDatasetTools.ListDatasources);
+        legacyTenantAdmin.ShouldNotContain("Forbidden");
+        legacyTenantAdmin.ShouldNotContain("a.internal");
         (await ToolAsync(h, cluster, McpDatasetTools.ListDatasources)).ShouldContain("a.internal");
 
         DatasourceRows(await ReadAsync(h, user, "autheris://catalog/datasources")).ShouldBe(0);

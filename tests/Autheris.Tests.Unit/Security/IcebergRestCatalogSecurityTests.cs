@@ -393,6 +393,7 @@ public sealed class IcebergRestCatalogSecurityTests
     {
         var optionsWithRebac = Options.Create(new GatewayOptions
         {
+            Tenancy = new TenancyOptions { Mode = "Single" },
             Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true }
         });
 

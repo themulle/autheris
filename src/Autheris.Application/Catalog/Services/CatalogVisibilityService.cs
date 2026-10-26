@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -63,7 +64,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly record struct MemoKey(string Subject, string Claims, string Tenant, string Contract, string Surface);
 
     private sealed record Context(
-        ClaimsPrincipal Principal, Sid Sid, CallerScope Scope, TenantId Tenant, TenancyMode Mode, IReadOnlyCollection<string> SharedTables, MemoKey BaseKey)
+        ClaimsPrincipal Principal, Sid Sid, CallerScope Scope, TenantId Tenant, TenantId? CatalogOwner, IReadOnlyCollection<string> SharedTables, MemoKey BaseKey)
     {
         public bool IsAdminView => CallerScopeResolver.IsAdminView(Scope);
     }
@@ -250,10 +251,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
 
-        var mode = _options.Tenancy.EffectiveMode;
-        var scope = CallerScopeResolver.Resolve(principal, mode);
-        if (scope == CallerScope.None)
+        var catalogOwner = TenantResolver.EffectiveDefaultOf(_options.Tenancy);
+        var resolution = CallerScopeResolver.ResolutionOf(principal, catalogOwner);
+        var scope = CallerScopeResolver.Resolve(principal, resolution, catalogOwner);
+        if (scope == CallerScope.None || resolution.Outcome == Autheris.Domain.Tenancy.TenantResolutionOutcome.Invalid)
         {
+            // An invalid tenant claim answers empty for every caller class, the ClusterAdmin included (fail closed, never a wider class).
             return null;
         }
 
@@ -261,7 +264,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         MemoKey baseKey;
         try
         {
-            baseKey = BaseKeyOf(principal, sid.Value, scope, caller.Tenant);
+            baseKey = BaseKeyOf(principal, sid.Value, scope, resolution.Tenant ?? caller.Tenant, caller.Tenant);
         }
         catch (Exception ex)
         {
@@ -269,7 +272,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
 
-        return new Context(principal, sid.Value, scope, caller.Tenant, mode, _options.Catalog.SharedTables ?? [], baseKey);
+        return new Context(principal, sid.Value, scope, caller.Tenant, catalogOwner, _options.Catalog.SharedTables ?? [], baseKey);
     }
 
     /// <summary>Engine -> shape -> ReBAC. Null = a dependency failed (already logged); cancellation propagates.</summary>
@@ -286,7 +289,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             else
             {
                 engineOutput = await CatalogVisibility.VisibleTablesAsync(
-                    rows, context.Principal, context.Tenant, _consentRepository, contract, context.Mode, context.SharedTables,
+                    rows, context.Principal, context.Tenant, _consentRepository, contract, context.CatalogOwner, context.SharedTables,
                     CatalogSurface.Discovery, ct).ConfigureAwait(false);
             }
 
@@ -393,12 +396,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     /// SEC-CAT138-05: subject SID, everything the consent engine reads from the principal (groups, roles, token scopes, caller class),
     /// the channel-supplied tenant, the contract and the surface. Never the principal reference alone.
     /// </summary>
-    private static MemoKey BaseKeyOf(ClaimsPrincipal principal, Sid sid, CallerScope scope, TenantId tenant)
+    private static MemoKey BaseKeyOf(ClaimsPrincipal principal, Sid sid, CallerScope scope, TenantId resolvedTenant, TenantId tenant)
     {
         var groups = string.Join(',', principal.GetGroupSids().Select(g => g.Value).OrderBy(x => x, StringComparer.Ordinal));
         var roles = string.Join(',', principal.GetUserRoles().OrderBy(x => x, StringComparer.Ordinal));
         var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(x => x, StringComparer.Ordinal));
-        var claims = $"{scope}|{principal.GetTenantId().Value}|g:{groups}|r:{roles}|s:{scopes}";
+        var claims = $"{scope}|{resolvedTenant.Value}|g:{groups}|r:{roles}|s:{scopes}";
         return new MemoKey(sid.Value, claims, tenant.Value, string.Empty, nameof(CatalogSurface.Discovery));
     }
 

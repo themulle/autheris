@@ -51,7 +51,7 @@ public sealed class CatalogVisibilityTierTests
     private static IReadOnlyList<TableMetadata> Filter(
         IEnumerable<TableMetadata> tables, IEnumerable<Consent>? consents = null, CatalogSurface surface = CatalogSurface.Discovery,
         string[]? shared = null, TenancyMode mode = TenancyMode.Multi, string tenant = TenantA) =>
-        CatalogVisibility.FilterForSubject(tables, consents ?? [], new TenantId(tenant), null, surface, shared, mode);
+        CatalogVisibility.FilterForSubject(tables, consents ?? [], new TenantId(tenant), null, surface, shared, mode.Owner());
 
     // ---- DataAccess (default): the tier switch is not executed at all (F-C13, G2) ----
 
@@ -74,7 +74,7 @@ public sealed class CatalogVisibilityTierTests
         var consents = ConsentRepo([]);
         var user = User(TenantA);
 
-        var viaOverload = await CatalogVisibility.VisibleTablesAsync(tables, user, new TenantId(TenantA), consents, contract: null, TenancyMode.Single, sharedTables: SharedList);
+        var viaOverload = await CatalogVisibility.VisibleTablesAsync(tables, user, new TenantId(TenantA), consents, contract: null, TenancyMode.Single.Owner(), sharedTables: SharedList);
         var viaShort = await CatalogVisibility.VisibleTablesAsync(tables, user, new TenantId(TenantA), consents);
         var viaMcp = await McpCatalogVisibility.VisibleTablesAsync(tables, user, consents, new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }, CancellationToken.None);
 
@@ -95,7 +95,7 @@ public sealed class CatalogVisibilityTierTests
             Table(new("a", "s", "full_t"), DatasetVisibility.Full)
         };
 
-        var visible = Filter(tables, mode: TenancyMode.Single, tenant: "default");
+        var visible = Filter(tables, mode: TenancyMode.Single, tenant: TenantId.LegacySingleTenant.Value);
 
         visible.Select(t => t.Identifier.TableName).ShouldBe(["summary_t", "full_t"]);
         visible[0].Columns.ShouldBeEmpty();
@@ -211,12 +211,13 @@ public sealed class CatalogVisibilityTierTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void Multi_ClaimlessTenant_NeverGetsTiers()
+    public void Multi_LegacyTenantId_IsANormalTenant_TiersFollowSharedTables()
     {
-        var tables = new[] { Table(Shared, DatasetVisibility.Full) };
+        var tables = new[] { Table(Shared, DatasetVisibility.Full), Table(Other, DatasetVisibility.Full) };
 
-        // No tenant claim resolves to the legacy single-tenant id; in Multi mode that principal is "claimless".
-        Filter(tables, shared: SharedList, tenant: TenantId.LegacySingleTenant.Value).ShouldBeEmpty();
+        // DT-A-7: no tenant id is special any more; a principal without tenant and without default never reaches the filter (scope None).
+        Filter(tables, shared: SharedList, tenant: TenantId.LegacySingleTenant.Value).ShouldHaveSingleItem().Identifier.ShouldBe(Shared);
+        Filter(tables, tenant: TenantId.LegacySingleTenant.Value).ShouldBeEmpty();
     }
 
     [Fact]
@@ -227,7 +228,7 @@ public sealed class CatalogVisibilityTierTests
         var claimless = User(tenant: null);
 
         var visible = await CatalogVisibility.VisibleTablesAsync(
-            tables, claimless, TenantId.LegacySingleTenant, ConsentRepo([]), contract: null, TenancyMode.Multi, SharedList, CatalogSurface.Discovery);
+            tables, claimless, TenantId.LegacySingleTenant, ConsentRepo([]), contract: null, TenancyMode.Multi.Owner(), SharedList, CatalogSurface.Discovery);
 
         visible.ShouldBeEmpty();
     }
@@ -239,9 +240,9 @@ public sealed class CatalogVisibilityTierTests
         var user = User(TenantA);
 
         var discovery = await CatalogVisibility.VisibleTablesAsync(
-            tables, user, new TenantId(TenantA), ConsentRepo([]), contract: null, TenancyMode.Multi, SharedList, CatalogSurface.Discovery);
+            tables, user, new TenantId(TenantA), ConsentRepo([]), contract: null, TenancyMode.Multi.Owner(), SharedList, CatalogSurface.Discovery);
         var dataAccess = await CatalogVisibility.VisibleTablesAsync(
-            tables, user, new TenantId(TenantA), ConsentRepo([]), contract: null, TenancyMode.Multi, SharedList, CatalogSurface.DataAccess);
+            tables, user, new TenantId(TenantA), ConsentRepo([]), contract: null, TenancyMode.Multi.Owner(), SharedList, CatalogSurface.DataAccess);
 
         discovery.ShouldHaveSingleItem().Identifier.ShouldBe(Shared);
         dataAccess.ShouldBeEmpty();
@@ -279,7 +280,7 @@ public sealed class CatalogVisibilityTierTests
         var admin = User(TenantA, "GovernanceAdmin");
 
         var visible = await CatalogVisibility.VisibleTablesAsync(
-            tables, admin, new TenantId(TenantA), ConsentRepo([]), contract: null, TenancyMode.Multi, SharedList, CatalogSurface.Discovery);
+            tables, admin, new TenantId(TenantA), ConsentRepo([]), contract: null, TenancyMode.Multi.Owner(), SharedList, CatalogSurface.Discovery);
 
         visible.ShouldHaveSingleItem().Identifier.ShouldBe(Shared);
         visible[0].CatalogView.ShouldBe(CatalogView.Unmarked);

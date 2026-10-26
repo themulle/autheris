@@ -20,7 +20,8 @@ public sealed partial class ODataHandler(
     ILogger<ODataHandler> logger,
     Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
     Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-    Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null) : IODataHandler
+    Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
+    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -45,6 +46,32 @@ public sealed partial class ODataHandler(
     private readonly ILogger<ODataHandler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache = memoryCache;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider = versionProvider;
+    private readonly Autheris.Application.Tenancy.ITenantResolver? _tenantResolver = tenantResolver;
+
+    /// <summary>
+    /// DT-A-7: the default tenant is the catalog owner and may see every active table as a candidate (each still passes the table access
+    /// check); every other tenant only its domain and the shared <c>default</c> domain. An unresolved tenant (no claim, no default,
+    /// invalid claim, no resolver) has no candidates (fail closed).
+    /// </summary>
+    private List<Autheris.Domain.Model.TableMetadata> CandidateTablesFor(
+        ClaimsPrincipal principal, IEnumerable<Autheris.Domain.Model.TableMetadata> allTables)
+    {
+        var resolution = _tenantResolver?.Resolve(principal)
+            ?? Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(principal, null);
+        if (resolution.Tenant is not { } tenant || tenant.Value is null ||
+            resolution.Outcome is Autheris.Domain.Tenancy.TenantResolutionOutcome.Invalid or Autheris.Domain.Tenancy.TenantResolutionOutcome.Unresolved)
+        {
+            return [];
+        }
+
+        var isOwner = _tenantResolver?.IsDefaultTenant(tenant) == true;
+        return allTables
+            .Where(t => t.Table.IsActive &&
+                        (isOwner ||
+                         string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
 
     public async Task<string> GetMetadataCsdlAsync(ClaimsPrincipal? principal = null, CancellationToken ct = default)
     {
@@ -208,13 +235,7 @@ public sealed partial class ODataHandler(
 
         var complete = true;
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var tenant = principal.GetTenantId();
-        var candidateTables = allTables
-            .Where(t => t.Table.IsActive &&
-                        (tenant == TenantId.LegacySingleTenant ||
-                         string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)))
-            .ToList();
+        var candidateTables = CandidateTablesFor(principal, allTables);
 
         var authorizedTables = new List<Autheris.Domain.Model.TableMetadata>();
         foreach (var tableMeta in candidateTables)

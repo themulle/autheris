@@ -125,7 +125,10 @@ public sealed class Issue117AccessExplanationDisclosureTests
                 Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
             .Returns(DeniedDecision());
 
-        var service = new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution);
+        // The principal has no tenant claim: it belongs to the default tenant (the legacy tenant of the Mode=Single bridge).
+        var service = new EffectiveAccessExplanationService(
+            tableRepo, consentRepo, resolution, gatewayOptions: Microsoft.Extensions.Options.Options.Create(
+                new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } }));
         var result = await service.ExplainMyAccessAsync(User(), Denied);
 
         result.Decision.ShouldBe("DENIED");

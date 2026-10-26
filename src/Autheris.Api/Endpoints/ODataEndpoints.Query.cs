@@ -35,12 +35,24 @@ public static partial class ODataEndpoints
         }
 
         var tables = await metadataRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
-        var tenant = context.User.GetTenantId();
-        var candidateTables = tables
-            .Where(t => tenant == TenantId.LegacySingleTenant ||
-                        string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        // DT-A-7: the default tenant (catalog owner) may address every table by its flat name; every other tenant only its own domain and the
+        // shared "default" domain. An unresolved tenant addresses nothing.
+        var tenantResolver = context.RequestServices?.GetService<Autheris.Application.Tenancy.ITenantResolver>();
+        var resolution = tenantResolver?.Resolve(context.User)
+            ?? Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(context.User, null);
+        var candidateTables = new List<Autheris.Domain.Model.TableMetadata>();
+        if (resolution.Outcome is Autheris.Domain.Tenancy.TenantResolutionOutcome.FromClaim
+                or Autheris.Domain.Tenancy.TenantResolutionOutcome.FromRealm
+                or Autheris.Domain.Tenancy.TenantResolutionOutcome.DefaultAssigned &&
+            resolution.Tenant is { } tenant && tenant.Value is not null)
+        {
+            var isOwner = tenantResolver?.IsDefaultTenant(tenant) == true;
+            candidateTables = tables
+                .Where(t => isOwner ||
+                            string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
 
         var matchingTables = candidateTables
             .Where(t => string.Equals(ODataCsdlGenerator.GetEntityName(t), entitySetName, StringComparison.OrdinalIgnoreCase))

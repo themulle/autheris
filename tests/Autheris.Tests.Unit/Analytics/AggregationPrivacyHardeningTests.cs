@@ -632,13 +632,14 @@ public sealed class AggregationPrivacyHardeningTests
     }
 
     [Fact]
-    public async Task InMemorySemanticCatalog_SingleTenancy_AllTenantsShareTheLegacyPartition()
+    public async Task InMemorySemanticCatalog_SingleTenancy_TenantsAreIsolated_DefaultTenantIncluded()
     {
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } });
         var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(options);
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"), TenantId.LegacySingleTenant);
 
-        (await catalog.GetMetricAsync("legacy_metric", new TenantId("tenant-b"))).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("legacy_metric", TenantId.LegacySingleTenant)).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("legacy_metric", new TenantId("tenant-b"))).ShouldBeNull();
     }
 
     [Fact]

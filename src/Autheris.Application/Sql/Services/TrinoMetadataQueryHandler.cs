@@ -112,7 +112,7 @@ public static class TrinoMetadataQueryHandler
         var sw = Stopwatch.StartNew();
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
         var activeTables = allTables.Where(t => t.Table.IsActive).ToList();
-        var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, gatewayOptions?.Tenancy.EffectiveMode ?? TenancyMode.Multi, gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
+        var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(gatewayOptions?.Tenancy), gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
 
         if (showCatalogsMatch.Success)
         {

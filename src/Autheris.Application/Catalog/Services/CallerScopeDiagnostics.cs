@@ -4,12 +4,13 @@ using System;
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using Autheris.Domain.Common;
+using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Throttled diagnostic for the one silent downgrade of <c>Gateway:Tenancy:Mode = Multi</c>: a principal that holds the
-/// GovernanceAdmin role but carries no tenant claim is not treated as an administrator. In a single-tenant installation that
-/// is a misconfiguration, so the log names the option. At most one Warning per principal and window; the per-process table
+/// Throttled diagnostic for the one silent downgrade of the catalog scope: a principal that holds the GovernanceAdmin role but carries
+/// no tenant claim while no default tenant is configured has no catalog standing. In a single-tenant installation that is a
+/// misconfiguration, so the log names the option. At most one Warning per principal and window; the per-process table
 /// is bounded.
 /// </summary>
 public static class CallerScopeDiagnostics
@@ -21,7 +22,8 @@ public static class CallerScopeDiagnostics
     public static void ReportIfClaimlessAdmin(ILogger logger, ClaimsPrincipal? user, CallerScope scope, long? nowTicks = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
-        if (scope != CallerScope.Claimless || !CallerScopeResolver.HoldsGovernanceAdminRole(user))
+        if (scope != CallerScope.None || user?.Identity?.IsAuthenticated != true || user.GetUserSid() == null ||
+            TenantClaimReader.Read(user).Kind != ClaimTenantKind.Absent || !CallerScopeResolver.HoldsGovernanceAdminRole(user))
         {
             return;
         }
@@ -41,7 +43,7 @@ public static class CallerScopeDiagnostics
 
         LastReportedTicks[key] = now;
         logger.LogWarning(
-            "A principal with the GovernanceAdmin role has no tenant claim and Gateway:Tenancy:Mode is Multi (default): it is not treated as an administrator and sees only consented tables. " +
-            "Single-tenant deployments must set Gateway:Tenancy:Mode=Single.");
+            "A principal with the GovernanceAdmin role has no tenant claim and no default tenant is configured: it has no catalog standing. " +
+            "Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.");
     }
 }

@@ -430,7 +430,7 @@ public sealed class Query
         var visible = await visibilityService
             .GetVisibleAsync(new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, tenantId, Autheris.Application.Catalog.Interfaces.CatalogChannel.GraphQl), contractDef, ct)
             .ConfigureAwait(false);
-        var isAdmin = visible.Scope is CallerScope.Global or CallerScope.Unrestricted or CallerScope.Tenant;
+        var isAdmin = visible.Scope is CallerScope.Global or CallerScope.CatalogOwner or CallerScope.Tenant;
 
         // SEC-CAT138-19: consents and pending requests are loaded only to compute AccessStatus; they never add or remove a row.
         IReadOnlyList<Consent> activeConsents = Array.Empty<Consent>();

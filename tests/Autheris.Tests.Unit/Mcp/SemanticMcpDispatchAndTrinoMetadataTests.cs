@@ -71,7 +71,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
     public async Task McpToolExecutionHandler_And_AiDataGuardrailService_ShouldExecute_SemanticTools()
     {
         var catalog = new InMemorySemanticCatalog(SingleMode);
-        await catalog.RegisterManifestAsync(new DbtSemanticManifest([SampleModel], [SampleMetric], "1.2"), TenantId.LegacySingleTenant);
+        await catalog.RegisterManifestAsync(new DbtSemanticManifest([SampleModel], [SampleMetric], "1.2"), new TenantId("tenant-a"));
 
         var metricQueryService = Substitute.For<ISemanticMetricQueryService>();
         metricQueryService.QueryMetricsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<MetricQueryRequest>(), Arg.Any<CancellationToken>())
@@ -213,7 +213,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         await ingestion.ParseAndIngestAsync(manifestJson, TenantId.LegacySingleTenant);
 
         capturedMeta.Should().NotBeNull();
-        capturedMeta!.Identifier.Should().Be(new TableIdentifier("semantic", "semantic", "orders"));
+        capturedMeta!.Identifier.Should().Be(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(TenantId.LegacySingleTenant), "orders"));
         capturedMeta.Table.Description.Should().Be("Orders semantic model");
         // Issue #111: the upsert ignores Table.Tags; the synthetic tags are imported as dbt dataset tags (see DbtDatasetTagTests).
         capturedMeta.Table.Tags.Should().BeEmpty();

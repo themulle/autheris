@@ -1,44 +1,48 @@
 namespace Autheris.Application.Catalog.Services;
 
 using System;
-using System.Security;
 using System.Security.Claims;
 using Autheris.Domain.Common;
-using Autheris.Domain.Options;
+using Autheris.Application.Tenancy;
+using Autheris.Domain.Tenancy;
 using Autheris.Domain.Security;
 
 /// <summary>Caller class of a catalog request, decided by <see cref="CallerScopeResolver"/>.</summary>
 public enum CallerScope
 {
-    /// <summary>No usable principal (missing, unauthenticated, no SID, invalid tenant claim): nothing is visible.</summary>
+    /// <summary>No usable principal (missing, unauthenticated, no SID, unresolved or invalid tenant): nothing is visible.</summary>
     None = 0,
 
     /// <summary>Canonical ClusterAdmin: whole catalog, all tenants.</summary>
     Global,
 
-    /// <summary>GovernanceAdmin of a single-tenant deployment without tenant claim: whole catalog.</summary>
-    Unrestricted,
+    /// <summary>
+    /// GovernanceAdmin of the default tenant, the catalog owner (DT-A-7): the whole physical catalog metadata. Never widens a
+    /// tenant-scoped object (virtual tables, consents, ReBAC, audit, lineage, subscriptions, jobs, access profiles; DT-SC-08).
+    /// </summary>
+    CatalogOwner,
 
-    /// <summary>GovernanceAdmin with a real tenant claim: catalog confined to that tenant.</summary>
+    /// <summary>GovernanceAdmin of any other tenant: catalog confined to that tenant.</summary>
     Tenant,
 
-    /// <summary>Authenticated caller with a tenant claim and no administrator class: consent path only.</summary>
-    Subject,
-
-    /// <summary>Multi-tenant deployment, principal without tenant claim: consent path only, never an administrator view.</summary>
-    Claimless
+    /// <summary>Authenticated caller with a resolved tenant and no administrator class: consent path only.</summary>
+    Subject
 }
 
 /// <summary>
 /// The only place that decides the caller class of every catalog channel (REST service, MCP tools and resources,
-/// <c>invoke_api</c>, GraphQL). The decision comes from the authenticated <see cref="ClaimsPrincipal"/> only; it never reads
+/// <c>invoke_api</c>, GraphQL). The decision comes from the authenticated <see cref="ClaimsPrincipal"/> and the tenant resolution only; it never reads
 /// <c>RequestContext.Roles</c> or <c>CallerSecurityContext.IsClusterAdmin</c> (string-matched role lists).
 /// </summary>
 public static class CallerScopeResolver
 {
     private const string GovernanceAdminRole = "GovernanceAdmin";
 
-    public static CallerScope Resolve(ClaimsPrincipal? user, TenancyMode mode)
+    /// <summary>
+    /// Scope from an explicit <paramref name="resolution"/>. The catalog owner is the default tenant: a GovernanceAdmin whose resolved tenant
+    /// <paramref name="catalogOwner"/> (<c>ITenantResolver.DefaultTenant</c>) is <see cref="CallerScope.CatalogOwner"/>.
+    /// </summary>
+    public static CallerScope Resolve(ClaimsPrincipal? user, TenantResolution resolution, TenantId? catalogOwner)
     {
         if (user?.Identity?.IsAuthenticated != true)
         {
@@ -58,41 +62,41 @@ public static class CallerScopeResolver
             return CallerScope.Global;
         }
 
-        TenantId tenant;
-        try
+        // Unresolved (no claim, no default) and invalid never map to a wider class; there is no claim-less consent path any more.
+        if (resolution.Outcome is not (TenantResolutionOutcome.FromClaim or TenantResolutionOutcome.FromRealm or TenantResolutionOutcome.DefaultAssigned) ||
+            resolution.Tenant is not { } tenant || tenant.Value is null)
         {
-            tenant = user.GetTenantId();
-        }
-        catch (SecurityException)
-        {
-            // An invalid tenant claim never maps to a wider class.
             return CallerScope.None;
         }
 
-        var hasTenantClaim = tenant != TenantId.LegacySingleTenant;
-        var isGovernanceAdmin = user.GetUserRoles().Contains(GovernanceAdminRole);
-
-        if (mode == TenancyMode.Single)
+        if (!user.GetUserRoles().Contains(GovernanceAdminRole))
         {
-            if (!isGovernanceAdmin)
-            {
-                return CallerScope.Subject;
-            }
-
-            return hasTenantClaim ? CallerScope.Tenant : CallerScope.Unrestricted;
+            return CallerScope.Subject;
         }
 
-        if (!hasTenantClaim)
-        {
-            return CallerScope.Claimless;
-        }
-
-        return isGovernanceAdmin ? CallerScope.Tenant : CallerScope.Subject;
+        return IsOwner(tenant, catalogOwner) ? CallerScope.CatalogOwner : CallerScope.Tenant;
     }
 
-    /// <summary>True when the caller class may list administrator metadata such as data sources.</summary>
-    public static bool IsAdminView(CallerScope scope) => scope is CallerScope.Global or CallerScope.Unrestricted or CallerScope.Tenant;
+    /// <summary>
+    /// Scope for a caller whose tenant is read from the claims and filled with <paramref name="catalogOwner"/> (the default tenant) when absent.
+    /// </summary>
+    public static CallerScope Resolve(ClaimsPrincipal? user, TenantId? catalogOwner) =>
+        Resolve(user, ResolutionOf(user, catalogOwner), catalogOwner);
 
-    /// <summary>True when the principal holds the GovernanceAdmin role (used for the downgrade diagnostic of claim-less administrators).</summary>
+    /// <summary>The tenant resolution of <paramref name="user"/> against <paramref name="catalogOwner"/> (the default tenant, <c>null</c> = none).</summary>
+    public static TenantResolution ResolutionOf(ClaimsPrincipal? user, TenantId? catalogOwner) =>
+        user?.Identity?.IsAuthenticated != true
+            ? new TenantResolution(TenantResolutionOutcome.Unauthenticated, null)
+            : TenantResolver.Decide(TenantClaimReader.Read(user), catalogOwner);
+
+    /// <summary>True when <paramref name="tenant"/> is the catalog owner (the default tenant).</summary>
+    public static bool IsOwner(TenantId tenant, TenantId? catalogOwner) =>
+        catalogOwner is { } owner && owner.Value is not null && tenant.Value is not null &&
+        string.Equals(owner.Value, tenant.Value, StringComparison.Ordinal);
+
+    /// <summary>True when the caller class may list administrator metadata such as data sources.</summary>
+    public static bool IsAdminView(CallerScope scope) => scope is CallerScope.Global or CallerScope.CatalogOwner or CallerScope.Tenant;
+
+    /// <summary>True when the principal holds the GovernanceAdmin role (used for the diagnostic of administrators without a resolvable tenant).</summary>
     public static bool HoldsGovernanceAdminRole(ClaimsPrincipal? user) => user?.GetUserRoles().Contains(GovernanceAdminRole) == true;
 }

@@ -44,6 +44,12 @@ public sealed class TenantResolver : ITenantResolver
         tenantId.Value is not null && Current().Effective is { } d && string.Equals(d.Value, tenantId.Value, StringComparison.Ordinal);
 
     /// <summary>Pure decision over the claim statement and the default tenant (S1-S6 of the semantics table).</summary>
+    /// <summary>
+    /// The effective default tenant (the catalog owner, DT-A-7) of <paramref name="tenancy"/> for services that hold the options but no
+    /// resolver; <c>null</c> when none is configured or the configured value is unusable (fail closed). Same rule as <see cref="DefaultTenant"/>.
+    /// </summary>
+    public static TenantId? EffectiveDefaultOf(TenancyOptions? tenancy) => tenancy is null ? null : DefaultState.From(tenancy).Effective;
+
     public static TenantResolution Decide(ClaimTenant claim, TenantId? defaultTenant) => claim.Kind switch
     {
         ClaimTenantKind.Valid => new TenantResolution(TenantResolutionOutcome.FromClaim, claim.Tenant),

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using Autheris.Application.Catalog.Services;
 using System.Diagnostics;
@@ -120,11 +121,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _ => "mcp_query"
     };
 
-    // Canonical caller class (never role strings): only the global and the unrestricted administrator skip the catalog visibility check;
-    // a tenant-scoped administrator is confined by it, a claim-less GovernanceAdmin in Multi mode is no administrator.
+    // Canonical caller class (never role strings): only the global and the catalog-owner administrator skip the catalog visibility check;
+    // a tenant-scoped administrator is confined by it, a GovernanceAdmin without a resolvable tenant is no administrator.
     private bool IsUnrestrictedCatalogCaller(McpSessionContext session) =>
-        CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(session), _options.Value.Tenancy.EffectiveMode)
-            is CallerScope.Global or CallerScope.Unrestricted;
+        CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(session), TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy))
+            is CallerScope.Global or CallerScope.CatalogOwner;
 
     public async ValueTask<McpToolCallResult> ExecuteToolWithGuardrailAsync(
         McpToolCallRequest request,

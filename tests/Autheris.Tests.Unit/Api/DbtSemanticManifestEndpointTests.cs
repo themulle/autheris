@@ -88,7 +88,7 @@ public sealed class DbtSemanticManifestEndpointTests
         return new Host
         {
             Catalog = catalog,
-            Tenancy = new SemanticTenancy(mode),
+            Tenancy = new SemanticTenancy(mode.Owner()),
             Ingestion = new DbtSemanticManifestIngestionService(
                 catalog, NullLogger<DbtSemanticManifestIngestionService>.Instance, repository, gatewayOptions: options, consentRepository: consents)
         };
@@ -150,7 +150,7 @@ public sealed class DbtSemanticManifestEndpointTests
     }
 
     [Fact]
-    public async Task SingleMode_LegacyCallerImportsAndEveryPrincipalSeesTheManifest()
+    public async Task SingleMode_DefaultTenantCallerImports_OtherTenantsDoNotSeeTheManifest()
     {
         var host = NewHost(TenancyMode.Single);
         var admin = Context(Principal(null, "GovernanceAdmin"), Manifest);
@@ -159,7 +159,9 @@ public sealed class DbtSemanticManifestEndpointTests
 
         var analyst = Context(Principal("tenant-b", "Analyst"));
         var list = await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(analyst, host.Catalog, host.Tenancy), analyst);
-        list.Body.ShouldContain("revenue");
+        list.Body.ShouldNotContain("revenue");
+        var sameTenant = Context(Principal(null, "Analyst"));
+        (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(sameTenant, host.Catalog, host.Tenancy), sameTenant)).Body.ShouldContain("revenue");
     }
 
     [Fact]

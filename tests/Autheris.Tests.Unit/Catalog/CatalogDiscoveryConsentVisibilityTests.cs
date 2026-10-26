@@ -106,7 +106,7 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
 
     // T-W0-14
     [Fact]
-    public async Task ClaimlessGovernanceAdmin_Multi_SeesConsentedTablesOnly_AndDowngradeIsLoggedOncePerWindow()
+    public async Task ClaimlessGovernanceAdmin_WithoutDefault_SeesNothing_AndDowngradeIsLoggedOncePerWindow()
     {
         var logger = Substitute.For<ILogger<Autheris.Application.Catalog.Services.CatalogDiscoveryService>>();
         logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
@@ -114,7 +114,7 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
         var (svc, _) = Create(Wp0.Options(TenancyMode.Multi), logger: logger, consents: [Wp0.Allow(Countries.Identifier, sid, TenantId.LegacySingleTenant)]);
         var admin = Wp0.Context(Wp0.User(sid, null, ["GovernanceAdmin"]));
 
-        Names(await svc.Inner.ListDatasetsAsync(admin)).ShouldBe(["countries"]);
+        Names(await svc.Inner.ListDatasetsAsync(admin)).ShouldBeEmpty();
         await svc.Inner.ListDatasetsAsync(admin);
 
         logger.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "Log" && (LogLevel)c.GetArguments()[0]! == LogLevel.Warning).ShouldBe(1);

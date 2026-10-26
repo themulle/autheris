@@ -39,9 +39,11 @@ public sealed class PrincipalResolverService : IPrincipalResolverService
         var callerTenant = context.TenantId.Value;
 
         // Filter users belonging to caller's tenant
+        // DT-A-7: configured users without a tenant belong to the default tenant (the catalog owner), in every deployment shape.
+        var defaultTenant = Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_gatewayOptions.Value.Tenancy);
         var users = _gatewayOptions.Value.Authentication.BasicAuth.Users
             .Where(u => string.Equals(u.TenantId, callerTenant, StringComparison.OrdinalIgnoreCase) ||
-                        (string.IsNullOrWhiteSpace(u.TenantId) && callerTenant == Autheris.Domain.Common.TenantId.LegacySingleTenant.Value))
+                        (string.IsNullOrWhiteSpace(u.TenantId) && defaultTenant is { } d && string.Equals(d.Value, callerTenant, StringComparison.Ordinal)))
             .ToList();
 
         var matches = new List<(BasicAuthUserConfig User, bool IsExact, int Distance)>();

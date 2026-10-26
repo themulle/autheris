@@ -33,7 +33,7 @@ public sealed class McpSemanticToolsTests
     {
         var single = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } });
         var catalog = new InMemorySemanticCatalog(single);
-        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Single);
+        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Single.Owner());
         var admin = AdminPrincipal();
         var manifest = new DbtSemanticManifest(
             SemanticModels: new List<DbtSemanticModel>(),
@@ -88,7 +88,7 @@ public sealed class McpSemanticToolsTests
     public async Task McpListMetrics_TenantScoped()
     {
         var catalog = new InMemorySemanticCatalog();
-        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi);
+        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi.Owner());
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-a"));
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("b_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-b"));
 
@@ -111,8 +111,8 @@ public sealed class McpSemanticToolsTests
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-a"));
         var noSid = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "tenant-a"), new Claim(ClaimTypes.Name, "x")], "TestAuth"));
 
-        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi), null)).ShouldNotContain("a_metric");
-        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Single), null)).ShouldNotContain("a_metric");
+        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi.Owner()), null)).ShouldNotContain("a_metric");
+        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Single.Owner()), null)).ShouldNotContain("a_metric");
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed class McpSemanticToolsTests
     public async Task McpDescribeMetric_NonAdmin_NoFilterTemplate()
     {
         var catalog = new InMemorySemanticCatalog();
-        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi);
+        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi.Owner());
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-a"));
 
         var analystList = await McpSemanticTools.ExecuteListMetricsAsync(catalog, Analyst("tenant-a"), tenancy, null);

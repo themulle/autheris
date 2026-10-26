@@ -31,9 +31,9 @@ public sealed class CatalogVirtualTableVisibilityTests
     private static readonly TenantId TenantA = Wp0.TenantA;
     private static readonly TenantId TenantB = Wp0.TenantB;
 
-    private static TableMetadata VirtualTable(TenantId tenant, string name = "orders", DatasetVisibility visibility = DatasetVisibility.Hidden, TenancyMode mode = TenancyMode.Multi)
+    private static TableMetadata VirtualTable(TenantId tenant, string name = "orders", DatasetVisibility visibility = DatasetVisibility.Hidden)
     {
-        var id = SemanticVirtualTables.IdentifierFor(tenant, mode, name);
+        var id = SemanticVirtualTables.IdentifierFor(tenant, name);
         return new TableMetadata
         {
             Identifier = id,
@@ -61,7 +61,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         TenancyMode mode = TenancyMode.Multi, IEnumerable<string>? shared = null, CatalogSurface surface = CatalogSurface.DataAccess)
     {
         var visible = await CatalogVisibility.VisibleTablesAsync(
-            tables.ToList(), user, tenant, consents, contract: null, mode, shared, surface);
+            tables.ToList(), user, tenant, consents, contract: null, mode.Owner(), shared, surface);
         return visible.Select(t => t.Identifier.ToString()).Order().ToList();
     }
 
@@ -142,9 +142,9 @@ public sealed class CatalogVirtualTableVisibilityTests
     }
 
     [Fact]
-    public async Task SingleMode_RuleIsSkipped_ByModeNotByTenantString()
+    public async Task DefaultTenant_OwnVirtualTable_IsVisible_ByTenantSchema()
     {
-        var single = VirtualTable(TenantId.LegacySingleTenant, mode: TenancyMode.Single);
+        var single = VirtualTable(TenantId.LegacySingleTenant);
         var consents = Wp0.Consents(Wp0.Allow(single.Identifier, "S-USER", TenantId.LegacySingleTenant, "id"));
 
         (await VisibleAsync(Wp0.User("S-USER", null), TenantId.LegacySingleTenant, [single], consents, TenancyMode.Single)).ShouldBe([Id(single)]);
@@ -180,8 +180,8 @@ public sealed class CatalogVirtualTableVisibilityTests
         var own = VirtualTable(TenantA);
         var allConsents = new[] { Wp0.Allow(foreign.Identifier, "S-USER", TenantA, "id"), Wp0.Allow(own.Identifier, "S-USER", TenantA, "id") };
 
-        var subject = CatalogVisibility.FilterForSubject([foreign, own], allConsents, TenantA, tenancyMode: TenancyMode.Multi);
-        var tenant = CatalogVisibility.FilterToTenant([foreign, own], TenantA, [foreign.Identifier, own.Identifier], [foreign.Identifier.ToString()], TenancyMode.Multi);
+        var subject = CatalogVisibility.FilterForSubject([foreign, own], allConsents, TenantA);
+        var tenant = CatalogVisibility.FilterToTenant([foreign, own], TenantA, [foreign.Identifier, own.Identifier], [foreign.Identifier.ToString()], TenancyMode.Multi.Owner());
 
         subject.Select(Id).ShouldBe([Id(own)]);
         tenant.Select(Id).ShouldBe([Id(own)]);
