@@ -1283,9 +1283,14 @@ public partial class SqliteGovernanceRepository
         return await ResolveDataOwnerIdsInternalAsync(conn, identifiers, ct);
     }
 
-    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
+    private Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
+        => IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, itsmApproverAccount, ct);
+
+    /// <summary>DEF-04: the approver read runs on the revoke transaction (<paramref name="tx"/>) after the consent row lock.</summary>
+    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, SqliteTransaction? tx, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
         using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = @"
             SELECT 1
             FROM TABLE_OWNERS tow

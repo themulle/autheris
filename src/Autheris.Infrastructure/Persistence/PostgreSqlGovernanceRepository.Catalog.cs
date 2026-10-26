@@ -1342,7 +1342,14 @@ public partial class PostgreSqlGovernanceRepository
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, itsmApproverAccount, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>DEF-04: the approver read runs on the revoke connection and transaction (<paramref name="tx"/>), after the consent row lock.</summary>
+    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(NpgsqlConnection conn, NpgsqlTransaction? tx, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
+    {
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = @"SELECT COUNT(*)
                             FROM TABLES t
                             JOIN TABLE_OWNERS tow ON t.id = tow.table_id
@@ -1360,6 +1367,7 @@ public partial class PostgreSqlGovernanceRepository
         if (directOwnerCount > 0) return true;
 
         await using var delCmd = conn.CreateCommand();
+        delCmd.Transaction = tx;
         delCmd.CommandText = @"SELECT COUNT(*)
                                FROM DATA_OWNER_DELEGATIONS d
                                JOIN DATA_OWNERS o ON d.data_owner_id = o.id
@@ -1379,6 +1387,7 @@ public partial class PostgreSqlGovernanceRepository
         if (delegateCount > 0) return true;
 
         await using var roleCmd = conn.CreateCommand();
+        roleCmd.Transaction = tx;
         roleCmd.CommandText = @"SELECT COUNT(*)
                                 FROM ROLES r
                                 JOIN ROLE_MEMBERS rm ON r.id = rm.role_id

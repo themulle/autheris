@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.Infrastructure.Persistence;
 
@@ -112,6 +114,13 @@ public partial class SqliteGovernanceRepository
             await tx.CommitAsync(ct).ConfigureAwait(false);
             OnTransactionCommitted(tx);
         }
+        catch (ConsentTenantIntegrityException refusal)
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            await RecordTenantRefusalAuditAsync(conn, actor, refusal, ct).ConfigureAwait(false);
+            throw;
+        }
         catch
         {
             await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false); // L3: not cancellable, so OnTransactionRolledBack always runs
@@ -160,7 +169,70 @@ public partial class SqliteGovernanceRepository
         }
     }
 
-    /// <summary>Revokes one consent inside <paramref name="tx"/> with the authorisation and audit of <c>RevokeConsentAsync</c>. Returns null when it was already revoked.</summary>
+    /// <summary>
+    /// Revokes one consent: one transaction for the row lock, the approver check, the update, the audit row and the epoch bump (PERS-05), then
+    /// the post-commit epoch invalidation. Already revoked is a no-op without audit, epoch bump or eviction.
+    /// </summary>
+    public async Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
+    {
+        TableIdentifier? revoked;
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        var conn = scope.Connection;
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, ct).ConfigureAwait(false);
+            if (revoked is { } table)
+            {
+                await IncrementTableEpochInternalAsync(conn, table, tx, ct).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+        }
+        catch (ConsentTenantIntegrityException refusal)
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
+            throw;
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+
+        if (revoked is { } committed)
+        {
+            await _epochValidationService.InvalidateEpochAsync(committed, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// DEF-SC-02/03: after the refused revoke was rolled back, one audit row in its own short transaction (ids only, never the tenant value).
+    /// A failing audit write propagates, so the refusal is never swallowed or downgraded.
+    /// </summary>
+    private async Task RecordTenantRefusalAuditAsync(SqliteConnection conn, Sid actor, ConsentTenantIntegrityException refusal, CancellationToken ct)
+    {
+        _logger?.LogWarning("Consent tenant integrity refusal {Code} for consent {ConsentId}.", ConsentTenantIntegrityException.Code, refusal.ConsentId);
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            await RecordAuditEventInternalAsync(conn, ConsentTenantRefusalAudit.Build(actor, refusal), ct, tx).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+    }
+
+    /// <summary>Revokes one consent inside <paramref name="tx"/>: row lock/write scope, then approver check, then update and audit. Returns null when it was already revoked.</summary>
     private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
         SqliteConnection conn, SqliteTransaction tx, Guid consentId, Sid actor, string reason, CancellationToken ct)
     {
@@ -171,14 +243,7 @@ public partial class SqliteGovernanceRepository
         }
 
         TableIdentifier? tableId = found.Table;
-        var tenant = TenantId.LegacySingleTenant;
-        // D2 (ARCH-MNT-22): SQLite throws on an invalid tenant value (new TenantId(raw)); PostgreSQL/SQL Server fall back silently (follow-up DEF-02).
-        if (found.TenantRaw is not null)
-        {
-            tenant = new TenantId(found.TenantRaw);
-        }
-
-        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(conn, tableId.Value, actor, ct).ConfigureAwait(false))
+        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, null, ct).ConfigureAwait(false))
         {
             throw new UnauthorizedAccessException($"User '{actor}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
         }
@@ -188,6 +253,7 @@ public partial class SqliteGovernanceRepository
             return null;
         }
 
+        var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, tableId.Value.ToString());
         await ConsentGrantSqlCore.MarkRevokedAsync(conn, tx, consentId, actor, reason, TimeProvider.System, ct).ConfigureAwait(false);
 
         await RecordAuditEventInternalAsync(conn, new AuditLogEntry
@@ -196,7 +262,7 @@ public partial class SqliteGovernanceRepository
             EventType = "CONSENT_REVOKED",
             ActorSid = actor,
             TargetTable = tableId.Value.ToString(),
-            Decision = "REVOKED",
+            Decision = ConsentGrantSqlCore.RevokedDecision,
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, Reason = reason })
         }, ct, tx).ConfigureAwait(false);

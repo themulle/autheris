@@ -193,38 +193,96 @@ public sealed class DialectSqlGoldenArchitectureTests
         return DialectSqlFragmentExtractor.Bodies(repo, Method(repo, name, parameterCount)).SelectMany(m => m.Body.Instructions);
     }
 
+    private static readonly string[] ConsentRevokeMethods = ["RevokeConsentInTransactionAsync", "RevokeSystemConsentAsync", "RevokeConsentAsync"];
+
+    private static List<MethodReference> Calls(IEnumerable<Instruction> instructions) =>
+        instructions.Where(i => i.Operand is MethodReference).Select(i => (MethodReference)i.Operand).ToList();
+
     [Trait("Category", "Security")]
     [Theory]
     [MemberData(nameof(DialectNames))]
-    public void Revoke_Retains_Divergences_D1_D2_D4_Until_Behaviour_Pr(string dialect)
+    public void Revoke_Is_Unified_Across_Dialects(string dialect)
     {
-        // ARCH-MNT-22-T-03: the three known divergences stay exactly as today (follow-up defects DEF-02..04; step 1 must not unify them).
-        var instructions = Instructions(dialect, "RevokeConsentInTransactionAsync").ToList();
-        var literals = instructions.Where(i => i.OpCode.Code == Code.Ldstr).Select(i => (string)i.Operand).ToList();
-        var calls = instructions.Where(i => i.Operand is MethodReference).Select(i => (MethodReference)i.Operand).ToList();
-        var sqlite = dialect == "Sqlite";
+        // DEF-02/03/04 (replaces ARCH-MNT-22-T-03): one decision literal, one fail-closed tenant resolution, approver check on the transaction.
+        foreach (var method in new[] { "RevokeConsentInTransactionAsync", "RevokeSystemConsentAsync" })
+        {
+            var instructions = Instructions(dialect, method).ToList();
+            var literals = instructions.Where(i => i.OpCode.Code == Code.Ldstr).Select(i => (string)i.Operand).ToList();
+            var calls = Calls(instructions);
 
-        // D1: audit decision literal.
-        literals.ShouldContain(sqlite ? "REVOKED" : "REVOKE");
-        literals.ShouldNotContain(sqlite ? "REVOKE" : "REVOKED");
+            // DEF-03 / DEF-SC-07: "REVOKED" (the const RevokedDecision), never "REVOKE".
+            literals.ShouldContain("REVOKED", $"{dialect}.{method}");
+            literals.ShouldNotContain("REVOKE", $"{dialect}.{method}");
 
-        // D2: tenant parse. SQLite throws on an invalid value (constructor), PG/MSSQL silently fall back via TryParse.
-        calls.Any(c => c.Name == "TryParse" && c.DeclaringType.Name == "TenantId").ShouldBe(!sqlite);
-        calls.Any(c => c.Name == ".ctor" && c.DeclaringType.Name == "TenantId").ShouldBe(sqlite);
+            // DEF-02 / DEF-SC-01: ResolveConsentTenant is the only tenant parse; no TryParse, no constructor, no default tenant.
+            calls.Count(c => c.Name == "ResolveConsentTenant").ShouldBe(1, $"{dialect}.{method}");
+            calls.ShouldNotContain(c => c.Name == "TryParse" && c.DeclaringType.Name == "TenantId", $"{dialect}.{method}");
+            calls.ShouldNotContain(c => c.Name == ".ctor" && c.DeclaringType.Name == "TenantId", $"{dialect}.{method}");
+            calls.ShouldNotContain(c => c.Name == "get_LegacySingleTenant", $"{dialect}.{method}");
+        }
 
-        // D4: approver check position. PG/MSSQL run it outside the transaction (no connection argument), SQLite on the same connection.
-        var approver = calls.Single(c => c.Name == "IsAuthorizedApproverForTableInternalAsync");
-        approver.Parameters.Any(p => p.ParameterType.Name.EndsWith("Connection", StringComparison.Ordinal)).ShouldBe(sqlite);
+        // DEF-04 / DEF-SC-06: the approver check runs on the revoke connection and transaction; the connection-opening overload is not used.
+        var approver = Calls(Instructions(dialect, "RevokeConsentInTransactionAsync")).Single(c => c.Name == "IsAuthorizedApproverForTableInternalAsync");
+        approver.Parameters.Any(p => p.ParameterType.Name.EndsWith("Connection", StringComparison.Ordinal)).ShouldBeTrue();
+        approver.Parameters.Any(p => p.ParameterType.Name.Contains("Transaction", StringComparison.Ordinal)).ShouldBeTrue();
     }
 
     [Trait("Category", "Security")]
     [Theory]
     [MemberData(nameof(DialectNames))]
-    public void ReplaceConsents_Invalidates_Epoch_And_Metadata_Cache_Per_Dialect_Current_Behaviour(string dialect)
+    public void Revoke_Entry_Points_Share_One_Core_Per_Dialect(string dialect)
     {
-        // ARCH-MNT-22-T-09 (pins D3 as-is): every dialect invalidates the epoch; only PG/MSSQL also evict _metadataCache (DEF-01).
+        // DEF-T-09 / DEF-SC-05: RevokeConsentAsync is the single-id use of the shared transactional core (no second copy of the revoke logic).
+        var revoke = Instructions(dialect, "RevokeConsentAsync").ToList();
+        Calls(revoke).ShouldContain(c => c.Name == "RevokeConsentInTransactionAsync");
+        revoke.Where(i => i.OpCode.Code == Code.Ldstr).Select(i => (string)i.Operand).ShouldNotContain("CONSENT_REVOKED");
+        Calls(revoke).ShouldNotContain(c => c.Name == "IsAuthorizedApproverForTableInternalAsync");
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [MemberData(nameof(DialectNames))]
+    public void Revoke_Audit_Decision_Literal_Is_Identical_Across_Dialects(string dialect)
+    {
+        // DEF-T-02 / DEF-SC-07 (IL part; runtime part in ConsentRevokeUnificationTests): no consent revoke method contains "REVOKE" as a literal.
+        foreach (var method in ConsentRevokeMethods)
+        {
+            Instructions(dialect, method).Where(i => i.OpCode.Code == Code.Ldstr).Select(i => (string)i.Operand).ShouldNotContain("REVOKE", $"{dialect}.{method}");
+        }
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void IntegrityAuditTenant_Is_Referenced_Only_By_The_Refusal_Audit()
+    {
+        // DEF-SC-04: one named bucket, used by exactly one method (the single replacement point for the default-tenant lane).
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
+        var users = module.GetTypes().SelectMany(t => t.Methods).Where(m => m.HasBody)
+            .Where(m => m.Body.Instructions.Any(i => i.Operand is MethodReference { Name: "get_IntegrityAuditTenant" }))
+            .Select(m => m.DeclaringType.Name + "." + m.Name).ToList();
+        users.ShouldBe(["ConsentTenantRefusalAudit.Build"]);
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [MemberData(nameof(DialectNames))]
+    public void ReplaceConsents_Invalidates_Epoch_And_Metadata_Cache_All_Dialects(string dialect)
+    {
+        // DEF-01 (replaces ARCH-MNT-22-T-09): every dialect invalidates the epoch and evicts the cached table metadata. PG/MSSQL touch
+        // _metadataCache directly; SQLite queues the eviction in the epoch bump (QueueMetadataInvalidation, applied on commit).
         var instructions = Instructions(dialect, "ReplaceConsentsAsync", parameterCount: 7).ToList();
         instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateEpochAsync" }).ShouldBeTrue();
-        instructions.Any(i => i.Operand is FieldReference { Name: "_metadataCache" }).ShouldBe(dialect != "Sqlite");
+        if (dialect == "Sqlite")
+        {
+            Calls(instructions).ShouldContain(c => c.Name == "IncrementTableEpochInternalAsync");
+            var repo = DialectSqlFragmentExtractor.RepositoryType(dialect);
+            var bump = repo.Methods.Single(m => m.Name == "IncrementTableEpochInternalAsync" && m.Parameters.Count == 4);
+            DialectSqlFragmentExtractor.Bodies(repo, bump).SelectMany(m => m.Body.Instructions)
+                .Any(i => i.Operand is MethodReference { Name: "QueueMetadataInvalidation" }).ShouldBeTrue();
+        }
+        else
+        {
+            instructions.Any(i => i.Operand is FieldReference { Name: "_metadataCache" }).ShouldBeTrue();
+        }
     }
 }
