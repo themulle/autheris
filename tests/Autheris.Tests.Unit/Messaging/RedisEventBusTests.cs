@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Diagnostics.Metrics;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Messaging;
@@ -98,12 +99,7 @@ public sealed class RedisEventBusTests
 
         onMessage!(RedisChannel.Literal("Autheris:ch"), "{\"value\":\"x\"}");
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < deadline)
-        {
-            lock (measurements) { if (measurements.Count > 0) { break; } }
-            await Task.Delay(20);
-        }
+        await WaitHelper.WaitUntil(() => { lock (measurements) { return measurements.Count > 0; } }, TimeSpan.FromSeconds(5), "the handler-failure measurement was never recorded");
         lock (measurements) { measurements.Sum().ShouldBe(1); }
     }
 }

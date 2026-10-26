@@ -71,10 +71,10 @@ public sealed class BackgroundServiceLockTests
             for (var i = 0; i < (int)advance.TotalSeconds; i++)
             {
                 time.Advance(TimeSpan.FromSeconds(1));
-                await Task.Delay(3);
+                await Task.Delay(3); // yields so the service loop observes each fake-clock step
             }
 
-            await Task.Delay(100);
+            await Task.Delay(100); // quiet period (100 ms) so the last cycle settles
         }
         finally
         {

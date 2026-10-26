@@ -7,20 +7,34 @@ using System.Text.RegularExpressions;
 public static class PatternMatcher
 {
     private static readonly ConcurrentDictionary<string, Regex> CompiledCache = new(StringComparer.Ordinal);
+    internal const int MaxCachedPatterns = 1024;
     private static readonly TimeSpan DefaultMatchTimeout = TimeSpan.FromMilliseconds(10);
 
     public static Regex CompilePattern(string pattern)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
 
-        return CompiledCache.GetOrAdd(pattern, p =>
+        return CompiledCache.TryGetValue(pattern, out var cached) ? cached : CompileAndCache(pattern);
+    }
+
+    internal static int CachedPatternCount => CompiledCache.Count;
+
+    internal static void ClearCache() => CompiledCache.Clear();
+
+    private static Regex CompileAndCache(string pattern)
+    {
+        // Failures are not cached; the cache is bounded so distinct policy patterns cannot grow it without limit.
+        var regex = new Regex(
+            ConvertGlobToRegex(pattern),
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.NonBacktracking,
+            DefaultMatchTimeout);
+        if (CompiledCache.Count >= MaxCachedPatterns)
         {
-            var regexPattern = ConvertGlobToRegex(p);
-            return new Regex(
-                regexPattern,
-                RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.NonBacktracking,
-                DefaultMatchTimeout);
-        });
+            CompiledCache.Clear();
+        }
+
+        CompiledCache[pattern] = regex;
+        return regex;
     }
 
     public static bool IsMatch(string pattern, string input)

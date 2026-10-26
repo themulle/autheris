@@ -6,6 +6,7 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 public static class DataCatalogServiceCollectionExtensions
 {
@@ -26,6 +27,8 @@ public static class DataCatalogServiceCollectionExtensions
 
         services.TryAddTransient<SsrfProtectionHandler>();
         // SEC E-03 / E-04: no redirects (the Alation TOKEN header never reaches a foreign origin), connect-time IP check.
+        // The registration site owns the OnChange subscription so PurviewTokenCache stays independent of GatewayOptions.
+        services.TryAddSingleton(sp => new PurviewTokenCache(sp.GetService<TimeProvider>() ?? TimeProvider.System, cb => sp.GetService<IOptionsMonitor<GatewayOptions>>()?.OnChange((_, _) => cb())));
         services.AddHttpClient<PurviewDataCatalogClient>().AddSecureOutboundHandlers(EgressIntegrations.Catalog);
         services.AddHttpClient<CollibraDataCatalogClient>().AddSecureOutboundHandlers(EgressIntegrations.Catalog);
         services.AddHttpClient<AlationCatalogClient>().AddSecureOutboundHandlers(EgressIntegrations.Catalog);

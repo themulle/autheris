@@ -185,7 +185,7 @@ public sealed class CasbinSnapshotImmutabilityTests
                         casbin.AddPolicy(TenantA, $"prog_{iteration}", "hr.dbo.employees", "read", "true", "allow");
                     }
 
-                    await Task.Delay(1);
+                    await Task.Delay(1); // scenario: paces the concurrent writer
                 }
             }
             catch (Exception ex)

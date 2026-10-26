@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -457,10 +458,15 @@ public class InfrastructureTests : IDisposable
         await _cacheService.SetCachedDecisionAsync(userSid, table, decision, TimeSpan.FromMilliseconds(50));
         _cacheService.GetTrackedKeyCount(table).ShouldBe(1);
 
-        await Task.Delay(100);
-
-        // Accessing cache triggers expiration callback in MemoryCache
-        _ = await _cacheService.GetCachedDecisionAsync(userSid, table);
+        // Accessing cache triggers expiration callback in MemoryCache, so poll through the cache until the entry has expired.
+        await WaitHelper.WaitUntil(
+            async () =>
+            {
+                _ = await _cacheService.GetCachedDecisionAsync(userSid, table);
+                return _cacheService.GetTrackedKeyCount(table) == 0;
+            },
+            WaitHelper.HangGuard,
+            "the expired entry was never removed from the table index");
 
         _cacheService.GetTrackedKeyCount(table).ShouldBe(0);
     }
