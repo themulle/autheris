@@ -56,5 +56,4 @@ query GetCustomersWithOrdersAndItems {
 ## 5. Configuration
 
 There is no separate switch: every GraphQL catalog query runs as one statement. Limits come from the `GraphQL` options
-(`MaxResponseRows`, `MaxAggregateRowBudget`, `MaxAllowedOffset`, `MaxResponseBytes`). The former
-`SingleQueryPushdown` options section was never read and has been removed (R-SQL-12).
+(`MaxResponseRows`, `MaxAggregateRowBudget`, `MaxAllowedOffset`, `MaxResponseBytes`).
