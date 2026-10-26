@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -262,28 +263,28 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.Equal("admin", capturedContext.TargetTable.TableName);
     }
 
-    [Fact]
-    public async Task CheckHttpAsync_ClientIdentityHeaders_WithoutCaller_DoesNotTrustUntrustedHeaders()
+    private static string RepoRoot()
     {
-        // SEC C-1: Headers like x-autheris-principal, x-tenant-id must NEVER be trusted from untrusted clients
-        var table = new TableIdentifier("default", "public", "orders");
-        var allowedDecision = new TableAccessDecision(
-            Table: table,
-            IsAllowed: true,
-            ColumnAccess: new Dictionary<string, ColumnAccessLevel>(),
-            CombinedRowFilterSql: null,
-            DeniedReasons: Array.Empty<string>(),
-            HasUnconstrainedColumnAllow: true);
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current != null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "Autheris.sln")))
+            {
+                return current.FullName;
+            }
 
-        SecurityEvaluationContext? capturedContext = null;
-        _policyService
-            .EvaluatePolicyAsync(
-                Arg.Do<SecurityEvaluationContext>(ctx => capturedContext = ctx),
-                Arg.Any<CancellationToken>())
-            .Returns(allowedDecision);
+            current = current.Parent;
+        }
 
-        const string method = "GET";
-        const string path = "/api/v1/orders";
+        throw new InvalidOperationException("Repo root not found");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExtAuthz_Unauthenticated_Is_Denied()
+    {
+        // DEF-T-10 / DEF-SC-10 (F2): SEC C-1 headers like x-autheris-principal and x-tenant-id are never trusted, and an unauthenticated caller
+        // no longer becomes "anonymous" in tenant "default": it is denied before any policy evaluation.
         var headers = new Dictionary<string, string>
         {
             ["x-autheris-principal"] = "spoofed-admin",
@@ -291,13 +292,47 @@ public sealed class EnvoyExtAuthzSecurityTests
             ["x-tenant-id"] = "evil-tenant"
         };
 
-        // Act: Caller is null (unauthenticated client attempting header forgery)
-        var response = await _service.CheckHttpAsync(method, path, headers, caller: null);
+        var unauthenticated = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
+        foreach (var caller in new System.Security.Claims.ClaimsPrincipal?[] { null, unauthenticated })
+        {
+            var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", headers, caller);
 
-        // Assert: Principal should be anonymous and tenant should be default; forged headers ignored
-        Assert.NotNull(capturedContext);
-        Assert.Equal("anonymous", capturedContext.UserSid.Value);
-        Assert.Equal("default", capturedContext.Tenant.Value);
+            Assert.Equal(401, response.HttpResponse.DeniedResponse!.Status.Code);
+            Assert.DoesNotContain("spoofed-admin", response.HttpResponse.DeniedResponse.Body);
+        }
+
+        await _policyService.DidNotReceive().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ExtAuthz_Authenticated_Without_Sid_Is_Denied_Instead_Of_Anonymous()
+    {
+        // DEF-SC-10: an authenticated principal without a SID claim must not become "ANONYMOUS".
+        var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            new[] { new System.Security.Claims.Claim("tenant_id", "corp") }, "MeshTls"));
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), caller);
+
+        Assert.True(response.Status.Code != 0);
+        await _policyService.DidNotReceive().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void ExtAuthz_ContextExtensions_Cannot_Select_Tenant_Or_User()
+    {
+        // DEF-T-10 / DEF-SC-10: the evaluation takes no identity input other than the validated principal (no source principal parameter)
+        // and the type carries no "default" tenant or "anonymous" user literal.
+        var evaluate = typeof(EnvoyExtAuthzService).GetMethod("EvaluateInternalAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        Assert.DoesNotContain(evaluate.GetParameters(), p => p.Name == "sourcePrincipal");
+
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Autheris.Application", "Mesh", "Services", "EnvoyExtAuthzService.cs"));
+        Assert.DoesNotContain("TryGetValue(\"tenant\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryGetValue(\"user\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("new TenantId(\"default\")", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Sid(\"anonymous\")", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"ANONYMOUS\"", source, StringComparison.Ordinal);
     }
 
     [Fact]
