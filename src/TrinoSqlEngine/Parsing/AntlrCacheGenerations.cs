@@ -83,7 +83,7 @@ public sealed class AntlrCacheGenerations : IDisposable
     /// Publishes a fresh generation now (what a swap does). The previous one stays valid for its in-flight users. Used by the fuzz harness to bound
     /// the caches of a long run; it clears nothing in place.
     /// </summary>
-    public void ForceSwap() => Publish(Current);
+    public void ForceSwap() => _ = Publish(Current);
 
     /// <summary>A lexer bound to the current generation. Counts the use first, which may swap (SC-03, SC-10).</summary>
     /// <exception cref="ParseCanceledException">Binding or counting failed; the caller must treat the input as rejected (SC-05).</exception>
@@ -91,8 +91,7 @@ public sealed class AntlrCacheGenerations : IDisposable
     {
         try
         {
-            Note(Current);
-            var generation = Current;
+            var generation = Note(Current);
             var lexer = new SqlBaseLexer(input);
             lexer.BindGeneration(generation);
             return lexer;
@@ -137,7 +136,7 @@ public sealed class AntlrCacheGenerations : IDisposable
     {
         try
         {
-            Note(parser.CacheGeneration ?? throw new InvalidOperationException("The parser is not bound to a generation."));
+            _ = Note(parser.CacheGeneration ?? throw new InvalidOperationException("The parser is not bound to a generation."));
         }
         catch (Exception)
         {
@@ -153,40 +152,45 @@ public sealed class AntlrCacheGenerations : IDisposable
         parser.BindGeneration(generation);
     }
 
-    private void Note(AntlrCacheGeneration used)
+    /// <summary>Counts one use of <paramref name="used"/>, swaps when due, and returns the generation that is current afterwards.</summary>
+    private AntlrCacheGeneration Note(AntlrCacheGeneration used)
     {
         var options = Volatile.Read(ref _options);
         long uses = Interlocked.Increment(ref used.UsesCounter);
         if (uses % options.GenerationCheckInterval != 0)
         {
-            return;
+            return Current;
         }
 
         long states = Volatile.Read(ref _stateCounter)(used);
         Volatile.Write(ref _lastStateCount, states);
         if (states <= options.MaxStatesPerGeneration)
         {
-            return;
+            return Current;
         }
 
         // The hard ceiling overrides the minimum number of uses, so a flood of distinct statements cannot outgrow it for long.
         bool overHardCap = states > (long)options.MaxStatesPerGeneration * options.HardCapFactor;
         if (uses < options.MinParsesPerGeneration && !overHardCap)
         {
-            return;
+            return Current;
         }
 
-        Publish(used);
+        return Publish(used);
     }
 
-    private void Publish(AntlrCacheGeneration replaced)
+    /// <summary>Publishes the successor of <paramref name="replaced"/> unless another thread already did; returns the current generation.</summary>
+    private AntlrCacheGeneration Publish(AntlrCacheGeneration replaced)
     {
         var next = new AntlrCacheGeneration(replaced.Number + 1);
         if (ReferenceEquals(Interlocked.CompareExchange(ref _current, next, replaced), replaced))
         {
             Interlocked.Increment(ref _swapCount);
             _swaps.Add(1);
+            return next;
         }
+
+        return Current;
     }
 
     private static AntlrCacheOptions Validated(AntlrCacheOptions options)

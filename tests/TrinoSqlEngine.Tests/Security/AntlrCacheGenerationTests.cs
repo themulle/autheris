@@ -426,7 +426,20 @@ public class AntlrCacheGenerationTests
         Assert.Throws<InvalidOperationException>(() => generations.Configure(new AntlrCacheOptions { MaxStatesPerGeneration = 2_000 }));
         Assert.Throws<ArgumentException>(() => generations.Configure(new AntlrCacheOptions { MaxStatesPerGeneration = 0 }));
     }
+}
 
+/// <summary>Disables parallelism for the tests that change the process-wide <see cref="AntlrCacheGenerations.Shared"/>.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SharedAntlrCacheCollection
+{
+    public const string Name = "SharedAntlrCache";
+}
+
+/// <summary>ARCH-MNT-15: the static extractor cannot take an instance, so this test swaps the state counter of Shared; it runs alone.</summary>
+[Trait("Category", "Security")]
+[Collection(SharedAntlrCacheCollection.Name)]
+public class SharedAntlrCacheMutationTests
+{
     // ---- D5: an unavailable cache rejects the parameter extraction without SQL text ------------------------------------------
 
     [ThreadStatic]
@@ -442,7 +455,7 @@ public class AntlrCacheGenerationTests
         try
         {
             s_failCountOnThisThread = true;
-            var ex = Assert.Throws<ParseCanceledException>(() => Analysis.SqlParameterExtractor.ExtractTokens($"SELECT '{marker}' FROM t WHERE a = @p"));
+            var ex = Assert.Throws<ParseCanceledException>(() => TrinoSqlEngine.Analysis.SqlParameterExtractor.ExtractTokens($"SELECT '{marker}' FROM t WHERE a = @p"));
 
             Assert.DoesNotContain(marker, ex.Message, StringComparison.Ordinal);
             Assert.Null(ex.InnerException);

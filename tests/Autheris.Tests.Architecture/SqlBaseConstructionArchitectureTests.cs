@@ -43,4 +43,26 @@ public sealed class SqlBaseConstructionArchitectureTests
     [Trait("Category", "Architecture")]
     public void ConstructionScan_FindsTheFactory_PositiveControl() =>
         Constructors().ShouldContain(FactoryFile);
+
+    private static List<string> ForceSwapReferences() =>
+        Directory.EnumerateFiles(Path.Combine(RepositoryRoot(), "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                        && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(p => File.ReadAllText(p).Contains("ForceSwap", StringComparison.Ordinal))
+            .Select(p => Path.GetRelativePath(RepositoryRoot(), p).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    public void ForceSwap_IsNotReferencedFromSrcOutsideTheFactory()
+    {
+        var offenders = ForceSwapReferences().Where(f => f != FactoryFile).ToList();
+        offenders.ShouldBeEmpty("ForceSwap is a test and fuzz-harness lever, not for production code: " + string.Join(", ", offenders));
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    public void ForceSwapScan_FindsTheDefinition_PositiveControl() =>
+        ForceSwapReferences().ShouldContain(FactoryFile);
 }
