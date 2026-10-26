@@ -1286,42 +1286,6 @@ public partial class SqliteGovernanceRepository
     private Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
         => IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, itsmApproverAccount, ct);
 
-    /// <summary>DEF-04: the approver read runs on the revoke transaction (<paramref name="tx"/>) after the consent row lock.</summary>
-    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(SqliteConnection conn, SqliteTransaction? tx, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"
-            SELECT 1
-            FROM TABLE_OWNERS tow
-            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
-            JOIN TABLES t ON tow.table_id = t.id
-            WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
-              AND (o.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (o.ad_account = @itsmAccount COLLATE NOCASE OR o.email = @itsmAccount COLLATE NOCASE))) AND o.is_active = 1
-            UNION
-            SELECT 1
-            FROM DATA_OWNER_DELEGATIONS del
-            JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
-            JOIN TABLES t ON tow.table_id = t.id
-            WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
-              AND (del.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND del.delegate_sid = @itsmAccount)) AND del.valid_from <= @now AND @now < del.valid_to
-            UNION
-            SELECT 1
-            FROM ROLE_MEMBERS rm
-            JOIN ROLES r ON rm.role_id = r.id
-            WHERE (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND rm.member_sid = @itsmAccount)) AND r.role_name IN ('GovernanceAdmin', 'ClusterAdmin')
-            LIMIT 1;";
-        cmd.Parameters.AddWithValue("@domain", table.Domain);
-        cmd.Parameters.AddWithValue("@schema", table.Schema);
-        cmd.Parameters.AddWithValue("@table", table.TableName);
-        cmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        cmd.Parameters.AddWithValue("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
-
-        var result = await cmd.ExecuteScalarAsync(ct);
-        return result != null && result != DBNull.Value;
-    }
-
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
