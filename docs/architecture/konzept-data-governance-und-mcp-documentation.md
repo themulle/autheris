@@ -678,55 +678,6 @@ Die Konfiguration der Säule 2 erfolgt zentral im Bereich `Gateway:Classificatio
           "defaultMaskingRuleName": "NULLIFY_STRICT"
         }
       ],
-      "MaskingRules": [
-        {
-          "name": "IBAN_STANDARD_4_4",
-          "baseStrategy": "PARTIAL_MASK",
-          "parameters": {
-            "keepPrefix": 4,
-            "keepSuffix": 4,
-            "maskChar": "*",
-            "fixedLength": false
-          }
-        },
-        {
-          "name": "EMAIL_DOMAIN_RETAIN",
-          "baseStrategy": "REGEX_REPLACE",
-          "parameters": {
-            "pattern": "(?<=.)[^@\\n](?=[^@\\n]*?@)",
-            "replacement": "*"
-          }
-        },
-        {
-          "name": "GEO_DISTRICT_500M",
-          "baseStrategy": "GEO_JITTER",
-          "parameters": {
-            "mode": "noise",
-            "radiusMeters": 500.0,
-            "decimals": 2
-          }
-        },
-        {
-          "name": "HMAC_SHA256_DEFAULT",
-          "baseStrategy": "HMAC_SHA256",
-          "parameters": {
-            "hmacKeyId": "vault-key-governance-2026",
-            "saltPrefix": "auth-tenant-salt"
-          }
-        },
-        {
-          "name": "REDACT_STANDARD",
-          "baseStrategy": "REDACT",
-          "parameters": {
-            "replacement": "[REDACTED]"
-          }
-        },
-        {
-          "name": "NULLIFY_STRICT",
-          "baseStrategy": "NULLIFY",
-          "parameters": {}
-        }
-      ],
       "AutoMaskingPolicyMatrix": [
         { "piiType": "PII_DIRECT", "namePattern": "iban|bank_account", "ruleName": "IBAN_STANDARD_4_4" },
         { "piiType": "PII_DIRECT", "namePattern": "email|mail_address", "ruleName": "EMAIL_DOMAIN_RETAIN" },
@@ -1055,7 +1006,7 @@ sequenceDiagram
     participant WORM as WORM Sealing Engine
 
     Core->>PromptGen: BuildClassificationPrompt(TableMetadata, ConfiguredEnums)
-    PromptGen->>PromptGen: Injiziert dynamisch konfigurierte SensitivityLevels & MaskingRules
+    PromptGen->>PromptGen: Injiziert dynamisch konfigurierte SensitivityLevels
     PromptGen->>Guard: Übergibt formatierten Prompt & Schema
     Guard->>Guard: Bereinigt Spaltenkommentare (Anti-Prompt-Injection Filter)
     Guard->>LLM: Inferenzanfrage (Timeout-Timer: 200 ms gestartet)
