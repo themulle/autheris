@@ -2,6 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using System.Net.Http;
+using Autheris.Api.Configuration.Validation;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Plugins;
@@ -28,6 +29,9 @@ public static class GatewaySqlEngineServiceExtensions
         this IServiceCollection services,
         GatewayOptions gatewayOptions)
     {
+        // ARCH-MNT-15-SC-04: invalid cache bounds stop the start (the same check also runs as GatewayOptions validation).
+        TrinoSqlEngine.Parsing.AntlrCacheGenerations.Shared.Configure(SqlParserCacheOptionsValidator.ToEngineOptions(gatewayOptions.SqlParserCache));
+
         // HTTP & Plugin Data Sources
 #pragma warning disable CA5359 // Intentionally allowed via danger_allow_untrusted_certificates for Getting Started / Dev
         if (gatewayOptions.AreUntrustedCertificatesAllowed)

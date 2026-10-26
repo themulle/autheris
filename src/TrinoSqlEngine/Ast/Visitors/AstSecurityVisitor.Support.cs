@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime;
+using TrinoSqlEngine.Parsing;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Emit;
@@ -278,7 +279,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         try
         {
             var charStream = new ZeroCopyCaseInsensitiveStream(sql.AsMemory());
-            var lexer = new SqlBaseLexer(charStream);
+            var lexer = AntlrCacheGenerations.Shared.CreateLexer(charStream);
             lexer.RemoveErrorListeners();
             var lexerErrors = new LexerErrorCounter();
             lexer.AddErrorListener(lexerErrors);

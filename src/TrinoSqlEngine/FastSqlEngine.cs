@@ -49,8 +49,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     /// </summary>
     public static SemaphoreSlim SharedParseConcurrencyLimiter { get; } = new(DefaultMaxConcurrentParses, DefaultMaxConcurrentParses);
 
-    private readonly ObjectPool<SqlBaseParser> _parserPool = 
-        new DefaultObjectPool<SqlBaseParser>(new ParserPooledObjectPolicy());
+    private readonly ParserPooledObjectPolicy _parserPolicy;
+    private readonly ObjectPool<SqlBaseParser> _parserPool;
 
     private int _parseThreadStackSize = DefaultParseThreadStackSize;
 
@@ -412,7 +412,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         ExecutionStackGuard.Ensure();
 
         var charStream = new ZeroCopyCaseInsensitiveStream(sql);
-        var lexer = new SqlBaseLexer(charStream);
+        var lexer = _generations.CreateLexer(charStream);
         lexer.RemoveErrorListeners();
         lexer.AddErrorListener(ThrowingErrorListener.Instance);
 
@@ -427,6 +427,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         EnsureNestingDepthWithinLimit(allTokens, sql.Span, cancellation);
 
         var parser = _parserPool.Get();
+        _parserPolicy.PrepareForUse(parser); // a failure here drops the instance: it was never returned to the pool
         try
         {
             parser.TokenStream = tokens;
@@ -785,9 +786,20 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     }
 
     private readonly Lazy<GovernedSqlCompiler> _compiler;
+    private readonly AntlrCacheGenerations _generations;
 
     public FastSqlEngine()
+        : this(AntlrCacheGenerations.Shared)
     {
+    }
+
+    /// <summary>ARCH-MNT-15: an engine whose parsers and lexers use the given ANTLR cache generations (a test seam; production uses the shared one).</summary>
+    public FastSqlEngine(AntlrCacheGenerations generations)
+    {
+        ArgumentNullException.ThrowIfNull(generations);
+        _generations = generations;
+        _parserPolicy = new ParserPooledObjectPolicy(generations);
+        _parserPool = new DefaultObjectPool<SqlBaseParser>(_parserPolicy);
         _compiler = new Lazy<GovernedSqlCompiler>(
             () => new GovernedSqlCompiler(this, Ast.Capabilities.DialectCapabilityTable.Default, CompileCache));
     }
