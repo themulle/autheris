@@ -19,13 +19,6 @@ public sealed class ItsmOptions
     public int RecertificationWarningDays { get; init; } = 3;
     public Dictionary<string, string> InstanceToTenantMap { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// SEC H-06: Webhook signatures are verified with a per-instance secret (<c>itsm:webhook-secret:{instanceId}</c>).
-    /// Only when this legacy switch is set, the single global secret <c>itsm:webhook-secret</c> is accepted as fallback
-    /// (every ITSM instance can then sign callbacks for every other instance's tenant).
-    /// </summary>
-    public bool LegacyGlobalWebhookSecret { get; init; } = false;
-
     public TenantId? GetTenantForInstance(string instanceId)
     {
         if (InstanceToTenantMap.TryGetValue(instanceId, out var tenantStr) && !string.IsNullOrWhiteSpace(tenantStr))

@@ -10,8 +10,6 @@ Autheris.Domain.Options.AuditOptions.ElasticsearchSinkUrl
 Autheris.Domain.Options.AuditOptions.TierBAggregationWindowSeconds
 Autheris.Domain.Options.AuthenticationOptions.GroupCacheTtlMinutes
 Autheris.Domain.Options.CatalogSearchOptions.FieldWeights
-Autheris.Domain.Options.CatalogSearchOptions.ModelName
-Autheris.Domain.Options.CatalogSearchOptions.OllamaBaseUrl
 Autheris.Domain.Options.CatalogSearchOptions.RefreshSeconds
 Autheris.Domain.Options.CdnOptions.PurgeMode
 Autheris.Domain.Options.CollibraOptions.CommunityId

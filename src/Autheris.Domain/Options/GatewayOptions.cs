@@ -73,19 +73,10 @@ public sealed class GatewayOptions
     [Required] public DatabricksOptions Databricks { get; init; } = new();
 
     /// <summary>
-    /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
-    /// When set to "Quickstart", relaxes catalog discovery, enables introspection and permissive defaults for local development.
+    /// True for <c>Dev:Preset = Quickstart</c>. The relaxations of the preset are expanded into the concrete <c>Insecure.*</c> values at
+    /// configuration time (DevConfiguration), so the accessors below do not need to know about it.
     /// </summary>
-    public string Profile { get; init; } = "Strict";
-
-    /// <summary>
-    /// True for <c>Dev:Preset = Quickstart</c> or the legacy <c>Profile = Quickstart</c> alias. The relaxations of the
-    /// preset are expanded into the concrete <c>Insecure.*</c> values at configuration time (DevConfiguration), so the
-    /// accessors below do not need to know about it.
-    /// </summary>
-    public bool IsQuickstartProfile =>
-        string.Equals(Profile, "Quickstart", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(Dev.Preset, DevOptions.PresetQuickstart, StringComparison.OrdinalIgnoreCase);
+    public bool IsQuickstartProfile => string.Equals(Dev.Preset, DevOptions.PresetQuickstart, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Open Schema Mode: Allows anyone to view the entire data catalog, OpenAPI specs, and schema documentation.
@@ -121,20 +112,14 @@ public sealed class GatewayOptions
     public bool IsWebhookSignatureBypassed => Insecure.danger_bypass_webhook_signature_validation || Insecure.danger_allow_anonymous_webhooks;
     public bool AreUntrustedCertificatesAllowed => Insecure.danger_allow_untrusted_certificates || Insecure.danger_allow_insecure_transport;
     public bool IsWebhookTimestampToleranceIgnored => Insecure.warn_ignore_webhook_timestamp_tolerance;
-    public bool IsWebhookTenantFallbackAllowed => Insecure.warn_fallback_default_tenant_for_webhooks;
     public bool AreExternalSystemsMockedIfUnreachable => Insecure.warn_mock_external_systems_if_unreachable;
     public bool IsMcpAuthBypassed => Insecure.danger_bypass_mcp_auth;
     public bool IsMcpUnmaskedAllowed => Insecure.warn_allow_unmasked_ai_access;
     public bool IsLakehouseAuthBypassed => Insecure.danger_bypass_lakehouse_auth;
     public bool IsRebacBypassed => Insecure.danger_bypass_rebac;
     public bool AreUnsignedS3RequestsAllowed => Insecure.warn_allow_unsigned_s3_requests;
-    public bool IsWebSqlDmlAllowed => WebSql.AllowDml || Insecure.warn_allow_websql_dml;
+    public bool IsWebSqlDmlAllowed => WebSql.AllowDml;
 
-    /// <summary>
-    /// Legacy alias (Insecure.warn_allow_websql_dml) for <see cref="WebSqlOptions.AllowDml"/>.
-    /// They unlock the same DML path and are reported as WARN with the hint to use WebSql.AllowDml instead.
-    /// </summary>
-    public bool IsLegacyWebSqlDmlSwitchActive => Insecure.warn_allow_websql_dml;
     public bool IsWebSqlGovernanceBypassed => Insecure.danger_bypass_websql_governance;
     public bool IsCrossSourceEnabled => CrossSource.Enabled || WebSql.CrossSource.Enabled;
 
@@ -143,10 +128,6 @@ public sealed class GatewayOptions
     /// and is therefore treated as a DANGER bypass (blocked outside Development).
     /// </summary>
     public bool IsOpenSchemaExplicitlyEnabled => OpenSchema || Catalog.OpenSchema;
-
-    // SEC H-06 / M-34 / C-04: Legacy and container opt-ins weaken protections and are reported as WARN.
-    public bool IsLegacyGlobalItsmWebhookSecretAllowed => Itsm.LegacyGlobalWebhookSecret;
-    public bool IsLegacyCatalogPayloadOnlySignatureAllowed => Catalog.AllowLegacyPayloadOnlySignature;
 
     // SEC H-19: Consents created automatically from OpenMetadata policies bypass the approval workflow (reported as WARN).
     public bool IsOpenMetadataAutoCreateConsentsEnabled => OpenMetadata.AutoCreateConsents;
@@ -235,9 +216,6 @@ public sealed class GatewayOptions
         if (AreUnsignedS3RequestsAllowed) list.Add("DANGER:warn_allow_unsigned_s3_requests");
         if (IsWebhookTimestampToleranceIgnored) list.Add("DANGER:warn_ignore_webhook_timestamp_tolerance");
         if (IsOpenMetadataAutoCreateConsentsEnabled) list.Add("DANGER:openmetadata_auto_create_consents (OpenMetadata.AutoCreateConsents)");
-        // API-1: Webhook tenant fallback and legacy global webhook secret allow cross-tenant spoofing and are prohibited outside Development
-        if (IsWebhookTenantFallbackAllowed) list.Add("DANGER:warn_fallback_default_tenant_for_webhooks");
-        if (IsLegacyGlobalItsmWebhookSecretAllowed) list.Add("DANGER:itsm_legacy_global_webhook_secret (Itsm.LegacyGlobalWebhookSecret)");
         // SQ-15: DML without an affected-rows limit (WebSql.MaxAffectedRows <= 0 means unlimited)
         if (IsWebSqlDmlAllowed && WebSql.MaxAffectedRows <= 0) list.Add(DangerPrefix + "websql_unlimited_affected_rows (WebSql.MaxAffectedRows = 0 with DML enabled)");
 
@@ -245,9 +223,7 @@ public sealed class GatewayOptions
         if (IsAllCorsAllowed) list.Add("WARN:warn_allow_all_cors_origins");
         if (AreQueryLimitsRelaxed) list.Add("WARN:warn_relaxed_query_limits");
         if (IsIntrospectionForced) list.Add("WARN:warn_enable_introspection");
-        if (IsLegacyCatalogPayloadOnlySignatureAllowed) list.Add("WARN:catalog_legacy_payload_only_signature (Catalog.AllowLegacyPayloadOnlySignature)");
         if (AllowDevelopmentInContainer) list.Add("WARN:allow_development_in_container (AllowDevelopmentInContainer)");
-        if (IsLegacyWebSqlDmlSwitchActive) list.Add("WARN:warn_allow_websql_dml (legacy alias, use WebSql.AllowDml)");
         if (IsEgressAllowlistActive) list.Add("WARN:egress_trusted_internal_allowlist (Egress.TrustedInternalHosts / Egress.TrustedInternalNetworks)");
         return list;
     }

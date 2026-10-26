@@ -69,4 +69,22 @@ public sealed class McpSchemaDiscoverySecurityTests
         discoveredExplicit.ShouldNotBeNull();
         discoveredExplicit.TargetTable.ShouldBe(new TableIdentifier("sales", "crm", "leads"));
     }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void McpTool_Table_Alias_Is_Rejected()
+    {
+        // L12 / DEF-SC-15: the removed `table:` alias of `targetTable:` is a schema error, not silently ignored.
+        Should.Throw<SchemaException>(() => SchemaBuilder.New()
+            .AddDirectiveType<McpToolDirectiveType>()
+            .AddQueryType(d =>
+            {
+                d.Name("Query");
+                d.Field("aliased_tool")
+                    .Type<StringType>()
+                    .Resolve(_ => "ok")
+                    .Directive("mcpTool", new ArgumentNode("name", "aliased_tool"), new ArgumentNode("table", "sales.crm.leads"));
+            })
+            .Create());
+    }
 }

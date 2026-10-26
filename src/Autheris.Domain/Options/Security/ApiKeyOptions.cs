@@ -99,11 +99,6 @@ public sealed class InsecureGettingStartedOptions
     public bool warn_ignore_webhook_timestamp_tolerance { get; init; } = false;
 
     /// <summary>
-    /// [WARN] Prevents cross-tenant aborts on webhooks by falling back to the request's tenant.
-    /// </summary>
-    public bool warn_fallback_default_tenant_for_webhooks { get; init; } = false;
-
-    /// <summary>
     /// [DANGER, legacy warn_ name] Simulates successful mock responses when external systems (ServiceNow, Jira) are unreachable.
     /// </summary>
     public bool warn_mock_external_systems_if_unreachable { get; init; } = false;
@@ -123,9 +118,4 @@ public sealed class InsecureGettingStartedOptions
     /// [DANGER] Disables all RLS, masking, and consent checks in the WebSQL endpoint (/api/v1/sql).
     /// </summary>
     public bool danger_bypass_websql_governance { get; init; } = false;
-
-    /// <summary>
-    /// [WARN] Legacy alias for WebSql.AllowDml: allows DML operations (INSERT, UPDATE, DELETE) in the WebSQL endpoint (/api/v1/sql).
-    /// </summary>
-    public bool warn_allow_websql_dml { get; init; } = false;
 }

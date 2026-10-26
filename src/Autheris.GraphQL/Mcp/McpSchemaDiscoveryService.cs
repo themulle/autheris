@@ -73,11 +73,6 @@ public sealed class McpSchemaDiscoveryService : IHostedService
                             var parts = ttn.Value.Split('.');
                             if (parts.Length == 3) targetTable = new TableIdentifier(parts[0], parts[1], parts[2]);
                         }
-                        else if (directive.Arguments.TryGetValue("table", out var tVal) && tVal is StringValueNode tn)
-                        {
-                            var parts = tn.Value.Split('.');
-                            if (parts.Length == 3) targetTable = new TableIdentifier(parts[0], parts[1], parts[2]);
-                        }
                         // MCP-6: Do NOT guess TargetTable by splitting field names or assuming default.dbo.
                         // When no explicit targetTable is provided, leave TargetTable null so that
                         // AiDataGuardrailService and McpGraphQlTableResolver resolve the actual tables from the GraphQL operation AST.

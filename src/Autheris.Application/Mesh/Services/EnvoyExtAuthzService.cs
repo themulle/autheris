@@ -53,7 +53,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
                 headers,
                 new Dictionary<string, string>(),
                 null,
-                null,
                 caller,
                 ct).ConfigureAwait(false);
         }
@@ -70,7 +69,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         IReadOnlyDictionary<string, string>? headers,
         IReadOnlyDictionary<string, string> contextExtensions,
         string? clientIpStr,
-        string? sourcePrincipal,
         System.Security.Claims.ClaimsPrincipal? caller,
         CancellationToken ct)
     {
@@ -96,55 +94,35 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             return EnvoyCheckResponse.Deny(400, "Bad Request: Invalid or traversing path.");
         }
 
-        // 2. Extract Tenant (SEC C-1 / SG-17: Strictly using canonical GetTenantId())
-        TenantId tenantId;
-        if (caller?.Identity?.IsAuthenticated == true)
+        // 2./3. Identity (SEC C-1 / SG-17 / DEF-SC-10): only the validated ClaimsPrincipal selects tenant and user. Neither contextExtensions nor a
+        // source principal can, and there is no "default" tenant or "anonymous" user: an unauthenticated caller, or an authenticated one without
+        // a SID, is denied before any policy evaluation.
+        if (caller?.Identity?.IsAuthenticated != true)
         {
-            tenantId = caller.GetTenantId();
+            _logger.LogWarning("Unauthenticated Envoy ext_authz call denied.");
+            return EnvoyCheckResponse.Deny(401, "Unauthorized: authentication required.");
         }
-        else if (contextExtensions.TryGetValue("tenant", out var ctxTenant) && !string.IsNullOrWhiteSpace(ctxTenant))
-        {
-            tenantId = new TenantId(ctxTenant);
-        }
-        else
-        {
-            tenantId = new TenantId("default");
-        }
-        var tenantStr = tenantId.Value;
 
-        // 3. Extract Principal (SEC C-1 / SG-17: Strictly using canonical GetUserSid())
-        Sid userSid;
-        if (caller?.Identity?.IsAuthenticated == true)
+        if (caller.GetUserSid() is not { } userSid)
         {
-            userSid = caller.GetUserSid() ?? new Sid(caller.Identity?.Name ?? "ANONYMOUS");
+            _logger.LogWarning("Envoy ext_authz call denied: the authenticated caller carries no user SID.");
+            return EnvoyCheckResponse.Deny(403, "Forbidden: caller identity is incomplete.");
         }
-        else if (!string.IsNullOrWhiteSpace(sourcePrincipal))
-        {
-            userSid = new Sid(sourcePrincipal);
-        }
-        else if (contextExtensions.TryGetValue("user", out var ctxUser) && !string.IsNullOrWhiteSpace(ctxUser))
-        {
-            userSid = new Sid(ctxUser);
-        }
-        else
-        {
-            userSid = new Sid("anonymous");
-        }
+
+        var tenantId = caller.GetTenantId();
+        var tenantStr = tenantId.Value;
         var principal = userSid.Value;
 
         // 4. Extract Groups / Roles (SEC C-1: Strictly from validated ClaimsPrincipal)
         var groupList = new List<Sid>();
-        if (caller?.Identity?.IsAuthenticated == true)
+        foreach (var claim in caller.FindAll(c => c.Type is System.Security.Claims.ClaimTypes.Role
+                                                         or System.Security.Claims.ClaimTypes.GroupSid
+                                                         or "groups"
+                                                         or "roles"))
         {
-            foreach (var claim in caller.FindAll(c => c.Type is System.Security.Claims.ClaimTypes.Role
-                                                             or System.Security.Claims.ClaimTypes.GroupSid
-                                                             or "groups"
-                                                             or "roles"))
+            if (!string.IsNullOrWhiteSpace(claim.Value))
             {
-                if (!string.IsNullOrWhiteSpace(claim.Value))
-                {
-                    groupList.Add(new Sid(claim.Value));
-                }
+                groupList.Add(new Sid(claim.Value));
             }
         }
 

@@ -180,7 +180,7 @@ public sealed class ItsmWebhookHandler(
         string? normalizedSignature = null;
         if (!bypassSignature)
         {
-            // SEC H-06: Secret pro Instanz; das globale Secret nur bei explizitem LegacyGlobalWebhookSecret.
+            // SEC H-06: per-instance secret only; there is no global-secret fallback.
             var secretKey = ResolveWebhookSecret(instanceId);
             if (secretKey == null)
             {
@@ -341,33 +341,13 @@ public sealed class ItsmWebhookHandler(
         // Sanitize untrusted data before writing it to logs (prevent log forging via CR/LF).
         var logInstanceId = instanceId.Replace("\r", string.Empty).Replace("\n", string.Empty);
 
-        // 5. Strikte Tenant-Bindung (umgehbar via warn_fallback_default_tenant_for_webhooks).
+        // 5. Strict tenant binding: an instance without a tenant mapping, or a ticket of another tenant, is always rejected.
         // SEC H-06: Ticket-Lookup erfolgt mit Tenant-Filter (WHERE itsm_ticket_id = @t AND tenant_id = @tenant).
         var expectedTenant = _itsmOptions.GetTenantForInstance(instanceId);
         ConsentRequest? request;
         if (expectedTenant != null)
         {
             request = await governanceRepo.GetConsentRequestByTicketIdAsync(payload.TicketId, expectedTenant.Value, ct).ConfigureAwait(false);
-            if (request == null && options.Value.IsWebhookTenantFallbackAllowed)
-            {
-                request = await governanceRepo.GetConsentRequestByTicketIdAsync(payload.TicketId, ct).ConfigureAwait(false);
-                if (request != null)
-                {
-                    logger.LogWarning(
-                        "[DANGER] Bypassing cross-tenant mismatch for ticket {TicketId}. Request tenant: {ReqTenant}, callback instance: {InstanceId}. Prohibited outside Development.",
-                        payload.TicketId, request.TenantId, logInstanceId);
-                }
-            }
-        }
-        else if (options.Value.IsWebhookTenantFallbackAllowed)
-        {
-            request = await governanceRepo.GetConsentRequestByTicketIdAsync(payload.TicketId, ct).ConfigureAwait(false);
-            if (request != null)
-            {
-                logger.LogWarning(
-                    "[DANGER] Bypassing tenant binding for unmapped ITSM instance {InstanceId} (ticket {TicketId}, request tenant {ReqTenant}). Prohibited outside Development.",
-                    logInstanceId, payload.TicketId, request.TenantId);
-            }
         }
         else
         {
@@ -555,12 +535,6 @@ public sealed class ItsmWebhookHandler(
             (globalSecret == null || !CryptographicOperations.FixedTimeEquals(instanceSecret, globalSecret)))
         {
             return instanceSecret;
-        }
-
-        if (_itsmOptions.LegacyGlobalWebhookSecret && globalSecret is { Length: > 0 } && !IsPlaceholder(globalSecret, GlobalWebhookSecretRef))
-        {
-            logger.LogWarning("[DANGER] ITSM webhook for instance '{InstanceId}' verified with the legacy global secret (Itsm:LegacyGlobalWebhookSecret=true). Prohibited outside Development.", instanceId);
-            return globalSecret;
         }
 
         return null;

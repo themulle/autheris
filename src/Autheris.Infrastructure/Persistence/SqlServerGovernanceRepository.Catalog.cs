@@ -1361,53 +1361,7 @@ public partial class SqlServerGovernanceRepository
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"SELECT COUNT(*)
-                            FROM TABLES t
-                            JOIN TABLE_OWNERS tow ON t.id = tow.table_id
-                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
-                            WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND (o.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (LOWER(o.ad_account) = LOWER(@itsmAccount) OR LOWER(o.email) = LOWER(@itsmAccount))))
-                              AND o.is_active = 1";
-        cmd.Parameters.AddWithValue("@domain", table.Domain);
-        cmd.Parameters.AddWithValue("@schema", table.Schema);
-        cmd.Parameters.AddWithValue("@table", table.TableName);
-        cmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        AddNullableTextParameter(cmd, "@itsmAccount", itsmApproverAccount);
-
-        var directOwnerCount = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
-        if (directOwnerCount > 0) return true;
-
-        await using var delCmd = conn.CreateCommand();
-        delCmd.CommandText = @"SELECT COUNT(*)
-                               FROM DATA_OWNER_DELEGATIONS d
-                               JOIN DATA_OWNERS o ON d.data_owner_id = o.id
-                               JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
-                               JOIN TABLES t ON tow.table_id = t.id
-                               WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                 AND (d.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(d.delegate_sid) = LOWER(@itsmAccount)))
-                                 AND d.valid_from <= @now AND d.valid_to >= @now";
-        delCmd.Parameters.AddWithValue("@domain", table.Domain);
-        delCmd.Parameters.AddWithValue("@schema", table.Schema);
-        delCmd.Parameters.AddWithValue("@table", table.TableName);
-        delCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        AddNullableTextParameter(delCmd, "@itsmAccount", itsmApproverAccount);
-        delCmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
-
-        var delegateCount = Convert.ToInt64(await delCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
-        if (delegateCount > 0) return true;
-
-        await using var roleCmd = conn.CreateCommand();
-        roleCmd.CommandText = @"SELECT COUNT(*)
-                                FROM ROLES r
-                                JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
-                                WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
-                                  AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
-        roleCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        AddNullableTextParameter(roleCmd, "@itsmAccount", itsmApproverAccount);
-
-        var roleAdminCount = Convert.ToInt64(await roleCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
-        return roleAdminCount > 0;
+        return await IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, itsmApproverAccount, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
