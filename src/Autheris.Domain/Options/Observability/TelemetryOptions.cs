@@ -90,8 +90,6 @@ public sealed class MetricsOptions
 public sealed class IdentityOptions
 {
     public TelemetryIdentityMode Mode { get; init; } = TelemetryIdentityMode.None;
-
-    public string? PseudonymKeyRef { get; init; }
 }
 
 public sealed class DataSourceTelemetryDefaults

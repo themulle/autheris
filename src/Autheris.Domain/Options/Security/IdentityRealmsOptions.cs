@@ -44,6 +44,4 @@ public sealed class ScimRealmSecretOptions
 public sealed class ScimOptions
 {
     public List<string> AllowedIpRanges { get; set; } = [];
-    public bool EnableMassChangeProtection { get; set; } = true;
-    public double MassChangeThresholdPercentage { get; set; } = 10.0;
 }

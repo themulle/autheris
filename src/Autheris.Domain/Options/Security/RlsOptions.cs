@@ -7,7 +7,6 @@ namespace Autheris.Domain.Options;
 public sealed class CasbinOptions
 {
     public bool Enabled { get; init; } = false;
-    public bool EnforceInQueryPipeline { get; init; } = true;
     public string? ModelPath { get; init; }
     public string? PolicyPath { get; init; }
     public bool WatchPolicyFile { get; init; } = true;
@@ -22,7 +21,6 @@ public sealed class RebacOptions
     public bool Enabled { get; init; } = true;
     public int MaxTraversalDepth { get; init; } = 10;
     public int CacheTtlSeconds { get; init; } = 60;
-    public int MaxCachedDecisions { get; init; } = 50000;
     [Range(0, 5000)] public int GenerationCacheMilliseconds { get; init; } = 1000;
     public bool EnforceOnStreaming { get; init; } = false;
 

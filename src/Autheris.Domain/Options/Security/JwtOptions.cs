@@ -170,8 +170,6 @@ public sealed class EntraIdAuthOptions
     public string MetadataAddress { get; init; } = string.Empty;
     public string Authority => string.IsNullOrWhiteSpace(TenantId) ? Instance : $"{Instance.TrimEnd('/')}/{TenantId.Trim('/')}";
     public bool RequireHttpsMetadata { get; init; } = true;
-    public string SidClaimType { get; init; } = "oid";
-    public string GroupsClaimType { get; init; } = "groups";
     public string RolesClaimType { get; init; } = "roles";
 
     /// <summary>
@@ -230,8 +228,6 @@ public sealed class AdfsAuthOptions
     public string MetadataAddress { get; init; } = string.Empty;
     public string Audience { get; init; } = string.Empty;
     public bool RequireHttpsMetadata { get; init; } = true;
-    public string SidClaimType { get; init; } = "primarysid";
-    public string GroupSidClaimType { get; init; } = "groupsid";
     public string RolesClaimType { get; init; } = "role";
 }
 

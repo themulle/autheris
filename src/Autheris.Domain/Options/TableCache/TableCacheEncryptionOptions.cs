@@ -9,5 +9,4 @@ public sealed class TableCacheEncryptionOptions
 
     public string KeyVaultKeyName { get; init; } = "table-cache-dek";
 
-    public string KeyDerivationContext { get; init; } = "Autheris.TableCache.v1";
 }

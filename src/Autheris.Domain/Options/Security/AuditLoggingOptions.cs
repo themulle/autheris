@@ -68,7 +68,6 @@ public sealed class AuditOptions
     public AuditCatalogReadMode CatalogReadMode { get; init; } = AuditCatalogReadMode.Summarized;
     [Range(1, 3600)] public int CatalogSummaryWindowSeconds { get; init; } = 60;
     public AuditRetentionOptions Retention { get; init; } = new();
-    public bool StoreStatementText { get; init; }
 
     /// <summary>
     /// SEC-ADG-23 (X1.2): store the compiled SQL text (markers only, no values by construction) in the audit record of a governed

@@ -96,8 +96,6 @@ Rendered as the entries of a ConfigMap "data" block.
 */}}
 {{- define "autheris.configData" -}}
 Gateway__GovernanceDb__Provider: {{ .Values.gateway.governanceDb.provider | quote }}
-Gateway__DrainDelaySeconds: {{ .Values.gateway.drainDelaySeconds | quote }}
-Gateway__ShutdownTimeoutSeconds: {{ .Values.gateway.shutdownTimeoutSeconds | quote }}
 Gateway__Authentication__ForwardAuth__RequireTrustedProxy: "true"
 {{- $allowedHosts := .Values.gateway.allowedHosts }}
 {{- if not $allowedHosts }}
@@ -180,10 +178,6 @@ Rendered as the entries of a container "env" list.
   value: {{ .Values.gateway.aspnetcoreEnvironment | quote }}
 - name: ASPNETCORE_URLS
   value: "http://+:{{ .Values.service.targetPort }}"
-- name: Gateway__DrainDelaySeconds
-  value: {{ .Values.gateway.drainDelaySeconds | quote }}
-- name: Gateway__ShutdownTimeoutSeconds
-  value: {{ .Values.gateway.shutdownTimeoutSeconds | quote }}
 # The root filesystem is read-only; async job results go to the writable /tmp emptyDir.
 - name: Gateway__AsyncJobs__ScratchDirectory
   value: "/tmp/autheris-jobs"

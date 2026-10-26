@@ -584,7 +584,8 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IRealmSchemeSelector, RealmSchemeSelector>();
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, RequireFunctionalRightHandler>();
         services.AddOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>()
-            .BindConfiguration(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName);
+            .BindConfiguration(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName)
+            .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmOptionsValidator>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmsScimOptionsValidator>();
         services.AddSingleton<WebSocketAuthInterceptor>();

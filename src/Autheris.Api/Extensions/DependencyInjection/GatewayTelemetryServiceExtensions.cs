@@ -34,6 +34,9 @@ public static class GatewayTelemetryServiceExtensions
         var telemetryOptions = telemetrySection.Get<TelemetryOptions>() ?? new TelemetryOptions();
 
         services.Configure<TelemetryOptions>(telemetrySection);
+        // ARCH-MNT-06: plaintext OTLP to a non-loopback host fails the start outside Development unless AllowInsecureTransport is set.
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<TelemetryOptions>, OtlpTransportOptionsValidator>();
+        services.AddOptions<TelemetryOptions>().ValidateOnStart();
         services.AddDataSourceTelemetryPolicy();
 
         if (!telemetryOptions.Enabled)

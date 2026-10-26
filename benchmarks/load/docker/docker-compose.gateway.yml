@@ -112,11 +112,9 @@ services:
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "10000"
-      Gateway__SingleQueryPushdown__Enabled: "true"
       Gateway__DataSources__Connections__chinook__ConnectionString: "Host=${DB_HOST:-10.0.1.10};Port=5432;Database=postgres;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=200;Minimum Pool Size=20"
       Gateway__DataSources__Connections__finance__ConnectionString: "Host=${DB_HOST:-10.0.1.10};Port=5432;Database=postgres;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=200;Minimum Pool Size=20"
       Gateway__DataSources__Connections__chinook__CommandTimeoutSeconds: "15"
-      Gateway__DataSources__Connections__chinook__Dialect: "PostgreSql"
     deploy:
       resources:
         limits:

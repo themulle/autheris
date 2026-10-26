@@ -70,7 +70,7 @@ public sealed class McpServerTests
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions
         {
-            Mcp = new McpOptions { Enabled = true, RequirePiiMasking = true }
+            Mcp = new McpOptions { Enabled = true }
         });
         var logger = NullLogger<AiDataGuardrailService>.Instance;
         var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);

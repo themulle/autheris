@@ -38,7 +38,6 @@ public sealed class RequiredFilterColumnsParityIntegrationTests : IClassFixture<
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
-            builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:MaxCostPerMinute", "1000000");
         }
 
         protected override async Task SeedExtraGovernanceAsync(IGovernanceRepository repo)
