@@ -18,17 +18,21 @@ public sealed class DbCatalogVersionProvider : ICatalogVersionProvider, IDisposa
     private readonly IDisposable? _eventSubscription;
 
     private CatalogVersion? _cachedVersion;
-    private long _cachedAtTicks;
+    private long _cachedAtTimestamp;
+    private long _generation;
+    private readonly TimeProvider _timeProvider;
     private readonly Lock _lock = new();
 
     public DbCatalogVersionProvider(
         ITableMetadataRepository metadataRepository,
         IEventBus? eventBus = null,
-        TimeSpan? ttl = null)
+        TimeSpan? ttl = null,
+        TimeProvider? timeProvider = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _eventBus = eventBus;
         _ttl = ttl ?? TimeSpan.FromSeconds(5);
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         if (_eventBus != null)
         {
@@ -45,8 +49,9 @@ public sealed class DbCatalogVersionProvider : ICatalogVersionProvider, IDisposa
     public DbCatalogVersionProvider(
         IGovernanceRepository governanceRepository,
         IEventBus? eventBus = null,
-        TimeSpan? ttl = null)
-        : this((ITableMetadataRepository)(governanceRepository ?? throw new ArgumentNullException(nameof(governanceRepository))), eventBus, ttl)
+        TimeSpan? ttl = null,
+        TimeProvider? timeProvider = null)
+        : this((ITableMetadataRepository)(governanceRepository ?? throw new ArgumentNullException(nameof(governanceRepository))), eventBus, ttl, timeProvider)
     {
     }
 
@@ -54,27 +59,34 @@ public sealed class DbCatalogVersionProvider : ICatalogVersionProvider, IDisposa
     {
         lock (_lock)
         {
+            _generation++;
             _cachedVersion = null;
-            _cachedAtTicks = 0;
+            _cachedAtTimestamp = 0;
         }
     }
 
     public async ValueTask<CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
     {
-        long nowTicks = DateTime.UtcNow.Ticks;
+        long generation;
         lock (_lock)
         {
-            if (_cachedVersion.HasValue && (nowTicks - _cachedAtTicks < _ttl.Ticks))
+            if (_cachedVersion.HasValue && _timeProvider.GetElapsedTime(_cachedAtTimestamp) < _ttl)
             {
                 return _cachedVersion.Value;
             }
+
+            generation = _generation;
         }
 
         var version = await _metadataRepository.GetCatalogVersionAsync(ct).ConfigureAwait(false);
         lock (_lock)
         {
-            _cachedVersion = version;
-            _cachedAtTicks = DateTime.UtcNow.Ticks;
+            // An invalidation that arrived during the read always wins: the value read may predate the change.
+            if (generation == _generation)
+            {
+                _cachedVersion = version;
+                _cachedAtTimestamp = _timeProvider.GetTimestamp();
+            }
         }
 
         return version;

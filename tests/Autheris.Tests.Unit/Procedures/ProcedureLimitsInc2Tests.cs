@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
@@ -1033,28 +1034,51 @@ public class ProcedureLimitsInc2Tests
     {
         var f = Active(scoped: false, total: 1, errorCodes: MapDefinition().ErrorCodes);
         f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
-            .ThrowsAsyncForAnyArgs(new FakeSqlStateException("ZZ002", "Value 4711 in dbo.Secret"));
+            .ThrowsAsyncForAnyArgs(new FakeSqlStateException("ZZ002", "Value " + ValueMarker + " in dbo.Secret"));
 
         var ex = await Should.ThrowAsync<FakeSqlStateException>(() => Run(f));
 
         ex.ShouldNotBeAssignableTo<ProcedureBusinessException>();
         f.AuditEntries.ShouldNotContain(a => a.EventType == "PROCEDURE_REJECTED");
-        f.AuditEntries.Single(a => a.EventType == "PROCEDURE_FAILED").DetailsJson.ShouldNotContain("4711");
+        f.AuditEntries.Single(a => a.EventType == "PROCEDURE_FAILED").DetailsJson.ShouldNotContain(ValueMarker);
         f.AuditEntries.Single(a => a.EventType == "PROCEDURE_FAILED").DetailsJson.ShouldNotContain("dbo.Secret");
         AssertNoDbText(f.Logger);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task T_PROC152I2_14_SEC_PROC_F4_TraceIdContainingOldMarker_DoesNotTripTheLeakAssertions()
+    {
+        // A random hex trace id can contain any four digits; the leak marker must not be a hex substring.
+        var traceId = ActivityTraceId.CreateFromString("00000000000000000000000000004711");
+        using var activity = new Activity("sec-proc-f4");
+        activity.SetParentId(traceId, ActivitySpanId.CreateRandom(), ActivityTraceFlags.None);
+        activity.Start();
+        var f = Active(scoped: false, total: 1, errorCodes: MapDefinition().ErrorCodes);
+        f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new FakeSqlStateException("ZZ002", "Value " + ValueMarker + " in dbo.Secret"));
+
+        await Should.ThrowAsync<FakeSqlStateException>(() => Run(f));
+
+        activity.TraceId.ToString().ShouldContain("4711");
+        f.Logger.Entries.ShouldContain(e => e.Message.Contains("4711")); // the trace id reached the log
+        AssertNoDbText(f.Logger);
+    }
+
+    // Contains non-hex characters so no random hex trace id, GUID or hash can contain it (SEC-PROC-F4).
+    private const string ValueMarker = "zq4711qz";
 
     private static void AssertNoDbText(CapturingLogger<GovernedProcedureExecutionService> logger)
     {
         foreach (var (_, message) in logger.Entries)
         {
-            message.ShouldNotContain("4711");
+            message.ShouldNotContain(ValueMarker);
             message.ShouldNotContain("dbo.Secret");
         }
 
         foreach (var state in logger.States)
         {
-            state.ShouldNotContain("4711");
+            state.ShouldNotContain(ValueMarker);
             state.ShouldNotContain("dbo.Secret");
         }
     }
@@ -1065,7 +1089,7 @@ public class ProcedureLimitsInc2Tests
     [Trait("Category", "Security")]
     public async Task T_PROC152I2_14_BusinessError_DbTextWithValueAndTable_NeverInResponseOrAudit(bool mapped)
     {
-        const string secret = "Value 4711 in dbo.Secret";
+        const string secret = "Value " + ValueMarker + " in dbo.Secret";
         var def = MapDefinition();
         var f = Active(scoped: false, total: 1, errorCodes: def.ErrorCodes);
         // The real invoker converts the DbException into number/SQLSTATE only; verify that seam first.
@@ -1075,11 +1099,11 @@ public class ProcedureLimitsInc2Tests
 
         var ex = await Should.ThrowAsync<ProcedureBusinessException>(() => Run(f));
 
-        ex.Message.ShouldNotContain("4711");
-        (ex.MappedMessage ?? string.Empty).ShouldNotContain("4711");
+        ex.Message.ShouldNotContain(ValueMarker);
+        (ex.MappedMessage ?? string.Empty).ShouldNotContain(ValueMarker);
         foreach (var entry in f.AuditEntries)
         {
-            (entry.DetailsJson ?? string.Empty).ShouldNotContain("4711");
+            (entry.DetailsJson ?? string.Empty).ShouldNotContain(ValueMarker);
             (entry.DetailsJson ?? string.Empty).ShouldNotContain("dbo.Secret");
         }
 

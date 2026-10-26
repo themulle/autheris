@@ -135,11 +135,15 @@ public sealed class RedisRateLimiterService : IRateLimiterService
     private static readonly LuaScript PreparedCostTokenBucketScript = LuaScript.Prepare(CostTokenBucketScript);
     private static readonly LuaScript PreparedCostTokenBucketSettleScript = LuaScript.Prepare(CostTokenBucketSettleScript);
 
+    private readonly TimeProvider _timeProvider;
+
     public RedisRateLimiterService(
         IConnectionMultiplexer multiplexer,
         IOptions<GatewayOptions> options,
-        ILogger<RedisRateLimiterService> logger)
+        ILogger<RedisRateLimiterService> logger,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _multiplexer = multiplexer;
         _db = multiplexer.GetDatabase();
         _logger = logger;
@@ -213,7 +217,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedSid = sid.Replace("{", "_").Replace("}", "_");
             var key = (RedisKey)$"{_prefix}ratelimit:sid:{sanitizedSid}";
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600; // 10 minutes idle expiry
 
             var res = (RedisResult[]?)await PreparedPostAuthSidScript.EvaluateAsync(
@@ -275,7 +279,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
 
             var res = (RedisResult[]?)await PreparedCostTokenBucketScript.EvaluateAsync(
@@ -334,7 +338,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         {
             var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
 
             var res = (RedisResult[]?)await PreparedCostTokenBucketSettleScript.EvaluateAsync(
@@ -388,7 +392,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
     public async Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
     {
         var capacity = policy.MaxTokensCapacity;
-        var refillRate = policy.TokenRefillRatePerSecond > 0 ? policy.TokenRefillRatePerSecond : 1.0;
+        var refillRate = Math.Max(0.0, policy.TokenRefillRatePerSecond);
 
         try
         {
@@ -406,7 +410,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
             if (double.TryParse((string?)data[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var tokens) &&
                 long.TryParse((string?)data[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lastRefillMs))
             {
-                var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
                 var elapsedSec = Math.Max(0.0, (nowMs - lastRefillMs) / 1000.0);
                 var currentTokens = Math.Min(capacity, tokens + (elapsedSec * refillRate));
                 return new CallerBucketState(capacity, Math.Round(currentTokens, 2), refillRate);

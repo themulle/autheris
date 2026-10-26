@@ -131,10 +131,14 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     /// <summary>ARC-S-09: Maximum number of remembered syntax failures (default 256).</summary>
     public int SyntaxErrorCacheMaxEntries { get; set; } = 256;
 
-    private readonly SyntaxErrorNegativeCache _syntaxErrors = new();
+    // Created on the first remembered syntax error (SEC-LB-09): most engines never see one. A null cache is a miss on lookup, never a cached "ok".
+    private SyntaxErrorNegativeCache? _syntaxErrors;
 
     /// <summary>Number of remembered syntax failures (diagnostics and tests).</summary>
-    internal int SyntaxErrorCacheCount => _syntaxErrors.Count;
+    internal int SyntaxErrorCacheCount => Volatile.Read(ref _syntaxErrors)?.Count ?? 0;
+
+    /// <summary>True once the first syntax error was remembered (test seam of the lazy cache).</summary>
+    internal bool SyntaxErrorCacheInitialized => Volatile.Read(ref _syntaxErrors) is not null;
 
     private const int StatementRule = 1;
     private const int ExpressionRule = 2;
@@ -357,14 +361,23 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
 
     private void ThrowIfKnownSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options)
     {
-        if (_syntaxErrors.TryGet(sql.Span, ruleKind, options, LimitsFingerprint(), out var message))
+        var cache = Volatile.Read(ref _syntaxErrors);
+        if (cache is not null && cache.TryGet(sql.Span, ruleKind, options, LimitsFingerprint(), out var message))
         {
             throw new ParseCanceledException(message);
         }
     }
 
-    private void RememberSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options, string message) =>
-        _syntaxErrors.Add(sql.Span, ruleKind, options, LimitsFingerprint(), message, SyntaxErrorCacheTtl, SyntaxErrorCacheMaxEntries);
+    private void RememberSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options, string message)
+    {
+        if (SyntaxErrorCacheTtl <= TimeSpan.Zero || SyntaxErrorCacheMaxEntries <= 0)
+        {
+            return; // the cache is switched off: do not create it
+        }
+
+        LazyInitializer.EnsureInitialized(ref _syntaxErrors, static () => new SyntaxErrorNegativeCache())
+            .Add(sql.Span, ruleKind, options, LimitsFingerprint(), message, SyntaxErrorCacheTtl, SyntaxErrorCacheMaxEntries);
+    }
 
     private static int RemainingMilliseconds(TimeSpan budget, long startTimestamp)
     {
@@ -410,8 +423,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         var allTokens = tokens.GetTokens();
 
         // SEC P-03: token security checks always run, independent of MaxNestingDepth.
-        EnsureTokensAreSafe(allTokens, tokenOptions, cancellation);
-        EnsureNestingDepthWithinLimit(allTokens, cancellation);
+        EnsureTokensAreSafe(allTokens, sql.Span, tokenOptions, cancellation);
+        EnsureNestingDepthWithinLimit(allTokens, sql.Span, cancellation);
 
         var parser = _parserPool.Get();
         try
@@ -479,10 +492,29 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     }
 
     /// <summary>
+    /// The characters of a lexer token as a slice of the statement, identical to <see cref="IToken.Text"/> (which allocates a string per
+    /// call). A token whose interval is not inside the statement (the EOF token) falls back to <see cref="IToken.Text"/>.
+    /// </summary>
+    internal static ReadOnlySpan<char> TokenText(IToken token, ReadOnlySpan<char> source, out bool hasText)
+    {
+        int start = token.StartIndex;
+        int stop = token.StopIndex;
+        if (token is CommonToken && start >= 0 && stop >= start && stop < source.Length)
+        {
+            hasText = true;
+            return source.Slice(start, stop - start + 1);
+        }
+
+        string? text = token.Text;
+        hasText = text is not null;
+        return text.AsSpan();
+    }
+
+    /// <summary>
     /// SEC P-03: Token-level security checks (SQ-01, SQ-02, SQ-10, SQ-11, SQ-13). Always executed, independent of
     /// <see cref="MaxNestingDepth"/>.
     /// </summary>
-    private static void EnsureTokensAreSafe(IList<IToken> allTokens, SqlTokenSecurityOptions options, ParseCancellation cancellation)
+    private static void EnsureTokensAreSafe(IList<IToken> allTokens, ReadOnlySpan<char> source, SqlTokenSecurityOptions options, ParseCancellation cancellation)
     {
         IToken? lastNonWsToken = null;
         int index = 0;
@@ -495,12 +527,12 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             }
 
             int type = token.Type;
-            string? text = token.Text;
 
             // SQ-02: Block comment nesting check (/* ... /* ... */) - always active
             if (type == SqlBaseLexer.BRACKETED_COMMENT)
             {
-                if (text != null && text.Length > 4 && text.IndexOf("/*", 2, StringComparison.Ordinal) >= 0)
+                string? commentText = token.Text;
+                if (commentText != null && commentText.Length > 4 && commentText.IndexOf("/*", 2, StringComparison.Ordinal) >= 0)
                 {
                     throw new ParseCanceledException(
                         $"line {token.Line}:{token.Column}: Nested block comments ('/* ... /* ... */') are strictly prohibited due to dialect lexer differentials.");
@@ -516,8 +548,11 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             if (type == SqlBaseLexer.WS || type == SqlBaseLexer.SIMPLE_COMMENT || type == SqlBaseLexer.BRACKETED_COMMENT)
                 continue;
 
+            // The text of the remaining tokens is read as a slice of the statement (same characters as IToken.Text, no string per token).
+            var text = TokenText(token, source, out bool hasText);
+
             // SEC-ADG-10: ${...} variable substitution sequences (Spark / Databricks)
-            if (options.RejectVariableSubstitutionSequences && text != null && text.Contains("${", StringComparison.Ordinal)
+            if (options.RejectVariableSubstitutionSequences && hasText && text.Contains("${", StringComparison.Ordinal)
                 && !CompilerHooks.IsDisabled(SecurityControl.VariableSubstitution)
                 )
             {
@@ -526,7 +561,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             }
 
             // SQ-01: Backslash escapes in string literals
-            if (options.RejectBackslashInStrings && type == SqlBaseLexer.STRING && text != null && text.Contains('\\'))
+            if (options.RejectBackslashInStrings && type == SqlBaseLexer.STRING && hasText && text.Contains('\\'))
             {
                 throw LiteralTokenRejectedException.Reject(token.Line, token.Column,
                     "Backslash escapes in string literals are not permitted due to dialect lexer differentials.");
@@ -553,13 +588,13 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             // SQL-1: Bracket lexer differentials (SQL Server / SQLite lex [...] as quoted identifier)
             if (options.RejectBracketLexerDifferentials)
             {
-                if (text == "[" || text == "]")
+                if (text.SequenceEqual("[") || text.SequenceEqual("]"))
                 {
                     throw new ParseCanceledException(
                         $"line {token.Line}:{token.Column}: Square brackets are not permitted for this SQL dialect due to dialect lexer differentials.");
                 }
 
-                if (text != null &&
+                if (hasText &&
                     (type == SqlBaseLexer.STRING || type == SqlBaseLexer.UNICODE_STRING ||
                      type == SqlBaseLexer.QUOTED_IDENTIFIER || type == SqlBaseLexer.BACKQUOTED_IDENTIFIER) &&
                     (text.Contains('[') || text.Contains(']') ||
@@ -578,7 +613,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             }
 
             // SQ-10: Non-ASCII characters outside strings/quoted identifiers
-            if (options.RejectNonAsciiIdentifiers && text != null &&
+            if (options.RejectNonAsciiIdentifiers && hasText &&
                 type != SqlBaseLexer.STRING &&
                 type != SqlBaseLexer.UNICODE_STRING &&
                 type != SqlBaseLexer.DOLLAR_STRING &&
@@ -590,13 +625,13 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                     if (text[ci] > 127)
                     {
                         throw new ParseCanceledException(
-                            $"line {token.Line}:{token.Column}: Non-ASCII characters outside string literals ('{text}') are not permitted.");
+                            $"line {token.Line}:{token.Column}: Non-ASCII characters outside string literals ('{text.ToString()}') are not permitted.");
                     }
                 }
             }
 
             // SQ-11: Dots inside quoted identifiers ("a.b")
-            if (options.RejectDotsInQuotedIdentifiers && (type == SqlBaseLexer.QUOTED_IDENTIFIER || type == SqlBaseLexer.BACKQUOTED_IDENTIFIER) && text != null)
+            if (options.RejectDotsInQuotedIdentifiers && (type == SqlBaseLexer.QUOTED_IDENTIFIER || type == SqlBaseLexer.BACKQUOTED_IDENTIFIER) && hasText)
             {
                 for (int ci = 0; ci < text.Length; ci++)
                 {
@@ -604,17 +639,17 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                     if (c == '.' || char.IsControl(c))
                     {
                         throw new ParseCanceledException(
-                            $"line {token.Line}:{token.Column}: Dots inside quoted identifiers ({text}) are not permitted.");
+                            $"line {token.Line}:{token.Column}: Dots inside quoted identifiers ({text.ToString()}) are not permitted.");
                     }
                 }
             }
 
             // Phase 5 L3: identifiers with the gateway prefix are reserved in the user statement (typed 400, fixed message, no echo)
-            if (options.RejectReservedIdentifiers && text != null &&
+            if (options.RejectReservedIdentifiers && hasText &&
                 (type == SqlBaseLexer.IDENTIFIER || type == SqlBaseLexer.DIGIT_IDENTIFIER ||
                  type == SqlBaseLexer.QUOTED_IDENTIFIER || type == SqlBaseLexer.BACKQUOTED_IDENTIFIER))
             {
-                var name = text.AsSpan();
+                var name = text;
                 if (type is SqlBaseLexer.QUOTED_IDENTIFIER or SqlBaseLexer.BACKQUOTED_IDENTIFIER && name.Length >= 2)
                 {
                     name = name[1..^1];
@@ -643,7 +678,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     /// <summary>
     /// SEC C-06: Token-level nesting check before parsing (0 disables only this check).
     /// </summary>
-    private void EnsureNestingDepthWithinLimit(IList<IToken> allTokens, ParseCancellation cancellation)
+    private void EnsureNestingDepthWithinLimit(IList<IToken> allTokens, ReadOnlySpan<char> source, ParseCancellation cancellation)
     {
         if (MaxNestingDepth <= 0) return;
 
@@ -666,7 +701,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             if (type == SqlBaseLexer.WS || type == SqlBaseLexer.SIMPLE_COMMENT || type == SqlBaseLexer.BRACKETED_COMMENT)
                 continue;
 
-            string? text = token.Text;
+            var text = TokenText(token, source, out _);
             bool isUnaryCandidate = false;
 
             if (type == SqlBaseLexer.CASE || type == SqlBaseLexer.BEGIN)
@@ -689,15 +724,15 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             {
                 isUnaryCandidate = true;
             }
-            else if (text == "(" || text == "[")
+            else if (text.SequenceEqual("(") || text.SequenceEqual("["))
             {
                 parenDepth++;
             }
-            else if (text == ")" || text == "]")
+            else if (text.SequenceEqual(")") || text.SequenceEqual("]"))
             {
                 if (parenDepth > 0) parenDepth--;
             }
-            else if (text == "->")
+            else if (text.SequenceEqual("->"))
             {
                 lambdaCount++;
             }

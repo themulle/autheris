@@ -613,7 +613,7 @@ public class ProcedureSecurityInc1Tests
     [Trait("Category", "Security")]
     public async Task T_PROC152_09_BusinessAndDbFailure_SecretText_AbsentFromResponseLogsAuditSpans()
     {
-        const string secret = "Asset 4711 of Mueller dbo.Secret";
+        const string secret = "Asset zq4711qz of Mueller dbo.Secret";
         var spans = new List<string>();
         using var listener = new ActivityListener
         {
@@ -642,12 +642,12 @@ public class ProcedureSecurityInc1Tests
         // non-business DbException: logged without the exception object and its text
         var db = Active();
         db.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new FakeSqlException(1205, secret));
-        await Should.ThrowAsync<FakeSqlException>(() => Run(db, inputs: new Dictionary<string, object?> { ["customer_id"] = 7, ["note"] = "value-4711" }));
+        await Should.ThrowAsync<FakeSqlException>(() => Run(db, inputs: new Dictionary<string, object?> { ["customer_id"] = 7, ["note"] = "value-zq4711qz" }));
         db.Logger.Entries.ShouldAllBe(l => l.Exception == null);
         db.Logger.AllText.ShouldNotContain("Mueller");
         db.Logger.AllText.ShouldNotContain("Secret");
-        db.Logger.AllText.ShouldNotContain("4711");
-        db.AuditEntries.ShouldAllBe(a => !a.DetailsJson.Contains("Mueller") && !a.DetailsJson.Contains("4711"));
+        db.Logger.AllText.ShouldNotContain("zq4711qz");
+        db.AuditEntries.ShouldAllBe(a => !a.DetailsJson.Contains("Mueller") && !a.DetailsJson.Contains("zq4711qz"));
         db.AuditEntries.ShouldContain(a => a.EventType == "PROCEDURE_FAILED");
 
         foreach (var all in new[] { business.Logger.AllText, db.Logger.AllText }.Concat(spans))
@@ -953,15 +953,15 @@ public class ProcedureSecurityInc1Tests
         var service = Substitute.For<IProcedureExecutionService>();
         service.ExecuteAsync(default!, default, default!, default, default).ThrowsAsyncForAnyArgs(new SecurityException("legacy"));
 
-        var response = await CallRoute(service, false, "probe-name", "customer_id=value-4711", null, factory);
+        var response = await CallRoute(service, false, "probe-name", "customer_id=value-zq4711qz", null, factory);
 
         response.Status.ShouldBe(500); // no 403 branch any more
         response.Body.ShouldBe("{\"error\":\"An internal error occurred.\"}");
-        logger.AllText.ShouldNotContain("value-4711");
+        logger.AllText.ShouldNotContain("value-zq4711qz");
         logger.AllText.ShouldNotContain("probe-name");
     }
 
-    private const string SecretText = "Asset 4711 of Mueller";
+    private const string SecretText = "Asset zq4711qz of Mueller";
 
     [Fact]
     [Trait("Category", "Security")]
@@ -972,12 +972,12 @@ public class ProcedureSecurityInc1Tests
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(() => Run(e));
 
-        ex.Message.ShouldContain("4711"); // rethrown unchanged; the route maps it to a generic 500
-        e.Logger.AllText.ShouldNotContain("4711");
+        ex.Message.ShouldContain("zq4711qz"); // rethrown unchanged; the route maps it to a generic 500
+        e.Logger.AllText.ShouldNotContain("zq4711qz");
         e.Logger.AllText.ShouldNotContain("Mueller");
         e.Logger.Entries.ShouldAllBe(x => x.Exception == null);
         e.Logger.AllText.ShouldContain(nameof(InvalidOperationException));
-        e.AuditEntries.ShouldAllBe(x => !x.DetailsJson.Contains("4711") && !x.DetailsJson.Contains("Mueller"));
+        e.AuditEntries.ShouldAllBe(x => !x.DetailsJson.Contains("zq4711qz") && !x.DetailsJson.Contains("Mueller"));
     }
 
     [Fact]
@@ -993,8 +993,8 @@ public class ProcedureSecurityInc1Tests
         var response = await CallRoute(service, false, "probe-name", null, null, factory);
 
         response.Status.ShouldBe(500);
-        response.Body.ShouldNotContain("4711");
-        logger.AllText.ShouldNotContain("4711");
+        response.Body.ShouldNotContain("zq4711qz");
+        logger.AllText.ShouldNotContain("zq4711qz");
         logger.AllText.ShouldNotContain("Mueller");
         logger.Entries.ShouldAllBe(x => x.Exception == null);
         logger.AllText.ShouldContain(nameof(InvalidOperationException));
