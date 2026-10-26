@@ -6,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Threading.Tasks;
+using Autheris.Application.Identity;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options.Security;
 using Microsoft.AspNetCore.Authentication;
@@ -14,16 +16,21 @@ using Microsoft.Extensions.Options;
 
 public sealed class ScimAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
+    internal const string InvalidCredentialsMessage = "Invalid SCIM bearer token or standard user token supplied on SCIM endpoint.";
+
     private readonly IOptionsMonitor<IdentityRealmsOptions> _realmOptions;
+    private readonly IClientIpResolver? _clientIpResolver;
 
     public ScimAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        IOptionsMonitor<IdentityRealmsOptions> realmOptions)
+        IOptionsMonitor<IdentityRealmsOptions> realmOptions,
+        IClientIpResolver? clientIpResolver = null)
         : base(options, logger, encoder)
     {
         _realmOptions = realmOptions;
+        _clientIpResolver = clientIpResolver;
     }
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -43,6 +50,19 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
         if (string.IsNullOrWhiteSpace(token))
         {
             return Task.FromResult(AuthenticateResult.Fail("Empty bearer token."));
+        }
+
+        // ARCH-MNT-06 (SC-03): the caller allowlist is evaluated before anything else is revealed about the realm or the secret, and a
+        // rejected peer receives the same generic failure as a wrong token (no "IP not allowed" oracle).
+        var allowedRanges = _realmOptions.CurrentValue.Scim?.AllowedIpRanges;
+        if (allowedRanges is { Count: > 0 })
+        {
+            var peer = _clientIpResolver?.ResolveClientIp();
+            if (!ScimIpAllowlist.IsAllowed(allowedRanges, peer))
+            {
+                Logger.LogWarning("SCIM request rejected: the peer address is outside Authentication:Realms:Scim:AllowedIpRanges (peer {Peer}).", peer);
+                return Task.FromResult(AuthenticateResult.Fail(InvalidCredentialsMessage));
+            }
         }
 
         // Extract realmId from path if available: /scim/v2/{realmId}/...
@@ -85,7 +105,7 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
 
         if (!isValid)
         {
-            return Task.FromResult(AuthenticateResult.Fail("Invalid SCIM bearer token or standard user token supplied on SCIM endpoint."));
+            return Task.FromResult(AuthenticateResult.Fail(InvalidCredentialsMessage));
         }
 
         // Security review: the secret holder gets only the dedicated provisioner role, never ClusterAdmin.

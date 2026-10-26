@@ -2,19 +2,49 @@ namespace Autheris.Application.Identity.Validators;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options.Security;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 public class IdentityRealmsScimOptionsValidator : IValidateOptions<IdentityRealmsOptions>
 {
     public const int MinimumSecretLength = 32;
 
+    private readonly IHostEnvironment? _environment;
+    private readonly ILogger<IdentityRealmsScimOptionsValidator>? _logger;
+
+    public IdentityRealmsScimOptionsValidator(IHostEnvironment? environment = null, ILogger<IdentityRealmsScimOptionsValidator>? logger = null)
+    {
+        _environment = environment;
+        _logger = logger;
+    }
+
     public ValidateOptionsResult Validate(string? name, IdentityRealmsOptions options)
     {
         if (options == null)
         {
             return ValidateOptionsResult.Fail("Options are null.");
+        }
+
+        // ARCH-MNT-06 (SC-01): an invalid caller range fails the start; it never silently disables the allowlist.
+        var ranges = options.Scim?.AllowedIpRanges ?? [];
+        for (var i = 0; i < ranges.Count; i++)
+        {
+            if (!ScimIpAllowlist.IsValidRange(ranges[i]))
+            {
+                return ValidateOptionsResult.Fail($"Authentication:Realms:Scim:AllowedIpRanges[{i}] is not a valid CIDR range or IP address.");
+            }
+        }
+
+        if (ranges.Count == 0
+            && _environment?.IsProduction() == true
+            && options.Realms.Values.Any(r => r.Provisioning == RealmProvisioningMode.Scim))
+        {
+            _logger?.LogWarning(
+                "SCIM provisioning is enabled without Authentication:Realms:Scim:AllowedIpRanges: any peer holding a SCIM secret is accepted. Restrict the callers by CIDR.");
         }
 
         var seenSecrets = new HashSet<string>(StringComparer.Ordinal);

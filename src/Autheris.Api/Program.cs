@@ -54,6 +54,7 @@ builder.Host.UseDefaultServiceProvider(options =>
 Autheris.Api.Configuration.LegacySwitchGuard.ThrowIfLegacyKeysSet(builder.Configuration);
 Autheris.Api.Configuration.SerilogSectionGuard.ThrowIfConfigured(builder.Configuration);
 var devReport = Autheris.Api.Configuration.DevConfiguration.Apply(builder.Configuration, builder.Environment);
+Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(builder.Configuration);
 builder.Services.AddSingleton(devReport);
 
 // 3. Modular Service Registrations

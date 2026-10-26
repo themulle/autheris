@@ -278,7 +278,7 @@ Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 
 New follow-ups found during delivery:
 
 - **ARCH-MNT-15-FU-01:** extend `SqlGate.BenchCheck` with a cold-cache P99 threshold (Phase 3 ruling D1).
-- **ARCH-MNT-15-FU-02:** calibrate the default `Gateway:SqlParserCache:MaxStatesPerGeneration` on the #360 fuzz corpus.
+- **ARCH-MNT-15-FU-02 (done in PR 9, `refactor/architecture-maintainability-9`):** calibrated on 2,794 distinct statements (308 fuzz seeds plus the engine corpora): 9,080 states at steady state (4,445 for the seeds alone), at most 411 new states per statement, about 1.25 KB per state, 0 swaps. The default of 50,000 stays: that is 5.5x the steady state, and the worst case of 50,000 x `HardCapFactor` 4 is about 239 MB per generation. `AntlrCacheCalibrationTests` pins the invariant: the seed corpus fits in one generation with 2x headroom, measured by state counts and not by time.
 - **ARCH-MNT-27:** `SecurityReviewG3EndpointAuthzTests.Envoy_ExportEmitsPathPrefixAndValidatesParameters` failed once with a `RegexMatchTimeoutException` under parallel build load. Check whether the regex timeout belongs to production code, which would mean timeouts under real load too, and fix it with a deterministic assertion or a `NonBacktracking` regex.
 - **Resolved:** ARCH-MNT-27 (#366: production Envoy regexes replaced by non-regex checks); DI decomposition is PR 4.
 - **DI snapshot maintenance:** every PR that adds or removes a DI registration must update `tests/Autheris.Tests.Unit/DependencyInjection/Snapshots/*.txt` with `AUTHERIS_UPDATE_SNAPSHOTS=1` locally (rejected in CI) and explain the diff in the PR.

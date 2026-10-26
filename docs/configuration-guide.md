@@ -353,7 +353,6 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
 | :--- | :--- | :--- | :--- | :--- |
 | `SizeLimitMb` | `int` | `16 .. 4096` | `512` | Maximale In-Memory-Cache-Größe in Megabyte. |
 | `DefaultTtlMinutes` | `int` | `1 .. 120` | `10` | Standard-Gültigkeit zwischengespeicherter Consent-Entscheidungen. |
-| `SensitiveTableTtlSeconds` | `int` | `1 .. 600` | `60` | Verkürzte TTL für als `IsSensitive = true` markierte Tabellen. |
 
 #### `Caching.Redis`
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
@@ -377,8 +376,7 @@ Steuert den L1 In-Memory Cache, L2 Redis und die Konsistenzprüfung.
 "Caching": {
   "L1MemoryCache": {
     "SizeLimitMb": 512,
-    "DefaultTtlMinutes": 10,
-    "SensitiveTableTtlSeconds": 60
+    "DefaultTtlMinutes": 10
   },
   "Redis": {
     "Configuration": "redis-cluster.corp.local:6379,abortConnect=false,ssl=true",
@@ -414,7 +412,6 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
 | :--- | :--- | :--- | :--- | :--- |
 | `TokenBucketCapacity` | `int` | `10 .. 100000` | `500` | Maximale Token-Kapazität pro authentifizierter User-SID. |
 | `TokensPerSecond` | `int` | `1 .. 10000` | `50` | Nachfüllrate des Token-Buckets pro Sekunde. |
-| `MaxCostPerMinute` | `int` | `100 .. 1000000` | `10000` | Maximales GraphQL-Komplexitätsbudget pro Minute pro Benutzer. |
 
 #### `RateLimiting.ClientTiers` (GraphQL Pre-Execution Cost & Quota Defense)
 
@@ -444,8 +441,7 @@ Steuert die [`CostAndQuotaMiddleware`](file:///root/autheris/src/Autheris.GraphQ
   },
   "PostAuthSidRateLimit": {
     "TokenBucketCapacity": 500,
-    "TokensPerSecond": 50,
-    "MaxCostPerMinute": 10000
+    "TokensPerSecond": 50
   },
   "ClientTiers": {
     "RoleTierMappings": {
@@ -842,7 +838,6 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 | `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Pfad des MCP-Endpunkts (Streamable HTTP). |
 | `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximales Token-Budget pro Tool-Aufruf; verhindert Context-Window-Overflows. |
 | `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Maximale Ergebniszeilen pro Datenabfrage. |
-| `Mcp:RequirePiiMasking` | `bool` | `true \| false` | `true` | Automatisches Scrubbing von PII- (E-Mail, IBAN) und DSGVO-Art.-9-Daten vor Übermittlung an LLMs. |
 | `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
@@ -857,7 +852,6 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
   "EndpointPath": "/mcp",
   "MaxTokensPerCall": 4096,
   "MaxResultRows": 100,
-  "RequirePiiMasking": true,
   "AllowedOperations": [
     "query_customers",
     "query_invoices",
@@ -926,7 +920,6 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `Casbin:Enabled` | `bool` | `true \| false` | `false` | Aktiviert das Casbin-Enforcement im Gateway. Standard ist `false`. |
-| `Casbin:EnforceInQueryPipeline` | `bool` | `true \| false` | `true` | Führt Casbin-Prüfungen in der Query-Pipeline aus. |
 | `Casbin:ModelPath` | `string?` | Dateipfad | `null` | Pfad zur Casbin-Modell-Datei (`.conf`). **Mandatory whenever `Casbin:Enabled = true`**. Wird gegen den Model Contract validiert, sobald gesetzt (auch wenn `Enabled = false`). |
 | `Casbin:PolicyPath` | `string?` | Dateipfad | `null` | Pfad zur globalen Casbin-Policy-Datei (`.csv`). Mandatory when `Casbin:Enabled = true`; must exist, not be empty, and contain at least one valid `p` rule. |
 | `Casbin:WatchPolicyFile` | `bool` | `true \| false` | `true` | Überwacht die Policy-Datei auf Änderungen zur Laufzeit (Hot Reload). |
@@ -934,7 +927,6 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
 ```json
 "Casbin": {
   "Enabled": true,
-  "EnforceInQueryPipeline": true,
   "ModelPath": "config/casbin-model.conf",
   "PolicyPath": "config/casbin-policy.csv",
   "WatchPolicyFile": true

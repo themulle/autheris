@@ -17,7 +17,6 @@ public static class ParityHostSettings
         b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
         b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
         // The sweeps send hundreds of GraphQL queries from one subject; lift the per-subject cost budget so it cannot mask results.
-        b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:MaxCostPerMinute", "1000000");
         b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
         b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
         b.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "5000");

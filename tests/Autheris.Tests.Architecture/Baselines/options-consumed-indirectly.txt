@@ -1,0 +1,16 @@
+# ARCH-MNT-06: option properties that production code consumes only through a member of the defining file (or by raw configuration key),
+# so the text heuristic of OptionsConsumptionInventoryTests reports them as unconsumed. Format: Namespace.Type.Property|ConsumingMember.
+# A line is valid only while (1) the property still exists and the heuristic still reports it, and (2) the consuming member is
+# used (member access, construction or static call) in a production file outside the file(s) declaring the options type.
+Autheris.Application.Security.TenantRegistryGateOptions.MaxNewRegistrationsPerIssuerPerWindow|TenantRegistryGate
+Autheris.Domain.Options.AuthenticationOptions.EnableKerberos|IsKerberosConfigured
+Autheris.Domain.Options.DevOptions.DemoData|DevConfiguration
+Autheris.Domain.Options.DevOptions.Persist|DevConfiguration
+Autheris.Domain.Options.DevOptions.TestAuthHandler|DevConfiguration
+Autheris.Domain.Options.DevOptions.Tooling|DevConfiguration
+Autheris.Domain.Options.DevToolingOptions.BananaCakePop|DevConfiguration
+Autheris.Domain.Options.DevToolingOptions.Introspection|DevConfiguration
+Autheris.Domain.Options.EnvoyExtAuthzOptions.TrustedPeers|IsTrustedPeer
+Autheris.Domain.Options.ExtensibilityOptions.BreakGlassAllowedRoles|GetEffectiveBreakGlassAllowedRoles
+Autheris.Domain.Options.GatewayOptions.Insecure|IsMcpAuthBypassed
+Autheris.Domain.Options.RedisOptions.FailClosedOnRevocationLookupError|ResolveFailClosedOnRevocationLookupError
