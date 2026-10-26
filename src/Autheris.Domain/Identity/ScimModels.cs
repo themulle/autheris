@@ -64,3 +64,6 @@ public sealed record ScimListResponse<T>(
     IReadOnlyList<T> Resources,
     IReadOnlyList<string>? Schemas = null
 );
+
+/// <summary>Result of a bounded lock count: <see cref="Count"/> is capped at the requested cap; <see cref="Oldest"/> is null when empty.</summary>
+public sealed record ScimLockWindow(int Count, DateTimeOffset? Oldest);

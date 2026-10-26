@@ -1,5 +1,6 @@
 namespace Autheris.Domain.Interfaces;
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,5 +31,12 @@ public interface IIdentityStoreRepository
     Task AddLockAsync(ScimLock lockEntry, CancellationToken ct = default);
     Task<bool> IsSubjectLockedAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default);
     Task<IReadOnlyList<ScimLock>> GetLocksAsync(TenantId tenantId, string realmId, CancellationToken ct = default);
+    /// <summary>
+    /// Counts the locks of (tenant, realm) whose source is one of <paramref name="sources"/> and whose lock time is at or after
+    /// <paramref name="sinceUtc"/>, stopping at <paramref name="cap"/> (bounded scan). Also returns the oldest matching lock time.
+    /// One row per user (distinct users).
+    /// </summary>
+    Task<ScimLockWindow> CountLocksSinceAsync(TenantId tenantId, string realmId, IReadOnlyList<string> sources, DateTimeOffset sinceUtc, int cap, CancellationToken ct = default);
+
     Task RemoveLockAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default);
 }
