@@ -1,0 +1,125 @@
+## set
+\n             ORDER BY created_ms DESC, id OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
+\n            INSERT INTO dbo.WEBHOOK_OUTBOX (id, source, subscription_id, owner_tenant_id, event_tenant_id, event_id, event_type, event_source, event_time_ms, payload_json, attempt, max_attempts, state, next_attempt_ms, lease_until_ms, lease_owner, last_status_code, last_error_code, created_ms, updated_ms)\n            SELECT @id, @source, @sub, @owner, @evTenant, @evId, @evType, @evSource, @evTime, @payload,\n                   @attempt, @maxAttempts, @state, @next, NULL, NULL, NULL, NULL, @created, @created\n             WHERE NOT EXISTS (SELECT 1 FROM dbo.WEBHOOK_OUTBOX WITH (UPDLOCK, HOLDLOCK)\n                                WHERE source = @source AND subscription_id = @sub AND event_id = @evId);
+\n            SELECT 
+\n            UPDATE dbo.WEBHOOK_OUTBOX SET next_attempt_ms = @until\n             WHERE state = 0 AND source = @source AND subscription_id = @sub AND next_attempt_ms < @until;
+\n            WITH picked AS (\n                SELECT TOP (@limit) * FROM dbo.WEBHOOK_OUTBOX WITH (UPDLOCK, READPAST, ROWLOCK)\n                 WHERE (state = 0 AND next_attempt_ms <= @now) OR (state = 1 AND lease_until_ms <= @now)\n                 ORDER BY next_attempt_ms)\n            UPDATE picked\n               SET state = 1, lease_until_ms = @leaseUntil, lease_owner = @owner, attempt = attempt + 1, updated_ms = @now\n            OUTPUT 
+ FROM dbo.WEBHOOK_OUTBOX\n             WHERE state = 3 AND 
+ WHERE id = @id AND state = 1 AND lease_owner = @owner;
+;
+@attempt
+@created
+@dead
+@delivered
+@error
+@evId
+@evSource
+@evTenant
+@evTime
+@evType
+@id
+@leaseUntil
+@limit
+@maxAttempts
+@next
+@now
+@owner
+@payload
+@source
+@state
+@status
+@sub
+@tenant
+@until
+DELETE FROM dbo.WEBHOOK_OUTBOX WHERE (state = 2 AND updated_ms < @delivered) OR (state = 3 AND updated_ms < @dead);
+SELECT COUNT(*) FROM dbo.WEBHOOK_OUTBOX WHERE state IN (0, 1);
+UPDATE dbo.WEBHOOK_OUTBOX SET 
+id
+id, subscription_id, event_id, event_type, attempt, last_status_code, last_error_code, created_ms
+leaseOwner
+message
+owner_tenant_id = @tenant
+owner_tenant_id IS NULL
+state = 0, lease_until_ms = NULL, lease_owner = NULL, next_attempt_ms = @next, last_status_code = @status, last_error_code = @error, updated_ms = @now
+state = 2, lease_until_ms = NULL, last_status_code = @status, last_error_code = NULL, updated_ms = @now
+state = 3, lease_until_ms = NULL, last_status_code = @status, last_error_code = @error, updated_ms = @now
+subscriptionId
+{field:WebhookOutboxMapping.OutputInserted}
+## method EnqueueAsync(WebhookOutboxMessage)
+message
+\n            INSERT INTO dbo.WEBHOOK_OUTBOX (id, source, subscription_id, owner_tenant_id, event_tenant_id, event_id, event_type, event_source, event_time_ms, payload_json, attempt, max_attempts, state, next_attempt_ms, lease_until_ms, lease_owner, last_status_code, last_error_code, created_ms, updated_ms)\n            SELECT @id, @source, @sub, @owner, @evTenant, @evId, @evType, @evSource, @evTime, @payload,\n                   @attempt, @maxAttempts, @state, @next, NULL, NULL, NULL, NULL, @created, @created\n             WHERE NOT EXISTS (SELECT 1 FROM dbo.WEBHOOK_OUTBOX WITH (UPDLOCK, HOLDLOCK)\n                                WHERE source = @source AND subscription_id = @sub AND event_id = @evId);
+@id
+@source
+@sub
+@owner
+@evTenant
+@evId
+@evType
+@evSource
+@evTime
+@payload
+@attempt
+@maxAttempts
+@state
+@next
+@created
+## set_Transaction 0
+## method ClaimBatchAsync
+leaseOwner
+\n            WITH picked AS (\n                SELECT TOP (@limit) * FROM dbo.WEBHOOK_OUTBOX WITH (UPDLOCK, READPAST, ROWLOCK)\n                 WHERE (state = 0 AND next_attempt_ms <= @now) OR (state = 1 AND lease_until_ms <= @now)\n                 ORDER BY next_attempt_ms)\n            UPDATE picked\n               SET state = 1, lease_until_ms = @leaseUntil, lease_owner = @owner, attempt = attempt + 1, updated_ms = @now\n            OUTPUT 
+{field:WebhookOutboxMapping.OutputInserted}
+;
+@now
+@leaseUntil
+@owner
+@limit
+## set_Transaction 0
+## method CompleteAsync
+state = 2, lease_until_ms = NULL, last_status_code = @status, last_error_code = NULL, updated_ms = @now
+## set_Transaction 0
+## method RescheduleAsync
+state = 0, lease_until_ms = NULL, lease_owner = NULL, next_attempt_ms = @next, last_status_code = @status, last_error_code = @error, updated_ms = @now
+## set_Transaction 0
+## method DeadLetterAsync
+state = 3, lease_until_ms = NULL, last_status_code = @status, last_error_code = @error, updated_ms = @now
+## set_Transaction 0
+## method FencedUpdateAsync
+id
+leaseOwner
+UPDATE dbo.WEBHOOK_OUTBOX SET 
+ WHERE id = @id AND state = 1 AND lease_owner = @owner;
+@id
+@owner
+@status
+@status
+@error
+@error
+@now
+@next
+@next
+## set_Transaction 0
+## method DeferSubscriptionAsync
+subscriptionId
+\n            UPDATE dbo.WEBHOOK_OUTBOX SET next_attempt_ms = @until\n             WHERE state = 0 AND source = @source AND subscription_id = @sub AND next_attempt_ms < @until;
+@until
+@source
+@sub
+## set_Transaction 0
+## method ListDeadLettersAsync
+\n            SELECT 
+id, subscription_id, event_id, event_type, attempt, last_status_code, last_error_code, created_ms
+ FROM dbo.WEBHOOK_OUTBOX\n             WHERE state = 3 AND 
+owner_tenant_id = @tenant
+owner_tenant_id IS NULL
+\n             ORDER BY created_ms DESC, id OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY;
+@tenant
+@limit
+## set_Transaction 0
+## method CountPendingAsync
+SELECT COUNT(*) FROM dbo.WEBHOOK_OUTBOX WHERE state IN (0, 1);
+## set_Transaction 0
+## method PurgeAsync(DateTimeOffset)
+DELETE FROM dbo.WEBHOOK_OUTBOX WHERE (state = 2 AND updated_ms < @delivered) OR (state = 3 AND updated_ms < @dead);
+@delivered
+@dead
+## set_Transaction 0

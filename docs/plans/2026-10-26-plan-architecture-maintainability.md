@@ -269,8 +269,10 @@ Both branches below merged on 2026-10-26 (#360 and #361), so these areas are ope
 | #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | merged |
 | #365 | `refactor/architecture-maintainability-5` | ARCH-MNT-23 rest (sleep-based sync replaced, test-sleep ratchet) | not needed (tests only) | APPROVED | merged |
 | #366 | `refactor/architecture-maintainability-6` | ARCH-MNT-16, 17, 27 | 17-SC-01..05, 27-SC-01..03 | APPROVED; Low findings fixed | merged |
-| #367 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot); CI startup stack overflow from the WP4.3 rename fixed (self-recursive `MapAsyncJobEndpoints` wrapper removed, `ExtensionSelfRecursionArchitectureTests`, local host start to `/health/ready` 200) | open |
-| #369 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | APPROVED; findings fixed | open (merge after #367) |
+| #367 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot); CI startup stack overflow from the WP4.3 rename fixed (self-recursive `MapAsyncJobEndpoints` wrapper removed, `ExtensionSelfRecursionArchitectureTests`, local host start to `/health/ready` 200) | merged |
+| #369 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | APPROVED; findings fixed | merged |
+| #370 | `refactor/architecture-maintainability-9` | ARCH-MNT-15-FU-02 (cap calibration; default 50,000 kept) | not needed (no default change) | APPROVED after 1 round | merged |
+| PR 10 | `refactor/architecture-maintainability-10` | ARCH-MNT-22 step 1 (ITSM Outbox, WebhookOutbox, ConsentGrants cores; child plan [`2026-10-26-plan-arch-mnt-22-dialect-dedup.md`](2026-10-26-plan-arch-mnt-22-dialect-dedup.md)) | 22-SC-01..08 | APPROVED | open; merge only after green PG/MSSQL Integration CI |
 | #368 | `refactor/architecture-maintainability-8` | ARCH-MNT-08 | 08-SC-01..09 | APPROVED after 1 round (SC-01 guard widened) | merged |
 
 Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 adds no `DateTime.UtcNow`, no `new HttpClient(`, no src file over 1,000 lines, and its new options are consumed.
@@ -289,6 +291,7 @@ New follow-ups found during delivery:
 - **ARCH-MNT-06-FU-04:** wire the Helm `drainDelaySeconds`/`shutdownTimeoutSeconds` to `Gateway:HighAvailability:*`, together with the `QueryTimeoutSeconds` alignment that NF-HA-01 requires.
 - **ARCH-MNT-08-FU-01:** let `OlapSqlRejectedException` accept only fixed reason codes, so no caller data can reach a response.
 - **ARCH-MNT-23-FU-01:** add `TimeProvider` seams to ReBAC tuple expiry and the `ConsentCacheService` expiry to remove the last real-time waits. `StartupWarmupTests.WarmupMetrics_RecordDurationAndOutcome_NoRequestCounters` failed once in a full run (it uses a global metrics listener) and needs isolation.
+- **ARCH-MNT-22 step 1 result:** production lines went from 1,904 to 1,587 (-317; the plan estimated -610), because the verbatim SQL literals stay in the dialect files. By area: ITSM Outbox -119, ConsentGrants -92, WebhookOutbox -5 (kept for the shared binding and the golden coverage). The dialect divergences D1-D5 are preserved and pinned. Follow-ups DEF-01..DEF-04 are in the child plan; the most important is DEF-02, the PostgreSQL/SQL Server tenant-parse fallback, which must fail closed. Next steps for ARCH-MNT-22: Audit, Catalog and Consent (L).
 
 ## 9. Wave 2 addendum (2026-10-26)
 
