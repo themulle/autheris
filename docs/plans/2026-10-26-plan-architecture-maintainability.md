@@ -264,9 +264,14 @@ Both branches below merged on 2026-10-26 (#360 and #361), so these areas are ope
 
 | PR | Branch | Items | Phase 3 | Phase 5 | Status |
 |----|--------|-------|---------|---------|--------|
-| #362 | `refactor/architecture-maintainability-1` | ARCH-MNT-01, 02, 03 (test), 04, 05, 07; this plan | not needed (detection only) | APPROVED after 1 round (ratchets tolerate shrink and deletion) | open, not merged |
-| #363 | `refactor/architecture-maintainability-2` | ARCH-MNT-23 part 1 (budget asserts, 3 worst delay files, `EnvVarScope`, `WaitHelper`) | not needed (tests only) | APPROVED after 1 round (R1 to R10) | open, not merged |
-| #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | open, not merged |
+| #362 | `refactor/architecture-maintainability-1` | ARCH-MNT-01, 02, 03 (test), 04, 05, 07; this plan | not needed (detection only) | APPROVED after 1 round (ratchets tolerate shrink and deletion) | merged |
+| #363 | `refactor/architecture-maintainability-2` | ARCH-MNT-23 part 1 (budget asserts, 3 worst delay files, `EnvVarScope`, `WaitHelper`) | not needed (tests only) | APPROVED after 1 round (R1 to R10) | merged |
+| #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | merged |
+| #365 | `refactor/architecture-maintainability-5` | ARCH-MNT-23 rest (sleep-based sync replaced, test-sleep ratchet) | not needed (tests only) | APPROVED | merged |
+| #366 | `refactor/architecture-maintainability-6` | ARCH-MNT-16, 17, 27 | 17-SC-01..05, 27-SC-01..03 | APPROVED; Low findings fixed | merged |
+| PR 4 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot) | open |
+| PR 7 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | pending | in implementation |
+| PR 8 | `refactor/architecture-maintainability-8` | ARCH-MNT-08 | 08-SC-01..09 | APPROVED; SC-01 regex widening in progress | in review |
 
 Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 adds no `DateTime.UtcNow`, no `new HttpClient(`, no src file over 1,000 lines, and its new options are consumed.
 
@@ -275,7 +280,8 @@ New follow-ups found during delivery:
 - **ARCH-MNT-15-FU-01:** extend `SqlGate.BenchCheck` with a cold-cache P99 threshold (Phase 3 ruling D1).
 - **ARCH-MNT-15-FU-02:** calibrate the default `Gateway:SqlParserCache:MaxStatesPerGeneration` on the #360 fuzz corpus.
 - **ARCH-MNT-27:** `SecurityReviewG3EndpointAuthzTests.Envoy_ExportEmitsPathPrefixAndValidatesParameters` failed once with a `RegexMatchTimeoutException` under parallel build load. Check whether the regex timeout belongs to production code, which would mean timeouts under real load too, and fix it with a deterministic assertion or a `NonBacktracking` regex.
-- **Next PR:** the DI decomposition (ARCH-MNT-09..12), now unblocked because #361 is merged.
+- **Resolved:** ARCH-MNT-27 (#366: production Envoy regexes replaced by non-regex checks); DI decomposition is PR 4.
+- **DI snapshot maintenance:** every PR that adds or removes a DI registration must update `tests/Autheris.Tests.Unit/DependencyInjection/Snapshots/*.txt` with `AUTHERIS_UPDATE_SNAPSHOTS=1` locally (rejected in CI) and explain the diff in the PR.
 
 ## 9. Wave 2 addendum (2026-10-26)
 
