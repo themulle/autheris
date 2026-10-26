@@ -134,9 +134,11 @@ public class AntlrCacheCalibrationTests(ITestOutputHelper output)
         var total = AntlrCacheGeneration.CountStates(generations.Current);
         var bytesPerState = (after - before) / Math.Max(1, total);
 
+        Assert.True(corpus.Count >= 2000 && SeedCorpus().Count >= 300, "The corpus shape changed; re-check the calibration.");
         output.WriteLine($"corpus statements: {corpus.Count} (seed corpus: {SeedCorpus().Count})");
         table.ForEach(output.WriteLine);
         output.WriteLine($"total states: {total}; max per-statement increase: {maxIncrease}; swaps: {generations.SwapCount}");
+        // GC.GetTotalMemory is process-global (other threads allocate too), so the bytes per state value is approximate.
         output.WriteLine($"managed bytes: {after - before}; approx bytes per state: {bytesPerState}");
         var defaults = new AntlrCacheOptions();
         output.WriteLine($"default cap {defaults.MaxStatesPerGeneration} -> worst case {(long)defaults.MaxStatesPerGeneration * defaults.HardCapFactor * bytesPerState / (1024 * 1024)} MB (budget {WorstCaseBudgetBytes / (1024 * 1024)} MB)");
@@ -153,7 +155,7 @@ public class AntlrCacheCalibrationTests(ITestOutputHelper output)
     [Fact]
     public void SeedCorpus_FitsInOneGenerationAtTheDefaultCap_WithoutASwap()
     {
-        var defaults = new AntlrCacheOptions();
+        var defaults = new AntlrCacheOptions { MinParsesPerGeneration = 1, GenerationCheckInterval = 1 };
         using var generations = new AntlrCacheGenerations(defaults);
         var engine = new FastSqlEngine(generations);
         var corpus = SeedCorpus();

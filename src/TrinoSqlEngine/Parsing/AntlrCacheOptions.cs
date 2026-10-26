@@ -10,7 +10,7 @@ namespace TrinoSqlEngine.Parsing;
 /// </remarks>
 public sealed record AntlrCacheOptions
 {
-    /// <summary>Largest accepted <see cref="MaxStatesPerGeneration"/> (a state costs a few KB, so this is already a multi-GB ceiling).</summary>
+    /// <summary>Largest accepted <see cref="MaxStatesPerGeneration"/> (a state costs about 1.3 KB, so this is already a ceiling above 1 GB).</summary>
     public const int MaxAllowedStatesPerGeneration = 1_000_000;
 
     /// <summary>Largest accepted <see cref="GenerationCheckInterval"/> and <see cref="MinParsesPerGeneration"/>.</summary>
