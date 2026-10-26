@@ -148,5 +148,77 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
         var step2 = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);
         step2.Status.ShouldBe("APPROVED");
     }
-}
 
+    private static async Task<(TableIdentifier Table, Guid TableId)> CreateRevokeTableAsync(SqlServerGovernanceRepository repo)
+    {
+        var tableId = new TableIdentifier("sales", "crm", "ms_rv_" + Guid.NewGuid().ToString("N")[..8]);
+        var table = new Table
+        {
+            Id = Guid.NewGuid(),
+            SourceName = tableId.Domain,
+            SchemaName = tableId.Schema,
+            TableName = tableId.TableName,
+            Sensitivity = "LOW",
+            RequiresFourEyes = false,
+            IsActive = true
+        };
+        var meta = await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = tableId,
+            Table = table,
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
+        });
+        return (tableId, meta.Table.Id);
+    }
+
+    private static Consent UserConsent(TableIdentifier table, Guid tableId, string sid, string tenant) => new()
+    {
+        TableId = tableId,
+        TableIdentifier = table,
+        TenantId = new TenantId(tenant),
+        GranteeType = GranteeType.User,
+        GranteeSid = new Sid(sid),
+        Effect = ConsentEffect.Allow,
+        ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+        ValidTo = DateTimeOffset.UtcNow.AddDays(30),
+        CreatedBySid = new Sid("S-1-5-21-ADMIN")
+    };
+
+    /// <summary>ARCH-MNT-22-T-04: a non-grantee without approver rights cannot revoke by id and nothing changes.</summary>
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Revoke_Unauthorized_NonGrantee_Throws_And_Writes_No_Change()
+    {
+        if (!_available) return;
+
+        await using var repo = NewRepository();
+        var (table, tableId) = await CreateRevokeTableAsync(repo);
+        var consent = await repo.CreateConsentAsync(UserConsent(table, tableId, "S-1-5-21-ALICE", "tenant-a"));
+
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope"));
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope"));
+
+        (await repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
+    }
+
+    /// <summary>ARCH-MNT-22-T-05: revoke by id (the row-locked tenant filter exemption) revokes exactly the addressed consent, never another tenant's.</summary>
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Revoke_ById_Cannot_Revoke_Other_Tenant_Consent()
+    {
+        if (!_available) return;
+
+        await using var repo = NewRepository();
+        var (table, tableId) = await CreateRevokeTableAsync(repo);
+        var alice = new Sid("S-1-5-21-ALICE");
+        var mine = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-a"));
+        var foreign = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-b"));
+
+        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only");
+
+        (await repo.GetConsentByIdAsync(mine.Id))!.IsRevoked.ShouldBeTrue();
+        (await repo.GetConsentByIdAsync(foreign.Id))!.IsRevoked.ShouldBeFalse();
+    }
+}

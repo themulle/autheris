@@ -64,7 +64,16 @@ public sealed class DialectSqlGoldenArchitectureTests
         }
 
         var golden = LoadGolden(dialect, area);
-        snapshot.Set.ShouldBe(golden.Set, $"{dialect}.{area}: SQL, parameter names, lock hints or literals changed; behaviour-preserving refactors must keep the golden byte-identical");
+        AssertSameSet(snapshot, golden.Set, $"{dialect}.{area}");
+    }
+
+    private static void AssertSameSet(DialectSqlSnapshot snapshot, IReadOnlyList<string> golden, string label)
+    {
+        var removed = golden.Except(snapshot.Set, StringComparer.Ordinal).Select(DialectSqlFragmentExtractor.Escape).ToList();
+        var added = snapshot.Set.Except(golden, StringComparer.Ordinal).Select(DialectSqlFragmentExtractor.Escape).ToList();
+        (removed.Count + added.Count).ShouldBe(
+            0,
+            $"{label}: SQL, parameter names, lock hints or literals changed; behaviour-preserving refactors must keep the golden byte-identical. Missing: [{string.Join(" | ", removed)}] Unexpected: [{string.Join(" | ", added)}]");
     }
 
     [Theory]
@@ -102,7 +111,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     {
         // ARCH-MNT-22-T-01: the committed golden equals what the compiled code contains (static L1 proof, all three dialects).
         var snapshot = DialectSqlFragmentExtractor.Extract(dialect, Area("ConsentGrants"));
-        snapshot.Set.ShouldBe(LoadGolden(dialect, "ConsentGrants").Set);
+        AssertSameSet(snapshot, LoadGolden(dialect, "ConsentGrants").Set, $"{dialect}.ConsentGrants");
     }
 
     [Trait("Category", "Security")]
@@ -161,7 +170,7 @@ public sealed class DialectSqlGoldenArchitectureTests
         var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
         var candidates = module.GetTypes()
             .Where(t => t.Name.EndsWith("SqlCore", StringComparison.Ordinal) || t.Name.EndsWith("Sql", StringComparison.Ordinal))
-            .Where(t => DialectSqlFragmentExtractor.Areas.Any(a => t.Name.StartsWith(a.Name, StringComparison.Ordinal)))
+            .Where(t => DialectSqlFragmentExtractor.Areas.Any(a => t.Name.StartsWith(a.TypeName, StringComparison.Ordinal)))
             .ToList();
         foreach (var type in candidates)
         {

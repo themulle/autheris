@@ -8,6 +8,24 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
+    /// <summary>Dialect SQL of the consent grant statements (ARCH-MNT-22). Literals are moved verbatim; binding and mapping live in <see cref="ConsentGrantSqlCore"/>.</summary>
+    internal static class ConsentGrantSql
+    {
+        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
+                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                       c.is_revoked, c.tenant_id
+                                FROM CONSENTS c
+                                JOIN TABLES t ON c.table_id = t.id
+                                WHERE t.source_name_lc = LOWER(@domain) AND t.schema_name_lc = LOWER(@schema) AND t.table_name_lc = LOWER(@table)
+                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
+                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
+
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
+                                FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
+                                JOIN TABLES t ON c.table_id = t.id
+                                WHERE c.id = @id";
+    }
+
     public async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
         TableIdentifier table,
         string roleName,
@@ -17,53 +35,9 @@ public partial class SqlServerGovernanceRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
 
-        var consents = new List<Consent>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                       c.is_revoked, c.tenant_id
-                                FROM CONSENTS c
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE t.source_name_lc = LOWER(@domain) AND t.schema_name_lc = LOWER(@schema) AND t.table_name_lc = LOWER(@table)
-                                  AND c.is_revoked = 0" + (tenantId != null ? " AND c.tenant_id = @tenantId" : "") + @"
-                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
-            cmd.Parameters.AddWithValue("@domain", table.Domain);
-            cmd.Parameters.AddWithValue("@schema", table.Schema);
-            cmd.Parameters.AddWithValue("@table", table.TableName);
-            if (tenantId != null)
-            {
-                cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
-            }
-
-            cmd.Parameters.AddWithValue("@role", roleName);
-
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                var consent = new Consent
-                {
-                    Id = Guid.Parse(reader.GetString(0)),
-                    TableId = Guid.Parse(reader.GetString(1)),
-                    TableIdentifier = table,
-                    ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                    Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                    GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), true),
-                    GranteeSid = reader.IsDBNull(5) ? (Sid?)null : new Sid(reader.GetString(5)),
-                    RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                    RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                    ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
-                    ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
-                    IsRevoked = reader.GetInt32(10) == 1,
-                    TenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(11))
-                };
-                if (consent.IsActive(atTime))
-                {
-                    consents.Add(consent);
-                }
-            }
-        }
+        var consents = await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
+            conn, ConsentGrantSql.ActiveRoleConsents(tenantId != null), table, roleName, tenantId, atTime, ct).ConfigureAwait(false);
 
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -156,32 +130,8 @@ public partial class SqlServerGovernanceRepository
     /// Sets <c>CONSENTS.description</c> of one non-revoked, unexpired consent of the tenant inside <paramref name="tx"/>; touches no other column.
     /// Returns false (no row changed) for an unknown, foreign-tenant, revoked or expired consent (SEC-GOV158I1-05).
     /// </summary>
-    private async Task<bool> UpdateConsentDescriptionInTransactionAsync(SqlConnection conn, SqlTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct)
-    {
-        // valid_to is stored as ISO text with the writer's offset, so the expiry is compared as a timestamp, not as text.
-        string? validTo;
-        await using (var sel = conn.CreateCommand())
-        {
-            sel.Transaction = tx;
-            sel.CommandText = "SELECT valid_to FROM CONSENTS WHERE id = @id AND tenant_id = @t AND is_revoked = 0";
-            sel.Parameters.AddWithValue("@id", update.ConsentId.ToString());
-            sel.Parameters.AddWithValue("@t", update.Tenant.Value);
-            validTo = await sel.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
-        }
-
-        if (validTo is null || DateTimeOffset.Parse(validTo, System.Globalization.CultureInfo.InvariantCulture) <= DateTimeOffset.UtcNow)
-        {
-            return false;
-        }
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = "UPDATE CONSENTS SET description = @d WHERE id = @id AND tenant_id = @t AND is_revoked = 0";
-        cmd.Parameters.AddWithValue("@d", (object?)update.Description ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@id", update.ConsentId.ToString());
-        cmd.Parameters.AddWithValue("@t", update.Tenant.Value);
-        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
-    }
+    private Task<bool> UpdateConsentDescriptionInTransactionAsync(SqlConnection conn, SqlTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct) =>
+        ConsentGrantSqlCore.UpdateDescriptionAsync(conn, tx, update, TimeProvider.System, ct);
 
     public async Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default)
     {
@@ -214,59 +164,31 @@ public partial class SqlServerGovernanceRepository
     private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
         SqlConnection conn, SqlTransaction tx, Guid consentId, Sid actor, string reason, CancellationToken ct)
     {
-        TableIdentifier? tableId = null;
-        var tenant = TenantId.LegacySingleTenant;
-        var isGranteeSelf = false;
-        var alreadyRevoked = false;
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
-                                FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.id = @id";
-            cmd.Parameters.AddWithValue("@id", consentId.ToString());
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            if (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-                if (!reader.IsDBNull(3) && TenantId.TryParse(reader.GetString(3), out var tid))
-                {
-                    tenant = tid;
-                }
-
-                isGranteeSelf = string.Equals(reader.GetString(4), "User", StringComparison.OrdinalIgnoreCase) &&
-                                string.Equals(reader.IsDBNull(5) ? null : reader.GetString(5), actor.Value, StringComparison.OrdinalIgnoreCase);
-                alreadyRevoked = reader.GetInt32(6) == 1;
-            }
-        }
-
-        if (!tableId.HasValue)
+        var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, ConsentGrantSql.RevokeTarget, consentId, actor, ct).ConfigureAwait(false);
+        if (target is not { } found)
         {
             throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
         }
 
-        if (!isGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(tableId.Value, actor, null, ct).ConfigureAwait(false))
+        TableIdentifier? tableId = found.Table;
+        var tenant = TenantId.LegacySingleTenant;
+        // D2 (ARCH-MNT-22): PostgreSQL/SQL Server fall back silently to LegacySingleTenant on an unparsable tenant; SQLite throws (follow-up DEF-02).
+        if (found.TenantRaw is not null && TenantId.TryParse(found.TenantRaw, out var tid))
+        {
+            tenant = tid;
+        }
+
+        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(tableId.Value, actor, null, ct).ConfigureAwait(false))
         {
             throw new UnauthorizedAccessException($"User '{actor}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
         }
 
-        if (alreadyRevoked)
+        if (found.AlreadyRevoked)
         {
             return null;
         }
 
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = @"UPDATE CONSENTS SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason
-                                WHERE id = @id AND is_revoked = 0";
-            cmd.Parameters.AddWithValue("@id", consentId.ToString());
-            cmd.Parameters.AddWithValue("@by", actor.Value);
-            cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("@reason", reason);
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
+        await ConsentGrantSqlCore.MarkRevokedAsync(conn, tx, consentId, actor, reason, TimeProvider.System, ct).ConfigureAwait(false);
 
         await RecordAuditEventAsync(new AuditLogEntry
         {

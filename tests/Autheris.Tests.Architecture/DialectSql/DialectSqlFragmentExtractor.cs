@@ -7,7 +7,11 @@ namespace Autheris.Tests.Architecture.DialectSql;
 /// <summary>One governed persistence area whose per-dialect SQL is pinned (ARCH-MNT-22).</summary>
 /// <param name="Name">Area name used in golden file names and in the <c>{Area}Sql</c> / <c>{Area}SqlCore</c> type names.</param>
 /// <param name="Roots">Root methods of the dialect repository, as <c>Name</c> or <c>Name(FirstParameterTypeName)</c> (overload disambiguation); a trailing <c>?</c> marks a root that only exists after a refactoring step (its strings join the set).</param>
-internal sealed record DialectSqlArea(string Name, string[] Roots);
+/// <param name="TypePrefix">Prefix of the nested <c>{TypePrefix}Sql</c> type and the <c>{TypePrefix}SqlCore</c> type; defaults to <paramref name="Name"/>.</param>
+internal sealed record DialectSqlArea(string Name, string[] Roots, string? TypePrefix = null)
+{
+    public string TypeName => TypePrefix ?? Name;
+}
 
 /// <summary>Ordered string fragments of one root method plus its <c>set_Transaction</c> call count.</summary>
 internal sealed record DialectSqlMethod(string Root, IReadOnlyList<string> Fragments, int SetTransactionCalls);
@@ -39,7 +43,8 @@ internal static class DialectSqlFragmentExtractor
         new("ConsentGrants",
         [
             "GetActiveRoleConsentsAsync", "UpdateConsentDescriptionInTransactionAsync", "RevokeConsentInTransactionAsync"
-        ])
+        ],
+        "ConsentGrant")
     ];
 
     private const string InfrastructureNamespace = "Autheris.Infrastructure.Persistence";
@@ -246,13 +251,13 @@ internal static class DialectSqlFragmentExtractor
 
     private static IEnumerable<TypeDefinition> AuxiliaryTypes(ModuleDefinition module, TypeDefinition repo, DialectSqlArea area)
     {
-        var nested = repo.NestedTypes.FirstOrDefault(t => t.Name == $"{area.Name}Sql");
+        var nested = repo.NestedTypes.FirstOrDefault(t => t.Name == $"{area.TypeName}Sql");
         if (nested is not null)
         {
             yield return nested;
         }
 
-        var core = module.GetType($"{InfrastructureNamespace}.{area.Name}SqlCore");
+        var core = module.GetType($"{InfrastructureNamespace}.{area.TypeName}SqlCore");
         if (core is not null)
         {
             yield return core;
