@@ -13,7 +13,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-public static class Plan9ServiceExtensions
+public static class AsyncJobServiceExtensions
 {
     public static IServiceCollection AddDatasourceTesting(this IServiceCollection services)
     {
@@ -33,14 +33,14 @@ public static class Plan9ServiceExtensions
         return services;
     }
 
-    public static IServiceCollection AddPlan9Services(this IServiceCollection services, IConfiguration? configuration = null)
+    public static IServiceCollection AddAsyncJobsAndDatasourceTesting(this IServiceCollection services, IConfiguration? configuration = null)
     {
         return services
             .AddDatasourceTesting()
             .AddAsyncJobs(configuration);
     }
 
-    public static IEndpointRouteBuilder MapPlan9Endpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapAsyncJobEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapAsyncJobEndpoints();
         return app;

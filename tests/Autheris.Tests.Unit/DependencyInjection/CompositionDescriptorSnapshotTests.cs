@@ -24,18 +24,24 @@ using Xunit;
 public sealed class CompositionDescriptorSnapshotTests
 {
     [Theory]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "ARCH-MNT-14-SC-05")]
     [InlineData("dev-sqlite")]
     [InlineData("production-like")]
     public void Composition_DescriptorSnapshot_IsStable(string profile)
     {
+        // ARCH-MNT-14-T-04
         var snapshot = BuildSnapshot(profile);
 
         SnapshotFile.AssertMatches(snapshot, SnapshotFile.SnapshotPath($"composition-{profile}.txt"));
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "ARCH-MNT-14-SC-05")]
     public void Snapshot_UpdateFlagIsRejectedInCi()
     {
+        // ARCH-MNT-14-T-05
         static Func<string, string?> Env(params (string Key, string Value)[] vars) =>
             key => vars.Where(v => v.Key == key).Select(v => (string?)v.Value).FirstOrDefault();
 
@@ -79,7 +85,7 @@ public sealed class CompositionDescriptorSnapshotTests
         var demoDataEnabled = DemoDataSwitch.Resolve(gatewayOptions, environment.EnvironmentName);
         services.AddSingleton<IDemoDataSwitch>(new DemoDataSwitch(demoDataEnabled));
         services.AddGatewayGraphQL(gatewayOptions);
-        services.AddPlan9Services(configuration);
+        services.AddAsyncJobsAndDatasourceTesting(configuration);
 
         var text = new StringBuilder();
         for (var i = 0; i < services.Count; i++)
@@ -131,7 +137,12 @@ public sealed class CompositionDescriptorSnapshotTests
     {
         if (!type.IsGenericType)
         {
-            return (type.FullName ?? type.Name).Replace('+', '.');
+            var plain = (type.FullName ?? type.Name).Replace('+', '.');
+
+            // NSubstitute numbers its proxy types (ObjectProxy, ObjectProxy_2, ...) in creation order across the whole test run.
+            return plain.StartsWith("Castle.Proxies.", StringComparison.Ordinal)
+                ? System.Text.RegularExpressions.Regex.Replace(plain, "_\\d+$", string.Empty)
+                : plain;
         }
 
         var name = (type.GetGenericTypeDefinition().FullName ?? type.Name).Replace('+', '.');

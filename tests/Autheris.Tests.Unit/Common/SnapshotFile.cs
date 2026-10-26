@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Runtime.CompilerServices;
 using Shouldly;
+using Xunit;
 
 /// <summary>
 /// Text snapshot support for refactoring guards (ARCH-MNT-14-SC-05). A snapshot is rewritten only when
@@ -50,6 +51,23 @@ internal static class SnapshotFile
         }
 
         File.Exists(snapshotPath).ShouldBeTrue($"snapshot '{snapshotPath}' is missing; generate it with {UpdateFlag}=1");
-        Normalize(File.ReadAllText(snapshotPath)).ShouldBe(normalized, $"snapshot '{snapshotPath}' differs; review the change and update with {UpdateFlag}=1");
+        var expected = Normalize(File.ReadAllText(snapshotPath));
+        if (!string.Equals(expected, normalized, StringComparison.Ordinal))
+        {
+            // The actual text goes to a temp file so a failure names the first differing line instead of dumping both texts.
+            var actualPath = Path.Combine(Path.GetTempPath(), "autheris-snapshot-actual-" + Path.GetFileName(snapshotPath));
+            File.WriteAllText(actualPath, normalized);
+            var expectedLines = expected.Split('\n');
+            var actualLines = normalized.Split('\n');
+            var line = 0;
+            while (line < expectedLines.Length && line < actualLines.Length && expectedLines[line] == actualLines[line])
+            {
+                line++;
+            }
+
+            Assert.Fail(
+                $"snapshot '{snapshotPath}' differs at line {line + 1}: expected '{(line < expectedLines.Length ? expectedLines[line] : "<end>")}' " +
+                $"but was '{(line < actualLines.Length ? actualLines[line] : "<end>")}'. Actual text: {actualPath}. Update with {UpdateFlag}=1 after review.");
+        }
     }
 }

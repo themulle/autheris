@@ -195,14 +195,19 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
     ];
 
     [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "ARCH-MNT-14-SC-01")]
     public void EachInvalidCase_FailsWithGoldenMessage()
     {
+        // ARCH-MNT-14-T-01
         var outcomes = FailureCases().Select(c => RunFailureOutcome(c, ValidatePublic, _fixtureDir));
 
         SnapshotFile.AssertMatches(string.Join("\n", outcomes), SnapshotFile.SnapshotPath("startup-validator-failures.txt"));
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "ARCH-MNT-14-SC-01")]
     public void ValidConfigs_LogGoldenWarnings()
     {
         var outcomes = WarningCases().Select(c => RunWarningOutcome(c, ValidatePublic, _fixtureDir));
