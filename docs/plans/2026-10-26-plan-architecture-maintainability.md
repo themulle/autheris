@@ -259,3 +259,20 @@ Both branches below merged on 2026-10-26 (#360 and #361), so these areas are ope
 - REV-08: SQL generators already share a base; no action.
 - REV-09: ARCH-MNT-04 (HttpClient ban) and ARCH-MNT-07. The assembly layering rule exists (`ArchitectureTests.cs`), and ARCH-MNT-01 adds the csproj freeze. The rule that every endpoint group requires authorization becomes a new item under ARCH-MNT-07, as an allowlisted ratchet.
 - REV-10: ARCH-MNT-25.
+
+## 8. Delivery status (2026-10-26)
+
+| PR | Branch | Items | Phase 3 | Phase 5 | Status |
+|----|--------|-------|---------|---------|--------|
+| #362 | `refactor/architecture-maintainability-1` | ARCH-MNT-01, 02, 03 (test), 04, 05, 07; this plan | not needed (detection only) | APPROVED after 1 round (ratchets tolerate shrink and deletion) | open, not merged |
+| #363 | `refactor/architecture-maintainability-2` | ARCH-MNT-23 part 1 (budget asserts, 3 worst delay files, `EnvVarScope`, `WaitHelper`) | not needed (tests only) | APPROVED after 1 round (R1 to R10) | open, not merged |
+| #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | open, not merged |
+
+Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 adds no `DateTime.UtcNow`, no `new HttpClient(`, no src file over 1,000 lines, and its new options are consumed.
+
+New follow-ups found during delivery:
+
+- **ARCH-MNT-15-FU-01:** extend `SqlGate.BenchCheck` with a cold-cache P99 threshold (Phase 3 ruling D1).
+- **ARCH-MNT-15-FU-02:** calibrate the default `Gateway:SqlParserCache:MaxStatesPerGeneration` on the #360 fuzz corpus.
+- **ARCH-MNT-27:** `SecurityReviewG3EndpointAuthzTests.Envoy_ExportEmitsPathPrefixAndValidatesParameters` failed once with a `RegexMatchTimeoutException` under parallel build load. Check whether the regex timeout belongs to production code, which would mean timeouts under real load too, and fix it with a deterministic assertion or a `NonBacktracking` regex.
+- **Next PR:** the DI decomposition (ARCH-MNT-09..12), now unblocked because #361 is merged.
