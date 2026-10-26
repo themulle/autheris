@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit;
 
 using System;
@@ -103,7 +104,7 @@ public sealed class IntegrationGapCTests
         var a2 = await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "tenant-a");
 
         var waitingA = manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "tenant-a").AsTask();
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => InteractiveMetrics(manager).QueuedRequests == 1, WaitHelper.HangGuard, "tenant A's request never queued");
 
         // Tenant B is not blocked by tenant A's waiting request
         var b1 = await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "tenant-b");
@@ -128,7 +129,7 @@ public sealed class IntegrationGapCTests
         var a2 = await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "tenant-a");
 
         var waitingA = manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "tenant-a").AsTask();
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => InteractiveMetrics(manager).QueuedRequests == 1, WaitHelper.HangGuard, "tenant A's request never queued");
         waitingA.IsCompleted.ShouldBeFalse();
         InteractiveMetrics(manager).QueuedRequests.ShouldBe(1);
 

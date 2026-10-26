@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Integration;
 
 using System;
@@ -141,10 +142,20 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
     private async Task AssertCompiledAuditAsync(int before, string door)
     {
         IReadOnlyList<AuditLogEntry> audits = await CompiledAuditsAsync();
-        for (var attempt = 0; attempt < 40 && audits.Count <= before; attempt++)
+        try
         {
-            await Task.Delay(250);
-            audits = await CompiledAuditsAsync();
+            await WaitHelper.WaitUntil(
+                async () =>
+                {
+                    audits = await CompiledAuditsAsync();
+                    return audits.Count > before;
+                },
+                TimeSpan.FromSeconds(10),
+                pollInterval: TimeSpan.FromMilliseconds(250));
+        }
+        catch (TimeoutException)
+        {
+            // fall through: the assertion below reports the missing audit record
         }
 
         audits.Count.ShouldBeGreaterThan(before, $"{door}: no audit record of the caller on '{DataSourceName}' with compiler_version and sql.compiled_digest was written");
