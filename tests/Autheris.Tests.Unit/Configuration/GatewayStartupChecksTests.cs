@@ -25,7 +25,10 @@ public sealed class GatewayStartupChecksTests : IDisposable
     /// is stricter than the production check, so the check is a defence in depth with no observable case. A newly unguarded check
     /// fails the mutation test; if this one becomes reachable it must get a case and leave this list.
     /// </summary>
-    private static readonly string[] UnreachableBehindObjectGraph = ["QueryCostOptions"];
+    private static readonly string[] UnreachableBehindObjectGraph =
+    [
+        "QueryCostOptions", // production range check is shadowed by the [Range]/[Required] annotations ObjectGraph validates first
+    ];
 
     private readonly string _fixtureDir = CreateFixtureDirectory();
 

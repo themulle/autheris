@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Autheris.Api.Configuration;
@@ -87,13 +88,35 @@ public sealed class CompositionDescriptorSnapshotTests
         services.AddGatewayGraphQL(gatewayOptions);
         services.AddAsyncJobsAndDatasourceTesting(configuration);
 
+        var kept = WithoutTestAuthRegistration(services);
         var text = new StringBuilder();
-        for (var i = 0; i < services.Count; i++)
+        for (var i = 0; i < kept.Count; i++)
         {
-            text.Append(Describe(i, services[i])).Append('\n');
+            text.Append(Describe(i, kept[i])).Append('\n');
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// The test authentication scheme is compiled in only with <c>-p:AutherisIncludeTestAuth=true</c> (<c>AUTHERIS_TEST_AUTH</c>); its
+    /// <c>AddScheme</c> call adds the handler and the three option descriptors directly before it. They are dropped so the snapshot is
+    /// the same with and without the flag, and only the kept descriptors are numbered.
+    /// </summary>
+    private static List<ServiceDescriptor> WithoutTestAuthRegistration(IServiceCollection services)
+    {
+        var all = services.ToList();
+        var handler = all.FindIndex(d => d.ServiceType.Name == "TestAuthHandler");
+        if (handler >= 3)
+        {
+            var scheme = all.GetRange(handler - 3, 3).Select(d => FormatType(d.ServiceType)).ToArray();
+            scheme[0].ShouldContain("IConfigureOptions<Microsoft.AspNetCore.Authentication.AuthenticationOptions>");
+            scheme[1].ShouldContain("IConfigureOptions<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>");
+            scheme[2].ShouldContain("IValidateOptions<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>");
+            all.RemoveRange(handler - 3, 4);
+        }
+
+        return all;
     }
 
     private static string Describe(int index, ServiceDescriptor descriptor)
