@@ -168,8 +168,7 @@ In `appsettings.json` or Kubernetes ConfigMap:
       },
       "PostAuthSidRateLimit": {
         "TokenBucketCapacity": 500,
-        "TokensPerSecond": 50,
-        "MaxCostPerMinute": 10000
+        "TokensPerSecond": 50
       },
       "ClientTiers": {
         "RoleTierMappings": {
