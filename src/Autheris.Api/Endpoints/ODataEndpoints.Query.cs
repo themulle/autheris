@@ -47,7 +47,7 @@ public static partial class ODataEndpoints
             resolution.Tenant is { } tenant && tenant.Value is not null)
         {
             var isOwner = tenantResolver?.IsDefaultTenant(tenant) == true;
-            candidateTables = tables
+            candidateTables = Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(tables, tenant)
                 .Where(t => isOwner ||
                             string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase))

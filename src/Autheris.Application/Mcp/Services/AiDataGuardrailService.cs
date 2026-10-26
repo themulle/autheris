@@ -121,11 +121,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _ => "mcp_query"
     };
 
-    // Canonical caller class (never role strings): only the global and the catalog-owner administrator skip the catalog visibility check;
-    // a tenant-scoped administrator is confined by it, a GovernanceAdmin without a resolvable tenant is no administrator.
+    // Canonical caller class (never role strings): only the global administrator skips the catalog visibility check. The catalog owner
+    // (default-tenant GovernanceAdmin) keeps it, because it drops other tenants' virtual tables and semantic models (DT-SC-08); a
+    // tenant-scoped administrator is confined by it, a GovernanceAdmin without a resolvable tenant is no administrator.
     private bool IsUnrestrictedCatalogCaller(McpSessionContext session) =>
         CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(session), TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy))
-            is CallerScope.Global or CallerScope.CatalogOwner;
+            == CallerScope.Global;
 
     public async ValueTask<McpToolCallResult> ExecuteToolWithGuardrailAsync(
         McpToolCallRequest request,

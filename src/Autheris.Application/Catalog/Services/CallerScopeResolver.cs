@@ -99,4 +99,24 @@ public static class CallerScopeResolver
 
     /// <summary>True when the principal holds the GovernanceAdmin role (used for the diagnostic of administrators without a resolvable tenant).</summary>
     public static bool HoldsGovernanceAdminRole(ClaimsPrincipal? user) => user?.GetUserRoles().Contains(GovernanceAdminRole) == true;
+
+    /// <summary>True when the principal carries an invalid, reserved or conflicting tenant claim (resolution outcome Invalid).</summary>
+    public static bool HasInvalidTenantClaim(ClaimsPrincipal? user) =>
+        user?.Identity?.IsAuthenticated == true && TenantClaimReader.Read(user).Kind == ClaimTenantKind.Invalid;
+
+    /// <summary>
+    /// The 403 text for a data-source listing: a GovernanceAdmin without standing is told why. An invalid claim names the code
+    /// <c>TENANT_CLAIM_INVALID</c> (never the value), a missing claim names the option.
+    /// </summary>
+    public static string DatasourceListingDenial(ClaimsPrincipal? user, CallerScope scope)
+    {
+        if (scope != CallerScope.None || user?.Identity?.IsAuthenticated != true || !HoldsGovernanceAdminRole(user))
+        {
+            return "Listing data sources requires a governance administrator.";
+        }
+
+        return HasInvalidTenantClaim(user)
+            ? "Listing data sources is denied: the tenant claim of the caller is invalid (TENANT_CLAIM_INVALID)."
+            : "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.";
+    }
 }

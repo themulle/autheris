@@ -65,7 +65,8 @@ public sealed partial class ODataHandler(
         }
 
         var isOwner = _tenantResolver?.IsDefaultTenant(tenant) == true;
-        return allTables
+        // DT-SC-08: the owner's widening is physical metadata only; other tenants' virtual tables are never candidates (shared rule).
+        return Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(allTables, tenant)
             .Where(t => t.Table.IsActive &&
                         (isOwner ||
                          string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||

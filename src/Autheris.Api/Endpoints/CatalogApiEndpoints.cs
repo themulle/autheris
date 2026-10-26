@@ -138,13 +138,21 @@ public static class CatalogApiEndpoints
             if (scope == CallerScope.None && httpContext.User.Identity?.IsAuthenticated == true &&
                 CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
             {
-                return Results.Json(
-                    new
-                    {
-                        error = "TENANT_UNRESOLVED",
-                        message = "The principal has no resolvable tenant: carry a tenant claim or configure Gateway:Tenancy:DefaultTenantId."
-                    },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return CallerScopeResolver.HasInvalidTenantClaim(httpContext.User)
+                    ? Results.Json(
+                        new
+                        {
+                            error = "TENANT_CLAIM_INVALID",
+                            message = "The tenant claim of the caller is invalid."
+                        },
+                        statusCode: StatusCodes.Status403Forbidden)
+                    : Results.Json(
+                        new
+                        {
+                            error = "TENANT_UNRESOLVED",
+                            message = "The principal has no resolvable tenant: carry a tenant claim or configure Gateway:Tenancy:DefaultTenantId."
+                        },
+                        statusCode: StatusCodes.Status403Forbidden);
             }
 
             var context = CreateRequestContext(httpContext);

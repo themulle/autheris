@@ -180,9 +180,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
             var scope = CallerScopeResolver.Resolve(effectiveContext.User, _catalogOwner);
             if (!CallerScopeResolver.IsAdminView(scope))
             {
-                return SerializeError("Forbidden", 403, scope == CallerScope.None && CallerScopeResolver.HoldsGovernanceAdminRole(effectiveContext.User) && effectiveContext.User?.Identity?.IsAuthenticated == true
-                    ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:DefaultTenantId."
-                    : "Listing data sources requires a governance administrator.");
+                return SerializeError("Forbidden", 403, CallerScopeResolver.DatasourceListingDenial(effectiveContext.User, scope));
             }
 
             var datasources = await _catalogDiscoveryService.ListDatasourcesAsync(effectiveContext, ct).ConfigureAwait(false);

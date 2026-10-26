@@ -216,7 +216,7 @@ public static class CatalogVisibility
     /// schema, is dropped. The rule applies to every tenant, the default tenant (catalog owner) included (DT-SC-08: virtual tables are
     /// tenant-scoped objects, only physical metadata is widened). The one place that recognises a virtual table is <see cref="SemanticVirtualTables"/>.
     /// </summary>
-    internal static IReadOnlyList<TableMetadata> DropForeignVirtualTables(IEnumerable<TableMetadata> tables, TenantId tenantId)
+    public static IReadOnlyList<TableMetadata> DropForeignVirtualTables(IEnumerable<TableMetadata> tables, TenantId tenantId)
     {
         ArgumentNullException.ThrowIfNull(tables);
         return tables

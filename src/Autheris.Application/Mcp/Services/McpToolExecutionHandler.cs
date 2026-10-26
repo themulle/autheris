@@ -352,9 +352,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     sessionContext.TenantId,
                     tool.Name,
                     ForbiddenCode,
-                    datasourceScope == CallerScope.None && CallerScopeResolver.HoldsGovernanceAdminRole(userPrincipal) && userPrincipal?.Identity?.IsAuthenticated == true
-                        ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:DefaultTenantId."
-                        : "Listing data sources requires a governance administrator.");
+                    CallerScopeResolver.DatasourceListingDenial(userPrincipal, datasourceScope));
             }
 
             var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() : null;

@@ -8,6 +8,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Dbt.Services;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
@@ -328,6 +329,15 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
 
         if (resolved is not { } table || (!caller.IsAdmin && !isOwner))
+        {
+            return new Gate(notFound, caller.IsAdmin ? null : caller, default);
+        }
+
+        // DT-SC-08: virtual tables / semantic models are tenant-scoped objects; the catalog-owner widening is physical metadata only. A caller
+        // that is not the global administrator reaches only the semantic tables of its own tenant schema (identical NotFound otherwise).
+        if (scope != CallerScope.Global &&
+            SemanticVirtualTables.IsInSemanticDomain(table) &&
+            !string.Equals(table.Schema, SemanticVirtualTables.TenantSchema(caller.Tenant), StringComparison.Ordinal))
         {
             return new Gate(notFound, caller.IsAdmin ? null : caller, default);
         }
