@@ -77,7 +77,20 @@ public sealed record TenantBindingSpecification(
                     ? ClaimTenant.Valid(fixedTenant)
                     : ClaimTenant.Invalid;
             case TenantBindingKind.ClaimMapped when !string.IsNullOrWhiteSpace(ClaimName) && Mapping is not null:
-                var raw = principal.FindFirst(ClaimName)?.Value;
+                // Same rule as DT-SC-02: several distinct values of the mapping claim are Invalid, never first-wins.
+                string? raw = null;
+                foreach (var claim in principal.FindAll(ClaimName))
+                {
+                    if (raw is null)
+                    {
+                        raw = claim.Value ?? string.Empty;
+                    }
+                    else if (!string.Equals(raw, claim.Value, StringComparison.Ordinal))
+                    {
+                        return ClaimTenant.Invalid;
+                    }
+                }
+
                 if (raw is null)
                 {
                     return ClaimTenant.Absent;

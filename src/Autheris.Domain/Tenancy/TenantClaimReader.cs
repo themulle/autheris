@@ -11,13 +11,28 @@ using Autheris.Domain.Common;
 public static class TenantClaimReader
 {
     /// <summary>The claim names read, in one place.</summary>
-    public static readonly IReadOnlyList<string> ClaimNames =
+    private static readonly string[] Names =
     [
         "tenant_id",
         "tid",
         "tenant",
         "http://schemas.microsoft.com/identity/claims/tenantid"
     ];
+
+    public static IReadOnlyList<string> ClaimNames => Names;
+
+    public static bool IsTenantClaimType(string? type)
+    {
+        for (var i = 0; i < Names.Length; i++)
+        {
+            if (string.Equals(Names[i], type, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public static ClaimTenant Read(ClaimsPrincipal? principal)
     {
@@ -26,11 +41,33 @@ public static class TenantClaimReader
             return ClaimTenant.Absent;
         }
 
-        string? seen = null;
-        foreach (var name in ClaimNames)
+        // Fast path (claim-less principals, the common default-tenant case): FindFirst does not allocate.
+        var any = false;
+        for (var i = 0; i < Names.Length; i++)
         {
-            foreach (var claim in principal.FindAll(name))
+            if (principal.FindFirst(Names[i]) is not null)
             {
+                any = true;
+                break;
+            }
+        }
+
+        if (!any)
+        {
+            return ClaimTenant.Absent;
+        }
+
+        string? seen = null;
+        var identities = principal.Identities;
+        foreach (var identity in identities)
+        {
+            foreach (var claim in identity.Claims)
+            {
+                if (!IsTenantClaimType(claim.Type))
+                {
+                    continue;
+                }
+
                 if (seen is null)
                 {
                     seen = claim.Value ?? string.Empty;

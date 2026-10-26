@@ -208,6 +208,30 @@ public sealed class TenantResolverTests
     }
 
     [Fact]
+    public void Unknown_Realm_Claim_Is_Invalid_Not_Claim_Fallback()
+    {
+        // Phase 5 finding (WP-DT-1): a non-blank realm claim whose realm is not registered must never fall through to the claim chain or D.
+        var sut = Sut(Default, Realm(TenantBindingSpecification.Unbound()));
+
+        sut.Resolve(Principal(("autheris:realm", "ghost"), ("tenant_id", "acme"))).Outcome.ShouldBe(TenantResolutionOutcome.Invalid);
+        sut.Resolve(Principal(("autheris:realm", "ghost"))).Outcome.ShouldBe(TenantResolutionOutcome.Invalid);
+    }
+
+    [Fact]
+    public void ClaimMapped_Realm_With_Several_Distinct_Values_Is_Invalid()
+    {
+        var binding = TenantBindingSpecification.ClaimMapped("grp", new Dictionary<string, TenantId>
+        {
+            ["g1"] = new TenantId("one"),
+            ["g2"] = new TenantId("two")
+        });
+        var sut = Sut(Default, Realm(binding));
+
+        sut.Resolve(Principal(("autheris:realm", "r1"), ("grp", "g1"), ("grp", "g2"))).Outcome.ShouldBe(TenantResolutionOutcome.Invalid);
+        sut.Resolve(Principal(("autheris:realm", "r1"), ("grp", "g1"), ("grp", "g1"))).Outcome.ShouldBe(TenantResolutionOutcome.FromRealm);
+    }
+
+    [Fact]
     public void Token_Supplied_Tenant_Source_Claim_Is_Stripped()
     {
         // The resolver never reads autheris:tenant_source: a forged value cannot produce DefaultAssigned or a tenant.

@@ -48,7 +48,22 @@ public sealed class TenantResolver : ITenantResolver
     /// The effective default tenant (the catalog owner, DT-A-7) of <paramref name="tenancy"/> for services that hold the options but no
     /// resolver; <c>null</c> when none is configured or the configured value is unusable (fail closed). Same rule as <see cref="DefaultTenant"/>.
     /// </summary>
-    public static TenantId? EffectiveDefaultOf(TenancyOptions? tenancy) => tenancy is null ? null : DefaultState.From(tenancy).Effective;
+    // Allocation-free (called per request by services that hold only the options): no DefaultState is built.
+    public static TenantId? EffectiveDefaultOf(TenancyOptions? tenancy)
+    {
+        if (tenancy is null)
+        {
+            return null;
+        }
+
+        if (tenancy.DefaultTenantId is { } raw)
+        {
+            return TenantId.TryParse(raw, out var parsed) ? (TenantId?)parsed : null;
+        }
+
+        // Transitional shim (removed in WP-DT-6): see DefaultState.From.
+        return tenancy.EffectiveMode == TenancyMode.Single ? (TenantId?)TenantId.LegacySingleTenant : null;
+    }
 
     public static TenantResolution Decide(ClaimTenant claim, TenantId? defaultTenant) => claim.Kind switch
     {
@@ -70,10 +85,24 @@ public sealed class TenantResolver : ITenantResolver
         var fromRealm = false;
         ClaimTenant claim;
         var realmId = principal.FindFirst(RealmClaimType)?.Value;
-        if (!string.IsNullOrWhiteSpace(realmId) && _realms?.GetRealm(realmId) is { } realm)
+        if (!string.IsNullOrWhiteSpace(realmId))
         {
-            claim = realm.TenantBinding.ResolveClaim(principal);
-            fromRealm = true;
+            if (_realms is not null)
+            {
+                // A non-blank realm claim names an authoritative realm: an unregistered one is Invalid (fail closed), never a claim-chain fallback.
+                if (_realms.GetRealm(realmId) is not { } realm)
+                {
+                    Record(TenantResolutionOutcome.Invalid);
+                    return new TenantResolution(TenantResolutionOutcome.Invalid, null);
+                }
+
+                claim = realm.TenantBinding.ResolveClaim(principal);
+                fromRealm = true;
+            }
+            else
+            {
+                claim = TenantClaimReader.Read(principal);
+            }
         }
         else
         {
@@ -128,14 +157,17 @@ public sealed class TenantResolver : ITenantResolver
         }
     }
 
+    // The options monitor hands out one TenancyOptions instance per configuration reload (the Func returns the current GatewayOptions.Tenancy
+    // reference), so ReferenceEquals on it is a stable change detector: same reference = same values. Reads and writes are published
+    // through Volatile so a reader never observes a half-built state on weak memory models.
     private DefaultState Current()
     {
         var tenancy = _tenancy();
-        var state = _state;
+        var state = Volatile.Read(ref _state);
         if (!ReferenceEquals(state.Source, tenancy))
         {
             state = DefaultState.From(tenancy);
-            _state = state;
+            Volatile.Write(ref _state, state);
         }
 
         return state;
