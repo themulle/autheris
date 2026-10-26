@@ -412,12 +412,19 @@ public static partial class GatewayServiceCollectionExtensions
         return services;
     }
 
-    internal static void ValidateGatewayOptions(GatewayOptions options, IHostEnvironment environment)
-        => ValidateGatewayOptions(options, environment, System.Environment.GetEnvironmentVariable);
+    internal static void ValidateGatewayOptions(
+        GatewayOptions options,
+        IHostEnvironment environment,
+        Autheris.Domain.Options.Observability.TelemetryOptions? telemetry = null)
+        => ValidateGatewayOptions(options, environment, System.Environment.GetEnvironmentVariable, telemetry);
 
-    internal static void ValidateGatewayOptions(GatewayOptions options, IHostEnvironment environment, Func<string, string?> getEnvironmentVariable)
+    internal static void ValidateGatewayOptions(
+        GatewayOptions options,
+        IHostEnvironment environment,
+        Func<string, string?> getEnvironmentVariable,
+        Autheris.Domain.Options.Observability.TelemetryOptions? telemetry = null)
     {
-        GatewayStartupValidator.ValidateStartup(options, environment, getEnvironmentVariable);
+        GatewayStartupValidator.ValidateStartup(options, environment, getEnvironmentVariable, telemetry: telemetry);
     }
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider)

@@ -172,7 +172,11 @@ public static partial class GatewayServiceCollectionExtensions
 
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateSqlRewriterEngine(configuration);
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateRemovedWebSqlSettings(configuration);
-        ValidateGatewayOptions(gatewayOptions, environment);
+        // ARCH-MNT-06-FU-03: the telemetry section is outside GatewayOptions; bind it here so the startup report can list insecure OTLP transport.
+        ValidateGatewayOptions(
+            gatewayOptions,
+            environment,
+            configuration.GetSection(Autheris.Domain.Options.Observability.TelemetryOptions.SectionName).Get<Autheris.Domain.Options.Observability.TelemetryOptions>());
 
         services.Configure<HostOptions>(o =>
         {

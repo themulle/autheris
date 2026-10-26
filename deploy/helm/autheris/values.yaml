@@ -107,8 +107,11 @@ topologySpreadConstraints:
   whenUnsatisfiable: DoNotSchedule
 
 gateway:
+  # NF-HA-01, rendered to Gateway__HighAvailability__*: shutdown >= query + 10 and
+  # terminationGracePeriodSeconds >= 2 * drain + shutdown + 10 (the preStop sleep uses drainDelaySeconds too). The render fails otherwise.
   drainDelaySeconds: 5
   shutdownTimeoutSeconds: 30
+  queryTimeoutSeconds: 20
   aspnetcoreEnvironment: "Production"
 
   # SEC2-09: when true, rendering fails unless exactly one authentication provider is fully configured, forwardAuth has
