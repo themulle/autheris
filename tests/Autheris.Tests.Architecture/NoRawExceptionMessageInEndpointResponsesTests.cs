@@ -12,6 +12,8 @@ namespace Autheris.Tests.Architecture;
 public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
 {
     // Entries are "<file name>|<trimmed source line>". Identical lines in one file are listed once per occurrence.
+    // Every entry below is a known violator that ARCH-MNT-08 replaces with GatewayExceptionStatusMapper/ProblemDetails
+    // (including the Results.Json sites in VirtualFilterEndpoints, IcebergRestCatalogEndpoints and McpStdioRunner).
     private static readonly string[] Baseline =
     [
         "CatalogApiEndpoints.cs|return Results.BadRequest(new { error = ex.Message });",
@@ -36,7 +38,9 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
         "VirtualFilterEndpoints.cs|return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status404NotFound);",
         "VirtualFilterEndpoints.cs|return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status409Conflict);",
         "VirtualFilterEndpoints.cs|return Results.Json(new { error = ex.Message, code = ex.Code }, statusCode: StatusCodes.Status400BadRequest);",
-        "VirtualFilterEndpoints.cs|var message = isDev ? ex.Message : \"The requested virtual filter operation is invalid.\";"
+        "VirtualFilterEndpoints.cs|var message = isDev ? ex.Message : \"The requested virtual filter operation is invalid.\";",
+        // JSON-RPC internal-error (-32603) response that echoes the exception text. Retired by ARCH-MNT-08.
+        "McpStdioRunner.cs|var errorResponse = $\"{{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"error\\\":{{\\\"code\\\":-32603,\\\"message\\\":{System.Text.Json.JsonSerializer.Serialize(ex.Message)}}},\\\"id\\\":null}}\";"
     ];
 
     [GeneratedRegex(@"\b(ex|e|exception)\.Message\b(?!\s*\.\s*Contains)")]
@@ -45,25 +49,12 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
     [Fact]
     public void EndpointSources_DoNotExposeNewRawExceptionMessages()
     {
-        var endpointsDir = FindEndpointsDirectory();
         var found = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(endpointsDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var dir in new[] { "src/Autheris.Api/Endpoints", "src/Autheris.Api/Mcp" })
         {
-            var name = Path.GetFileName(file);
-            foreach (var raw in File.ReadLines(file))
+            foreach (var file in RepositoryScan.EnumerateFiles(dir, "*.cs"))
             {
-                var line = raw.Trim();
-                if (line.StartsWith("//", StringComparison.Ordinal)
-                    || line.Contains("logger", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (ExceptionMessageAccess().IsMatch(line))
-                {
-                    found.Add($"{name}|{line}");
-                }
+                found.AddRange(FindOccurrences(Path.GetFileName(file), RepositoryScan.ReadText(file)));
             }
         }
 
@@ -83,20 +74,40 @@ public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
             + string.Join("\n", violations));
     }
 
-    private static string FindEndpointsDirectory()
+    [Fact]
+    public void ResultsJson_ExceptionMessage_IsDetected()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
+        var sample = "try { }\ncatch (Exception ex)\n{\n    return Results.Json(new { error = ex.Message }, statusCode: 500);\n}\n";
+
+        FindOccurrences("Sample.cs", sample).ShouldBe(["Sample.cs|return Results.Json(new { error = ex.Message }, statusCode: 500);"]);
+        FindOccurrences("Sample.cs", "return Results.Json(new { error = \"fixed\" }, statusCode: 500);").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void JsonRpcError_ExceptionMessage_IsDetected()
+    {
+        var sample = "var errorResponse = $\"{{\\\"error\\\":{{\\\"code\\\":-32603,\\\"message\\\":{Serialize(ex.Message)}}}}}\";\r\n";
+
+        FindOccurrences("Runner.cs", sample).Count.ShouldBe(1);
+        FindOccurrences("Runner.cs", "var errorResponse = \"{\\\"code\\\":-32603,\\\"message\\\":\\\"Internal error\\\"}\";").ShouldBeEmpty();
+    }
+
+    private static List<string> FindOccurrences(string fileName, string text)
+    {
+        var found = new List<string>();
+        foreach (var line in RepositoryScan.CodeLines(text))
         {
-            var candidate = Path.Combine(dir.FullName, "src", "Autheris.Api", "Endpoints");
-            if (Directory.Exists(candidate))
+            if (line.Contains("logger", StringComparison.OrdinalIgnoreCase))
             {
-                return candidate;
+                continue;
             }
 
-            dir = dir.Parent;
+            if (ExceptionMessageAccess().IsMatch(line))
+            {
+                found.Add($"{fileName}|{line}");
+            }
         }
 
-        throw new DirectoryNotFoundException("Could not locate src/Autheris.Api/Endpoints from the test output directory.");
+        return found;
     }
 }

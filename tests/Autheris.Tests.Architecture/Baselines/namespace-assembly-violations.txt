@@ -1,0 +1,4 @@
+# ARCH-MNT-03: types outside their assembly namespace root. Format: assembly|type. Fixed in a follow-up.
+Autheris.Api|Autheris.Application.Mcp.Services.McpStdioRunner
+Autheris.Application|Autheris.Domain.Common.WebSqlSecurityException
+Autheris.Infrastructure|Autheris.Application.Docs.Services.FileSystemUniversalDocStore
