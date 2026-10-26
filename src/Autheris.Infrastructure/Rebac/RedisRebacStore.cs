@@ -26,9 +26,11 @@ public sealed class RedisRebacStore : IRebacStore
     private readonly IConnectionMultiplexer _multiplexer;
     private readonly ILogger<RedisRebacStore> _logger;
     private readonly string _prefix;
+    private readonly TimeProvider _timeProvider;
 
-    public RedisRebacStore(IConnectionMultiplexer multiplexer, IOptions<GatewayOptions> options, ILogger<RedisRebacStore> logger)
+    public RedisRebacStore(IConnectionMultiplexer multiplexer, IOptions<GatewayOptions> options, ILogger<RedisRebacStore> logger, TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         var prefix = options?.Value?.Caching?.Redis?.InstanceName ?? "autheris:";
@@ -106,7 +108,7 @@ public sealed class RedisRebacStore : IRebacStore
     {
         var tenant = NormalizeTenant(tenantId).ToLowerInvariant();
         var db = _multiplexer.GetDatabase();
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         // 1. All three given -> HGET on the exact field
         if (!string.IsNullOrWhiteSpace(user) && !string.IsNullOrWhiteSpace(relation) && !string.IsNullOrWhiteSpace(obj))

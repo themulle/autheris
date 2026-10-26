@@ -20,9 +20,12 @@ public sealed class InMemoryRebacStore : IRebacStore
     // Partitioned by tenantId -> Set of RebacTuples
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, RebacTuple>> _tenantStores = new(StringComparer.OrdinalIgnoreCase);
 
-    public InMemoryRebacStore(ILogger<InMemoryRebacStore> logger)
+    private readonly TimeProvider _timeProvider;
+
+    public InMemoryRebacStore(ILogger<InMemoryRebacStore> logger, TimeProvider? timeProvider = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public ValueTask AddTupleAsync(RebacTuple tuple, CancellationToken ct = default)
@@ -85,7 +88,7 @@ public sealed class InMemoryRebacStore : IRebacStore
             return ValueTask.FromResult<IReadOnlyList<RebacTuple>>([]);
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         IEnumerable<RebacTuple> query = store.Values.Where(t => !t.IsExpired(now)); // WP-SC-16: an expired tuple is absent (fail closed)
 
         if (user != null)

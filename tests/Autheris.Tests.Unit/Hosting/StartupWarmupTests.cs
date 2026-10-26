@@ -327,8 +327,12 @@ public sealed class StartupWarmupTests
         listener.Start();
 
         var state = new StartupWarmupState();
-        var ok = new FakeStep("Okay", _ => Task.CompletedTask);
-        var bad = new FakeStep("Bad", _ => throw new InvalidOperationException());
+        // The meter is process-global: other warm-up tests run in parallel, so this test records only its own uniquely named steps.
+        var id = Guid.NewGuid().ToString("N");
+        var okName = $"Okay-{id}";
+        var badName = $"Bad-{id}";
+        var ok = new FakeStep(okName, _ => Task.CompletedTask);
+        var bad = new FakeStep(badName, _ => throw new InvalidOperationException());
         using var service = CreateService([ok, bad], state, new FakeTimeProvider());
 
         await service.StartAsync(CancellationToken.None);
@@ -337,9 +341,11 @@ public sealed class StartupWarmupTests
 
         lock (lockObj)
         {
-            recorded.Select(r => r.Instrument).Distinct().Order().ShouldBe(["autheris.startup.warmup.duration", "autheris.startup.warmup.step.duration"]);
-            recorded.Where(r => r.Instrument.EndsWith("step.duration", StringComparison.Ordinal))
-                .Select(r => $"{r.Tags["step"]}={r.Tags["outcome"]}").Order().ShouldBe(["Bad=failed", "Okay=completed"]);
+            var instruments = recorded.Select(r => r.Instrument).Distinct().ToList();
+            instruments.ShouldContain("autheris.startup.warmup.duration");
+            instruments.ShouldContain("autheris.startup.warmup.step.duration");
+            recorded.Where(r => r.Instrument.EndsWith("step.duration", StringComparison.Ordinal) && (Equals(r.Tags["step"], okName) || Equals(r.Tags["step"], badName)))
+                .Select(r => $"{r.Tags["step"]}={r.Tags["outcome"]}").Order().ShouldBe([$"{badName}=failed", $"{okName}=completed"]);
             recorded.All(r => r.Tags.Keys.All(k => k == "step" || k == "outcome")).ShouldBeTrue();
         }
     }
