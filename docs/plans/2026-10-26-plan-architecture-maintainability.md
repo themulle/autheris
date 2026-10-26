@@ -242,6 +242,8 @@ Phase 3 light review: confirm that equal snapshots imply unchanged decorator ord
 
 ## 6. Deferred until merged (no changes in the first PRs)
 
+Both branches below merged on 2026-10-26 (#360 and #361), so these areas are open for the follow-ups. The PR 1 ratchets were re-run against the merged `main`.
+
 - **PR #360 (parser-fuzz):** `scripts/sim/run-parser-fuzz.sh`, the simulation workflow, the `Autheris.Tests.Fuzz` harness and `SimulationIsolationArchitectureTests.cs` (1,158 lines, a split candidate later).
 - **`chore/remove-orphaned-code`:** `GatewayExecutionService` (704 lines), `IGatewayExecutionService`, `BatchRelationLoader`, `ChunkedQueryExecutor`, `GatewayExecutionServiceExtensions.cs`, `GraphQlOptions.MaxInClauseBatchSize`, `InvoiceModels`, `docs/plans/security.txt` and `docs/architecture/arc42.md`.
 

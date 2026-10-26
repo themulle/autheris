@@ -133,7 +133,6 @@ public class PipelineAndInfrastructureSecurityTests
             maskingProvider,
             null,
             null,
-            null,
             dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
@@ -158,7 +157,6 @@ public class PipelineAndInfrastructureSecurityTests
         var cacheService = Substitute.For<IConsentCacheService>();
         var resolutionService = Substitute.For<IConsentResolutionService>();
         var maskingProvider = Substitute.For<IColumnMaskingProvider>();
-        var chunkedExecutor = Substitute.For<IChunkedQueryExecutor>();
 
         var tableId = new TableIdentifier("finance", "dbo", "finance_table_1");
         var metadata = new TableMetadata
@@ -197,7 +195,6 @@ public class PipelineAndInfrastructureSecurityTests
             resolutionService,
             cacheService,
             maskingProvider,
-            chunkedExecutor,
             null, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]

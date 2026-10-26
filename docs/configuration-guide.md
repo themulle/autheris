@@ -491,7 +491,6 @@ Steuert Hot Chocolate 16 Parameter, Komplexitätsgrenzen und Anti-CSRF-Prüfunge
 | `EnableBananaCakePop` | `bool` | `true \| false` | `false` | Nitro Banana Cake Pop GraphQL IDE im Browser. In Produktion deaktivieren! |
 | `MaxResponseRows` | `int` | `100 .. 100000` | `5000` | Maximal zulässige Zeilenanzahl im Response-Budget. |
 | `MaxResponseBytes` | `long` | `1 MB .. 100 MB` | `10485760` (10 MB) | Maximales Byte-Budget für GraphQL-Antworten. |
-| `MaxInClauseBatchSize` | `int` | `10 .. 10000` | `500` | Maximale Batch-Größe für DataLoader `IN`-Prädikate. |
 | `TrustedOrigins` | `List<string>` | URLs / `"*"` | `[]` | CORS- und Anti-CSRF-Erlaubnisliste für `Origin`/`Referer`-Header. |
 | `TrustedDocumentsDirectory` | `string` | Directory path | `""` | Global allowlist of `*.graphql` / `*.gql` documents (hashed over the normalized document). Required and must exist when `PersistedQueriesOnly=true`, unless `AppScopedTrustedDocuments.Enabled=true` (then it may be empty). |
 | `AppScopedTrustedDocuments.Enabled` | `bool` | `true \| false` | `false` | Runtime-managed, app-scoped trusted documents (see below). Requires `PersistedQueriesOnly=true`; startup fails otherwise. |
@@ -511,7 +510,6 @@ Steuert Hot Chocolate 16 Parameter, Komplexitätsgrenzen und Anti-CSRF-Prüfunge
   "EnableBananaCakePop": false,
   "MaxResponseRows": 5000,
   "MaxResponseBytes": 10485760,
-  "MaxInClauseBatchSize": 500,
   "TrustedOrigins": [
     "https://portal.corp.local",
     "https://analytics.corp.local"

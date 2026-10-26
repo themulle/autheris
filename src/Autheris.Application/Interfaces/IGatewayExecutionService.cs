@@ -7,8 +7,6 @@ namespace Autheris.Application.Interfaces;
 
 public interface IGatewayExecutionService
 {
-    int LastDispatchedChildQueryCount { get; }
-
     Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, TableAccessDecision Decision)> ExecuteTableQueryAsync(
         ClaimsPrincipal? principal,
         TableIdentifier table,
@@ -50,11 +48,6 @@ public interface IGatewayExecutionService
         bool recordAudit = true,
         CancellationToken ct = default) =>
         CheckTableAccessAsync(principal, metadata.Identifier, ct);
-
-    Task<IReadOnlyDictionary<string, List<InvoiceItemRecord>>> LoadInvoiceItemsBatchAsync(
-        ClaimsPrincipal? principal,
-        IReadOnlyList<string> invoiceIds,
-        CancellationToken ct = default);
 }
 
 /// <summary>A column to order by (4a.3).</summary>

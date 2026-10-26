@@ -18,7 +18,7 @@ Wir etablieren einen hybriden Ansatz:
 - **Single-Source Correlated Subquery Pushdown:** Befinden sich Ziel- und Filtertabellen in derselben Datenquelle, generiert das Gateway eine korrelierte `EXISTS (SELECT 1 FROM ... WHERE ...)`-Klausel.
   - **Parameter-Overhead:** $P = 0$ für ID-Mengen; Ausführung erfolgt direkt über den RDBMS-Query-Optimizer mittels Index-Seeks.
   - **Dialekt-Sicherheit:** Automatische Bezeichner-Quotierung für SQL Server (`[...]`), PostgreSQL (`"..."`), SQLite (`"..."`) und Databricks (`` `...` ``).
-- **Cross-Source Virtual Set Injection:** Bei verteilten Datenquellen werden IDs über den `IChunkedQueryExecutor` in partitionierte Chunks aufgeteilt und mit `OR` verknüpft, wodurch die Parameter-Limits strikt eingehalten werden.
+- **Cross-Source Virtual Set Injection:** Bei verteilten Datenquellen werden IDs über den (inzwischen entfernten) `IChunkedQueryExecutor` in partitionierte Chunks aufgeteilt und mit `OR` verknüpft, wodurch die Parameter-Limits strikt eingehalten werden.
 
 ### 2. Domänen- und Metadaten-Erweiterung
 - Erweiterung von `ConsentRowFilter` um:
