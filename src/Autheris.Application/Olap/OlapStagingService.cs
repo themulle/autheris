@@ -119,7 +119,7 @@ public sealed class OlapStagingService(
             case OlapSqlRejectedException rejected:
                 logger.LogWarning("OLAP SQL rejected: {Code}", rejected.Code);
                 return new OlapStagingOutcome(
-                    rejected.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400,
+                    rejected.HttpStatus,
                     rejected.Message,
                     ErrorCode: rejected.Code);
             case TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException:
@@ -252,7 +252,7 @@ public sealed class OlapStagingService(
         catch (OlapSqlRejectedException ex)
         {
             logger.LogWarning("OLAP SQL rejected before table resolution: {Code}", ex.Code);
-            return new OlapStagingOutcome(400, ex.Message, ErrorCode: ex.Code);
+            return new OlapStagingOutcome(ex.HttpStatus, ex.Message, ErrorCode: ex.Code);
         }
 
         var sources = new List<OlapTableSource>();
@@ -535,7 +535,7 @@ public sealed class OlapStagingService(
             logger.LogWarning("OLAP engine rejected the SQL: {Code}", ex.Code);
             await tryAudit("OLAP_QUERY_FAILED", string.Join(",", stagedCounts.Keys), "DENY", FailureDetails(ex.Code)).ConfigureAwait(false);
             return new OlapStagingOutcome(
-                ex.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400, ex.Message, ErrorCode: ex.Code);
+                ex.HttpStatus, ex.Message, ErrorCode: ex.Code);
         }
         catch (InvalidOperationException ex) when (HasCode(ex, DuckDbOlapEngine.CodeStagedRows))
         {
@@ -719,7 +719,7 @@ public sealed class OlapStagingService(
         catch (OlapSqlRejectedException ex)
         {
             return new PhaseBDenial(
-                ex.Code == OlapSqlRejectedException.ColumnPolicy ? 403 : 400, ex.Code, ex.Message, ex.Code, ex.InnerException?.Message);
+                ex.HttpStatus, ex.Code, ex.Message, ex.Code);
         }
 
         return null;
@@ -745,7 +745,7 @@ public sealed class OlapStagingService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw new OlapSqlRejectedException(OlapSqlRejectedException.NotAnalyzable, "Cross-source OLAP queries must use the gateway SQL dialect.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.GatewayDialectRequired);
         }
 
         if (metadata.StatementType != SqlStatementType.Select ||
@@ -754,17 +754,13 @@ public sealed class OlapStagingService(
             metadata.HasInlineFunctionDefinitions ||
             (metadata.FunctionCalls?.Any(f => !OlapSqlPolicy.AllowedFunctions.Contains(f)) ?? false))
         {
-            throw new OlapSqlRejectedException(
-                OlapSqlRejectedException.ConstructNotAllowed,
-                "The SQL statement uses a construct that is not permitted in cross-source OLAP queries.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.ConstructNotAllowed);
         }
 
         bool hasJoinReferences = metadata.JoinColumnReferences is { Count: > 0 };
         if (!crossOptions.AllowNonEquiJoins && !hasJoinReferences && (metadata.JoinCount > 0 || metadata.ReferencedTables.Count > 1))
         {
-            throw new OlapSqlRejectedException(
-                OlapSqlRejectedException.ConstructNotAllowed,
-                "The SQL statement uses a construct that is not permitted in cross-source OLAP queries.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.ConstructNotAllowed);
         }
 
         foreach (var target in metadata.ReferencedTables)
@@ -775,9 +771,7 @@ public sealed class OlapStagingService(
                     .Any(n => string.Equals(n, target.TableName, StringComparison.OrdinalIgnoreCase)));
             if (owner == null)
             {
-                throw new OlapSqlRejectedException(
-                    OlapSqlRejectedException.ConstructNotAllowed,
-                    "The SQL statement uses a construct that is not permitted in cross-source OLAP queries.");
+                throw new OlapSqlRejectedException(OlapSqlRejectionReason.ConstructNotAllowed);
             }
 
             try
@@ -786,10 +780,9 @@ public sealed class OlapStagingService(
             }
             catch (WebSqlPolicyException ex)
             {
-                // The guardrail text names column, table and rule; it stays in Development details and the Debug log, never in the body or above.
-                logger.Warning(ex, "OLAP masked-column guardrail denied the statement ({Code}).", OlapSqlRejectedException.ColumnPolicy);
-                throw new OlapSqlRejectedException(
-                    OlapSqlRejectedException.ColumnPolicy, "The SQL statement was rejected by the column security policy.", ex);
+                // The guardrail text names column, table and rule; it is never logged, audited or returned (type name and code only).
+                logger.LogWarning("OLAP masked-column guardrail denied the statement ({Code}, {ExceptionType}).", OlapSqlRejectedException.ColumnPolicy, ex.GetType().Name);
+                throw new OlapSqlRejectedException(OlapSqlRejectionReason.ColumnPolicy, ex);
             }
         }
     }

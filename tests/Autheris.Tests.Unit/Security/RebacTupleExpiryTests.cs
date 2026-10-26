@@ -9,6 +9,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Rebac;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -20,17 +21,20 @@ public sealed class RebacTupleExpiryTests
 {
     private static readonly System.Text.Json.JsonSerializerOptions Json = new(System.Text.Json.JsonSerializerDefaults.Web);
 
-    private readonly InMemoryRebacStore _store = new(NullLogger<InMemoryRebacStore>.Instance);
+    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    private readonly InMemoryRebacStore _store;
     private readonly IOptions<GatewayOptions> _options = Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true, CacheTtlSeconds = 60 } });
 
+    public RebacTupleExpiryTests() => _store = new(NullLogger<InMemoryRebacStore>.Instance, _clock);
+
     private ZanzibarRebacEvaluator Evaluator(Autheris.Application.Security.Rebac.Interfaces.IRebacStore? store = null) =>
-        new(store ?? _store, _options, NullLogger<ZanzibarRebacEvaluator>.Instance);
+        new(store ?? _store, _options, NullLogger<ZanzibarRebacEvaluator>.Instance, timeProvider: _clock);
 
     [Fact]
     public async Task SEC_SC_20_InMemoryStore_DoesNotReturnExpiredTuples()
     {
-        await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1) });
-        await _store.AddTupleAsync(new RebacTuple("t", "b", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5) });
+        await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddMinutes(-1) });
+        await _store.AddTupleAsync(new RebacTuple("t", "b", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddMinutes(5) });
         await _store.AddTupleAsync(new RebacTuple("t", "c", "viewer", "doc:1"));
 
         var tuples = await _store.GetTuplesAsync("t", obj: "doc:1");
@@ -41,7 +45,7 @@ public sealed class RebacTupleExpiryTests
     [Fact]
     public async Task SEC_SC_20_Evaluator_DeniesAnExpiredTuple_EvenWhenTheStoreReturnsIt()
     {
-        var expired = new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
+        var expired = new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddMinutes(-1) };
         var leaky = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>();
         leaky.GetTuplesAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<System.Threading.CancellationToken>())
             .Returns(new ValueTask<IReadOnlyList<RebacTuple>>([expired]));
@@ -52,14 +56,52 @@ public sealed class RebacTupleExpiryTests
     [Fact]
     public async Task SEC_SC_20_Evaluator_PositiveDecisionIsNotCachedPastTheTupleExpiry()
     {
-        await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMilliseconds(400) });
+        await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddMilliseconds(400) });
         var evaluator = Evaluator();
         var request = new RebacCheckRequest("t", "a", "viewer", "doc:1");
 
         (await evaluator.CheckAsync(request)).Allowed.ShouldBeTrue();
-        await Task.Delay(600); // scenario: the store clock is not injectable, so wait past the 400 ms tuple expiry
+        _clock.Advance(TimeSpan.FromMilliseconds(600));
 
         (await evaluator.CheckAsync(request)).Allowed.ShouldBeFalse("the 60 s decision cache must not outlive the tuple");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WAVE3_TIME_SC_02_RebacTuple_ExpiredAtBoundary_IsDenied()
+    {
+        await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddSeconds(10) });
+
+        _clock.Advance(TimeSpan.FromSeconds(10) - TimeSpan.FromTicks(1));
+        (await _store.GetTuplesAsync("t", obj: "doc:1")).Count.ShouldBe(1);
+
+        _clock.Advance(TimeSpan.FromTicks(1));
+        (await _store.GetTuplesAsync("t", obj: "doc:1")).ShouldBeEmpty("expired exactly at ExpiresAt (expiresAt <= now)");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WAVE3_TIME_SC_02_Evaluator_CachedDecisionPastExpiry_Reevaluated()
+    {
+        await _store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = _clock.GetUtcNow().AddMinutes(5) });
+        var evaluator = Evaluator();
+        var request = new RebacCheckRequest("t", "a", "viewer", "doc:1");
+        (await evaluator.CheckAsync(request)).Allowed.ShouldBeTrue();
+
+        _clock.Advance(TimeSpan.FromMinutes(6));
+
+        (await evaluator.CheckAsync(request)).Allowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WAVE3_TIME_SC_01_Stores_NullTimeProvider_UsesSystem()
+    {
+        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance, timeProvider: null);
+        await store.AddTupleAsync(new RebacTuple("t", "a", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5) });
+        await store.AddTupleAsync(new RebacTuple("t", "b", "viewer", "doc:1") { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-5) });
+
+        (await store.GetTuplesAsync("t", obj: "doc:1")).Select(x => x.User).ShouldBe(["a"]);
     }
 
     [Fact]

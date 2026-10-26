@@ -8,7 +8,23 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using DuckDB.NET.Data;
 
-/// <summary>A client SQL text that the OLAP endpoint rejects. <see cref="Code"/> is stable and safe to return; the message is generic.</summary>
+/// <summary>Closed set of reasons the OLAP endpoint rejects a client statement. Each maps to a fixed code, status and message.</summary>
+public enum OlapSqlRejectionReason
+{
+    InvalidStatement,
+    SingleSelectOnly,
+    ProhibitedFunction,
+    EscapeStringsProhibited,
+    GatewayDialectRequired,
+    ConstructNotAllowed,
+    ColumnPolicy
+}
+
+/// <summary>
+/// A client SQL text that the OLAP endpoint rejects. The message and <see cref="Code"/> come only from a fixed table keyed by
+/// <see cref="Reason"/>; no caller text, parser text or inner exception text can enter them. An inner exception may be attached for
+/// diagnostics, but callers must log its type only.
+/// </summary>
 public sealed class OlapSqlRejectedException : SecurityException
 {
     public const string Invalid = "OLAP_SQL_INVALID";
@@ -16,19 +32,36 @@ public sealed class OlapSqlRejectedException : SecurityException
     public const string ConstructNotAllowed = "OLAP_SQL_CONSTRUCT_NOT_ALLOWED";
     public const string ColumnPolicy = "OLAP_COLUMN_POLICY";
 
-    public OlapSqlRejectedException(string code, string message)
-        : base(message)
+    public OlapSqlRejectedException(OlapSqlRejectionReason reason)
+        : base(Describe(reason).Message)
     {
-        Code = code;
+        Reason = Describe(reason).Reason;
     }
 
-    public OlapSqlRejectedException(string code, string message, Exception innerException)
-        : base(message, innerException)
+    public OlapSqlRejectedException(OlapSqlRejectionReason reason, Exception innerException)
+        : base(Describe(reason).Message, innerException)
     {
-        Code = code;
+        Reason = Describe(reason).Reason;
     }
 
-    public string Code { get; }
+    public OlapSqlRejectionReason Reason { get; }
+
+    public string Code => Describe(Reason).Code;
+
+    /// <summary>403 for the column policy, 400 for every other reason.</summary>
+    public int HttpStatus => Reason == OlapSqlRejectionReason.ColumnPolicy ? 403 : 400;
+
+    // Unknown values fail closed to InvalidStatement.
+    private static (OlapSqlRejectionReason Reason, string Code, string Message) Describe(OlapSqlRejectionReason reason) => reason switch
+    {
+        OlapSqlRejectionReason.SingleSelectOnly => (reason, Invalid, "Only a single SELECT statement is permitted in OLAP queries."),
+        OlapSqlRejectionReason.ProhibitedFunction => (reason, Invalid, "The SQL statement uses a function that is prohibited in OLAP queries."),
+        OlapSqlRejectionReason.EscapeStringsProhibited => (reason, Invalid, "Escape strings and backslashes are prohibited in OLAP queries."),
+        OlapSqlRejectionReason.GatewayDialectRequired => (reason, NotAnalyzable, "Cross-source OLAP queries must use the gateway SQL dialect."),
+        OlapSqlRejectionReason.ConstructNotAllowed => (reason, ConstructNotAllowed, "The SQL statement uses a construct that is not permitted in cross-source OLAP queries."),
+        OlapSqlRejectionReason.ColumnPolicy => (reason, ColumnPolicy, "The SQL statement was rejected by the column security policy."),
+        _ => (OlapSqlRejectionReason.InvalidStatement, Invalid, "The SQL statement is not valid for the OLAP endpoint.")
+    };
 }
 
 /// <summary>
@@ -77,14 +110,12 @@ public static class OlapSqlInspector
         ArgumentNullException.ThrowIfNull(sql);
         if (string.IsNullOrWhiteSpace(sql) || (maxLength > 0 && sql.Length > maxLength))
         {
-            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.InvalidStatement);
         }
 
         if (sql.Contains('\0') || sql.Contains('\\') || HasEscapeStringPrefix(sql))
         {
-            throw new OlapSqlRejectedException(
-                OlapSqlRejectedException.Invalid,
-                "Escape strings and backslashes are prohibited in OLAP queries.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.EscapeStringsProhibited);
         }
     }
 
@@ -197,12 +228,12 @@ public static class OlapSqlInspector
         }
         catch (DuckDBException)
         {
-            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.InvalidStatement);
         }
 
         if (string.IsNullOrEmpty(json))
         {
-            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.InvalidStatement);
         }
 
         try
@@ -214,7 +245,7 @@ public static class OlapSqlInspector
                 !root.TryGetProperty("statements", out var statements) ||
                 statements.ValueKind != JsonValueKind.Array)
             {
-                throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+                throw new OlapSqlRejectedException(OlapSqlRejectionReason.InvalidStatement);
             }
 
             int count = statements.GetArrayLength();
@@ -232,7 +263,7 @@ public static class OlapSqlInspector
         }
         catch (JsonException)
         {
-            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement is not valid for the OLAP endpoint.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.InvalidStatement);
         }
     }
 

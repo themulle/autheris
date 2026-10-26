@@ -45,7 +45,6 @@ tests/Autheris.Tests.Unit/Plugins/Auth/AuthPluginRoleProviderTests.cs|1
 tests/Autheris.Tests.Unit/Security/AuthPluginSecurityTests.cs|2
 tests/Autheris.Tests.Unit/Security/CasbinLockFreeEnforcementTests.cs|1
 tests/Autheris.Tests.Unit/Security/CdcChannelRaceGql8Tests.cs|1
-tests/Autheris.Tests.Unit/Security/RebacTupleExpiryTests.cs|1
 tests/Autheris.Tests.Unit/Security/WebSqlHeterogeneousJoinTests.cs|1
 tests/Autheris.Tests.Unit/SecurityReviewG5Tests.cs|3
 tests/Autheris.Tests.Unit/Services/BackgroundServiceLockTests.cs|3
