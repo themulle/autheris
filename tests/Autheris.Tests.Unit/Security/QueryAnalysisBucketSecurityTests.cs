@@ -75,7 +75,7 @@ public sealed class QueryAnalysisBucketSecurityTests
 
         var redisState = await redisLimiter.GetBucketStateAsync(key, policy);
         redisState.ShouldNotBeNull();
-        redisState.CurrentBalance.ShouldBe(750.0, 1.0);
+        redisState.CurrentBalance.ShouldBe(750.0);
         redisState.Capacity.ShouldBe(1000);
 
         // Verify zero mutation calls occurred on Redis
