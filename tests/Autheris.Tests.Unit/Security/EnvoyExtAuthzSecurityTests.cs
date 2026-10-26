@@ -314,7 +314,9 @@ public sealed class EnvoyExtAuthzSecurityTests
 
         var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), caller);
 
-        Assert.True(response.Status.Code != 0);
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.DoesNotContain("corp", response.HttpResponse.DeniedResponse.Body);
+        Assert.DoesNotContain("ANONYMOUS", response.HttpResponse.DeniedResponse.Body, StringComparison.OrdinalIgnoreCase);
         await _policyService.DidNotReceive().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
     }
 
