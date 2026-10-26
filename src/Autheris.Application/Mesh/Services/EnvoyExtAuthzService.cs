@@ -26,8 +26,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
 
     private static readonly char[] CrlfChars = new[] { '\r', '\n' };
 
-    // API version path segment (v1, v2, V10, ...), see ExtractResourceFromPath.
-
     private readonly Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? _virtualFilters;
 
     public EnvoyExtAuthzService(

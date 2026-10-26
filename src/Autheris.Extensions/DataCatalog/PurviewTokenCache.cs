@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 /// <summary>
 /// SEC ARCH-MNT-17: process-wide, single-slot cache of the Purview access token. The slot is bound to the credential set
 /// (tenant, client id, SHA-256 of the configured secret) so a changed credential never receives a token minted for another one.
+/// The key uses the configured secret (or secret reference), not the resolved Key Vault value: a rotated value behind an
+/// unchanged reference keeps the old token until it expires (minus the 60 s skew) or the options change.
 /// The token lives in memory only; neither the token, the secret nor the fingerprint is logged or placed in an exception.
 /// </summary>
 public sealed class PurviewTokenCache : IDisposable

@@ -4,6 +4,8 @@ using Autheris.Application.Governance.Policies;
 using Shouldly;
 using Xunit;
 
+// The cache is process-wide static state; the strict cap assertions need exclusive access.
+[Collection("PatternMatcherCache")]
 public sealed class PatternMatcherCacheTests
 {
     [Fact]
@@ -29,3 +31,6 @@ public sealed class PatternMatcherCacheTests
         PatternMatcher.CachedPatternCount.ShouldBeLessThanOrEqualTo(PatternMatcher.MaxCachedPatterns);
     }
 }
+
+[CollectionDefinition("PatternMatcherCache", DisableParallelization = true)]
+public sealed class PatternMatcherCacheCollection;
