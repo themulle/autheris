@@ -744,7 +744,7 @@ public sealed class StartupWarmupExecutorTests
     public void Pipeline_NoSkipWarmupExecution_OperationExecutionLast_MiddlewareOrderPinned()
     {
         // T-OPS150-09 (replaced): the gateway pipeline never installs SkipWarmupExecution and UseOperationExecution is the last middleware.
-        var source = System.IO.File.ReadAllText(FindFile("src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs"));
+        var source = System.IO.File.ReadAllText(FindFile("src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.GraphQL.cs"));
         source.ShouldNotContain("UseSkipWarmupExecution");
         var op = source.IndexOf(".UseOperationExecution()", StringComparison.Ordinal);
         op.ShouldBeGreaterThan(0);

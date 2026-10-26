@@ -1,0 +1,86 @@
+Baseline_Development_Default [Development]: OK
+Baseline_Production_Valid [Production]: OK
+ObjectGraph_RangeViolation [Production]: ValidationException: The field ShutdownTimeoutSeconds must be between 10 and 180.
+ObjectGraph_RangeViolation [Development]: ValidationException: The field ShutdownTimeoutSeconds must be between 10 and 180.
+OracleRuntime_PlaintextPassword [Production]: ValidationException: Security violation: Oracle data source 'ora' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:ora:PasswordKeyVaultRef).
+SqlServerWindowsAuth_InvalidConnectionString [Production]: ValidationException: SQL Server data source 'sql' has an invalid connection string: Format of the initialization string does not conform to specification starting at index 0.
+Databricks_MissingSection [Production]: ValidationException: Databricks data source 'dbx' requires a DataSources:Connections:dbx:Databricks section.
+DefaultSchemas_InvalidSchema [Production]: ValidationException: Security violation: DataSources:Connections:pg:DefaultSchema must match ^[A-Za-z_][A-Za-z0-9_$#]{0,127}$.
+TenantCollisions_StrictMode [Production]: ValidationException: Security violation (B-1): tenant ids that differ only in case are configured (ACME / Acme). Strict mode refuses the start; rename one of them.
+WebhookSubscriptions_MissingId [Production]: ValidationException: Gateway:Webhooks:Subscriptions:0:Id is required (a stable, unique id of at most 128 characters).
+QueryCost_FailureFeeRange [Production]: ValidationException: The field FailureFee must be between 1 and 1000.
+QueryCost_Null [Production]: ValidationException: The QueryCost field is required.
+Egress_TooBroadNetwork [Production]: ValidationException: Egress allowlist configuration error (Gateway:Egress): IPv4 networks at least /8, IPv6 at least /32, no overlap with loopback/link-local/metadata/CGNAT/multicast/IPv4-mapped ranges:\n  - Egress.TrustedInternalNetworks '10.0.0.0/4': Network too large (prefix /4); at least /8 required for IPv4.
+CasbinModel_FileNotFound [Production]: ValidationException: Casbin model file '<tmp>/missing.conf' was not found.
+CasbinModel_FileEmpty [Production]: ValidationException: Casbin Model-Datei '<tmp>/model-empty.conf' ist leer.
+CasbinModel_ContractViolation [Production]: ValidationException: Casbin-Modell '<tmp>/model-invalid.conf' does not satisfy the gateway contract: M1: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M2: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M3: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M4: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M5: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M6: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M7: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); M8: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.); W1: model could not be evaluated (FormatException: Unrecognized line format: 'this is not a casbin model'.)
+CasbinPolicy_PathNotConfigured [Production]: ValidationException: Casbin is enabled (Gateway:Casbin:Enabled = true), but Casbin:PolicyPath is not configured.
+CasbinPolicy_FileNotFound [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/missing.csv' was not found.
+CasbinPolicy_FileEmpty [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/policy-empty.csv' is empty.
+CasbinPolicy_NoRules [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/policy-norules.csv' contains no valid 'p' rules.
+CasbinPolicy_InvalidFile [Production]: ValidationException: Casbin is enabled, but policy file '<tmp>/policy-invalid.csv' is invalid: Casbin policy line 1: 'p' rules require 4 to 8 fields.
+ReverseProxy_InvalidNetwork [Production]: ValidationException: Configuration error ReverseProxy.KnownNetworks: invalid IP network 'not-a-network'.
+ReverseProxy_WildcardNetwork [Production]: ValidationException: Sicherheitsverletzung: ReverseProxy.KnownNetworks '0.0.0.0/0' ist ein Wildcard-Netzwerk (/0). Wildcard-Proxies sind verboten!
+ReverseProxy_InvalidProxy [Production]: ValidationException: Configuration error ReverseProxy.KnownProxies: invalid IP address 'not-an-ip'.
+DevelopmentInContainer_NoOptIn [Development]: ValidationException: Security violation: ASPNETCORE_ENVIRONMENT=Development in a container (DOTNET_RUNNING_IN_CONTAINER=true) is allowed only with an explicit opt-in (Gateway:AllowDevelopmentInContainer=true or AUTHERIS_ALLOW_DEV_IN_CONTAINER=true). Use ASPNETCORE_ENVIRONMENT=Production for production; use docker-compose.dev.yml for local testing.
+DevelopmentInContainer_OptInByOption [Development]: OK
+DevelopmentInContainer_OptInByEnvironment [Development]: OK
+GraphQlTrustedDocuments_AppScopedWithoutPersistedOnly [Production]: ValidationException: Security violation: GraphQL.AppScopedTrustedDocuments.Enabled=true requires GraphQL.PersistedQueriesOnly=true; otherwise ad-hoc documents would be accepted next to the app-scoped allowlist.
+GraphQlTrustedDocuments_DirectoryMissing [Production]: ValidationException: Security violation: GraphQL.PersistedQueriesOnly=true requires an existing GraphQL.TrustedDocumentsDirectory containing the approved operations (*.graphql / *.gql). Without a document store, the switch would have no effect.
+FederationSigning_KeyMissing [Production]: ValidationException: Security violation: Federation context header signing is enabled (Federation:SignContextHeaders = true), but Federation:SigningKey is not configured or uses the insecure default secret. A secure key of at least 32 bytes is required outside Development.
+FederationSigning_DefaultSecret [Production]: ValidationException: Security violation: Federation context header signing is enabled (Federation:SignContextHeaders = true), but Federation:SigningKey is not configured or uses the insecure default secret. A secure key of at least 32 bytes is required outside Development.
+FederationSigning_KeyTooShort [Production]: InvalidOperationException: Security error: Gateway:Federation:SigningKey must be at least 32 bytes long outside the development environment (current length: 9).
+FederationSigning_KeyMissingAllowedInDevelopment [Development]: OK
+SecuritySwitchReport_WebSqlBypassFlag [Development]: OK
+SecuritySwitchReport_WarnFlagsAndVirtualFilters [Production]: OK
+OperationalInvariants_DmlWithoutRoles [Production]: ValidationException: Configuration error: WebSql.AllowDml=true requires at least one role in WebSql.DmlWriterRoles (SEC M-20: DML is allowed only for explicitly authorized roles).
+OperationalInvariants_QuickstartInProduction [Production]: ValidationException: Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.
+OperationalInvariants_ShutdownTimeout [Production]: ValidationException: NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.
+OperationalInvariants_TerminationGrace [Production]: ValidationException: NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.
+OperationalInvariants_DevOptions [Production]: ValidationException: Gateway:Dev:Preset 'bogus' is invalid. Allowed: Standard, Quickstart, Strict.\nSecurity violation: Gateway:Dev:Preset may ONLY be set in the Development environment!
+OperationalInvariants_DevOptions [Development]: ValidationException: Gateway:Dev:Preset 'bogus' is invalid. Allowed: Standard, Quickstart, Strict.
+BasicAuthSession_RequiresBasicAuth [Production]: ValidationException: BasicAuth.Session.Enabled=true erfordert BasicAuth.Enabled=true.\nBasicAuth.Session must not be enabled when RequireKerberosOnly=true.\nSecurity violation: BasicAuth.Session is prohibited in the Production environment.
+BasicAuthUsers_MissingPassword [Production]: ValidationException: Security violation: BasicAuth user 'alice' has no password.
+ForwardAuth_InvalidDefaultTenant [Production]: ValidationException: ForwardAuth.DefaultTenantId has an invalid tenant format.
+ForwardAuth_BasicAuthWithKerberosOnly [Production]: ValidationException: Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.
+ForwardAuth_SecretMissing [Production]: ValidationException: Security violation: Outside Development, ForwardAuth requires a configured SharedSecret or SharedSecretKeyVaultRef.
+ForwardAuth_SecretTooShort [Production]: ValidationException: Security violation: Outside the development environment, ForwardAuth.SharedSecret must be at least 32 bytes long.
+ForwardAuth_TrustedProxyNotRequired [Production]: ValidationException: Security violation: RequireTrustedProxy must not be set to false when ForwardAuth is enabled outside Development.
+ForwardAuth_InvalidTrustedNetwork [Production]: ValidationException: Configuration error ForwardAuth.TrustedNetworks: invalid IP network 'not-a-network'.
+ForwardAuth_WildcardTrustedNetwork [Production]: ValidationException: Sicherheitsverletzung (API-8): ForwardAuth.TrustedNetworks '0.0.0.0/0' ist ein Wildcard-Netzwerk (/0). Wildcard-Netzwerke sind verboten!
+ForwardAuth_InvalidTrustedProxy [Production]: ValidationException: Configuration error ForwardAuth.TrustedProxies: invalid IP address 'not-an-ip'.
+ProductionGovernance_SeedDemoData [Production]: ValidationException: Sicherheitsverletzung: GovernanceDb.SeedDemoData darf AUSSCHLIESSLICH in der Development-Umgebung true sein!
+ProductionGovernance_MigrationsSkip [Production]: ValidationException: Security violation: GovernanceDb:Migrations:Mode = Skip is only allowed in the Development environment. Use Apply or Verify.
+ProductionGovernance_TestAuthHandler [Production]: ValidationException: Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.
+ProductionGovernance_EntraIdHttpsMetadata [Production]: ValidationException: Security violation: RequireHttpsMetadata must not be false outside Development.
+ProductionGovernance_AnonymousAccess [Production]: ValidationException: Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.
+ProductionGovernance_DemoRebacSeed [Production]: ValidationException: Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.
+ProductionGovernance_DangerBypass [Production]: ValidationException: Critical security violation: The following security bypasses may be active ONLY in the Development environment:\n  - DANGER:danger_disable_column_masking
+ProductionGovernance_DangerBypassAllowedInDevelopment [Development]: OK
+ProductionTransport_Introspection [Production]: ValidationException: Security violation: Outside Development, GraphQL introspection (GraphQL:EnableIntrospection or warn_enable_introspection) may be active only with an explicit opt-in (AllowInsecureWarnFlagsInProduction = true).
+ProductionTransport_AllCors [Production]: ValidationException: Security violation (API-16): Outside Development, warn_allow_all_cors_origins may be active only with an explicit opt-in (AllowInsecureWarnFlagsInProduction = true).
+ProductionTransport_McpDeveloperCors [Production]: ValidationException: Security violation: Mcp.EnableDeveloperCors is strictly prohibited outside Development and cannot be bypassed.
+ProductionTransport_HmacReferenceMissing [Production]: ValidationException: NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.
+ProductionTransport_OpenMetadataPlainHttp [Production]: ValidationException: Security violation: Outside Development, OpenMetadata.ServerUrl must use HTTPS.
+ProductionTransport_DataSourceWithoutTls [Production]: ValidationException: Sicherheitsverletzung: DataSources:Connections:pg: PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.
+ProductionTransport_WildcardOrigin [Production]: ValidationException: Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).
+ProductionTransport_PlainHttpOrigin [Production]: ValidationException: Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.
+ProductionTransport_RebacClusterWithoutRedis [Production]: ValidationException: Security violation: ReBAC in MultiNodeClusterMode requires Caching.Redis.Enabled = true for cluster-wide invalidation (RR-L4-04).
+ProductionTransport_ReplicasWithoutRedis [Production]: ValidationException: NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.
+ProductionTransport_PluginsWithoutManifest [Production]: ValidationException: Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.
+ProductionAuthentication_PlaintextPassword [Production]: ValidationException: Security violation (DEP-14): Outside Development, BasicAuth passwords must be stored as a hash ($argon2id$... or $pbkdf2$...). Plaintext passwords are prohibited.
+ProductionAuthentication_WeakPbkdf2 [Production]: ValidationException: Security violation: Outside Development, BasicAuth PBKDF2 hashes must use at least 210000 iterations.
+ProductionAuthentication_TruncatedHash [Production]: ValidationException: Security violation (API-05): Outside Development, BasicAuth hashes must carry a salt of at least 16 bytes and a 32-byte hash (truncated value?).
+ProductionAuthentication_EntraIdIncomplete [Production]: ValidationException: Security violation: Outside Development, EntraId requires Audience or ClientId, plus TenantId (issuer), to be configured.
+ProductionAuthentication_AdfsIncomplete [Production]: ValidationException: Security violation: Outside Development, Adfs.Audience and Authority must be configured.
+ProductionAuthentication_WellFormedHashAccepted [Production]: OK
+ProductionStorage_WormWithoutS3Keys [Production]: ValidationException: Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.
+ProductionStorage_InMemorySqlite [Production]: ValidationException: Security violation: In-memory SQLite databases (GovernanceDb.ConnectionString) are strictly prohibited outside Development.
+ProductionStorage_ContainerRelativeSqlitePath [Production]: ValidationException: Security and configuration error (DEP-4): In the container, the process runs as non-root user ($APP_UID). The SQLite path 'governance.db' is located directly in the non-writable application directory (/app). Use the writable data directory '/app/data' (for example Gateway:State:StateDirectory=/app/data).
+ProductionStorage_FallbackAuditKey [Production]: ValidationException: CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.
+ProductionStorage_AnchorMissing [Production]: ValidationException: CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.
+ProductionStorage_AuditChecksSkippedInTestEnvironment [Production]: OK
+GovernanceDbProvider_Unsupported [Production]: ValidationException: GovernanceDb provider 'Oracle' is not supported. Allowed values are 'Sqlite', 'PostgreSql' or 'SqlServer'.
+GovernanceDbProvider_Unsupported [Development]: ValidationException: GovernanceDb provider 'Oracle' is not supported. Allowed values are 'Sqlite', 'PostgreSql' or 'SqlServer'.
+ClusterState_SqliteWithReplicas [Production]: ValidationException: Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.
+ClusterState_EmbeddedGarnetWithReplicas [Production]: ValidationException: NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet. The embedded Garnet server (Caching.Garnet.EnableEmbeddedServer = true) is local to one process and cannot provide cluster-wide state; disable it and configure Caching.Redis.
