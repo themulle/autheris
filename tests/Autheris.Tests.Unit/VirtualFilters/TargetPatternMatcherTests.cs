@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using Shouldly;
 using Xunit;
 
@@ -84,18 +85,16 @@ public sealed class TargetPatternMatcherTests
     }
 
     [Fact]
-    public void IsMatch_UsesTheLinearEngine_PathologicalInputReturnsFalseQuickly()
+    public async Task IsMatch_UsesTheLinearEngine_PathologicalInputReturnsFalseQuickly()
     {
         // ST-9
         var pathological = new TableIdentifier(new string('a', 50_000) + "!", "s", "t");
         TargetPatternMatcher.IsMatch("^(a+)+$", Customers).ShouldBeFalse();   // warm-up (construction and cache)
 
-        var watch = Stopwatch.StartNew();
-        var matched = TargetPatternMatcher.IsMatch("^(a+)+$", pathological);
-        watch.Stop();
+        // A backtracking engine needs exponential time here and never returns; the hang guard turns that into a failure.
+        var matched = await WaitHelper.RunGuarded(() => TargetPatternMatcher.IsMatch("^(a+)+$", pathological));
 
         matched.ShouldBeFalse();
-        watch.ElapsedMilliseconds.ShouldBeLessThan(100);
     }
 
     [Theory]

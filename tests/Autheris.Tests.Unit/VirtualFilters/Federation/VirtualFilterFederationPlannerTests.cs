@@ -11,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
@@ -315,20 +316,21 @@ public sealed class VirtualFilterFederationPlannerTests
     public async Task Plan_KeyLoadingTimesOut_IsDeniedSourceUnavailable_EvenIfTheProviderIgnoresCancellation()
     {
         // ST-23 (planner half, SEC-12): the request timeout bounds key loading.
-        var keys = new FakeKeySetProvider { Delay = TimeSpan.FromSeconds(5), IgnoreCancellation = true };
+        var keys = new FakeKeySetProvider { Delay = TimeSpan.FromSeconds(60), IgnoreCancellation = true };
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        var started = DateTime.UtcNow;
+        // The provider ignores cancellation and would block for 60 s: the planner only returns (inside the hang guard) if it enforces the timeout itself.
 
+        var started = DateTime.UtcNow;
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
             new VirtualFilterFederationPlanner(keys).PlanAsync(
                 null,
                 [Resolved(Customers)],
                 new Dictionary<TableIdentifier, TableAccessDecision> { [Customers.Identifier] = Protected(Customers, Pair()) },
                 Tenant,
-                cts.Token));
+                cts.Token)).WaitAsync(WaitHelper.HangGuard);
 
         ex.ErrorCode.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");
-        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(3));
+        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(10)); // loose: 50x the 200 ms timeout, far below the 60 s provider delay
     }
 
     [Fact]

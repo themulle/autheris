@@ -23,6 +23,7 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.Itsm;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
+using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -338,7 +339,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     }
 
     [Fact]
-    public void SemanticPromptGuardrail_ReDosStressTest_ShouldCompleteWithinTimeout()
+    public async Task SemanticPromptGuardrail_ReDosStressTest_ShouldCompleteWithinTimeout()
     {
         // Arrange: Construct an adversarial ReDoS string targeting regex backtracking
         var sb = new StringBuilder();
@@ -352,13 +353,24 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         var guardrail = new SemanticPromptGuardrail(NullLogger<SemanticPromptGuardrail>.Instance);
 
-        // Act
-        var sw = Stopwatch.StartNew();
-        var result = guardrail.EvaluatePrompt("query_tool", maliciousPayload);
-        sw.Stop();
+        // Deterministic ReDoS property: every guardrail regex carries a finite match timeout of at most 200 ms.
+        var regexMembers = typeof(SemanticPromptGuardrail)
+            .GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Where(m => m.ReturnType == typeof(System.Text.RegularExpressions.Regex) && m.GetParameters().Length == 0)
+            .ToList();
+        regexMembers.Count.ShouldBeGreaterThanOrEqualTo(5);
+        foreach (var member in regexMembers)
+        {
+            var regex = (System.Text.RegularExpressions.Regex)member.Invoke(null, null)!;
+            regex.MatchTimeout.ShouldNotBe(System.Text.RegularExpressions.Regex.InfiniteMatchTimeout, member.Name);
+            regex.MatchTimeout.ShouldBeLessThanOrEqualTo(TimeSpan.FromMilliseconds(200), member.Name);
+        }
 
-        // Assert: ReDoS protection must finish within reasonable time (< 1000 ms) and deny
-        sw.ElapsedMilliseconds.ShouldBeLessThan(1000);
+        // Act
+        // Hang guard only (30 s vs. the 200 ms regex timeout): fails the test instead of hanging the run.
+        var result = await WaitHelper.RunGuarded(() => guardrail.EvaluatePrompt("query_tool", maliciousPayload));
+
+        // Assert: the adversarial payload is still denied
         result.IsAllowed.ShouldBeFalse();
     }
 

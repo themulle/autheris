@@ -11,6 +11,7 @@ using Autheris.Application.Identity.Attributes;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -277,7 +278,7 @@ public sealed class CallerAttributeResolverTests : IDisposable
         using var cancelA = new CancellationTokenSource();
         var a = Resolve(resolver, User(), ct: cancelA.Token);
         var b = Resolve(resolver, User());
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => Volatile.Read(ref provider.Calls) >= 1, WaitHelper.HangGuard, "the provider was never invoked");
         cancelA.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => a);
         gate.SetResult();
@@ -411,7 +412,7 @@ public sealed class CallerAttributeResolverTests : IDisposable
         var provider = new FakeProvider { Behavior = async (_, _, ct) => { await Task.Delay(Timeout.Infinite, ct); return Raw("x"); } };
         var resolver = Create(null, Registry(Def()), provider);
         var pending = Resolve(resolver, User());
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => Volatile.Read(ref provider.Calls) >= 1, WaitHelper.HangGuard, "the provider was never invoked");
         _time.Advance(TimeSpan.FromMilliseconds(2100));
         var result = await pending;
         result.Outcome.ShouldBe(CallerAttributeOutcome.Failed);
@@ -430,7 +431,7 @@ public sealed class CallerAttributeResolverTests : IDisposable
             Resolve(resolver, User("11111111-1111-1111-1111-111111111111")),
             Resolve(resolver, User("11111111-1111-1111-1111-111111111112"))
         };
-        await Task.Delay(100);
+        await WaitHelper.WaitUntil(() => Volatile.Read(ref provider.Calls) >= 2, WaitHelper.HangGuard, "the provider was never invoked");
         var rejected = await Resolve(resolver, User("11111111-1111-1111-1111-111111111113"));
         rejected.Outcome.ShouldBe(CallerAttributeOutcome.Failed);
         rejected.ReasonCode.ShouldBe("Bulkhead");
@@ -567,7 +568,7 @@ public sealed class CallerAttributeResolverTests : IDisposable
         using var cancelA = new CancellationTokenSource();
         var a = Resolve(resolver, resolver.CreateSubject(principal, Tenant), ct: cancelA.Token);
         var b = Resolve(resolver, resolver.CreateSubject(principal, Tenant));
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => Volatile.Read(ref provider.Calls) >= 1, WaitHelper.HangGuard, "the provider was never invoked");
         cancelA.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => a);
         gate.SetResult();

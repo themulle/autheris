@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Autheris.Api.Configuration;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
@@ -91,26 +92,18 @@ public sealed class SerilogSectionGuardTests
     [Fact]
     public void SerilogSection_WithEnvVarAllowLegacyFalse_ThrowsInvalidOperationException()
     {
-        var prevEnv = Environment.GetEnvironmentVariable("AUTHERIS_ALLOW_LEGACY_CONFIG");
-        try
-        {
-            Environment.SetEnvironmentVariable("AUTHERIS_ALLOW_LEGACY_CONFIG", "false");
+        using var env = new EnvVarScope("AUTHERIS_ALLOW_LEGACY_CONFIG", "false");
 
-            var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Serilog:MinimumLevel"] = "Debug"
-                })
-                .Build();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Serilog:MinimumLevel"] = "Debug"
+            })
+            .Build();
 
-            using var writer = new StringWriter();
-            var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.CheckConfiguration(config, writer));
-            ex.Message.ShouldContain("The 'Serilog' configuration section is no longer supported");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("AUTHERIS_ALLOW_LEGACY_CONFIG", prevEnv);
-        }
+        using var writer = new StringWriter();
+        var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.CheckConfiguration(config, writer));
+        ex.Message.ShouldContain("The 'Serilog' configuration section is no longer supported");
     }
 
     [Fact]

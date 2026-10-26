@@ -15,6 +15,7 @@ using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Security;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -48,20 +49,13 @@ public sealed class DatasourceSecretNamespaceTests
     public void DatasourceRef_MatchingEnvVarAlias_IsNotResolved()
     {
         var envVarKey = "DATASOURCE_GATEWAY_DATAMASKING_HMACSECRET";
-        Environment.SetEnvironmentVariable(envVarKey, OperatorSecretValue);
-        try
-        {
-            var provider = new DefaultEnvironmentSecretProvider();
+        using var env = new EnvVarScope(envVarKey, OperatorSecretValue);
+        var provider = new DefaultEnvironmentSecretProvider();
 
-            Should.Throw<KeyNotFoundException>(() =>
-            {
-                provider.GetSecretBytes("datasource:Gateway:DataMasking:HmacSecret");
-            }).Message.ShouldContain("datasource secret not found");
-        }
-        finally
+        Should.Throw<KeyNotFoundException>(() =>
         {
-            Environment.SetEnvironmentVariable(envVarKey, null);
-        }
+            provider.GetSecretBytes("datasource:Gateway:DataMasking:HmacSecret");
+        }).Message.ShouldContain("datasource secret not found");
     }
 
     [Fact]

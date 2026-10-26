@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Events;
 using Autheris.Domain.Events;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
@@ -26,10 +27,8 @@ public sealed class InMemoryGatewayEventBusQueueTests
         using var bus = NewBus(timeout: TimeSpan.FromSeconds(30));
         using var sub = bus.Subscribe<AccessPlanCreatedEvent>((_, _) => new TaskCompletionSource().Task);
 
-        var sw = Stopwatch.StartNew();
-        await bus.PublishAsync(Ev("e1"));
-
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(1));
+        // The handler never completes and the bus timeout is 30 s: publish only returns promptly if it does not await the handler.
+        await bus.PublishAsync(Ev("e1")).WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     [Fact]

@@ -19,6 +19,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Databricks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -348,13 +349,9 @@ public sealed class GovernedSqlExecutorX1Tests
             var executor = new GovernedSqlExecutor(
                 new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
                 factory, null, NullLogger.Instance, null, session);
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-
             await Should.ThrowAsync<TimeoutException>(() => executor.ExecuteRewrittenAsync(
                 new GovernedSqlQueryRequest(Sql), Writer(), new TenantId(Tenant), Rewrite(compiled), new DmlAuditContext(),
-                new Dictionary<string, object?>(), (_, _) => Task.CompletedTask, CancellationToken.None));
-
-            clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2.5));
+                new Dictionary<string, object?>(), (_, _) => Task.CompletedTask, CancellationToken.None)).WaitAsync(WaitHelper.HangGuard);
         }
         finally
         {

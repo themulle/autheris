@@ -10,6 +10,7 @@ using Autheris.Application.Olap;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
@@ -46,8 +47,7 @@ public sealed class DuckDbInterruptSql29Tests
         // About 8 * 10^9 combinations: far longer than the one-second timeout.
         var request = new OlapQueryRequest("SELECT sum(a.id * b.id + c.id * d.id) FROM nums a, nums b, nums c, nums d", [Source(300)]);
 
-        var sw = Stopwatch.StartNew();
-        await Should.ThrowAsync<Exception>(() => engine.ExecuteOlapQueryAsync(request));
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+        // The query would run for minutes: the engine only throws (inside the hang guard) if it interrupts at the 1 s timeout.
+        await Should.ThrowAsync<Exception>(() => engine.ExecuteOlapQueryAsync(request)).WaitAsync(WaitHelper.HangGuard);
     }
 }

@@ -12,6 +12,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -147,13 +148,14 @@ public sealed class FederatedVirtualFilterEnforcementTests
     public async Task KeySourceTimesOut_DeniedWithinTheRequestTimeout_ConnectorNeverCalled()
     {
         // ST-23: the provider ignores the token; the request timeout (1 s) still bounds key loading.
-        var (crm, _, pipeline) = Setup(keys: k => { k.Delay = TimeSpan.FromSeconds(5); k.IgnoreCancellation = true; }, timeoutSeconds: 1);
+        var (crm, _, pipeline) = Setup(keys: k => { k.Delay = TimeSpan.FromSeconds(60); k.IgnoreCancellation = true; }, timeoutSeconds: 1);
 
-        var clock = Stopwatch.StartNew();
-        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Join));
+        // The provider would block for 60 s: the pipeline only returns (inside the hang guard) if it enforces the request timeout itself.
+        var started = DateTime.UtcNow;
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Join)).WaitAsync(WaitHelper.HangGuard);
+        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(10)); // loose: 10x the 1 s timeout, far below the 60 s provider delay
 
         ex.ErrorCode.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
         crm.UpstreamCalls.ShouldBe(0);
     }
 

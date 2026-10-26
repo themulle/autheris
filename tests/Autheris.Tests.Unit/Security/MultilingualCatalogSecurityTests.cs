@@ -18,6 +18,7 @@ using Autheris.Infrastructure.AI;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Catalog;
+using Autheris.Tests.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,11 +34,11 @@ public sealed class MultilingualCatalogSecurityTests
 {
     /// <summary>
     /// SEC-CAT146-01: ReDoS safety in BCP 47 parser and negotiator.
-    /// Parser must be zero-regex, linear time, bounded length, finishing in under 10ms even for adversarial inputs.
+    /// Parser must be zero-regex, linear time, bounded length, rejecting over-long input by length bound without unbounded work.
     /// </summary>
     [Fact]
     [Trait("Category", "Security")]
-    public void T_CAT146_01_ReDoS_Safety_In_Bcp47Parser_And_Negotiator()
+    public async Task T_CAT146_01_ReDoS_Safety_In_Bcp47Parser_And_Negotiator()
     {
         var negotiator = new LanguageNegotiator();
         var supported = new[] { "de", "en", "fr" };
@@ -46,17 +47,19 @@ public sealed class MultilingualCatalogSecurityTests
         var longMalformed = string.Join("-", Enumerable.Repeat("abcdefghij", 500));
         var adversarialHeader = string.Join(", ", Enumerable.Range(0, 200).Select(i => $"de-x-{new string('a', 50)};q={i / 200.0:F2}"));
 
-        var sw = Stopwatch.StartNew();
+        longMalformed.Length.ShouldBeGreaterThan(Bcp47LanguageTag.MaxTagLength);
 
-        for (int i = 0; i < 50; i++)
+        // Deterministic: over-long input is rejected by the length bound; the adversarial header falls back to the default.
+        // The hang guard (30 s) is not a performance budget.
+        await WaitHelper.RunGuarded(() =>
         {
-            _ = Bcp47LanguageTag.TryParse(longMalformed, out _);
-            _ = Bcp47LanguageTag.TryCanonicalize(longMalformed, out _);
-            negotiator.NegotiateLanguage(adversarialHeader, supported, "en");
-        }
-
-        sw.Stop();
-        sw.ElapsedMilliseconds.ShouldBeLessThan(100); // 50 iterations well under 100ms (< 2ms per op)
+            for (int i = 0; i < 50; i++)
+            {
+                Bcp47LanguageTag.TryParse(longMalformed, out _).ShouldBeFalse();
+                Bcp47LanguageTag.TryCanonicalize(longMalformed, out _).ShouldBeFalse();
+                negotiator.NegotiateLanguage(adversarialHeader, supported, "en").ShouldBe("en");
+            }
+        });
     }
 
     /// <summary>

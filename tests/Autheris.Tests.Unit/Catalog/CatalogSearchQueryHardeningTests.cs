@@ -12,6 +12,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -148,17 +149,15 @@ public sealed class CatalogSearchQueryHardeningTests
     }
 
     [Fact]
-    public void Ollama_SyncEmbedding_IsBoundedByTheTimeout_InsteadOfBlockingIndefinitely()
+    public async Task Ollama_SyncEmbedding_IsBoundedByTheTimeout_InsteadOfBlockingIndefinitely()
     {
         using var httpClient = new HttpClient(new HangingHandler()) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         var generator = new OllamaEmbeddingGenerator("http://localhost:11434", "nomic-embed-text", 384, httpClient, null, TimeSpan.FromMilliseconds(200));
 
-        var sw = Stopwatch.StartNew();
-        var vector = generator.GenerateNormalizedEmbedding("customer orders");
-        sw.Stop();
+        // The handler hangs forever: the call only returns (inside the hang guard) if the 200 ms timeout is enforced.
+        var vector = await WaitHelper.RunGuarded(() => generator.GenerateNormalizedEmbedding("customer orders"));
 
         vector.IsEmpty.ShouldBeTrue();
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
     }
 
     [Fact]

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Events;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Events;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
@@ -34,9 +35,8 @@ public sealed class WebhookEventBridgeHostedServiceTests
         var bridge = new WebhookEventBridgeHostedService(bus, dispatcher, NullLogger<WebhookEventBridgeHostedService>.Instance);
         await bridge.StartAsync(CancellationToken.None);
 
-        var sw = Stopwatch.StartNew();
-        await bus.PublishAsync(NewEvent("ev-slow"));
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
+        // The dispatcher blocks until released: publish only returns if it does not wait for delivery.
+        await bus.PublishAsync(NewEvent("ev-slow")).WaitAsync(WaitHelper.HangGuard);
 
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         release.SetResult();
@@ -90,10 +90,9 @@ public sealed class WebhookEventBridgeHostedServiceTests
             return Task.CompletedTask;
         });
 
-        var sw = Stopwatch.StartNew();
-        await bus.PublishAsync(NewEvent("ev-hang"));
+        // The hanging subscriber never completes: publish only returns if the bus enforces its 200 ms subscriber timeout.
+        await bus.PublishAsync(NewEvent("ev-hang")).WaitAsync(WaitHelper.HangGuard);
 
-        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
         await bus.DrainAsync();
         healthyRan.ShouldBeTrue();
     }

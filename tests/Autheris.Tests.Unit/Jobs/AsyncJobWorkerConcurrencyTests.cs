@@ -18,6 +18,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -92,14 +93,16 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         queue.Enqueue(new AsyncJobExecutionItem(job, new AsyncQueryJobRequest("SELECT 1"), User(), new CancellationTokenSource()));
 
         await worker.StartAsync(CancellationToken.None);
-        for (var i = 0; i < 100; i++)
-        {
-            lock (queue.Transitions)
+        await WaitHelper.WaitUntil(
+            () =>
             {
-                if (queue.Transitions.Exists(d => d.State == AsyncJobState.Completed)) break;
-            }
-            await Task.Delay(50);
-        }
+                lock (queue.Transitions)
+                {
+                    return queue.Transitions.Exists(d => d.State == AsyncJobState.Completed);
+                }
+            },
+            TimeSpan.FromSeconds(10),
+            "the job never reached Completed");
         await worker.StopAsync(CancellationToken.None);
 
         lock (queue.Transitions)
@@ -166,15 +169,8 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         return new AsyncJobExecutionItem(job, new AsyncQueryJobRequest("SELECT 1"), User("alice", tenant), new CancellationTokenSource());
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 10_000)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition())
-        {
-            if (sw.ElapsedMilliseconds > timeoutMs) throw new TimeoutException("Condition not reached.");
-            await Task.Delay(10);
-        }
-    }
+    private static Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 10_000) =>
+        WaitHelper.WaitUntil(condition, TimeSpan.FromMilliseconds(timeoutMs), "Condition not reached.");
 
     [Fact]
     public async Task MaxConcurrentJobs_IsHonoured()
@@ -394,12 +390,13 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         await WaitUntilAsync(() => started.Count == 4);
 
         channel.Writer.TryWrite(Item("c"));
-        await Task.Delay(100);
+        // The scheduler only reads the channel when a slot frees up, so the loop below is the synchronisation.
         // Running jobs finish one at a time: the freed slots must reach the new tenant long before A or B drain their backlog.
         for (var i = 0; i < 10 && !started.Contains("c"); i++)
         {
+            var before = started.Count;
             gate.Release();
-            await Task.Delay(50);
+            await WaitUntilAsync(() => started.Count > before);
         }
 
         started.Contains("c").ShouldBeTrue();
@@ -513,7 +510,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         channel.Writer.TryWrite(Item("a"));
         channel.Writer.TryWrite(Item("a"));
         await WaitUntilAsync(() => started.Count == 1);
-        await Task.Delay(100);
+        await WaitUntilAsync(() => channel.Reader.Count == 0);
         for (var i = 0; i < 300; i++) channel.Writer.TryWrite(Item("flood" + (i % 3)));
         await WaitUntilAsync(() => started.Count > 20);
 

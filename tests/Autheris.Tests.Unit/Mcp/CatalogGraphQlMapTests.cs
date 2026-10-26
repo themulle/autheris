@@ -8,6 +8,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.GraphQL.Mcp;
+using Autheris.Tests.Common;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -153,11 +154,11 @@ public sealed class CatalogGraphQlMapTests
         var fragments = string.Join("\n", Enumerable.Range(0, 25).Select(i => $"fragment F{i} on crm_dbo_customers {{ ...F{i + 1} ...F{i + 1} }}"));
         var document = $"query Q {{ crm_dbo_customers {{ ...F0 }} }}\n{fragments}\nfragment F25 on crm_dbo_customers {{ id {relationField} {{ amount }} }}";
 
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        var tables = await _map.ResolveDocumentTablesAsync(document);
-        watch.Stop();
+        // Deterministic seam: the walk counts every visited selection and fails closed (null) above MaxVisitedSelections (10_000).
+        // Unmemoised, 2^25 = 33,554,432 expansions exceed that cap by a factor of ~3,300, so the NotBeNull assertion below only
+        // holds with memoisation. The 30 s hang guard is a last resort and not the assertion.
+        var tables = await _map.ResolveDocumentTablesAsync(document).WaitAsync(WaitHelper.HangGuard);
 
-        watch.Elapsed.ShouldBeLessThan(System.TimeSpan.FromSeconds(1));
         tables.ShouldNotBeNull();
         tables.ShouldBe([Customers, Orders], ignoreOrder: true);
     }
