@@ -263,7 +263,7 @@ During early development or when onboarding third-party webhooks (e.g. ServiceNo
 
 The codebase follows **Clean Architecture**:
 - `Autheris.Domain`: pure business rules, entities, options and domain calculation services. No dependencies on external libraries or frameworks.
-- `Autheris.Application`: core execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`, `ChunkedQueryExecutor`), data source executors and repository contracts.
+- `Autheris.Application`: core execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), data source executors and repository contracts.
 - `Autheris.Infrastructure`: ADO.NET SQL persistence (`SqliteGovernanceRepository`), Redis messaging (`RedisEventBus`), rate limiters, idempotency stores and claims transformation.
 - `Autheris.GraphQL`: Hot Chocolate schema configuration, dynamic types, queries, mutations and subscriptions.
 - `Autheris.Api`: ASP.NET Core host, authentication handlers (`BasicAuthenticationHandler`, `ForwardAuthAuthenticationHandler`), `Dev` configuration and endpoints, rate limiting middleware, health probes and graceful drain.
