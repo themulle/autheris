@@ -7,7 +7,6 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Jobs.Interfaces;
 using Autheris.Application.Jobs.Services;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,12 +37,6 @@ public static class AsyncJobServiceExtensions
         return services
             .AddDatasourceTesting()
             .AddAsyncJobs(configuration);
-    }
-
-    public static IEndpointRouteBuilder MapAsyncJobEndpoints(this IEndpointRouteBuilder app)
-    {
-        app.MapAsyncJobEndpoints();
-        return app;
     }
 }
 
