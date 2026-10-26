@@ -23,8 +23,10 @@ public sealed record AntlrCacheOptions
     public const int MaxHardCapFactor = 16;
 
     /// <summary>
-    /// Total state cap per generation. Conservative default (about 100 to 250 MB per generation at a few KB per state); calibration against the
-    /// fuzz and SQL corpus (plan ARCH-MNT-15 Stage 0, PR #360) is a follow-up and must not raise it without a measurement.
+    /// Total state cap per generation. Calibrated (ARCH-MNT-15-FU-02, <c>AntlrCacheCalibrationTests</c>): the whole parser corpus (fuzz seeds, SQL gate,
+    /// Trino and conformance statements, about 2,800 distinct statements) settles at about 9,000 states, so 50,000 leaves more than 5x headroom and a
+    /// realistic workload stays in one generation. A state costs about 1.3 KB (coarse managed-heap estimate), so the worst case of one generation,
+    /// <see cref="HardCapFactor"/> x cap, is about 240 MB (target at most 256 MB). Do not raise it without re-running the calibration.
     /// </summary>
     public int MaxStatesPerGeneration { get; init; } = 50_000;
 
