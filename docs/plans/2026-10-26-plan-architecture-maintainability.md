@@ -264,9 +264,14 @@ Both branches below merged on 2026-10-26 (#360 and #361), so these areas are ope
 
 | PR | Branch | Items | Phase 3 | Phase 5 | Status |
 |----|--------|-------|---------|---------|--------|
-| #362 | `refactor/architecture-maintainability-1` | ARCH-MNT-01, 02, 03 (test), 04, 05, 07; this plan | not needed (detection only) | APPROVED after 1 round (ratchets tolerate shrink and deletion) | open, not merged |
-| #363 | `refactor/architecture-maintainability-2` | ARCH-MNT-23 part 1 (budget asserts, 3 worst delay files, `EnvVarScope`, `WaitHelper`) | not needed (tests only) | APPROVED after 1 round (R1 to R10) | open, not merged |
-| #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | open, not merged |
+| #362 | `refactor/architecture-maintainability-1` | ARCH-MNT-01, 02, 03 (test), 04, 05, 07; this plan | not needed (detection only) | APPROVED after 1 round (ratchets tolerate shrink and deletion) | merged |
+| #363 | `refactor/architecture-maintainability-2` | ARCH-MNT-23 part 1 (budget asserts, 3 worst delay files, `EnvVarScope`, `WaitHelper`) | not needed (tests only) | APPROVED after 1 round (R1 to R10) | merged |
+| #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | merged |
+| #365 | `refactor/architecture-maintainability-5` | ARCH-MNT-23 rest (sleep-based sync replaced, test-sleep ratchet) | not needed (tests only) | APPROVED | merged |
+| #366 | `refactor/architecture-maintainability-6` | ARCH-MNT-16, 17, 27 | 17-SC-01..05, 27-SC-01..03 | APPROVED; Low findings fixed | merged |
+| #367 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot); CI startup stack overflow from the WP4.3 rename fixed (self-recursive `MapAsyncJobEndpoints` wrapper removed, `ExtensionSelfRecursionArchitectureTests`, local host start to `/health/ready` 200) | open |
+| #369 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | APPROVED; findings fixed | open (merge after #367) |
+| #368 | `refactor/architecture-maintainability-8` | ARCH-MNT-08 | 08-SC-01..09 | APPROVED after 1 round (SC-01 guard widened) | merged |
 
 Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 adds no `DateTime.UtcNow`, no `new HttpClient(`, no src file over 1,000 lines, and its new options are consumed.
 
@@ -275,4 +280,242 @@ New follow-ups found during delivery:
 - **ARCH-MNT-15-FU-01:** extend `SqlGate.BenchCheck` with a cold-cache P99 threshold (Phase 3 ruling D1).
 - **ARCH-MNT-15-FU-02:** calibrate the default `Gateway:SqlParserCache:MaxStatesPerGeneration` on the #360 fuzz corpus.
 - **ARCH-MNT-27:** `SecurityReviewG3EndpointAuthzTests.Envoy_ExportEmitsPathPrefixAndValidatesParameters` failed once with a `RegexMatchTimeoutException` under parallel build load. Check whether the regex timeout belongs to production code, which would mean timeouts under real load too, and fix it with a deterministic assertion or a `NonBacktracking` regex.
-- **Next PR:** the DI decomposition (ARCH-MNT-09..12), now unblocked because #361 is merged.
+- **Resolved:** ARCH-MNT-27 (#366: production Envoy regexes replaced by non-regex checks); DI decomposition is PR 4.
+- **DI snapshot maintenance:** every PR that adds or removes a DI registration must update `tests/Autheris.Tests.Unit/DependencyInjection/Snapshots/*.txt` with `AUTHERIS_UPDATE_SNAPSHOTS=1` locally (rejected in CI) and explain the diff in the PR.
+- **Lesson from #367:** a pure rename let a wrapper extension bind to itself; only a host start shows it. `ExtensionSelfRecursionArchitectureTests` now guards it, and refactors that touch the composition root must prove a local host start (`dotnet run` with `ASPNETCORE_ENVIRONMENT=Development`, `/health/ready`).
+- **ARCH-MNT-06-FU-01 (owner decision pending):** `docs/features/f-perf-13` (line 172, `MaxCostPerMinute`), `f-gov-13` (line 90, `MaskingRules`) and `f-ops-02` (`Gateway__DrainDelaySeconds`) still mention removed keys. Feature docs change only on owner request.
+- **ARCH-MNT-06-FU-02 (SC-09):** SCIM mass-change protection (`EnableMassChangeProtection`) was never implemented and its flag is deleted, so it is a known absent control.
+- **ARCH-MNT-06-FU-03:** report `Otlp:AllowInsecureTransport` in the startup danger list (`StartupChecks`); today it only logs a warning.
+- **ARCH-MNT-06-FU-04:** wire the Helm `drainDelaySeconds`/`shutdownTimeoutSeconds` to `Gateway:HighAvailability:*`, together with the `QueryTimeoutSeconds` alignment that NF-HA-01 requires.
+- **ARCH-MNT-08-FU-01:** let `OlapSqlRejectedException` accept only fixed reason codes, so no caller data can reach a response.
+- **ARCH-MNT-23-FU-01:** add `TimeProvider` seams to ReBAC tuple expiry and the `ConsentCacheService` expiry to remove the last real-time waits. `StartupWarmupTests.WarmupMetrics_RecordDurationAndOutcome_NoRequestCounters` failed once in a full run (it uses a global metrics listener) and needs isolation.
+
+## 9. Wave 2 addendum (2026-10-26)
+
+Owner order: continue with the rest of the plan. Verified against `main` 38a4b1ff (#362 to #364 merged). Each PR is its own branch off `origin/main`; the PR 1 ratchets stay green, and shrink-only baselines are lowered in the PR that shrinks them. This section replaces "Follow-ups, in order" of section 4.
+
+### 9.1 PR 4 (`-4`): DI decomposition and startup checks (ARCH-MNT-09..12, 14)
+
+Refresh of WP2.0 to WP2.3: #361 left `GatewayExecutionServiceExtensions.cs` in place and #364 changed only the SQL engine registrations, so the cut stands. `AddAutherisGovernance` spans lines 48-341 (one helper at 342). `GatewayServiceCollectionExtensions` has 693 lines. `GatewayStartupValidator.ValidateStartup` spans lines 41-632 with 64 `throw` sites and no aggregation: it is fail-fast, the first violation wins, and warnings are logged between checks. The split keeps that contract. WP4.0a and WP4.0b land first; WP4.1 to WP4.4 then run in parallel and share no files.
+
+| WP | Files | Tests and verification |
+|----|-------|------------------------|
+| WP4.0a | `tests/Autheris.Tests.Unit/DependencyInjection/CompositionDescriptorSnapshotTests.cs`, `Snapshots/composition-dev-sqlite.txt`, `Snapshots/composition-production-like.txt` | `Composition_DescriptorSnapshot_IsStable(profile)`. It replays the Program.cs registration sequence (lines 60-69) on an in-memory configuration. One line per descriptor: index, service type, lifetime, key, and `type:<Impl>`, `instance:<Type>` or `factory:<ReturnType>`. Lambda method names are excluded because they change under extract-method. Regenerate with `AUTHERIS_UPDATE_SNAPSHOTS=1`. |
+| WP4.0b | `tests/Autheris.Tests.Unit/Configuration/GatewayStartupValidatorGoldenTests.cs`, `Snapshots/startup-validator-failures.txt`, `Snapshots/startup-validator-warnings.txt` | `EachInvalidCase_FailsWithGoldenMessage`: one case per throw site, run under Production and Development, recording the exception type and message. `ValidConfigs_LogGoldenWarnings`. Both goldens are generated on unchanged code. |
+| WP4.1 | `GatewayGovernanceServiceExtensions.cs` becomes `partial`, plus `.Consent.cs`, `.Catalog.cs`, `.Audit.cs`, `.Policy.cs`, `.Identity.cs` | Every private method covers one contiguous line range of today's body and is called in the same order. The snapshot is equal. |
+| WP4.2 | `GatewayServiceCollectionExtensions.cs` becomes `partial`, plus `GatewayServiceCollectionExtensions.Options.cs` (lines 88-218) and `.GraphQL.cs` (lines 546-682) | Keeping the class partial means the class name, the namespace and the callers stay unchanged. The snapshot is equal. |
+| WP4.3 | `Plan9ServiceExtensions.cs` renamed to `AsyncJobServiceExtensions.cs` (`AddAsyncJobsAndDatasourceTesting`, `MapAsyncJobEndpoints`), `Program.cs:69`, `GatewayApplicationBuilderExtensions.cs:289` | Unit `~AsyncJob`, then a host-start smoke test. |
+| WP4.4 | `GatewayStartupValidator.cs` (`ValidateStartup` becomes a loop), plus new `StartupChecks/StartupCheck.cs`, `GatewayStartupChecks.cs`, `PolicyAndNetworkStartupChecks.cs`, `GraphQlAndSwitchStartupChecks.cs`, `AuthenticationStartupChecks.cs`, `ProductionStartupChecks.cs`, `StorageStartupChecks.cs` | Goldens are equal. `StartupChecks_OrderIsStable` compares the check names to a golden. `EachCheck_IsGuardedByAGoldenCase` drops one registry entry at a time and requires at least one golden case to change, which is an in-test mutation proof that no check was dropped. Lower the `source-size-ceilings.txt` entry, or delete it once the file is under 1,000 lines. |
+
+Decision (default taken): the checks are `internal sealed record StartupCheck(string Name, Action<StartupCheckContext> Run)` in one static ordered array, not DI services, because validation runs before the container exists. `StartupCheckContext` holds the options, the environment, `GetEnv`, the logger, `IsDevelopment`, `DangerBypasses` and `Warnings`. The bypass and warning lists are computed once; both are pure functions of the options. An internal overload `ValidateStartup(..., IReadOnlyList<StartupCheck> checks)` serves the mutation test. The order follows today's line ranges:
+
+1. ObjectGraph (55).
+2. The eight existing per-area methods (58-65).
+3. Egress (67).
+4. CasbinModel (76).
+5. CasbinPolicy (110).
+6. ReverseProxy (146).
+7. DevelopmentInContainer (171).
+8. GraphQlTrustedDocuments (184).
+9. FederationSigning (206).
+10. SecuritySwitchReport (223-261).
+11. OperationalInvariants (263-295).
+12. BasicAuthSession (296).
+13. BasicAuthUsers (303).
+14. ForwardAuth (313-373).
+15. ProductionGovernance (374-420).
+16. ProductionTransportAndOrigins (421-501).
+17. ProductionAuthentication (502-539).
+18. ProductionStorageAndAudit (540-612).
+19. GovernanceDbProvider (613).
+20. ClusterState (618-631).
+
+### 9.2 PR 5 (`-5`, in implementation)
+
+This is the rest of ARCH-MNT-23: the remaining `Task.Delay`/`Thread.Sleep` synchronization in tests, plus a `Task.Delay`-in-tests ratchet. No design is needed.
+
+### 9.3 PR 6 (`-6`): ARCH-MNT-16, 17, 27
+
+1. **ARCH-MNT-16** (`PatternMatcher.cs`). This change copies the `TargetPatternMatcher` pattern:
+   - Add `MaxCachedPatterns = 1024`.
+   - Replace `GetOrAdd` with `TryGetValue`, then `CompileAndCache`, which runs `Clear()` when `Count >= cap`.
+   - Add `internal ClearCache()` and `CachedPatternCount`.
+   - Tests in `tests/Autheris.Tests.Unit/Governance/PatternMatcherCacheTests.cs`: `ManyDistinctPatterns_CacheStaysWithinCap` and `AfterEviction_StillMatches`. Each asserts `<= cap` only, so the tests stay safe in parallel.
+2. **ARCH-MNT-17.** The client is registered with `AddHttpClient<PurviewDataCatalogClient>()` and is therefore transient. A token cache held in an instance field would cache nothing, so the cache moves to a new singleton:
+   - The singleton is `src/Autheris.Extensions/DataCatalog/PurviewTokenCache.cs`, registered in `DataCatalogServiceCollectionExtensions.cs` and injected with `TimeProvider` and `IOptionsMonitor<GatewayOptions>`.
+   - It has one slot keyed by `PurviewCredentialKey(TenantId, ClientId, SecretFingerprint = SHA-256 hex of ClientSecret)` and a per-instance `SemaphoreSlim`.
+   - An `OnChange` callback clears the slot. The development mock token is returned as a constant and is never cached.
+   - The static fields are deleted from `PurviewDataCatalogClient.cs`, and its `datetime-now-counts.txt` entry is lowered from 4 to 0.
+   - Tests in `tests/Autheris.Tests.Unit/DataCatalog/PurviewTokenCacheTests.cs`: `TwoCredentialSets_DoNotShareTokens`, `SecretRotation_Refetches`, `OptionsChange_ClearsCache`, `DevMockToken_IsNeverCached`, `Expiry_Refetches` (with a fake `TimeProvider`) and `ConcurrentCallers_FetchOnce`.
+3. **ARCH-MNT-27.**
+   - **Root cause:** the timeout comes from production code. `EnvoyExtAuthzService.DnsLabelRegex` and `AuthzPathRegex` (lines 439-440, `Compiled`, 100 ms) are linear and anchored. The match timeout is measured in wall-clock time, so a thread that is descheduled under load trips it. On the export endpoints this would surface as a 500 under real load.
+   - **Fix:** replace the regex checks with deterministic `SearchValues<char>` checks, `IsDnsLabel(ReadOnlySpan<char>)` and `IsAuthzPath(...)`, in the new file `src/Autheris.Application/Mesh/Services/EnvoyExportValidation.cs`. Do the same for `VersionSegment` (line 31).
+   - **Tests:** `EnvoyExportValidationTests.IsDnsLabel_AgreesWithFormerRegex` (boundaries at 63/64 characters, leading and trailing `-`, upper case, empty) and `IsAuthzPath_AgreesWithFormerRegex`. The existing G3 test stays unchanged.
+
+### 9.4 PR 7 (`-7`): ARCH-MNT-06 inventory and unknown-key rejection
+
+Correction to section 2.4: `EnvoyExtAuthzOptions.TrustedPeers` (`IsTrustedPeer`, used at `EnvoyExtAuthzEndpoints.cs:138`), `AuthenticationOptions.EnableKerberos` (`IsKerberosConfigured`), `RedisOptions.FailClosedOnRevocationLookupError` (`Resolve…`), `GatewayOptions.Insecure` (the `Is*` members), `ExtensibilityOptions.BreakGlassAllowedRoles` (`GetEffective…`), `TenantRegistryGateOptions.MaxNewRegistrationsPerIssuerPerWindow` and the `DevOptions`/`DevToolingOptions` keys (read raw in `DevConfiguration.Apply`) are consumed. They are false positives of the "outside the defining file" heuristic.
+
+All of them stay. They leave the baseline through a new `Baselines/options-consumed-indirectly.txt` file with lines of the form `Type.Property|ConsumingMember`. A new test, `IndirectConsumers_AreReadOutsideTheDefiningFile`, checks that each named consuming member is read outside the defining file.
+
+| Property | Intended semantics | Wire | Decision | Files |
+|----------|--------------------|------|----------|-------|
+| `OtlpOptions.AllowInsecureTransport` | allow plaintext OTLP export | S | wire: outside Development, an `http://` endpoint with a non-loopback host fails the start unless the flag is true | `GatewayTelemetryServiceExtensions.cs` (~168), `TelemetryOptions.cs` |
+| `ScimOptions.AllowedIpRanges` | CIDR allowlist of SCIM callers per realm | S | wire: empty means unrestricted (today's behaviour); a non-empty list makes the handler fail authentication for any other peer; an invalid CIDR fails the start | `ScimAuthenticationHandler.cs` (~74), `IdentityRealmsOptions.cs`, `GatewaySecurityOptionsValidator.cs` |
+| `ScimOptions.EnableMassChangeProtection`, `MassChangeThresholdPercentage` | block bulk SCIM deprovisioning | L | delete, backlog ARCH-MNT-06-FU-01 | `IdentityRealmsOptions.cs` |
+| `McpOptions.RequirePiiMasking`, `AllowAnonymousDiscovery` | masking and auth on MCP | n/a | delete: masking is always on unless `Insecure:warn_allow_unmasked_ai_access` is set, and auth applies unless `danger_bypass_mcp_auth` is set | `McpOptions.cs` |
+| `CasbinOptions.EnforceInQueryPipeline` | Casbin enforcement in the query pipeline | n/a | delete (`Casbin:Enabled` governs) | `RlsOptions.cs` |
+| `AuditOptions.StoreStatementText` | store SQL text in the audit log | n/a | delete: the audit log never stores statement text, and telemetry has `AllowStatementText` | `AuditLoggingOptions.cs` |
+| `ClassificationOptions.MaskingRules`, `StepUpAuthThresholdRank`, `AutoApproveMaxRank` | classification-driven masking, step-up and auto-approval | L | delete: `ApprovalPipelineConfig` and DataMasking govern these | `ClassificationOptions.cs` |
+| `EntraIdAuthOptions.SidClaimType`, `GroupsClaimType`; `AdfsAuthOptions.SidClaimType`, `GroupSidClaimType` | configurable identity claims | M | delete: `Sid.cs` keeps fixed claim resolution, and configurable claim types would widen the spoofing surface | `JwtOptions.cs` |
+| `IdentityOptions.PseudonymKeyRef` (telemetry) | key used for pseudonymous identity attributes | M | delete: no pseudonymous telemetry path exists | `TelemetryOptions.cs` |
+| `TableCacheEncryptionOptions.KeyDerivationContext` | HKDF context | S | delete: it is not secret, and the constant in `TableCacheCryptoHelper` stays | `TableCacheEncryptionOptions.cs` |
+| `TableCacheOptions.AllowStaleOnOutage` | serve stale data on an outage | n/a | delete: false is the fail-closed default and was never implemented | `TableCacheOptions.cs` |
+| `L1MemoryCacheOptions.SensitiveTableTtlSeconds` | shorter L1 TTL for sensitive tables | M | delete, backlog FU-02: revocation freshness is enforced by epoch validation (`FailClosedOnSensitiveTables`) | `RedisOptions.cs` |
+| `RebacOptions.MaxCachedDecisions` | cap on a ReBAC decision cache | n/a | delete: no such cache exists | `RlsOptions.cs` |
+| `PostAuthSidRateLimitOptions.MaxCostPerMinute` | cost-based limit per SID | L | delete, backlog FU-03 | `RateLimitingOptions.cs` |
+
+Each deleted row also leaves `unconsumed-options.txt`, `appsettings*.json` and the Helm values. Non-security baseline entries (Webhooks, CatalogSearch, Metrics and others) stay in the shrink-only ratchet.
+
+**Unknown-key rejection (default taken; it lives in its own files):**
+
+- **Files.** `src/Autheris.Api/Configuration/UnknownGatewayKeyGuard.cs` holds the static `ThrowIfUnknownKeys(IConfiguration)`. `GatewayConfigurationSchema.cs` holds the side-bound `(section, Type)` pairs (for example `Gateway:DuckDbOlap`, `Gateway:Catalog`, `Gateway:State`, `Gateway:TableCache`, `Gateway:AsyncJobs`), the free-form subtrees and the keys owned by specific guards.
+- **Call site.** `Program.cs` calls the guard once, right after `DevConfiguration.Apply` (line 56). Dev presets inject keys, so the guard has to run after them. `LegacySwitchGuard` and `SerilogSectionGuard` run earlier (lines 54-55), so their specific messages win. `WebSql:SqlRewriterEngine` and `WebSql:PlanCache` are exempt, so `ValidateRemovedWebSqlSettings` keeps its message. This touches neither `AddGatewayOptions` nor `GatewayStartupValidator` (PR 4), and in `Program.cs` it is a different hunk from WP4.3.
+- **Detection.** The guard walks the leaves of `GetSection("Gateway").AsEnumerable(true)` and resolves each path segment by segment. The rules are, in order:
+  - The longest side-bound prefix switches the type.
+  - Public properties match case-insensitively.
+  - An `IDictionary<string,T>` key is free-form.
+  - A list or array segment must be a numeric index.
+  - A scalar must be a leaf.
+  - An `IConfigurationSection`, a `Dictionary<string,string>` or an `object` is free-form.
+- **Why not `ErrorOnUnknownConfiguration`.** `BinderOptions.ErrorOnUnknownConfiguration` is not used. It stops at the first type, cannot merge the side-bound sections, and would have to change every `Bind` call.
+- **Failure.** The guard throws one `InvalidOperationException` that lists up to 20 unknown keys, sorted, in both `A:B` and `Gateway__A__B` form. It never includes a value.
+- **Scope.** Only the `Gateway` root is checked. `Logging`, `Kestrel`, `ConnectionStrings`, `OTEL_*` and `AllowedHosts` are out of scope. Environment variables map onto the same keys and are checked the same way. Helm renders `Gateway__*` environment variables, so shipped values are covered by a test.
+- **No bypass.** The guard has no escape hatch and does not honour `AUTHERIS_ALLOW_LEGACY_CONFIG`.
+- **Tests** (`tests/Autheris.Tests.Unit/Configuration/UnknownGatewayKeyGuardTests.cs`):
+  - `UnknownKey_FailsStartup_ListsKeyNotValue`
+  - `EnvVarStyleKey_IsChecked`
+  - `DictionaryAndListKeys_AreAccepted`
+  - `SideBoundSectionKeys_AreAccepted`
+  - `DeletedSecurityFlag_FailsStartup` (`Gateway:Mcp:RequirePiiMasking`)
+  - `RemovedWebSqlKey_KeepsSpecificMessage`
+  - `DevPresetKeys_AreKnown`
+  - `ShippedConfiguration_HasNoUnknownGatewayKeys` (`src/Autheris.Api/appsettings*.json`, `deploy/containers/**/appsettings*.json`, `deploy/helm/autheris/values*.yaml`, `templates/deployment.yaml`, `deploy/podman-compose*.yaml`)
+  - `Schema_CoversEveryGatewaySectionLiteralInSrc`, a drift test over `"Gateway:..."` literals and `GatewaySections`
+
+### 9.5 PR 8 (`-8`): ARCH-MNT-08 raw exception messages
+
+All sites switch to `ApiProblems.Problem` (`application/problem+json` with `type`, `title`, `status`, a fixed generic `detail`, `code`, `correlationId` and `traceId`). The original exception is logged through `ApiProblems.LogFailure`. Dev-gated `isDev ? ex.Message` branches are removed, and statuses stay as they are unless stated otherwise. New codes go into `ApiErrorCodes`. The arch test baseline becomes empty, and the regex is widened to `\b\w*(?:ex|Ex|exception|Exception)\.Message\b`, which also catches `sex.Message` in `GovernancePlanEndpoints:81,120`.
+
+| Site | Response after the change |
+|------|---------------------------|
+| `CatalogApiEndpoints:745` | 400 `INVALID_SECRET_REF` |
+| `DataContractEndpoints:65` | narrowed to `ArgumentException`, `JsonException` or `ValidationException`: 400 `DATA_CONTRACT_INVALID`; any other exception goes to the global handler |
+| `DuckDbOlapEndpoints` (3 sites) | 400 `OLAP_QUERY_FAILED` or `OLAP_RESULT_TOO_LARGE`, written as a problem body while `!HasStarted` |
+| `GovernanceEndpoints.Audit:385` | 429 `PRIVACY_BUDGET_EXHAUSTED`; the header and the extensions `clientId`, `consumed` and `totalBudget` are kept |
+| `GovernanceEndpoints.Access:187` | 400 `ROW_FILTER_SYNTAX_INVALID` in every environment |
+| `GovernanceEndpoints.Access:340,619`, `RebacEndpoints:76` | audit `DetailsJson`, not a response: `reasonType = ex.GetType().Name` instead of the message |
+| `GovernancePlanEndpoints:81,85,120,124` | 403 `ACCESS_DENIED`; `catch (Exception)` narrowed to `ArgumentException` or `InvalidOperationException`: 400 `GOVERNANCE_PLAN_INVALID` |
+| `IcebergRestCatalogEndpoints:107-110` | 403 `ACCESS_DENIED`, 400 `BAD_REQUEST` ("The request is invalid."), 501 `NOT_IMPLEMENTED`, 500 `INTERNAL_ERROR` |
+| `ProcedureEndpointRoutes:395,401` | 400 `PROCEDURE_ARGUMENT_INVALID`, 422 `PROCEDURE_BUSINESS_RULE_VIOLATION`; `WriteErrorAsync` emits a problem body |
+| `VirtualFilterEndpoints:189-207` | 409 `VIRTUAL_FILTER_CONFLICT` or `RESOURCE_LOCKED`, 404 `RESOURCE_NOT_FOUND`, 400 `VIRTUAL_FILTER_INVALID`, 400 with `code = ex.Code` (governed `VirtualFilterErrorCodes`), 400 `INVALID_JSON` or `BAD_REQUEST` |
+| `McpStdioRunner:60` | `{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":{"correlationId":"<guid>"}},"id":null}`; the log entry carries the same id |
+
+Tests: `RawExceptionMessage_NeverReachesTheClient(site)` throws a fake exception with a `SENTINEL-<guid>` message per site and asserts the code, the presence of `correlationId`, and that the body does not contain the sentinel. `McpStdio_InternalError_IsGenericWithCorrelationId` covers the MCP site. The architecture test runs with an empty baseline.
+
+### 9.6 PR 9 (optional) and later
+
+- **FU-02 is cheap (S).** `tests/Autheris.Tests.Fuzz/Replay/ParserCacheCalibrationTests.cs` replays the 309 seed files on a fresh `AntlrCacheGenerations` with the `stateCounter` hook and records the peak number of states per generation. The 50,000 default stays unless twice the peak exceeds it, and the numbers are recorded here.
+- **FU-01 is not cheap (M).** `SqlGate.BenchCheck` reads only the G8 `SqlCompilerBenchmarks` output. The cold/warm `SqlParserCacheBenchmarks` needs a reader, a ratio threshold and a workflow job, so FU-01 is deferred.
+- **Later.** ARCH-MNT-22 and the long-method splits (ARCH-MNT-20) need no design now.
+
+### 9.7 Phase 3 scope and questions
+
+PR 7 and PR 8 need a mandatory review. ARCH-MNT-14 (PR 4) and ARCH-MNT-17 (PR 6) need a light review. ARCH-MNT-16 and 27 need none beyond the PR 6 light review.
+
+1. (07) Unknown `Gateway` keys fail the start in every environment, including Development, with no escape hatch. Is that accepted?
+2. (07) Is limiting the check to the `Gateway` root acceptable?
+3. (07) The failure message lists keys only, never values, capped at 20. Is that acceptable?
+4. (07) OTLP: is the loopback exemption for `http` acceptable? Should plaintext stay allowed in Development?
+5. (07) SCIM `AllowedIpRanges`: should it use the raw peer address or the forwarded IP after the `KnownProxies` processing? Should an empty list mean unrestricted, or deny outside Development?
+6. (07) Is it acceptable to delete the configurable SID and group claim types in favour of fixed resolution?
+7. (07) For `Mcp:RequirePiiMasking`, `Mcp:AllowAnonymousDiscovery` and `Casbin:EnforceInQueryPipeline`, confirm that enforcement is unconditional today, so deleting them changes nothing.
+8. (08) Dev-gated exception messages are removed in all environments; the detail is available only in the logs, by correlation id. Is that accepted?
+9. (08) May the privacy-budget 429 keep the `clientId`, `consumed` and `totalBudget` extensions?
+10. (08) Audit details record the exception type instead of the message. Is that sufficient for forensics?
+11. (08) Iceberg REST: should errors stay ProblemDetails or follow the Iceberg `ErrorModel`?
+12. (08) Narrowing `catch (Exception)` turns unexpected errors from 400 into a mapped 500. Is that accepted?
+13. (08) MCP stdio: should the error keep `id: null`, and is a GUID correlation id acceptable?
+14. (14) Do equal goldens (failure messages for every throw site, warnings, check order) and the per-check mutation test prove fail-closed order and completeness? Is a lambda-insensitive descriptor snapshot enough to prove the decorator order is unchanged?
+15. (17) Is the single-slot singleton cache sufficient for token isolation: keyed with the secret fingerprint, cleared on options change, with the mock token never cached and the token never logged?
+
+### 9.x Phase 3 binding conditions (csharp-security-expert, 2026-10-26)
+
+Verdicts: PR 7 (ARCH-MNT-06) APPROVED WITH CONDITIONS. PR 8 (ARCH-MNT-08) APPROVED WITH CONDITIONS. PR 4 (ARCH-MNT-14) APPROVED WITH CONDITIONS. PR 6 (ARCH-MNT-17, 27) APPROVED WITH CONDITIONS. ARCH-MNT-16 needs no condition beyond the plan.
+Code facts checked: `Mcp:RequirePiiMasking`, `Mcp:AllowAnonymousDiscovery`, `Casbin:EnforceInQueryPipeline` have no reader in `src/` (defaults true/false/true), so deleting them changes nothing. MCP auth is gated only by `IsMcpAuthBypassed`. `IsMcpUnmaskedAllowed` has no reader outside `GatewayOptions.cs`, so the plan's statement "masking is always on unless warn_allow_unmasked_ai_access" is unverified and gets a test (T-03). `SidClaimType`/`GroupsClaimType`/`GroupSidClaimType` have no reader outside `JwtOptions.cs`. `ScimAuthenticationHandler` fails with generic messages; `HttpContextClientIpResolver` is the canonical post-forwarded-headers IP.
+
+**Rulings on questions 1-15**
+1. Accepted: unknown `Gateway` keys fail startup in every environment, no bypass, `AUTHERIS_ALLOW_LEGACY_CONFIG` not honoured.
+2. Accepted: `Gateway` root only; `Logging`, `Kestrel`, `ConnectionStrings`, `OTEL_*`, `AllowedHosts` are out of scope.
+3. Accepted: key names only, sorted, capped at 20 plus a "N more" count; never a value, and never a value-derived substring (a mistyped key can itself be a secret, see SC-06-04).
+4. Accepted: loopback `http` is allowed; plaintext in Development is allowed. Non-loopback `http` outside Development fails unless `AllowInsecureTransport` is true, and then logs a startup warning and appears in the danger list.
+5. Use the resolved client IP from `HttpContextClientIpResolver` (trusted proxies only; raw peer when no proxy is trusted). Empty list means unrestricted (not a regression), with a Production startup warning; a non-empty list that cannot be evaluated (no IP) denies.
+6. Accepted: delete the configurable claim types; fixed resolution stays.
+7. Confirmed for the three flags (no reader). The masking claim needs the test T-03 before the flag is deleted.
+8. Accepted: no exception message in any response in any environment; detail only in logs by correlation id.
+9. Accepted: `clientId` is the caller's own id and `consumed`/`totalBudget` are budget figures, not secrets. The 429 must still be returned only after authentication and must not echo other clients' data.
+10. Sufficient: exception type name only, never the message, never the stack; the correlation id links to the log.
+11. Follow the Iceberg REST `ErrorModel` (`{"error":{"message","type","code"}}`) on the Iceberg routes so client SDKs parse it; the message is the fixed generic text. Governed `ApiErrorCodes` map to `type`. A ProblemDetails body is not required there.
+12. Accepted: unexpected exceptions become the global-handler 500 with a correlation id (fail-closed, no 400 masking of server faults).
+13. Accepted: `id: null` and a GUID correlation id (`Guid.NewGuid()`, not derived from input), logged with the exception.
+14. Goldens plus the per-check mutation test prove order and completeness only if the conditions SC-14-01..04 hold. A lambda-insensitive snapshot proves the decorator order only if the descriptor list includes the index and the implementation-type of decorator registrations (SC-14-05).
+15. Sufficient with the conditions SC-17-01..05 (fingerprint is never logged or exposed, the cache never stores the secret).
+
+**ARCH-MNT-06 (PR 7), binding**
+- SC-01: Every wired flag fails closed: invalid value (bad CIDR, bad URI) fails startup, never silently disables the control.
+- SC-02: OTLP check applies to every configured exporter endpoint (traces, metrics, logs, per-signal overrides); loopback means `localhost`, `127.0.0.0/8`, `::1` only, parsed with `Uri`/`IPAddress`, not string prefix (`http://localhost.evil.com` must fail).
+- SC-03: SCIM allowlist is evaluated before the bearer secret comparison result is revealed, applies to every SCIM endpoint, uses IPv4-mapped-IPv6 normalisation, and rejection returns the same generic failure text as other failures (no "IP not allowed" oracle).
+- SC-04: Guard error text and logs never contain values; the key path is sanitised (control characters stripped, each key truncated to 128 chars) to prevent log injection.
+- SC-05: The guard never blocks the specific guard messages (LegacySwitchGuard, SerilogSectionGuard, removed WebSql) and runs after `DevConfiguration.Apply`; `Gateway:Insecure:*` and `Gateway:Casbin`, `Gateway:Rls`, `Gateway:Audit` security sections are bound to their types, not free-form.
+- SC-06: No free-form (`object`/`IConfigurationSection`/`Dictionary<string,string>`) exemption may cover a security-relevant subtree (Insecure, Authentication, Casbin, Mcp, Audit, Consent, Tls); the schema lists each free-form subtree explicitly and the test enumerates them.
+- SC-07: Deleted flags are removed from code, `unconsumed-options.txt`, appsettings, Helm values, docs and `deploy/` in the same PR (otherwise shipped config fails startup by design).
+- SC-08: A baseline entry in `options-consumed-indirectly.txt` is valid only if the consuming member is read outside the defining file and is not itself dead; stale lines fail the test.
+- SC-09: Backlog items FU-01..03 stay out of the PR; `ScimOptions.EnableMassChangeProtection` deletion must be noted in the plan as a known absent control (no behaviour change).
+Mandatory tests (`[Trait("Category","Security")]`), ids ARCH-MNT-06-T-NN: 01 `UnknownKey_FailsStartup_InDevelopmentAndProduction`; 02 `UnknownKey_ErrorNeverContainsValue` (secret-looking key and value); 03 `McpMasking_AppliedByDefault_WithoutFlag` and `McpAuth_RequiredByDefault`; 04 `CasbinEnforcement_AppliedWithoutEnforceInQueryPipelineKey`; 05 `Otlp_PlaintextNonLoopback_FailsStart_ExceptDevOrFlag` incl. `localhost.evil.com`; 06 `Scim_AllowedIpRanges_RejectsOtherPeer_AcceptsListed`, `Scim_InvalidCidr_FailsStart`, `Scim_EmptyList_Unrestricted`, `Scim_ForwardedHeaderFromUntrustedPeer_DoesNotBypassRanges`; 07 `DeletedClaimTypeKeys_FailStartup`; 08 `FreeFormSubtrees_ExcludeSecurityRoots`; 09 `IndirectConsumers_AreReadOutsideTheDefiningFile` (plan test); plus the plan's guard tests.
+
+**ARCH-MNT-08 (PR 8), binding**
+- SC-01: No `ex.Message`, `ex.ToString()`, `ex.InnerException`, stack or exception type appears in any response body or header; the widened regex also bans `.ToString()` on exceptions in the endpoint folders.
+- SC-02: Response `detail` is a fixed string per code; never interpolated with caller or exception data (including `ex.Code` from `VirtualFilterErrorCodes`, which must be validated against the governed list, unknown values map to `BAD_REQUEST`).
+- SC-03: `ApiProblems.LogFailure` logs the exception with the correlation id; log templates use structured parameters, no user-controlled string concatenated.
+- SC-04: Audit `DetailsJson` gets `reasonType` = exception type name only; no message.
+- SC-05: Narrowed `catch` filters must not swallow `OperationCanceledException`; unmapped exceptions propagate to the global handler (500, generic).
+- SC-06: DuckDB OLAP writes a problem body only while `!HasStarted`; once started, abort the connection and never append an error string to a partial stream.
+- SC-07: `ACCESS_DENIED` responses are identical for "not found" and "forbidden" where today's behaviour is already existence-hiding; do not introduce a distinguishing code.
+- SC-08: Iceberg and MCP error shapes follow rulings 11 and 13; MCP stdio never writes the exception to stdout.
+- SC-09: The arch test baseline is empty and the test fails on a missing endpoint folder (no vacuous pass).
+Mandatory tests, ids ARCH-MNT-08-T-NN: 01 `RawExceptionMessage_NeverReachesTheClient(site)` (plan test, sentinel in body, headers and `Location`); 02 `ProblemBody_HasCodeCorrelationIdAndFixedDetail`; 03 `AuditDetails_ContainTypeNotMessage` (Access x2, Rebac); 04 `PrivacyBudget429_KeepsExtensions_NoMessage`; 05 `UnexpectedException_Returns500_NotMapped400`; 06 `Cancellation_IsNotMappedToProblem`; 07 `Iceberg_ErrorsUseErrorModel_GenericMessage`; 08 `McpStdio_InternalError_IsGenericWithCorrelationId` and `McpStdio_NothingExceptJsonRpcOnStdout`; 09 `VirtualFilter_UnknownCode_MapsToBadRequest`; 10 `OlapError_AfterResponseStarted_DoesNotAppendMessage`; 11 `ArchTest_NoExceptionMessageInEndpoints_EmptyBaseline`.
+
+**ARCH-MNT-14 and DI snapshot (PR 4), light**
+- SC-01: Goldens (failures, warnings, order) are generated on unchanged code in a separate first commit; the refactor commit may not change them.
+- SC-02: One golden case per throw site, each also asserting the exception type; a site without a case fails `EachCheck_IsGuardedByAGoldenCase`.
+- SC-03: Fail-fast stays: the first failing check wins; the loop must not catch and aggregate, and `Warnings`/`DangerBypasses` stay computed once from options.
+- SC-04: Any check that is added, removed or moved changes the order golden; the order test compares names and count.
+- SC-05: The DI snapshot lists index, service type, lifetime, key and implementation (type/instance type/factory return type); authorization, audit and decorator registrations are verified in order, in both profiles; the snapshot updates only with `AUTHERIS_UPDATE_SNAPSHOTS=1` and the env var must not be set in CI (CI test fails if it is).
+- SC-06: The snapshot never records option values or secrets.
+Tests ARCH-MNT-14-T-NN: 01 `EachInvalidCase_FailsWithGoldenMessage`; 02 `StartupChecks_OrderIsStable`; 03 `EachCheck_IsGuardedByAGoldenCase`; 04 `Composition_DescriptorSnapshot_IsStable` (both profiles); 05 `Snapshot_UpdateFlagIsRejectedInCi`; 06 `Validator_FirstViolationWins_NoAggregation`.
+
+**ARCH-MNT-17 (PR 6), light**
+- SC-01: Cache holds the token only; the key is SHA-256 of tenant, client id and secret, and neither the secret, the fingerprint nor the token is logged or in an exception message.
+- SC-02: Token is kept in memory only, stored with expiry minus a safety skew (60 s) via `TimeProvider`; an expired or failed fetch is never cached and failures are not served from a stale slot (fail closed).
+- SC-03: The slot is replaced atomically; a fetch started under old options must not write into the slot after an `OnChange` clear (compare key before store).
+- SC-04: Semaphore wait honours the caller's cancellation token and has no unbounded wait.
+- SC-05: Mock token only when Development mock mode is active; production configuration can never reach that branch.
+Tests ARCH-MNT-17-T-NN (plan tests plus): 07 `FetchStartedBeforeOptionsChange_DoesNotPopulateCache`; 08 `FailedFetch_IsNotCached`; 09 `TokenAndSecret_NeverInLogsOrExceptions`.
+
+**ARCH-MNT-27 (PR 6), light**
+- SC-27-01: `IsDnsLabel` and `IsAuthzPath` accept exactly the former regex language (same anchors, `$` newline semantics included: the old `$` accepted a trailing `\n`; the new check must reject it and the plan must record that as an intended tightening), ASCII only, no culture, no Unicode letters.
+- SC-27-02: Fail closed: any input that is null, empty, over 63 (label) or over the former path bound is rejected; no exception escapes on any input.
+- SC-27-03: The equivalence tests run over the regex retained in test code, with a boundary table plus a seeded random corpus (at least 10,000 strings over a hostile alphabet including `\n`, `\0`, Unicode, `%2e`, `..`, `//`), and assert the only differences are the documented trailing-newline case.
+Tests ARCH-MNT-27-T-NN: 01 `IsDnsLabel_AgreesWithFormerRegex`; 02 `IsAuthzPath_AgreesWithFormerRegex`; 03 `EnvoyExport_RejectsHostileInputs_Without500`; 04 `VersionSegment_AgreesWithFormerRegex`.
+
+**Backlog**: ARCH-MNT-06-FU-01..03 stand. No further item moved: all wired flags (OTLP, SCIM CIDR) are small and stay in PR 7.
