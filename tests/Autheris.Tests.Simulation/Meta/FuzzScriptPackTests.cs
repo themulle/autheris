@@ -212,7 +212,10 @@ public sealed class FuzzScriptPackTests
         region.ShouldBeGreaterThan(0);
         arena.ShouldBeLessThan(afl);
         region.ShouldBeLessThan(afl);
-        code.Count(l => l.Contains("MALLOC_ARENA_MAX", StringComparison.Ordinal)).ShouldBe(1);
+        code.Count(l => l.Contains("MALLOC_ARENA_MAX", StringComparison.Ordinal)).ShouldBe(2);
+        var unset = code.FindIndex(l => Regex.IsMatch(l, @"^\s*unset\s+MALLOC_ARENA_MAX\s+DOTNET_GCRegionRange\s*$"));
+        unset.ShouldBeGreaterThan(afl, "the settings are scoped to the afl-fuzz target, not the later replay");
+        unset.ShouldBeLessThan(code.FindIndex(l => l.Contains("--afl-findings", StringComparison.Ordinal)));
         script.ShouldContain("MEM_REGEX='^[0-9]{4}$'");
     }
 
@@ -228,9 +231,11 @@ public sealed class FuzzScriptPackTests
         code.ShouldContain("wait \"$SAMPLER_PID\"");
         code.ShouldContain("deadline=$((SECONDS + 10#$1 + 60))");
         code.ShouldContain("pgrep -x dotnet");
-        Regex.Count(code, "/proc/").ShouldBe(1);
+        Regex.Count(code, "/proc/").ShouldBe(2);
         code.ShouldContain("\"/proc/$pid/status\"");
-        code.ShouldNotContain("/proc/$pid/cmdline");
+        code.ShouldContain("\"/proc/$pid/cmdline\"");
+        code.ShouldContain("\"${argv[2]}\" == \"--afl\"");
+        code.ShouldContain("kill \"$SLEEP_PID\"");
         code.ShouldNotContain("/proc/$pid/environ");
         code.ShouldNotContain("kill -9");
         code.ShouldContain("SAMPLER_DIR=\"$RUNNER_TEMP/fuzz-sampler\"");

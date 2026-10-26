@@ -223,10 +223,16 @@ fi
 SAMPLER_PID=""
 sampler_loop() {
   set +e
+  local SLEEP_PID=""
+  trap 'kill "$SLEEP_PID" 2>/dev/null; exit 0' TERM
+  local -a argv=()
   local deadline=$((SECONDS + 10#$1 + 60)) pid key value vm rss thr pvm=0 prss=0 pthr=0 p
   while (( SECONDS < deadline )); do
     for pid in $(pgrep -x dotnet 2>/dev/null); do
       [[ "$pid" =~ ^[0-9]{1,8}$ ]] || continue
+      # Only the AFL target (exact argv), not publish leftovers such as MSBuild or compiler server nodes.
+      mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || continue
+      [[ ${#argv[@]} -eq 3 && "${argv[0]}" == "dotnet" && "${argv[1]}" == "$FUZZ_BIN/Autheris.Tests.Fuzz.dll" && "${argv[2]}" == "--afl" ]] || continue
       vm=0; rss=0; thr=0
       while read -r key value _; do
         case "$key" in
@@ -242,7 +248,9 @@ sampler_loop() {
     done
     p="$SAMPLER_DIR/peak"
     echo "$pvm $prss $pthr" > "$p.tmp" 2>/dev/null && mv -f -- "$p.tmp" "$p" 2>/dev/null
-    sleep 2
+    sleep 2 &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID"
   done
 }
 stop_sampler() {
@@ -295,6 +303,8 @@ set +e
 afl-fuzz -i "$AFL_IN" -x "$CORPUS/sql.dict" -o "$AFL_OUT" -t 5000 -G 65536 -m "$SIM_AFL_MEM_MB" -s "$SEED" -V "$MODE" -- dotnet "$FUZZ_BIN/Autheris.Tests.Fuzz.dll" --afl
 AFL_RC=$?
 set -e
+# The address-space settings apply to the afl-fuzz target only; the findings replay below must not inherit them.
+unset MALLOC_ARENA_MAX DOTNET_GCRegionRange
 echo "run-parser-fuzz: afl-fuzz exit code $AFL_RC"
 stop_sampler
 
