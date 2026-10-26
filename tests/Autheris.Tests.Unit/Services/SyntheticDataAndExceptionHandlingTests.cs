@@ -26,7 +26,6 @@ public sealed class SyntheticDataAndExceptionHandlingTests
     private readonly IConsentResolutionService _resolutionService = Substitute.For<IConsentResolutionService>();
     private readonly IConsentCacheService _cacheService = Substitute.For<IConsentCacheService>();
     private readonly IColumnMaskingProvider _maskingProvider = Substitute.For<IColumnMaskingProvider>();
-    private readonly IChunkedQueryExecutor _chunkedExecutor = new ChunkedQueryExecutor(500);
 
     private readonly TableIdentifier _testTableId = new("crm", "dbo", "customers");
 
@@ -83,7 +82,6 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             _resolutionService,
             _cacheService,
             _maskingProvider,
-            _chunkedExecutor,
             Options.Create(new GatewayOptions()),
             drainController: null,
             dataSourceExecutors: [], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance); // explicitly empty

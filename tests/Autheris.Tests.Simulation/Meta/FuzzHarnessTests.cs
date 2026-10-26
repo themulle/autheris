@@ -255,6 +255,59 @@ public sealed partial class FuzzHarnessTests
 
     [Fact]
     [Trait("Category", "Security")]
+    // SEC-PF-07
+    public void FuzzTarget_DfaReset_OnlyBetweenInputsAndNeverMasksOom()
+    {
+        // Deterministic boundary: the reset fires exactly on every interval-th execution, never earlier.
+        var resets = 0;
+        var gate = new FuzzDfaReset(3, () => resets++);
+        gate.OnInputBoundary(false).ShouldBeFalse();
+        gate.OnInputBoundary(false).ShouldBeFalse();
+        gate.OnInputBoundary(false).ShouldBeTrue();
+        gate.OnInputBoundary(false).ShouldBeFalse();
+        resets.ShouldBe(1);
+        gate.Executions.ShouldBe(4);
+
+        // A live abandoned input thread defers the reset to the next safe boundary (no race with the DFA).
+        var deferred = new FuzzDfaReset(1, () => resets++);
+        deferred.OnInputBoundary(true).ShouldBeFalse();
+        resets.ShouldBe(1);
+        deferred.OnInputBoundary(false).ShouldBeTrue();
+        resets.ShouldBe(2);
+
+        // Between inputs only: the reset runs on the calling thread before the input thread starts, never while an input runs.
+        var inputRunning = false;
+        var violated = false;
+        var caller = Environment.CurrentManagedThreadId;
+        var between = new FuzzDfaReset(1, () => violated |= Volatile.Read(ref inputRunning) || Environment.CurrentManagedThreadId != caller);
+        for (var i = 0; i < 3; i++)
+        {
+            FuzzRunner.RunOne("SELECT 1"u8.ToArray(), _ => { Volatile.Write(ref inputRunning, true); Volatile.Write(ref inputRunning, false); }, between);
+        }
+
+        violated.ShouldBeFalse();
+        between.Executions.ShouldBe(3);
+
+        // An OutOfMemoryException of the reset is never swallowed and the input does not run.
+        var ran = false;
+        var oom = new FuzzDfaReset(1, () => throw new OutOfMemoryException());
+        Should.Throw<OutOfMemoryException>(() => FuzzRunner.RunOne([1], _ => ran = true, oom));
+        ran.ShouldBeFalse();
+
+        // The real reset clears the shared DFA and parsing still works afterwards.
+        new FuzzDfaReset(1).OnInputBoundary(false).ShouldBeTrue();
+        FuzzRunner.RunOne("SELECT id FROM orders WHERE id > 1"u8.ToArray(), null, new FuzzDfaReset(1)).Outcome.ShouldBe(FuzzOutcome.Accepted);
+        FuzzDfaReset.DefaultInterval.ShouldBe(250_000);
+
+        var source = File.ReadAllText(Path.Combine(FuzzTestPaths.FuzzProject, "Target", "FuzzDfaReset.cs"));
+        source.ShouldNotContain("catch");
+        source.ShouldNotContain("DateTime");
+        source.ShouldNotContain("Stopwatch");
+        source.ShouldNotContain("Random");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     // SEC-SIM-20
     public void FuzzTarget_PerformsNoIoOrNetwork()
     {

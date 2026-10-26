@@ -19,7 +19,6 @@ public sealed class GraphQLOptions
     public string BananaCakePopPath { get; init; } = "/ui/bcp";
     [Range(100, 100000)] public int MaxResponseRows { get; init; } = 5000;
     [Range(1048576, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
-    [Range(10, 10000)] public int MaxInClauseBatchSize { get; init; } = 500;
     // SEC M-13: Hard upper bound for root fields/aliases per GraphQL operation (alias amplification).
     [Range(1, 200)] public int MaxRootFieldsPerOperation { get; init; } = 10;
     /// <summary>
