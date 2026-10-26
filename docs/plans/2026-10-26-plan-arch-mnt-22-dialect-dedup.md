@@ -88,3 +88,41 @@ Tests add about +450 (WP0 ~250, WP1-WP3 ~70 each) plus 9 golden files.
 3. D4: approver check outside the revoke transaction on PG/MSSQL; accept for step 1?
 4. Is L1 + L2 + CI integration sufficient as the merge gate without local Docker?
 5. Confirm the tenant-predicate exemptions (revoke by id under lock; ITSM system queue) and Decision 6 (core names outside the `GovernanceRepository` exemption) as binding conditions.
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-26)
+
+Verdict: APPROVED WITH CONDITIONS. Behaviour-preserving, statement-level extraction; no existing control is weakened as long as the conditions below hold.
+
+### Rulings on the architect's questions
+1. D1/D2: keep both unchanged in step 1; fix in a separate behaviour PR. D2 is the more important one: the PG/MSSQL silent fallback to `LegacySingleTenant` on an unparsable tenant is fail-open-adjacent (wrong-tenant attribution in the audit/cache epoch). The follow-up must make it strict (throw / fail closed) on all three dialects. D1 is an audit-literal inconsistency only (low).
+2. D3: not a stale-authorisation defect. The SQLite `_metadataCache` holds `TABLES` + `TABLE_COLUMNS` + `COLUMN_MASKING_RULES` (30 s TTL, generation-guarded) and no consent rows; consent decisions read `CONSENTS` directly, and SQLite `ReplaceConsentsAsync` already calls `_epochValidationService.InvalidateEpochAsync`. Consent replacement cannot change cached masking/column metadata. Classified as inconsistency (DEF-01, informational); harmonise in the same follow-up behaviour PR, no separate security fix PR needed.
+3. D4: accept in step 1. The check-then-act window only matters if an approver is demoted in the milliseconds between check and revoke, and the action only reduces access (revocation). Low. Follow-up: move the check into the transaction on PG/MSSQL (after the row lock) with the D1/D2 fix. Step 1 must not move it.
+4. Merge gate: golden tests (L1 static + L2 runtime recording-connection) plus green CI integration contract tests on all three dialects are sufficient, provided CI actually runs PG and MSSQL containers (not skipped) and L1/L2 goldens were generated from the pre-change code (WP0 first). Local Docker is not required.
+5. Binding, see SC-04 and SC-05.
+
+### Binding conditions
+- ARCH-MNT-22-SC-01: Extracted helpers keep SQL text, parameter names/order/types, and lock hints (`FOR UPDATE`, `UPDLOCK/ROWLOCK`) byte-identical; all values stay bound parameters, no string concatenation of caller data into SQL.
+- ARCH-MNT-22-SC-02: Authorisation (approver/self-grantee check), the `alreadyRevoked` check and the audit write remain in the dialect repositories in the current order; the shared core must not own any decision. D1, D2, D3, D4 stay exactly as today (R6); any golden diff caused by unifying them fails the PR.
+- ARCH-MNT-22-SC-03: Transaction, rollback, post-commit cache/epoch invalidation and tenant scoping stay in the dialect layer; the core only receives an open connection/transaction and never commits, rolls back or opens connections.
+- ARCH-MNT-22-SC-04: Exactly two tenant-filter exemptions are allowed and must be documented in the helper XML doc and the architecture test allow-list: (a) revoke-by-id under row lock (tenant resolved from the locked row), (b) the ITSM system queue. No other new query without a tenant predicate.
+- ARCH-MNT-22-SC-05: Core class names must not contain `GovernanceRepository` (ConsentQueryTenantArchitectureTests skips such types); a test must assert this naming rule so the skip cannot hide the new core.
+- ARCH-MNT-22-SC-06: No secret/consent-reason/payload values in new log or exception messages from the core; messages keep ids only (as today).
+- ARCH-MNT-22-SC-07: Core helpers keep existing bounds (batch sizes, `LIMIT/TOP`, ct propagation); no unbounded reads added.
+- ARCH-MNT-22-SC-08: Goldens are generated before any production change (WP0) and committed; updating a golden requires explicit reviewer sign-off in the PR description.
+
+### Mandatory tests (`[Trait("Category","Security")]`)
+- ARCH-MNT-22-T-01 `DialectGolden_ConsentGrants_Sql_Is_Unchanged` (L1 static, all 3 dialects).
+- ARCH-MNT-22-T-02 `DialectGolden_ConsentGrants_RuntimeBinding_Is_Unchanged` (L2 recording connection: parameter names/values, order).
+- ARCH-MNT-22-T-03 `Revoke_Retains_Divergences_D1_D2_D4_Until_Behaviour_Pr` (pins audit decision literal per dialect, tenant-parse behaviour, approver check position).
+- ARCH-MNT-22-T-04 `Revoke_Unauthorized_NonGrantee_Throws_And_Writes_No_Change` (per dialect).
+- ARCH-MNT-22-T-05 `Revoke_ById_Cannot_Revoke_Other_Tenant_Consent` (per dialect; guards exemption (a)).
+- ARCH-MNT-22-T-06 `Itsm_Outbox_SystemQueue_Is_Only_TenantFilter_Exemption` (architecture test with explicit allow-list).
+- ARCH-MNT-22-T-07 `CoreClasses_Do_Not_Contain_GovernanceRepository_In_Name`.
+- ARCH-MNT-22-T-08 `Webhook_And_Itsm_Outbox_Claim_Is_Exclusive_And_Tenant_Scoped_Unchanged` (golden + contract).
+- ARCH-MNT-22-T-09 `ReplaceConsents_Invalidates_Epoch_And_Metadata_Cache_Per_Dialect_Current_Behaviour` (pins D3 as-is).
+
+### Defects / follow-ups (separate behaviour PR, not part of step 1)
+- ARCH-MNT-22-DEF-01 (informational/low): SQLite `ReplaceConsentsAsync` does not evict `_metadataCache`; no stale-authorisation impact (cache holds no consent data). Fix with test `ReplaceConsents_Sqlite_Evicts_MetadataCache`.
+- ARCH-MNT-22-DEF-02 (low-medium): PG/MSSQL revoke tenant-parse silently falls back to `LegacySingleTenant`. Required test `Revoke_Invalid_Tenant_Value_Fails_Closed_All_Dialects`.
+- ARCH-MNT-22-DEF-03 (low): D1 audit decision `REVOKED` vs `REVOKE`; unify, test `Revoke_Audit_Decision_Literal_Is_Identical_Across_Dialects`.
+- ARCH-MNT-22-DEF-04 (low): D4 approver check outside the transaction on PG/MSSQL; move inside after the row lock, test `Revoke_Approver_Demoted_Before_Lock_Is_Rejected`.
