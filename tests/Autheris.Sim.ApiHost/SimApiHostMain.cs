@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Autheris.Sim.ApiHost;
 
@@ -22,6 +23,12 @@ public static class SimApiHostMain
 {
     public static async Task<int> Main(string[] args)
     {
+        // REQ-LB-04: diagnostics go to stderr only (the script prints the host log through its canary scrub, SEC-LB-03).
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Console.Error.WriteLine($"sim-api-host: unhandled exception (terminating={e.IsTerminating}): {(e.ExceptionObject as Exception)?.ToString() ?? e.ExceptionObject?.GetType().Name}");
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+            Console.Error.WriteLine($"sim-api-host: unobserved task exception: {SimHostShutdown.Describe(e.Exception)}");
+
         SimApiHostOptions options;
         try
         {
@@ -37,7 +44,16 @@ public static class SimApiHostMain
         Console.Error.WriteLine("sim-api-host: built without -p:AutherisIncludeTestAuth=true; there is no test-auth handler, refusing to start.");
         return 2;
 #else
-        return await RunAsync(options).ConfigureAwait(false);
+        try
+        {
+            return await RunAsync(options).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // REQ-LB-03 / SEC-LB-05: the catch-all returns 1, never 0.
+            Console.Error.WriteLine($"sim-api-host: startup failed: {SimHostShutdown.Describe(ex)}");
+            return 1;
+        }
 #endif
     }
 
@@ -60,59 +76,155 @@ public static class SimApiHostMain
         Directory.CreateDirectory(dataDir);
         var dataPath = Path.Combine(dataDir, "data.db");
         var govPath = Path.Combine(dataDir, "gov.db");
-        var exit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; exit.TrySetResult(); });
-        using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx => { ctx.Cancel = true; exit.TrySetResult(); });
+        var shutdown = new SimHostShutdown();
+        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; shutdown.Request(); });
+        using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx => { ctx.Cancel = true; shutdown.Request(); });
+
+        // SEC-LB-02: from here on the data dir is wiped on every exit path (codes 0, 1, 3, 4, 5).
+        var cleaned = false;
+        void Cleanup()
+        {
+            cleaned = true;
+            try
+            {
+                SqliteConnection.ClearAllPools();
+            }
+            finally
+            {
+                WipeDataDir(dataDir);
+            }
+        }
 
         WebApplicationFactory<Program>? factory = null;
         try
         {
-            SimApiSeed.Create(dataPath);
-
-            using (var seeding = NewHost(options, dataPath, govPath))
+            var startCode = 0;
+            try
             {
-                await RegisterCatalogAsync(seeding).ConfigureAwait(false);
+                SimApiSeed.Create(dataPath);
+
+                using (var seeding = NewHost(options, dataPath, govPath))
+                {
+                    await RegisterCatalogAsync(seeding).ConfigureAwait(false);
+                }
+
+                factory = NewHost(options, dataPath, govPath);
+                var port = options.Port;
+                factory.UseKestrel(k => k.Listen(IPAddress.Loopback, port));
+                factory.StartServer();
+
+                // SEC-SIM-03 / SEC-LB-01: assert that the loopback bind holds before the ready file is written.
+                var addresses = factory.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses ?? [];
+                if (addresses.Count == 0 || addresses.Any(a => !SimApiHostOptions.IsLoopbackUrl(a)))
+                {
+                    Console.Error.WriteLine("sim-api-host: bound addresses are not provably loopback; refusing to continue.");
+                    startCode = 3;
+                }
+                else
+                {
+                    using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(30) };
+                    AddTestAuth(http.DefaultRequestHeaders, "Reader");
+                    using var probe = await http.GetAsync(new Uri("/odata/v4/$metadata", UriKind.Relative)).ConfigureAwait(false);
+                    if (probe.StatusCode != HttpStatusCode.OK)
+                    {
+                        Console.Error.WriteLine($"sim-api-host: self-probe failed with status {(int)probe.StatusCode}.");
+                        startCode = 3;
+                    }
+                    else
+                    {
+                        SimApiSeed.WriteCanaries(Path.Combine(dataDir, "canaries.txt"));
+                        if (!string.IsNullOrEmpty(options.ReadyFile))
+                        {
+                            await File.WriteAllTextAsync(options.ReadyFile, $"127.0.0.1:{port}\n").ConfigureAwait(false);
+                        }
+
+                        Console.WriteLine($"sim-api-host: ready on http://127.0.0.1:{port} (profile {options.Profile.ToString().ToLowerInvariant()})");
+                        // A SIGTERM during startup is only recorded; it is honoured here once the host is ready. The whole startup is bounded by stop_host's 30 s SIGKILL.
+                        await shutdown.Requested.ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // REQ-LB-03: nothing escapes Main; a real startup crash fails the job with code 1.
+                Console.Error.WriteLine($"sim-api-host: startup failed: {SimHostShutdown.Describe(ex)}");
+                startCode = 1;
             }
 
-            factory = NewHost(options, dataPath, govPath);
-            var port = options.Port;
-            factory.UseKestrel(k => k.Listen(IPAddress.Loopback, port));
-            factory.StartServer();
-
-            // SEC-SIM-03: assert that the loopback bind holds before the ready file is written.
-            var addresses = factory.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses ?? [];
-            if (addresses.Count == 0 || addresses.Any(a => !SimApiHostOptions.IsLoopbackUrl(a)))
+            if (factory is null)
             {
-                Console.Error.WriteLine("sim-api-host: bound addresses are not provably loopback; refusing to continue.");
-                return 3;
+                return startCode == 0 ? 1 : startCode;
             }
 
-            using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(30) };
-            AddTestAuth(http.DefaultRequestHeaders, "Reader");
-            using var probe = await http.GetAsync(new Uri("/odata/v4/$metadata", UriKind.Relative)).ConfigureAwait(false);
-            if (probe.StatusCode != HttpStatusCode.OK)
+            if (startCode != 0)
             {
-                Console.Error.WriteLine($"sim-api-host: self-probe failed with status {(int)probe.StatusCode}.");
-                return 3;
+                try
+                {
+                    // SEC-LB-06: bounded. A dispose timeout maps to the documented shutdown timeout code, any other failure to code 4.
+                    await DisposeFallbackAsync(factory).WaitAsync(DisposeTimeout).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    SimHostShutdown.SafeWrite(Console.Error, "sim-api-host: shutdown timed out while disposing after a startup failure");
+                    return SimHostShutdown.ExitShutdownTimeout;
+                }
+                catch (Exception ex)
+                {
+                    SimHostShutdown.SafeWrite(Console.Error, $"sim-api-host: shutdown failed: {SimHostShutdown.Describe(ex)}");
+                    return SimHostShutdown.ExitShutdownFailed;
+                }
+
+                return startCode;
             }
 
-            SimApiSeed.WriteCanaries(Path.Combine(dataDir, "canaries.txt"));
-            if (!string.IsNullOrEmpty(options.ReadyFile))
-            {
-                await File.WriteAllTextAsync(options.ReadyFile, $"127.0.0.1:{port}\n").ConfigureAwait(false);
-            }
-
-            Console.WriteLine($"sim-api-host: ready on http://127.0.0.1:{port} (profile {options.Profile.ToString().ToLowerInvariant()})");
-            await exit.Task.ConfigureAwait(false);
-            return 0;
+            // Normal path: this is the only component that starts the stop (REQ-LB-01); the entry-point thread disposes the host.
+            var lifetime = factory.Services.GetRequiredService<IHostApplicationLifetime>();
+            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = lifetime.ApplicationStopped.Register(() => stopped.TrySetResult());
+            lifetime.StopApplication();
+            var host = factory;
+            return await shutdown.RunAsync(
+                ct => stopped.Task.WaitAsync(ct),
+                () => IsDisposed(host),
+                () => DisposeFallbackAsync(host),
+                Cleanup,
+                Console.Error,
+                StopTimeout,
+                DisposeTimeout).ConfigureAwait(false);
         }
         finally
         {
-            factory?.Dispose();
-            SqliteConnection.ClearAllPools();
-            WipeDataDir(dataDir);
+            if (!cleaned)
+            {
+                try
+                {
+                    Cleanup();
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"sim-api-host: cleanup failed: {SimHostShutdown.Describe(ex)}");
+                }
+            }
         }
     }
+
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(5);
+
+    private static bool IsDisposed(WebApplicationFactory<Program> factory)
+    {
+        try
+        {
+            _ = factory.Services.GetService<IHostApplicationLifetime>();
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return true;
+        }
+    }
+
+    private static async Task DisposeFallbackAsync(WebApplicationFactory<Program> factory) => await factory.DisposeAsync().ConfigureAwait(false);
 
     /// <summary>Synthetic credentials of the sim host. They are valid only for this test-auth build and carry no secret (SEC-SIM-04).</summary>
     internal static void AddTestAuth(HttpRequestHeaders headers, string roles)
@@ -140,6 +252,9 @@ public static class SimApiHostMain
         {
             // The solution-relative content root discovery of WebApplicationFactory finds no solution (this project is in none, SEC-SIM-21).
             b.UseContentRoot(AppContext.BaseDirectory);
+            // REQ-LB-01/02: no ConsoleLifetime (SimApiHostMain owns the signals) and a bounded host stop. WithWebHostBuilder services win over Program's.
+            b.ConfigureServices(s => s.AddSingleton<IHostLifetime, SimHostLifetime>());
+            b.UseShutdownTimeout(TimeSpan.FromSeconds(10));
             ApplySettings(b, govPath);
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dataPath}");

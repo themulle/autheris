@@ -10,7 +10,7 @@ public sealed class DialectStructureTests : ParityTestBase
 {
     private static IEnumerable<Type> ContainerClasses() =>
         typeof(ParityPostgresHostFixture).Assembly.GetTypes()
-            .Where(t => t.GetConstructors().Any(c => c.GetParameters().Any(p => p.ParameterType == typeof(ParityPostgresHostFixture))));
+            .Where(t => t.GetConstructors().Any(c => c.GetParameters().Any(p => p.ParameterType == typeof(ParityPostgresHostFixture) || p.ParameterType == typeof(ParitySqlServerHostFixture))));
 
     private static bool HasTrait(Type type, string name, string value) =>
         type.GetCustomAttributesData().Any(d => d.AttributeType == typeof(TraitAttribute)
@@ -43,6 +43,24 @@ public sealed class DialectStructureTests : ParityTestBase
         var cases = Pairwise.PairwiseModel.Cases().Where(c => c.Dialect == Pairwise.PairwiseModel.SqlServer).ToList();
         cases.Count.ShouldBe(Pairwise.PairwiseModel.Cases().Count(c => c.Dialect == Pairwise.PairwiseModel.Sqlite));
         DialectPairwiseTests.ContainerCases().Count(r => ((string)r[1]).EndsWith("_sqlserver", StringComparison.Ordinal)).ShouldBe(cases.Count * 2);
+    }
+
+    [Fact]
+    public void Dialect_TimeBucketCellsCoverSqlServerAndPostgres()
+    {
+        var cellIds = TimeBucketCells.All.Select(c => c.Id).ToList();
+        cellIds.ShouldBe(["tb_week_sale_date", "tb_quarter_sale_date", "tb_isoweek_year_boundary_utc", "tb_isoweek_year_boundary_berlin", "tb_month_year_boundary_berlin", "tb_isoweek_zone_shift_new_york", "tb_hour_sold_at"]);
+        cellIds.Distinct().Count().ShouldBe(cellIds.Count);
+        TimeBucketCells.All.Single(c => c.Id == "tb_week_sale_date").Expected.Sum(r => (int)r[1]!).ShouldBe(Seed.ParitySeed.Sales.Count);
+        TimeBucketCells.All.Single(c => c.Id == "tb_quarter_sale_date").Expected.Sum(r => (int)r[1]!).ShouldBe(Seed.ParitySeed.Sales.Count);
+        foreach (var type in new[] { typeof(DialectTimeBucketSqlServerTests), typeof(DialectTimeBucketPostgresTests) })
+        {
+            HasTrait(type, "Dialect", "Container").ShouldBeTrue(type.Name);
+            HasTrait(type, "Category", "Parity").ShouldBeTrue(type.Name);
+        }
+
+        ContainerClasses().ShouldContain(typeof(DialectTimeBucketSqlServerTests));
+        ContainerClasses().ShouldContain(typeof(DialectTimeBucketPostgresTests));
     }
 
     [Fact]
