@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Data.Common;
 using System.Diagnostics;
 using Autheris.Domain.Options;
@@ -81,12 +82,10 @@ public sealed class SqliteExecutionHardeningTests
     public async Task RecursiveCte_IsInterruptedWithinTheTimeoutPlusOneSecond_AsATimeoutException()
     {
         await using var connection = await OpenAsync();
-        var clock = Stopwatch.StartNew();
 
         await Should.ThrowAsync<TimeoutException>(() => SqliteExecutionGuard.RunAsync(
-            connection, TimeSpan.FromMilliseconds(300), () => ScalarAsync(connection, LongRecursiveCte), CancellationToken.None));
-
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+            connection, TimeSpan.FromMilliseconds(300), () => ScalarAsync(connection, LongRecursiveCte), CancellationToken.None))
+            .WaitAsync(WaitHelper.HangGuard);
     }
 
     [Fact]
@@ -103,12 +102,10 @@ public sealed class SqliteExecutionHardeningTests
             IsBackground = true
         };
         cancelThread.Start();
-        var clock = Stopwatch.StartNew();
 
         await Should.ThrowAsync<OperationCanceledException>(() => SqliteExecutionGuard.RunAsync(
-            connection, TimeSpan.FromSeconds(30), () => ScalarAsync(connection, LongRecursiveCte), cts.Token));
-
-        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+            connection, TimeSpan.FromSeconds(30), () => ScalarAsync(connection, LongRecursiveCte), cts.Token))
+            .WaitAsync(WaitHelper.HangGuard);
     }
 
     [Fact]

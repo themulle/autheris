@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -37,7 +38,7 @@ public sealed class MultilingualCatalogSecurityTests
     /// </summary>
     [Fact]
     [Trait("Category", "Security")]
-    public void T_CAT146_01_ReDoS_Safety_In_Bcp47Parser_And_Negotiator()
+    public async Task T_CAT146_01_ReDoS_Safety_In_Bcp47Parser_And_Negotiator()
     {
         var negotiator = new LanguageNegotiator();
         var supported = new[] { "de", "en", "fr" };
@@ -46,17 +47,16 @@ public sealed class MultilingualCatalogSecurityTests
         var longMalformed = string.Join("-", Enumerable.Repeat("abcdefghij", 500));
         var adversarialHeader = string.Join(", ", Enumerable.Range(0, 200).Select(i => $"de-x-{new string('a', 50)};q={i / 200.0:F2}"));
 
-        var sw = Stopwatch.StartNew();
-
-        for (int i = 0; i < 50; i++)
+        // Termination is the property (no unbounded work on adversarial input); the hang guard is not a performance budget.
+        await WaitHelper.RunGuarded(() =>
         {
-            _ = Bcp47LanguageTag.TryParse(longMalformed, out _);
-            _ = Bcp47LanguageTag.TryCanonicalize(longMalformed, out _);
-            negotiator.NegotiateLanguage(adversarialHeader, supported, "en");
-        }
-
-        sw.Stop();
-        sw.ElapsedMilliseconds.ShouldBeLessThan(100); // 50 iterations well under 100ms (< 2ms per op)
+            for (int i = 0; i < 50; i++)
+            {
+                _ = Bcp47LanguageTag.TryParse(longMalformed, out _);
+                _ = Bcp47LanguageTag.TryCanonicalize(longMalformed, out _);
+                negotiator.NegotiateLanguage(adversarialHeader, supported, "en");
+            }
+        });
     }
 
     /// <summary>

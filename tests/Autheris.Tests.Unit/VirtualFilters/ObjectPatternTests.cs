@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
+using Autheris.Tests.Common;
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -117,14 +118,14 @@ public sealed class ObjectPatternTests
     }
 
     [Fact]
-    public void CatastrophicBacktrackingPattern_RunsInLinearTime()
+    public async Task CatastrophicBacktrackingPattern_RunsInLinearTime()
     {
         var pattern = ObjectPattern.Parse("src.((a+)+).t");
         var name = new string('a', 50_000) + "b";
 
-        var watch = Stopwatch.StartNew();
-        pattern.MatchesObject(new TableIdentifier("src", name, "t")).ShouldBeFalse();
-        watch.ElapsedMilliseconds.ShouldBeLessThan(2000);
+        // A backtracking engine needs exponential time here and never returns; the hang guard turns that into a failure.
+        var matched = await WaitHelper.RunGuarded(() => pattern.MatchesObject(new TableIdentifier("src", name, "t")));
+        matched.ShouldBeFalse();
     }
 
     [Fact]

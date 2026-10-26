@@ -15,8 +15,9 @@ using Shouldly;
 using Xunit;
 
 [Collection(SerialIntegrationCollection.Name)]
-public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
+    private readonly Autheris.Tests.Common.EnvVarScope _env;
     private readonly WebApplicationFactory<Program> _factory;
     private const string WebhookSecret = "super-secret-itsm-token-12345";
 
@@ -26,7 +27,7 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
 
     public ItsmIntegrationTests(WebApplicationFactory<Program> factory)
     {
-        Environment.SetEnvironmentVariable("ITSM__WEBHOOK_SECRET", WebhookSecret);
+        _env = new Autheris.Tests.Common.EnvVarScope("ITSM__WEBHOOK_SECRET", WebhookSecret);
 
         _factory = factory.WithWebHostBuilder(builder =>
         {
@@ -41,6 +42,8 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
             builder.UseSetting("itsm:webhook-secret:inst-tenant-b", InstanceSecretB);
         });
     }
+
+    public void Dispose() => _env.Dispose();
 
     private static string ComputeSignature(string payload, DateTimeOffset? timestamp = null, string secret = InstanceSecretA)
     {

@@ -417,7 +417,7 @@ public sealed class SqlServerWindowsAuthConfiguratorTests : IDisposable
         System.Diagnostics.Debug.Assert(NativeGetenv(name) == IntPtr.Zero);
 
         // Managed-only set is invisible to native code (documents the bug this helper fixes).
-        Environment.SetEnvironmentVariable(name, "managed-only");
+        using var env = new Autheris.Tests.Common.EnvVarScope(name, "managed-only");
         Assert.Equal(IntPtr.Zero, NativeGetenv(name));
 
         NativeEnvironmentAccess.Set(name, "native-visible");

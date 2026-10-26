@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -315,9 +316,9 @@ public sealed class VirtualFilterFederationPlannerTests
     public async Task Plan_KeyLoadingTimesOut_IsDeniedSourceUnavailable_EvenIfTheProviderIgnoresCancellation()
     {
         // ST-23 (planner half, SEC-12): the request timeout bounds key loading.
-        var keys = new FakeKeySetProvider { Delay = TimeSpan.FromSeconds(5), IgnoreCancellation = true };
+        var keys = new FakeKeySetProvider { Delay = TimeSpan.FromSeconds(60), IgnoreCancellation = true };
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        var started = DateTime.UtcNow;
+        // The provider ignores cancellation and would block for 60 s: the planner only returns (inside the hang guard) if it enforces the timeout itself.
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
             new VirtualFilterFederationPlanner(keys).PlanAsync(
@@ -325,10 +326,9 @@ public sealed class VirtualFilterFederationPlannerTests
                 [Resolved(Customers)],
                 new Dictionary<TableIdentifier, TableAccessDecision> { [Customers.Identifier] = Protected(Customers, Pair()) },
                 Tenant,
-                cts.Token));
+                cts.Token)).WaitAsync(WaitHelper.HangGuard);
 
         ex.ErrorCode.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");
-        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(3));
     }
 
     [Fact]

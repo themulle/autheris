@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit;
 
 using System;
@@ -40,7 +41,7 @@ public sealed class Wave3MarketFeaturesTests
         var requestTask = service.RequestStepUpApprovalAsync("transfer_funds", "tenant-a", "requester-bob", table);
 
         // Allow ticket registration
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Any(), WaitHelper.HangGuard, "the step-up ticket was never registered");
 
         var pendingTickets = service.GetPendingTickets("tenant-a");
         var ticket = Assert.Single(pendingTickets);
@@ -71,7 +72,7 @@ public sealed class Wave3MarketFeaturesTests
         var table = new TableIdentifier("finance", "public", "payroll");
 
         var requestTask = service.RequestStepUpApprovalAsync("view_payroll", "tenant-a", "requester-bob", table);
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Any(), WaitHelper.HangGuard, "the step-up ticket was never registered");
 
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
         var rejectResult = await service.RejectStepUpRequestAsync(ticket.ApprovalId, "steward-alice", "Unauthorized access to payroll.");
@@ -97,7 +98,7 @@ public sealed class Wave3MarketFeaturesTests
         var table = new TableIdentifier("hr", "public", "salaries");
 
         var requestTask = service.RequestStepUpApprovalAsync("query_salaries", "tenant-a", "user-attacker", table);
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Any(), WaitHelper.HangGuard, "the step-up ticket was never registered");
 
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
 
@@ -125,7 +126,7 @@ public sealed class Wave3MarketFeaturesTests
         var table = new TableIdentifier("vault", "public", "keys");
 
         var requestTask = service.RequestStepUpApprovalAsync("read_keys", "tenant-a", "requester-bob", table);
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Any(), WaitHelper.HangGuard, "the step-up ticket was never registered");
 
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
 
@@ -208,7 +209,7 @@ public sealed class Wave3MarketFeaturesTests
         var guardrailTask = guardrail.ExecuteToolWithGuardrailAsync(request, sessionContext);
 
         // Wait for ticket
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => hitlService.GetPendingTickets("tenant-1").Any(), WaitHelper.HangGuard, "the step-up ticket was never registered");
         var pending = hitlService.GetPendingTickets("tenant-1");
         var ticket = Assert.Single(pending);
 
