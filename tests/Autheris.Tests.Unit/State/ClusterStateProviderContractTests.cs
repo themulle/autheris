@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.State;
 
 using System;
@@ -102,10 +103,7 @@ public abstract class ClusterStateProviderContractTests
         await provider.PublishEventAsync("contract:chan", "payload");
 
         // Redis delivers asynchronously; in-memory delivers inline. Wait briefly for either.
-        for (var i = 0; i < 50 && delivered == 0; i++)
-        {
-            await Task.Delay(20);
-        }
+        await WaitHelper.WaitUntil(() => delivered != 0, WaitHelper.HangGuard, "the published event was never delivered");
 
         delivered.ShouldBe(1);
     }

@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Jobs;
 
 using System;
@@ -188,12 +189,11 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await worker.StartAsync(cts.Token);
         AsyncJobDescriptor? job = null;
-        for (int i = 0; i < 100; i++)
+        await WaitHelper.WaitUntil(async () =>
         {
             job = await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), "alice");
-            if (job is { State: AsyncJobState.Failed or AsyncJobState.Cancelled or AsyncJobState.Completed }) break;
-            await Task.Delay(50);
-        }
+            return job is { State: AsyncJobState.Failed or AsyncJobState.Cancelled or AsyncJobState.Completed };
+        }, TimeSpan.FromSeconds(10), pollInterval: TimeSpan.FromMilliseconds(50));
 
         await worker.StopAsync(CancellationToken.None);
         return job;
@@ -275,16 +275,17 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
 
         // Wait until job is completed
         AsyncJobDescriptor? completedJob = null;
-        for (int i = 0; i < 50; i++)
+        await WaitHelper.WaitUntil(async () =>
         {
             var job = await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), "alice");
-            if (job?.State == AsyncJobState.Completed)
+            if (job?.State != AsyncJobState.Completed)
             {
-                completedJob = job;
-                break;
+                return false;
             }
-            await Task.Delay(50);
-        }
+
+            completedJob = job;
+            return true;
+        }, TimeSpan.FromSeconds(10), pollInterval: TimeSpan.FromMilliseconds(50));
 
         await worker.StopAsync(CancellationToken.None);
 

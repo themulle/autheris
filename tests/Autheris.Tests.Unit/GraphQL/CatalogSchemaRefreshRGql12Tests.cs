@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.GraphQL;
 
 using System;
@@ -78,12 +79,26 @@ public sealed class CatalogSchemaRefreshRGql12Tests
     private static async Task<IRequestExecutor> WaitForRebuildAsync(IRequestExecutorProvider provider, ICatalogSchemaDiagnostics diagnostics, int expectedOmissions)
     {
         // HotChocolate evicts and rebuilds the executor asynchronously after TypesChanged.
-        var deadline = DateTime.UtcNow.AddSeconds(10);
         var executor = await provider.GetExecutorAsync();
-        while (diagnostics.OmittedTables.Count != expectedOmissions && DateTime.UtcNow < deadline)
+        try
         {
-            await Task.Delay(25);
-            executor = await provider.GetExecutorAsync();
+            await WaitHelper.WaitUntil(
+                async () =>
+                {
+                    if (diagnostics.OmittedTables.Count == expectedOmissions)
+                    {
+                        return true;
+                    }
+
+                    executor = await provider.GetExecutorAsync();
+                    return diagnostics.OmittedTables.Count == expectedOmissions;
+                },
+                TimeSpan.FromSeconds(10),
+                pollInterval: TimeSpan.FromMilliseconds(25));
+        }
+        catch (TimeoutException)
+        {
+            // fall through: the caller asserts on the returned executor
         }
 
         return executor;

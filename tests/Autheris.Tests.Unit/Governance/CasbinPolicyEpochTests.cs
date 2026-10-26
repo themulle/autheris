@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Governance;
 
 using System;
@@ -74,9 +75,13 @@ public sealed class CasbinPolicyEpochTests : IDisposable
     // The epoch grows by a random positive delta per change, so tests wait for "changed" instead of an exact value.
     private async Task<long> WaitForEpochAsync(long previous = 0, string key = EpochKey)
     {
-        for (var i = 0; i < 200 && await _state.Inner.GetAsync<long>(key) == previous; i++)
+        try
         {
-            await Task.Delay(10);
+            await WaitHelper.WaitUntil(async () => await _state.Inner.GetAsync<long>(key) != previous, TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            // fall through: the assertion below reports the unchanged epoch
         }
 
         var value = await _state.Inner.GetAsync<long>(key);
@@ -194,7 +199,7 @@ public sealed class CasbinPolicyEpochTests : IDisposable
         _time.Advance(TimeSpan.FromSeconds(30));
         await b.EvaluatePolicyAsync(Ctx());
         await a.EvaluatePolicyAsync(Ctx());
-        await Task.Delay(50);
+        await Task.Delay(50); // quiet period (50 ms) before a negative assertion: no epoch ping-pong between the nodes
 
         (await _state.Inner.GetAsync<long>(EpochKey)).ShouldBe(epoch); // no ping-pong between the nodes
     }
@@ -345,9 +350,13 @@ public sealed class CasbinPolicyEpochTests : IDisposable
 
         node.Dispose();
 
-        for (var i = 0; i < 200 && _state.ActiveSubscriptions != 0; i++)
+        try
         {
-            await Task.Delay(10);
+            await WaitHelper.WaitUntil(() => _state.ActiveSubscriptions == 0, TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            // fall through: the assertion below reports the remaining subscriptions
         }
 
         _state.ActiveSubscriptions.ShouldBe(0);
@@ -362,7 +371,7 @@ public sealed class CasbinPolicyEpochTests : IDisposable
             node.AddPolicy(Tenant, $"S-1-5-21-x{i}", Table.ToString(), "read");
         }
 
-        await Task.Delay(100);
+        await Task.Delay(100); // quiet period (100 ms): lets the asynchronous epoch bumps land (no completion signal)
         (await _state.Inner.GetAsync<long>(EpochKey)).ShouldBeGreaterThan(20); // 20 increments of exactly 1 would give 20
     }
 

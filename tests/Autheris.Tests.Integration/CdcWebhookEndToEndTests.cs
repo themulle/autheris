@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Integration;
 
 using System;
@@ -110,21 +111,8 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
             }
         }
 
-        public async Task<bool> WaitForAsync(int count, TimeSpan timeout)
-        {
-            var until = DateTime.UtcNow + timeout;
-            while (DateTime.UtcNow < until)
-            {
-                if (Received.Count >= count)
-                {
-                    return true;
-                }
-
-                await Task.Delay(100);
-            }
-
-            return Received.Count >= count;
-        }
+        public Task<bool> WaitForAsync(int count, TimeSpan timeout) =>
+            Eventually.WaitAsync(() => Received.Count >= count, timeout, TimeSpan.FromMilliseconds(100));
 
         public void Dispose()
         {

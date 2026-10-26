@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Security;
 
 using System;
@@ -68,7 +69,7 @@ public sealed class McpClusterStateMcp23Tests
         store.RemoveSession(session.SessionId);
 
         store.SseSubscriptionCount.ShouldBe(0);
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => subscription.ReceivedCalls().Any(), WaitHelper.HangGuard, "the SSE subscription was never disposed");
         await subscription.Received(1).DisposeAsync();
     }
 
@@ -94,7 +95,7 @@ public sealed class McpClusterStateMcp23Tests
             Options.Create(new GatewayOptions()), NullLogger<HitLStepUpApprovalService>.Instance, clusterState: state);
 
         var request = service.RequestStepUpApprovalAsync("tool", "tenant-a", "requester", new TableIdentifier("d", "s", "t"));
-        await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Any(), WaitHelper.HangGuard, "the approval ticket was never registered");
         var ticket = service.GetPendingTickets("tenant-a").ShouldHaveSingleItem();
 
         var result = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward", ["steward"], "tenant-a")).WaitAsync(Fast);

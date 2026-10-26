@@ -435,7 +435,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
             NullLogger<AsyncQueryJobBackgroundWorker>.Instance,
             clusterState: _state, topology: new ClusterStateTopology(ClusterStateMode.External));
         await worker.StartAsync(CancellationToken.None);
-        await Task.Delay(500);
+        await Task.Delay(500); // quiet period (500 ms) before a negative assertion: the cancelled job must never start
         await worker.StopAsync(CancellationToken.None);
 
         sqlCalls.ShouldBe(0, "a cancelled job must never start");
@@ -561,7 +561,7 @@ public sealed class AsyncJobClusterAccessTests : IDisposable
 
         (await b.CancelJobAsync(job.JobId, _tenant, "alice")).ShouldBeTrue();
         release.SetResult(); // the driver ignores the token and finishes anyway
-        await Task.Delay(500);
+        await Task.Delay(500); // quiet period (500 ms): lets the token-ignoring driver finish before the cancelled-state assertions
         await worker.StopAsync(CancellationToken.None);
 
         (await b.GetJobAsync(job.JobId, _tenant, "alice"))!.State.ShouldBe(AsyncJobState.Cancelled);

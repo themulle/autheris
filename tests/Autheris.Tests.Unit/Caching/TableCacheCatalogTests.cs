@@ -106,7 +106,7 @@ public sealed class TableCacheCatalogTests
             }));
         }
 
-        await Task.Delay(300);
+        await Task.Delay(300); // scenario: fixed 300 ms stress window for concurrent readers and writers
         done = true;
 
         await Task.WhenAll(writeTasks);

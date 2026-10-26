@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Webhooks;
 
 using System;
@@ -431,15 +432,6 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!condition())
-        {
-            if (DateTime.UtcNow > deadline)
-            {
-                throw new TimeoutException("Condition not reached.");
-            }
-
-            await Task.Delay(10);
-        }
+        await WaitHelper.WaitUntil(condition, TimeSpan.FromSeconds(10), "Condition not reached.");
     }
 }

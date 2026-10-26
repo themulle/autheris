@@ -164,7 +164,7 @@ public sealed class ClusterScheduledServiceTests
                 var slice = remaining < step ? remaining : step;
                 Time.Advance(slice);
                 remaining -= slice;
-                await Task.Delay(5);
+                await Task.Delay(5); // yields so cycles started by the timer can schedule the next one
             }
         }
 

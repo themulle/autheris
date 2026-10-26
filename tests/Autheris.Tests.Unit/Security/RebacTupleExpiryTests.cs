@@ -57,7 +57,7 @@ public sealed class RebacTupleExpiryTests
         var request = new RebacCheckRequest("t", "a", "viewer", "doc:1");
 
         (await evaluator.CheckAsync(request)).Allowed.ShouldBeTrue();
-        await Task.Delay(600);
+        await Task.Delay(600); // scenario: the store clock is not injectable, so wait past the 400 ms tuple expiry
 
         (await evaluator.CheckAsync(request)).Allowed.ShouldBeFalse("the 60 s decision cache must not outlive the tuple");
     }
