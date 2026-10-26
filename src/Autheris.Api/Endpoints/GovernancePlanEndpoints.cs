@@ -4,6 +4,7 @@ using System;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Governance.Interfaces;
@@ -53,77 +54,10 @@ public static class GovernancePlanEndpoints
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
 
         // 3. Confirm Plan with TOTP 2FA: issues HMAC-signed confirmation token (ADR-03, ADR-05, R-62)
-        app.MapPost("/api/governance/plans/{planId}/confirm", async (
-            string planId,
-            AdminConfirmPlanRequest? request,
-            HttpContext context,
-            IAccessPlanningService planningService,
-            CancellationToken ct) =>
-        {
-            var adminSid = ResolveAdminSid(context);
-            if (string.IsNullOrWhiteSpace(adminSid))
-            {
-                return Results.Unauthorized();
-            }
-
-            if (request == null || string.IsNullOrWhiteSpace(request.TotpCode))
-            {
-                return Results.BadRequest(new { error = "TotpCode is required." });
-            }
-
-            try
-            {
-                var result = await planningService.ConfirmPlanAsync(planId, request.TotpCode, adminSid, ct).ConfigureAwait(false);
-                return Results.Ok(result);
-            }
-            catch (SecurityException sex)
-            {
-                return Results.Json(new { error = sex.Message }, statusCode: StatusCodes.Status403Forbidden);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        app.MapPost("/api/governance/plans/{planId}/confirm", HandleConfirmAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         // 4. Apply Access Plan: requires valid confirmation token
-        app.MapPost("/api/governance/plans/{planId}/apply", async (
-            string planId,
-            AdminApplyAccessRequest? request,
-            HttpContext context,
-            IAccessPlanningService planningService,
-            CancellationToken ct) =>
-        {
-            var adminSid = ResolveAdminSid(context);
-            if (string.IsNullOrWhiteSpace(adminSid))
-            {
-                return Results.Unauthorized();
-            }
-
-            if (request == null || string.IsNullOrWhiteSpace(request.ConfirmationToken))
-            {
-                return Results.BadRequest(new { error = "ConfirmationToken is required." });
-            }
-
-            try
-            {
-                var effectiveRequest = string.Equals(request.PlanId, planId, StringComparison.OrdinalIgnoreCase)
-                    ? request
-                    : request with { PlanId = planId };
-
-                var callerTenant = EndpointSecurity.GetRequestTenant(context);
-                var result = await planningService.ApplyAccessAsync(effectiveRequest, adminSid, callerTenant, ct: ct, caller: context.User).ConfigureAwait(false);
-                return Results.Ok(result);
-            }
-            catch (SecurityException sex)
-            {
-                return Results.Json(new { error = sex.Message }, statusCode: StatusCodes.Status403Forbidden);
-            }
-            catch (Exception ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        app.MapPost("/api/governance/plans/{planId}/apply", HandleApplyAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         return app;
     }
@@ -138,5 +72,80 @@ public static class GovernancePlanEndpoints
 
         return context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? context.User.FindFirst("sub")?.Value;
+    }
+
+    internal static async Task<IResult> HandleConfirmAsync(
+        string planId,
+        AdminConfirmPlanRequest? request,
+        HttpContext context,
+        IAccessPlanningService planningService,
+        CancellationToken ct)
+    {
+        var adminSid = ResolveAdminSid(context);
+        if (string.IsNullOrWhiteSpace(adminSid))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (request == null || string.IsNullOrWhiteSpace(request.TotpCode))
+        {
+            return Results.BadRequest(new { error = "TotpCode is required." });
+        }
+
+        try
+        {
+            var result = await planningService.ConfirmPlanAsync(planId, request.TotpCode, adminSid, ct).ConfigureAwait(false);
+            return Results.Ok(result);
+        }
+        catch (SecurityException sex)
+        {
+            ApiProblems.LogFailure(context, sex, ApiErrorCodes.AccessDenied);
+            return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Access to this resource is denied by gateway security policy.", context);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            ApiProblems.LogFailure(context, ex, ApiErrorCodes.GovernancePlanInvalid);
+            return ApiProblems.BadRequest(ApiErrorCodes.GovernancePlanInvalid, "The governance plan request is invalid.", context);
+        }
+    }
+
+    internal static async Task<IResult> HandleApplyAsync(
+        string planId,
+        AdminApplyAccessRequest? request,
+        HttpContext context,
+        IAccessPlanningService planningService,
+        CancellationToken ct)
+    {
+        var adminSid = ResolveAdminSid(context);
+        if (string.IsNullOrWhiteSpace(adminSid))
+        {
+            return Results.Unauthorized();
+        }
+
+        if (request == null || string.IsNullOrWhiteSpace(request.ConfirmationToken))
+        {
+            return Results.BadRequest(new { error = "ConfirmationToken is required." });
+        }
+
+        try
+        {
+            var effectiveRequest = string.Equals(request.PlanId, planId, StringComparison.OrdinalIgnoreCase)
+                ? request
+                : request with { PlanId = planId };
+
+            var callerTenant = EndpointSecurity.GetRequestTenant(context);
+            var result = await planningService.ApplyAccessAsync(effectiveRequest, adminSid, callerTenant, ct: ct, caller: context.User).ConfigureAwait(false);
+            return Results.Ok(result);
+        }
+        catch (SecurityException sex)
+        {
+            ApiProblems.LogFailure(context, sex, ApiErrorCodes.AccessDenied);
+            return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Access to this resource is denied by gateway security policy.", context);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            ApiProblems.LogFailure(context, ex, ApiErrorCodes.GovernancePlanInvalid);
+            return ApiProblems.BadRequest(ApiErrorCodes.GovernancePlanInvalid, "The governance plan request is invalid.", context);
+        }
     }
 }

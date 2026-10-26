@@ -2,6 +2,7 @@ namespace Autheris.Api.Endpoints;
 
 using System.Linq;
 using System.Security;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
@@ -99,15 +100,17 @@ public static class IcebergRestCatalogEndpoints
         return app;
     }
 
-    private static IResult HandleIcebergError(HttpContext context, Exception ex)
+    /// <summary>Iceberg REST <c>ErrorModel</c> with a fixed message per status; the exception is logged, never returned (ARCH-MNT-08).</summary>
+    internal static IResult HandleIcebergError(HttpContext context, Exception ex)
     {
-        var isProduction = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
-        return ex switch
+        var (status, code, message) = ex switch
         {
-            SecurityException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden),
-            ArgumentException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status400BadRequest),
-            NotSupportedException => Results.Problem(detail: isProduction ? "Not implemented." : ex.Message, statusCode: StatusCodes.Status501NotImplemented),
-            _ => Results.Problem(detail: isProduction ? "An unexpected error occurred." : ex.Message, statusCode: StatusCodes.Status500InternalServerError)
+            SecurityException => (StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied."),
+            ArgumentException => (StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The request is invalid."),
+            NotSupportedException => (StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "Not implemented."),
+            _ => (StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An unexpected error occurred.")
         };
+        ApiProblems.LogFailure(context, ex, code);
+        return Results.Json(new { error = new { message, type = code, code = status } }, statusCode: status);
     }
 }

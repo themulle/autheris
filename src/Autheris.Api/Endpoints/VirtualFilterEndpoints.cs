@@ -6,9 +6,11 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.VirtualFilters;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -19,7 +21,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -178,34 +179,49 @@ public static partial class VirtualFilterEndpoints
         return await MapErrorsAsync(() => action(security, actor), context).ConfigureAwait(false);
     }
 
-    private static async Task<IResult> MapErrorsAsync(Func<Task<IResult>> action, HttpContext? context = null)
+    internal static async Task<IResult> MapErrorsAsync(Func<Task<IResult>> action, HttpContext? context = null)
     {
         try
         {
             return await action().ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is ManagedResourceLockedException or VirtualFilterConflictException)
+        catch (ManagedResourceLockedException ex)
         {
-            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status409Conflict);
+            return Problem(context, ex, StatusCodes.Status409Conflict, ApiErrorCodes.ResourceLocked, "The virtual filter resource is locked by another source.");
+        }
+        catch (VirtualFilterConflictException ex)
+        {
+            return Problem(context, ex, StatusCodes.Status409Conflict, ApiErrorCodes.VirtualFilterConflict, "The virtual filter change conflicts with existing state.");
         }
         catch (KeyNotFoundException ex)
         {
-            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status404NotFound);
+            return Problem(context, ex, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The requested virtual filter resource was not found.");
         }
         catch (InvalidOperationException ex)
         {
-            bool isDev = context?.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() ?? false;
-            var message = isDev ? ex.Message : "The requested virtual filter operation is invalid.";
-            return Results.Json(new { error = message }, statusCode: StatusCodes.Status400BadRequest);
+            return Problem(context, ex, StatusCodes.Status400BadRequest, ApiErrorCodes.VirtualFilterInvalid, "The requested virtual filter operation is invalid.");
         }
         catch (VirtualFilterBindingException ex)
         {
-            return Results.Json(new { error = ex.Message, code = ex.Code }, statusCode: StatusCodes.Status400BadRequest);
+            // The code is echoed only when it is one of the governed codes; the detail is fixed per code (never the message).
+            return VirtualFilterErrorCodes.IsGoverned(ex.Code)
+                ? Problem(context, ex, StatusCodes.Status400BadRequest, ex.Code, "The virtual filter binding is invalid.")
+                : Problem(context, ex, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The request is invalid.");
         }
-        catch (Exception ex) when (ex is ArgumentException or JsonException or FormatException)
+        catch (JsonException ex)
         {
-            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+            return Problem(context, ex, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidJson, "The request body is not valid JSON.");
         }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            return Problem(context, ex, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The request is invalid.");
+        }
+    }
+
+    private static IResult Problem(HttpContext? context, Exception ex, int status, string code, string detail)
+    {
+        ApiProblems.LogFailure(context, ex, code);
+        return ApiProblems.Problem(status, code, detail, context);
     }
 
     /// <summary>The caller's tenant, or the requested one for ClusterAdmin (decision 3); null when forbidden.</summary>
