@@ -435,3 +435,74 @@ PR 7 and PR 8 need a mandatory review. ARCH-MNT-14 (PR 4) and ARCH-MNT-17 (PR 6)
 13. (08) MCP stdio: should the error keep `id: null`, and is a GUID correlation id acceptable?
 14. (14) Do equal goldens (failure messages for every throw site, warnings, check order) and the per-check mutation test prove fail-closed order and completeness? Is a lambda-insensitive descriptor snapshot enough to prove the decorator order is unchanged?
 15. (17) Is the single-slot singleton cache sufficient for token isolation: keyed with the secret fingerprint, cleared on options change, with the mock token never cached and the token never logged?
+
+### 9.x Phase 3 binding conditions (csharp-security-expert, 2026-10-26)
+
+Verdicts: PR 7 (ARCH-MNT-06) APPROVED WITH CONDITIONS. PR 8 (ARCH-MNT-08) APPROVED WITH CONDITIONS. PR 4 (ARCH-MNT-14) APPROVED WITH CONDITIONS. PR 6 (ARCH-MNT-17, 27) APPROVED WITH CONDITIONS. ARCH-MNT-16 needs no condition beyond the plan.
+Code facts checked: `Mcp:RequirePiiMasking`, `Mcp:AllowAnonymousDiscovery`, `Casbin:EnforceInQueryPipeline` have no reader in `src/` (defaults true/false/true), so deleting them changes nothing. MCP auth is gated only by `IsMcpAuthBypassed`. `IsMcpUnmaskedAllowed` has no reader outside `GatewayOptions.cs`, so the plan's statement "masking is always on unless warn_allow_unmasked_ai_access" is unverified and gets a test (T-03). `SidClaimType`/`GroupsClaimType`/`GroupSidClaimType` have no reader outside `JwtOptions.cs`. `ScimAuthenticationHandler` fails with generic messages; `HttpContextClientIpResolver` is the canonical post-forwarded-headers IP.
+
+**Rulings on questions 1-15**
+1. Accepted: unknown `Gateway` keys fail startup in every environment, no bypass, `AUTHERIS_ALLOW_LEGACY_CONFIG` not honoured.
+2. Accepted: `Gateway` root only; `Logging`, `Kestrel`, `ConnectionStrings`, `OTEL_*`, `AllowedHosts` are out of scope.
+3. Accepted: key names only, sorted, capped at 20 plus a "N more" count; never a value, and never a value-derived substring (a mistyped key can itself be a secret, see SC-06-04).
+4. Accepted: loopback `http` is allowed; plaintext in Development is allowed. Non-loopback `http` outside Development fails unless `AllowInsecureTransport` is true, and then logs a startup warning and appears in the danger list.
+5. Use the resolved client IP from `HttpContextClientIpResolver` (trusted proxies only; raw peer when no proxy is trusted). Empty list means unrestricted (not a regression), with a Production startup warning; a non-empty list that cannot be evaluated (no IP) denies.
+6. Accepted: delete the configurable claim types; fixed resolution stays.
+7. Confirmed for the three flags (no reader). The masking claim needs the test T-03 before the flag is deleted.
+8. Accepted: no exception message in any response in any environment; detail only in logs by correlation id.
+9. Accepted: `clientId` is the caller's own id and `consumed`/`totalBudget` are budget figures, not secrets. The 429 must still be returned only after authentication and must not echo other clients' data.
+10. Sufficient: exception type name only, never the message, never the stack; the correlation id links to the log.
+11. Follow the Iceberg REST `ErrorModel` (`{"error":{"message","type","code"}}`) on the Iceberg routes so client SDKs parse it; the message is the fixed generic text. Governed `ApiErrorCodes` map to `type`. A ProblemDetails body is not required there.
+12. Accepted: unexpected exceptions become the global-handler 500 with a correlation id (fail-closed, no 400 masking of server faults).
+13. Accepted: `id: null` and a GUID correlation id (`Guid.NewGuid()`, not derived from input), logged with the exception.
+14. Goldens plus the per-check mutation test prove order and completeness only if the conditions SC-14-01..04 hold. A lambda-insensitive snapshot proves the decorator order only if the descriptor list includes the index and the implementation-type of decorator registrations (SC-14-05).
+15. Sufficient with the conditions SC-17-01..05 (fingerprint is never logged or exposed, the cache never stores the secret).
+
+**ARCH-MNT-06 (PR 7), binding**
+- SC-01: Every wired flag fails closed: invalid value (bad CIDR, bad URI) fails startup, never silently disables the control.
+- SC-02: OTLP check applies to every configured exporter endpoint (traces, metrics, logs, per-signal overrides); loopback means `localhost`, `127.0.0.0/8`, `::1` only, parsed with `Uri`/`IPAddress`, not string prefix (`http://localhost.evil.com` must fail).
+- SC-03: SCIM allowlist is evaluated before the bearer secret comparison result is revealed, applies to every SCIM endpoint, uses IPv4-mapped-IPv6 normalisation, and rejection returns the same generic failure text as other failures (no "IP not allowed" oracle).
+- SC-04: Guard error text and logs never contain values; the key path is sanitised (control characters stripped, each key truncated to 128 chars) to prevent log injection.
+- SC-05: The guard never blocks the specific guard messages (LegacySwitchGuard, SerilogSectionGuard, removed WebSql) and runs after `DevConfiguration.Apply`; `Gateway:Insecure:*` and `Gateway:Casbin`, `Gateway:Rls`, `Gateway:Audit` security sections are bound to their types, not free-form.
+- SC-06: No free-form (`object`/`IConfigurationSection`/`Dictionary<string,string>`) exemption may cover a security-relevant subtree (Insecure, Authentication, Casbin, Mcp, Audit, Consent, Tls); the schema lists each free-form subtree explicitly and the test enumerates them.
+- SC-07: Deleted flags are removed from code, `unconsumed-options.txt`, appsettings, Helm values, docs and `deploy/` in the same PR (otherwise shipped config fails startup by design).
+- SC-08: A baseline entry in `options-consumed-indirectly.txt` is valid only if the consuming member is read outside the defining file and is not itself dead; stale lines fail the test.
+- SC-09: Backlog items FU-01..03 stay out of the PR; `ScimOptions.EnableMassChangeProtection` deletion must be noted in the plan as a known absent control (no behaviour change).
+Mandatory tests (`[Trait("Category","Security")]`), ids ARCH-MNT-06-T-NN: 01 `UnknownKey_FailsStartup_InDevelopmentAndProduction`; 02 `UnknownKey_ErrorNeverContainsValue` (secret-looking key and value); 03 `McpMasking_AppliedByDefault_WithoutFlag` and `McpAuth_RequiredByDefault`; 04 `CasbinEnforcement_AppliedWithoutEnforceInQueryPipelineKey`; 05 `Otlp_PlaintextNonLoopback_FailsStart_ExceptDevOrFlag` incl. `localhost.evil.com`; 06 `Scim_AllowedIpRanges_RejectsOtherPeer_AcceptsListed`, `Scim_InvalidCidr_FailsStart`, `Scim_EmptyList_Unrestricted`, `Scim_ForwardedHeaderFromUntrustedPeer_DoesNotBypassRanges`; 07 `DeletedClaimTypeKeys_FailStartup`; 08 `FreeFormSubtrees_ExcludeSecurityRoots`; 09 `IndirectConsumers_AreReadOutsideTheDefiningFile` (plan test); plus the plan's guard tests.
+
+**ARCH-MNT-08 (PR 8), binding**
+- SC-01: No `ex.Message`, `ex.ToString()`, `ex.InnerException`, stack or exception type appears in any response body or header; the widened regex also bans `.ToString()` on exceptions in the endpoint folders.
+- SC-02: Response `detail` is a fixed string per code; never interpolated with caller or exception data (including `ex.Code` from `VirtualFilterErrorCodes`, which must be validated against the governed list, unknown values map to `BAD_REQUEST`).
+- SC-03: `ApiProblems.LogFailure` logs the exception with the correlation id; log templates use structured parameters, no user-controlled string concatenated.
+- SC-04: Audit `DetailsJson` gets `reasonType` = exception type name only; no message.
+- SC-05: Narrowed `catch` filters must not swallow `OperationCanceledException`; unmapped exceptions propagate to the global handler (500, generic).
+- SC-06: DuckDB OLAP writes a problem body only while `!HasStarted`; once started, abort the connection and never append an error string to a partial stream.
+- SC-07: `ACCESS_DENIED` responses are identical for "not found" and "forbidden" where today's behaviour is already existence-hiding; do not introduce a distinguishing code.
+- SC-08: Iceberg and MCP error shapes follow rulings 11 and 13; MCP stdio never writes the exception to stdout.
+- SC-09: The arch test baseline is empty and the test fails on a missing endpoint folder (no vacuous pass).
+Mandatory tests, ids ARCH-MNT-08-T-NN: 01 `RawExceptionMessage_NeverReachesTheClient(site)` (plan test, sentinel in body, headers and `Location`); 02 `ProblemBody_HasCodeCorrelationIdAndFixedDetail`; 03 `AuditDetails_ContainTypeNotMessage` (Access x2, Rebac); 04 `PrivacyBudget429_KeepsExtensions_NoMessage`; 05 `UnexpectedException_Returns500_NotMapped400`; 06 `Cancellation_IsNotMappedToProblem`; 07 `Iceberg_ErrorsUseErrorModel_GenericMessage`; 08 `McpStdio_InternalError_IsGenericWithCorrelationId` and `McpStdio_NothingExceptJsonRpcOnStdout`; 09 `VirtualFilter_UnknownCode_MapsToBadRequest`; 10 `OlapError_AfterResponseStarted_DoesNotAppendMessage`; 11 `ArchTest_NoExceptionMessageInEndpoints_EmptyBaseline`.
+
+**ARCH-MNT-14 and DI snapshot (PR 4), light**
+- SC-01: Goldens (failures, warnings, order) are generated on unchanged code in a separate first commit; the refactor commit may not change them.
+- SC-02: One golden case per throw site, each also asserting the exception type; a site without a case fails `EachCheck_IsGuardedByAGoldenCase`.
+- SC-03: Fail-fast stays: the first failing check wins; the loop must not catch and aggregate, and `Warnings`/`DangerBypasses` stay computed once from options.
+- SC-04: Any check that is added, removed or moved changes the order golden; the order test compares names and count.
+- SC-05: The DI snapshot lists index, service type, lifetime, key and implementation (type/instance type/factory return type); authorization, audit and decorator registrations are verified in order, in both profiles; the snapshot updates only with `AUTHERIS_UPDATE_SNAPSHOTS=1` and the env var must not be set in CI (CI test fails if it is).
+- SC-06: The snapshot never records option values or secrets.
+Tests ARCH-MNT-14-T-NN: 01 `EachInvalidCase_FailsWithGoldenMessage`; 02 `StartupChecks_OrderIsStable`; 03 `EachCheck_IsGuardedByAGoldenCase`; 04 `Composition_DescriptorSnapshot_IsStable` (both profiles); 05 `Snapshot_UpdateFlagIsRejectedInCi`; 06 `Validator_FirstViolationWins_NoAggregation`.
+
+**ARCH-MNT-17 (PR 6), light**
+- SC-01: Cache holds the token only; the key is SHA-256 of tenant, client id and secret, and neither the secret, the fingerprint nor the token is logged or in an exception message.
+- SC-02: Token is kept in memory only, stored with expiry minus a safety skew (60 s) via `TimeProvider`; an expired or failed fetch is never cached and failures are not served from a stale slot (fail closed).
+- SC-03: The slot is replaced atomically; a fetch started under old options must not write into the slot after an `OnChange` clear (compare key before store).
+- SC-04: Semaphore wait honours the caller's cancellation token and has no unbounded wait.
+- SC-05: Mock token only when Development mock mode is active; production configuration can never reach that branch.
+Tests ARCH-MNT-17-T-NN (plan tests plus): 07 `FetchStartedBeforeOptionsChange_DoesNotPopulateCache`; 08 `FailedFetch_IsNotCached`; 09 `TokenAndSecret_NeverInLogsOrExceptions`.
+
+**ARCH-MNT-27 (PR 6), light**
+- SC-27-01: `IsDnsLabel` and `IsAuthzPath` accept exactly the former regex language (same anchors, `$` newline semantics included: the old `$` accepted a trailing `\n`; the new check must reject it and the plan must record that as an intended tightening), ASCII only, no culture, no Unicode letters.
+- SC-27-02: Fail closed: any input that is null, empty, over 63 (label) or over the former path bound is rejected; no exception escapes on any input.
+- SC-27-03: The equivalence tests run over the regex retained in test code, with a boundary table plus a seeded random corpus (at least 10,000 strings over a hostile alphabet including `\n`, `\0`, Unicode, `%2e`, `..`, `//`), and assert the only differences are the documented trailing-newline case.
+Tests ARCH-MNT-27-T-NN: 01 `IsDnsLabel_AgreesWithFormerRegex`; 02 `IsAuthzPath_AgreesWithFormerRegex`; 03 `EnvoyExport_RejectsHostileInputs_Without500`; 04 `VersionSegment_AgreesWithFormerRegex`.
+
+**Backlog**: ARCH-MNT-06-FU-01..03 stand. No further item moved: all wired flags (OTLP, SCIM CIDR) are small and stay in PR 7.
