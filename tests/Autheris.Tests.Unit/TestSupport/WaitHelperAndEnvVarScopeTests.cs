@@ -66,6 +66,25 @@ public sealed class WaitHelperAndEnvVarScopeTests
     }
 
     [Fact]
+    public void EnvVarScope_SetTwiceOnTheSameName_RestoresTheOriginalValue()
+    {
+        Environment.SetEnvironmentVariable(Var, "original");
+        try
+        {
+            using (var scope = new EnvVarScope(Var, "first"))
+            {
+                scope.Set(Var, "second");
+            }
+
+            Environment.GetEnvironmentVariable(Var).ShouldBe("original");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Var, null);
+        }
+    }
+
+    [Fact]
     public void EnvVarScope_RestoresAnUnsetVariableToUnset()
     {
         Environment.SetEnvironmentVariable(Var, null);

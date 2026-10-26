@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Events;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,6 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Events;
 using Autheris.Domain.Events;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;

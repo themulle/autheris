@@ -1,11 +1,11 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
-using Autheris.Tests.Common;
 using System;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using Shouldly;
 using Xunit;
 

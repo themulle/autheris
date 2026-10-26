@@ -1,7 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
-using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -16,6 +15,7 @@ using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Security;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;

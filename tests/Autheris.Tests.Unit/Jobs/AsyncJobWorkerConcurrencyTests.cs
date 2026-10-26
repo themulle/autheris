@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Jobs;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -19,6 +18,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,6 +10,7 @@ using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Lineage;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
@@ -256,8 +256,8 @@ public class LineageTraversalTests
         // Warmup
         await _sut.CalculateConsentRevocationImpactAsync(new TenantId("perf-tenant"), consentId, callerContext);
 
-        // Timed run
-        // The iterative BFS must terminate and visit every node exactly once; wall-clock timing is not asserted.
+        // Measured run
+        // The iterative BFS must terminate and report all 9,999 downstream nodes (asserted below); wall-clock timing is not asserted.
         var report = await _sut.CalculateConsentRevocationImpactAsync(new TenantId("perf-tenant"), consentId, callerContext)
             .WaitAsync(WaitHelper.HangGuard);
 

@@ -1,10 +1,10 @@
 namespace Autheris.Tests.Unit.Configuration;
 
 using System;
-using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.IO;
 using Autheris.Api.Configuration;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;

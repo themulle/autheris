@@ -1,4 +1,3 @@
-using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit;
 
 using System;
@@ -15,6 +14,7 @@ using Autheris.Application.Sql;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;

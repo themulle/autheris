@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Security;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,6 +10,7 @@ using Autheris.Application.Olap;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;

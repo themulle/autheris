@@ -1,10 +1,10 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
-using Autheris.Tests.Common;
 using System;
 using System.Diagnostics;
 using System.Linq;
 using Autheris.Domain.Common;
+using Autheris.Tests.Common;
 using FsCheck;
 using FsCheck.Xunit;
 using Shouldly;

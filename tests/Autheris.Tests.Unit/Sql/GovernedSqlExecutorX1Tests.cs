@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Sql;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -20,6 +19,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Databricks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;

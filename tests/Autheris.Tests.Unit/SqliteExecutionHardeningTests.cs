@@ -1,8 +1,8 @@
-using Autheris.Tests.Common;
 using System.Data.Common;
 using System.Diagnostics;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Tests.Common;
 using Microsoft.Data.Sqlite;
 using Shouldly;
 using Xunit;

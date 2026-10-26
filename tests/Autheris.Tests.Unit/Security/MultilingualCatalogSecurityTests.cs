@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Security;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -19,6 +18,7 @@ using Autheris.Infrastructure.AI;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Catalog;
+using Autheris.Tests.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,7 +34,7 @@ public sealed class MultilingualCatalogSecurityTests
 {
     /// <summary>
     /// SEC-CAT146-01: ReDoS safety in BCP 47 parser and negotiator.
-    /// Parser must be zero-regex, linear time, bounded length, finishing in under 10ms even for adversarial inputs.
+    /// Parser must be zero-regex, linear time, bounded length, rejecting over-long input by length bound without unbounded work.
     /// </summary>
     [Fact]
     [Trait("Category", "Security")]
@@ -47,14 +47,17 @@ public sealed class MultilingualCatalogSecurityTests
         var longMalformed = string.Join("-", Enumerable.Repeat("abcdefghij", 500));
         var adversarialHeader = string.Join(", ", Enumerable.Range(0, 200).Select(i => $"de-x-{new string('a', 50)};q={i / 200.0:F2}"));
 
-        // Termination is the property (no unbounded work on adversarial input); the hang guard is not a performance budget.
+        longMalformed.Length.ShouldBeGreaterThan(Bcp47LanguageTag.MaxTagLength);
+
+        // Deterministic: over-long input is rejected by the length bound; the adversarial header falls back to the default.
+        // The hang guard (30 s) is not a performance budget.
         await WaitHelper.RunGuarded(() =>
         {
             for (int i = 0; i < 50; i++)
             {
-                _ = Bcp47LanguageTag.TryParse(longMalformed, out _);
-                _ = Bcp47LanguageTag.TryCanonicalize(longMalformed, out _);
-                negotiator.NegotiateLanguage(adversarialHeader, supported, "en");
+                Bcp47LanguageTag.TryParse(longMalformed, out _).ShouldBeFalse();
+                Bcp47LanguageTag.TryCanonicalize(longMalformed, out _).ShouldBeFalse();
+                negotiator.NegotiateLanguage(adversarialHeader, supported, "en").ShouldBe("en");
             }
         });
     }

@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -13,6 +12,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -151,7 +151,9 @@ public sealed class FederatedVirtualFilterEnforcementTests
         var (crm, _, pipeline) = Setup(keys: k => { k.Delay = TimeSpan.FromSeconds(60); k.IgnoreCancellation = true; }, timeoutSeconds: 1);
 
         // The provider would block for 60 s: the pipeline only returns (inside the hang guard) if it enforces the request timeout itself.
+        var started = DateTime.UtcNow;
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Join)).WaitAsync(WaitHelper.HangGuard);
+        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(10)); // loose: 10x the 1 s timeout, far below the 60 s provider delay
 
         ex.ErrorCode.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");
         crm.UpstreamCalls.ShouldBe(0);

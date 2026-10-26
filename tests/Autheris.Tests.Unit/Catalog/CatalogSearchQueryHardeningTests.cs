@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Catalog;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -13,6 +12,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;

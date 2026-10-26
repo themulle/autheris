@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
@@ -320,6 +320,7 @@ public sealed class VirtualFilterFederationPlannerTests
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         // The provider ignores cancellation and would block for 60 s: the planner only returns (inside the hang guard) if it enforces the timeout itself.
 
+        var started = DateTime.UtcNow;
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
             new VirtualFilterFederationPlanner(keys).PlanAsync(
                 null,
@@ -329,6 +330,7 @@ public sealed class VirtualFilterFederationPlannerTests
                 cts.Token)).WaitAsync(WaitHelper.HangGuard);
 
         ex.ErrorCode.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");
+        (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(10)); // loose: 50x the 200 ms timeout, far below the 60 s provider delay
     }
 
     [Fact]

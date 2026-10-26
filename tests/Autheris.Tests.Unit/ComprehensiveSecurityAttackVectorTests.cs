@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -24,6 +23,7 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.Itsm;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
+using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -353,11 +353,24 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         var guardrail = new SemanticPromptGuardrail(NullLogger<SemanticPromptGuardrail>.Instance);
 
+        // Deterministic ReDoS property: every guardrail regex carries a finite match timeout of at most 200 ms.
+        var regexMembers = typeof(SemanticPromptGuardrail)
+            .GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Where(m => m.ReturnType == typeof(System.Text.RegularExpressions.Regex) && m.GetParameters().Length == 0)
+            .ToList();
+        regexMembers.Count.ShouldBeGreaterThanOrEqualTo(5);
+        foreach (var member in regexMembers)
+        {
+            var regex = (System.Text.RegularExpressions.Regex)member.Invoke(null, null)!;
+            regex.MatchTimeout.ShouldNotBe(System.Text.RegularExpressions.Regex.InfiniteMatchTimeout, member.Name);
+            regex.MatchTimeout.ShouldBeLessThanOrEqualTo(TimeSpan.FromMilliseconds(200), member.Name);
+        }
+
         // Act
-        // Catastrophic backtracking would not terminate; the hang guard fails the test instead of hanging the run.
+        // Hang guard only (30 s vs. the 200 ms regex timeout): fails the test instead of hanging the run.
         var result = await WaitHelper.RunGuarded(() => guardrail.EvaluatePrompt("query_tool", maliciousPayload));
 
-        // Assert: ReDoS protection must terminate and deny
+        // Assert: the adversarial payload is still denied
         result.IsAllowed.ShouldBeFalse();
     }
 

@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Webhooks;
 
-using Autheris.Tests.Common;
 using System;
 using System.Diagnostics;
 using System.Threading;
@@ -8,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Events;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Events;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;

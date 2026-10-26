@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Identity.Attributes;
 
-using Autheris.Tests.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -12,6 +11,7 @@ using Autheris.Application.Identity.Attributes;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
