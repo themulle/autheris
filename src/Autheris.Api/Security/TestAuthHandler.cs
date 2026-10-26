@@ -45,13 +45,12 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
             }
             else if (_gatewayOptions?.Value.IsAnonymousAccessAllowed == true)
             {
+                // Test host only (DT-SC-09): the header tenant is a test fixture input; without it the principal is claim-less (the resolver decides).
                 var anonTenant = headers.TryGetValue("X-Test-Tenant", out var aTenantVal) && !string.IsNullOrWhiteSpace(aTenantVal)
                     ? aTenantVal.ToString().Trim()
                     : (headers.TryGetValue("X-Tenant-ID", out var aTidVal) && !string.IsNullOrWhiteSpace(aTidVal)
                         ? aTidVal.ToString().Trim()
-                        : (headers.TryGetValue("X-Tenant-Id", out var aTidAltVal) && !string.IsNullOrWhiteSpace(aTidAltVal)
-                            ? aTidAltVal.ToString().Trim()
-                            : TenantId.LegacySingleTenant.Value));
+                        : null);
 
                 // Insecure Getting-Started: Allow anonymous access with guest identity (no admin privilege escalation)
                 List<Claim> anonClaims =
@@ -60,11 +59,15 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
                     new(ClaimTypes.Name, "DEV_ANONYMOUS"),
                     new(ClaimTypes.NameIdentifier, "S-1-5-21-DEV-ANONYMOUS"),
                     new("objectSid", "S-1-5-21-DEV-ANONYMOUS"),
-                    new(ClaimTypes.Role, "AnonymousUser"),
-                    new("tenant_id", anonTenant),
-                    new("tenant", anonTenant),
-                    new("tid", anonTenant)
+                    new(ClaimTypes.Role, "AnonymousUser")
                 ];
+                if (anonTenant is not null)
+                {
+                    anonClaims.Add(new Claim("tenant_id", anonTenant));
+                    anonClaims.Add(new Claim("tenant", anonTenant));
+                    anonClaims.Add(new Claim("tid", anonTenant));
+                }
+
                 var anonIdentity = new ClaimsIdentity(anonClaims, SchemeName, ClaimTypes.Name, ClaimTypes.Role);
                 var anonPrincipal = new ClaimsPrincipal(anonIdentity);
                 var anonTicket = new AuthenticationTicket(anonPrincipal, SchemeName);
@@ -140,13 +143,14 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
             ? tenantVal.ToString().Trim()
             : (headers.TryGetValue("X-Tenant-ID", out var tidVal) && !string.IsNullOrWhiteSpace(tidVal)
                 ? tidVal.ToString().Trim()
-                : (headers.TryGetValue("X-Tenant-Id", out var tidAltVal) && !string.IsNullOrWhiteSpace(tidAltVal)
-                    ? tidAltVal.ToString().Trim()
-                    : TenantId.LegacySingleTenant.Value));
+                : null);
 
-        claims.Add(new Claim("tenant_id", testTenant));
-        claims.Add(new Claim("tenant", testTenant));
-        claims.Add(new Claim("tid", testTenant));
+        if (testTenant is not null)
+        {
+            claims.Add(new Claim("tenant_id", testTenant));
+            claims.Add(new Claim("tenant", testTenant));
+            claims.Add(new Claim("tid", testTenant));
+        }
 
         var identity = new ClaimsIdentity(claims, SchemeName, ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);

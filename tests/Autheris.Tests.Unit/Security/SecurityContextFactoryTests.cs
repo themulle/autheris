@@ -158,8 +158,8 @@ public sealed class SecurityContextFactoryTests
         var secCtx = (SecurityPrincipalContext)httpContext.Items[SecurityPrincipalContext.ItemKey]!;
         secCtx.TenantId.Value.ShouldBe("tenant-gamma");
 
-        httpContext.Items.ContainsKey(TenantResolutionMiddleware.TenantIdItemKey).ShouldBeTrue();
-        var legacyTenant = (TenantId)httpContext.Items[TenantResolutionMiddleware.TenantIdItemKey]!;
+        httpContext.Items.ContainsKey(SecurityPrincipalContext.TenantIdItemKey).ShouldBeTrue();
+        var legacyTenant = (TenantId)httpContext.Items[SecurityPrincipalContext.TenantIdItemKey]!;
         legacyTenant.Value.ShouldBe("tenant-gamma");
     }
 

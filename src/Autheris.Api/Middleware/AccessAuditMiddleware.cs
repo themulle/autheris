@@ -269,7 +269,7 @@ public sealed class AccessAuditMiddleware
                 {
                     auditContext.TenantId = context.User.GetTenantId();
                 }
-                catch (System.Security.SecurityException)
+                catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
                 {
                     auditContext.AdditionalDetails["tenantClaim"] = "INVALID";
                 }

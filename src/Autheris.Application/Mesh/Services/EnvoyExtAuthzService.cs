@@ -100,7 +100,16 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         TenantId tenantId;
         if (caller?.Identity?.IsAuthenticated == true)
         {
-            tenantId = caller.GetTenantId();
+            // DT-A-3: claims only; a caller without a resolvable tenant (or with an invalid claim) is denied, never given a default.
+            try
+            {
+                tenantId = caller.GetTenantId();
+            }
+            catch (Autheris.Domain.Exceptions.GatewaySecurityException ex)
+            {
+                _logger.LogWarning("ext_authz denied: the caller has no valid tenant ({Code}).", ex.ErrorCode);
+                return EnvoyCheckResponse.Deny(403, "Forbidden: tenant unresolved.");
+            }
         }
         else if (contextExtensions.TryGetValue("tenant", out var ctxTenant) && !string.IsNullOrWhiteSpace(ctxTenant))
         {

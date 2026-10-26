@@ -46,7 +46,7 @@ internal static class EndpointSecurity
             return ctx.TenantId;
         }
 
-        if (context.Items.TryGetValue(TenantResolutionMiddleware.TenantIdItemKey, out var itemTenant) && itemTenant is TenantId resolved)
+        if (context.Items.TryGetValue(SecurityPrincipalContext.TenantIdItemKey, out var itemTenant) && itemTenant is TenantId resolved)
         {
             return resolved;
         }

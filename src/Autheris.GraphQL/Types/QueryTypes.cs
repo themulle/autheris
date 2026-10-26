@@ -412,7 +412,7 @@ public sealed class Query
         {
             tenantId = principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -745,7 +745,7 @@ public sealed class Query
         var groupSids = principal.GetGroupSids().ToList();
         var roles = principal.GetUserRoles().ToList();
 
-        var tenantId = TenantId.LegacySingleTenant;
+        TenantId tenantId;
         if (httpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
         {
             tenantId = tid;

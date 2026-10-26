@@ -273,7 +273,7 @@ public sealed class ClientTierResolver : IClientTierResolver
         {
             tenant = principal.GetTenantId().Value;
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             tenant = "invalid-tenant";
         }

@@ -38,9 +38,7 @@ public static partial class GovernanceEndpoints
 
         // SEC H-05: Tenant is enforced server-side from the resolved principal tenant;
         // a foreign tenant from the request body is honored only for ClusterAdmin.
-        var effectiveTenant = context.Items.TryGetValue(TenantResolutionMiddleware.TenantIdItemKey, out var itemTenant) && itemTenant is TenantId resolvedTenant
-            ? resolvedTenant
-            : TenantId.LegacySingleTenant;
+        var effectiveTenant = EndpointSecurity.GetRequestTenant(context);
         if (request.Tenant is { } requestedTenant && requestedTenant != effectiveTenant)
         {
             if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin))

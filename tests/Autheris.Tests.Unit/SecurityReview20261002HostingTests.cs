@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Domain.Security;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -603,7 +604,7 @@ public sealed class SecurityReview20261002HostingTests
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Method = "GET";
         httpContext.Request.Path = "/mcp/sse";
-        httpContext.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        httpContext.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
         httpContext.User = User("S-1-5-21-SSE");
         httpContext.Response.Body = new MemoryStream();
 
@@ -617,7 +618,7 @@ public sealed class SecurityReview20261002HostingTests
     public void H07_ResolveTenantKey_UsesTenantIdObjectFromItems()
     {
         var httpContext = new DefaultHttpContext();
-        httpContext.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        httpContext.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
 
         ResourceGroupMiddleware.ResolveTenantKey(httpContext).ShouldBe("tenant-a");
     }

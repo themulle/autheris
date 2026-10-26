@@ -128,14 +128,27 @@ public sealed class RebacFieldMiddleware
             return;
         }
 
-        // 3. Resolve Tenant (Priority: Middleware-validated TenantId -> Token Claim -> Fallback)
-        var tenantStr = (httpContext != null && httpContext.Items.TryGetValue("TenantId", out var itemT) && itemT is TenantId tid ? tid.Value : null)
-                        ?? principal?.FindFirst("tenant_id")?.Value
-                        ?? principal?.FindFirst("tid")?.Value
-                        ?? principal?.FindFirst("tenant")?.Value
-                        ?? TenantId.LegacySingleTenant.Value;
+        // 3. Resolve Tenant (Middleware-validated TenantId, else the stamped claim; no fallback: unresolved is denied, DT-A-3)
+        TenantId tenantId;
+        if (httpContext != null && httpContext.Items.TryGetValue("TenantId", out var itemT) && itemT is TenantId itemTenant)
+        {
+            tenantId = itemTenant;
+        }
+        else if (Autheris.Domain.Tenancy.TenantClaimReader.Read(principal) is { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } claimTenant)
+        {
+            tenantId = claimTenant.Tenant;
+        }
+        else
+        {
+            context.ReportError(
+                ErrorBuilder.New()
+                    .SetMessage("Access denied: The caller has no resolvable tenant.")
+                    .SetCode("TENANT_UNRESOLVED")
+                    .SetPath(context.Path)
+                    .Build());
+            return;
+        }
 
-        var tenantId = new TenantId(tenantStr);
         var targetObject = $"{objectType}:{objectId}";
 
         // 4. Batch DataLoader check (Zero-N+1)

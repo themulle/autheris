@@ -106,51 +106,7 @@ public static class ClaimsNormalizer
             }
         }
 
-        // 3. Ensure canonical tenant_id claim is populated (INF-08)
-        var realmId = clonedPrincipal.FindFirst("autheris:realm")?.Value;
-        var realm = (!string.IsNullOrWhiteSpace(realmId) && Sid.RealmLookup != null)
-            ? Sid.RealmLookup(realmId)
-            : null;
-
-        if (realm != null && (realm.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.Fixed ||
-                              realm.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.ClaimMapped))
-        {
-            TenantId? boundTenant = null;
-            try
-            {
-                boundTenant = clonedPrincipal.GetTenantId();
-            }
-            catch (System.Security.SecurityException)
-            {
-            }
-
-            if (boundTenant is { } bTenant)
-            {
-                foreach (var claim in identity.FindAll("tenant_id").ToList())
-                {
-                    identity.RemoveClaim(claim);
-                }
-                identity.AddClaim(new Claim("tenant_id", bTenant.Value));
-            }
-        }
-        else if (identity.FindFirst("tenant_id") == null)
-        {
-            // API-7: an invalid tenant claim must not fail the authentication pipeline with 500; the claim is left as is
-            // and SecurityContextResolutionMiddleware rejects the request with 403.
-            TenantId? resolvedTenant = null;
-            try
-            {
-                resolvedTenant = clonedPrincipal.GetTenantId();
-            }
-            catch (System.Security.SecurityException)
-            {
-            }
-
-            if (resolvedTenant is { } tenant && tenant != TenantId.LegacySingleTenant)
-            {
-                identity.AddClaim(new Claim("tenant_id", tenant.Value));
-            }
-        }
+        // 3. The tenant is not decided here (DT-A-3): the claims transformation stamps the resolved tenant exactly once per ingress.
 
         // 4. Ensure ClaimTypes.GroupSid is populated from any provider group claims (AD / Kerberos / OIDC)
         var existingGroups = identity.FindAll(ClaimTypes.GroupSid)

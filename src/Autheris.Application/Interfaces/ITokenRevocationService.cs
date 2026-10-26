@@ -115,7 +115,7 @@ public static class TokenRevocationKeys
         {
             tenant = principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             tenant = null; // malformed tenant claim: such tokens are rejected by the tenant resolution anyway
         }

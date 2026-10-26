@@ -75,10 +75,11 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         }
 
         // 4. Propagate Tenant ID
+        // DT-A-3: the tenant comes from the resolved request tenant or the stamped claim; no sentinel. Without one no tenant header is
+        // forwarded (the subgraph then rejects the call fail-closed).
+        var claimTenant = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
         var effectiveTenant = tenantId
-            ?? principal?.FindFirst("tenant_id")?.Value
-            ?? principal?.FindFirst("tenant")?.Value
-            ?? TenantId.LegacySingleTenant.Value;
+            ?? (claimTenant.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claimTenant.Tenant.Value : null);
 
         if (!string.IsNullOrWhiteSpace(effectiveTenant))
         {
@@ -147,7 +148,7 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
             }
 
             var payload = FederationContextSignature.BuildCanonicalV2(
-                effectiveTenant, userSid, timestamp, nonce, subgraphName, rolesStr, methodStr, pathStr, bodyHash);
+                effectiveTenant ?? string.Empty, userSid, timestamp, nonce, subgraphName, rolesStr, methodStr, pathStr, bodyHash);
             var signature = FederationContextSignature.Sign(payload, signingKey);
 
             request.Headers.Remove(FederationContextSignature.VersionHeader);

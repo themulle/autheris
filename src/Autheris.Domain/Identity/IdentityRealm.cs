@@ -62,7 +62,7 @@ public sealed record TenantBindingSpecification(
     /// <summary>
     /// DT-A-5: the realm's tenant statement as a <see cref="ClaimTenant"/>. <c>Unbound</c> and a ClaimMapped realm whose claim is absent
     /// say nothing (Absent: the default tenant applies); a present but unmapped claim, a reserved tenant and a malformed binding are
-    /// Invalid (fail closed, no value echo). Additive: <see cref="ResolveTenant"/> is unchanged until the ingress cutover.
+    /// Invalid (fail closed, no value echo). The one tenant statement of a realm binding.
     /// </summary>
     public ClaimTenant ResolveClaim(ClaimsPrincipal principal)
     {
@@ -102,28 +102,6 @@ public sealed record TenantBindingSpecification(
             default:
                 return ClaimTenant.Invalid;
         }
-    }
-
-    public TenantId ResolveTenant(ClaimsPrincipal principal)
-    {
-        ArgumentNullException.ThrowIfNull(principal);
-
-        if (Kind == TenantBindingKind.Fixed && FixedTenantId.HasValue)
-        {
-            return FixedTenantId.Value;
-        }
-
-        if (Kind == TenantBindingKind.ClaimMapped && !string.IsNullOrWhiteSpace(ClaimName) && Mapping != null)
-        {
-            var val = principal.FindFirst(ClaimName)?.Value;
-            if (val != null && Mapping.TryGetValue(val, out var matchedTenant))
-            {
-                return matchedTenant;
-            }
-            throw new SecurityException($"Claim '{ClaimName}' value '{val}' not authorized in realm tenant mapping.");
-        }
-
-        return TenantId.LegacySingleTenant;
     }
 }
 

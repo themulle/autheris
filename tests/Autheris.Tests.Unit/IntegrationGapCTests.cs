@@ -1,3 +1,4 @@
+using Autheris.Domain.Security;
 using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit;
 
@@ -323,7 +324,7 @@ public sealed class IntegrationGapCTests
 
         var contextA = new DefaultHttpContext();
         contextA.Request.Path = "/graphql";
-        contextA.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        contextA.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
         contextA.Response.Body = new MemoryStream();
         await middleware.InvokeAsync(contextA);
         contextA.Response.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
@@ -331,7 +332,7 @@ public sealed class IntegrationGapCTests
 
         var contextB = new DefaultHttpContext();
         contextB.Request.Path = "/graphql";
-        contextB.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-b");
+        contextB.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-b");
         contextB.Response.Body = new MemoryStream();
         await middleware.InvokeAsync(contextB);
         contextB.Response.StatusCode.ShouldNotBe(StatusCodes.Status429TooManyRequests);

@@ -278,7 +278,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         {
             return context.Principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             // Fail closed with a generic message (no claim value or resolver detail).
             throw new GatewayForbiddenException("Invalid tenant identity.");

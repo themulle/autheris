@@ -175,7 +175,7 @@ public static class CdcStreamAdminEndpoints
         {
             tenant = context.User.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             tenant = default;
         }

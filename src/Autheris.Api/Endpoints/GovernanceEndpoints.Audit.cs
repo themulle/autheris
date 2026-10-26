@@ -51,10 +51,8 @@ public static partial class GovernanceEndpoints
         return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, new Sid(sid), context.RequestAborted).ConfigureAwait(false);
     }
 
-    private static TenantId ResolveRequestTenant(HttpContext context) =>
-        context.Items.TryGetValue(TenantResolutionMiddleware.TenantIdItemKey, out var itemTenant) && itemTenant is TenantId resolvedTenant
-            ? resolvedTenant
-            : TenantId.LegacySingleTenant;
+    // DT-A-3: no sentinel; an unresolved request tenant throws TENANT_UNRESOLVED (mapped to 403) at the tenant read.
+    private static TenantId ResolveRequestTenant(HttpContext context) => EndpointSecurity.GetRequestTenant(context);
 
     /// <summary>
     /// WP-SC-10 / SEC-SC-16: keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the

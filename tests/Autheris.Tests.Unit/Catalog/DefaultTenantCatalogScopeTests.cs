@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Domain.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -313,7 +314,7 @@ public sealed class DefaultTenantCatalogScopeTests
         {
             var ctx = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
             ctx.User = Wp0.User("S-D-GA", null, ["GovernanceAdmin"]);
-            ctx.Items[TenantResolutionMiddleware.TenantIdItemKey] = D;
+            ctx.Items[SecurityPrincipalContext.TenantIdItemKey] = D;
             return ctx;
         }
 

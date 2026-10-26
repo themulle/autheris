@@ -94,16 +94,17 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     }
 
     [Fact]
-    public async Task TenantResolutionMiddleware_HeaderSmuggling_ConflictingHeaders_Returns403()
+    public async Task SecurityContextResolution_HeaderSmuggling_ConflictingHeaders_Returns403()
     {
         // Arrange: Multiple X-Tenant-ID headers injected (HTTP parameter pollution / header smuggling)
         RequestDelegate next = _ => Task.CompletedTask;
-        var middleware = new TenantResolutionMiddleware(next);
+        var middleware = new SecurityContextResolutionMiddleware(next);
 
         var context = new DefaultHttpContext();
         var claims = new[]
         {
             new Claim("tenant_id", "tenant-alpha"),
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-alice"),
             new Claim(ClaimTypes.Name, "alice")
         };
         context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Basic"));
@@ -122,11 +123,11 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [InlineData("../../etc/shadow")]
     [InlineData("tenant\r\nEvil: true")]
     [InlineData("tenant' OR '1'='1")]
-    public async Task TenantResolutionMiddleware_MalformedTenantHeader_FailsClosedSafely(string malformedHeader)
+    public async Task SecurityContextResolution_MalformedTenantHeader_FailsClosedSafely(string malformedHeader)
     {
         // Arrange
         RequestDelegate next = _ => Task.CompletedTask;
-        var middleware = new TenantResolutionMiddleware(next);
+        var middleware = new SecurityContextResolutionMiddleware(next);
 
         var context = new DefaultHttpContext();
         // Unauthenticated request attempting tenant header manipulation
@@ -136,8 +137,9 @@ public sealed class ComprehensiveSecurityAttackVectorTests
         // Act
         await middleware.InvokeAsync(context);
 
-        // Assert: Must fail closed with 400 Bad Request or 403 Forbidden without unhandled crash
-        context.Response.StatusCode.ShouldBeOneOf(StatusCodes.Status400BadRequest, StatusCodes.Status403Forbidden);
+        // Assert: an unauthenticated principal never selects a tenant (DT-SC-09): the header is ignored, no tenant is resolved, no crash.
+        context.Response.StatusCode.ShouldBeOneOf(StatusCodes.Status200OK, StatusCodes.Status400BadRequest, StatusCodes.Status403Forbidden);
+        context.Items.ContainsKey(Autheris.Domain.Security.SecurityPrincipalContext.TenantIdItemKey).ShouldBeFalse();
     }
 
     // =========================================================================

@@ -260,21 +260,15 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 return Task.FromResult(AuthenticateResult.Fail("Missing required tenant header for ForwardAuth."));
             }
         }
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(forwardAuthOptions.DefaultTenantId))
-            {
-                tenant = forwardAuthOptions.DefaultTenantId;
-            }
-            else
-            {
-                tenant = TenantId.LegacySingleTenant.Value;
-            }
-        }
 
-        claims.Add(new Claim("tenant_id", tenant));
-        claims.Add(new Claim("tenant", tenant));
-        claims.Add(new Claim("tid", tenant));
+        // DT-A-5: without a trusted upstream tenant header the principal carries no tenant claim; the resolver assigns the default
+        // tenant (or leaves it unresolved). The ForwardAuth-specific default tenant is no longer read.
+        if (tenant is not null)
+        {
+            claims.Add(new Claim("tenant_id", tenant));
+            claims.Add(new Claim("tenant", tenant));
+            claims.Add(new Claim("tid", tenant));
+        }
 
         // Map default enterprise user role if none assigned
         if (!claims.Any(c => c.Type == ClaimTypes.Role))

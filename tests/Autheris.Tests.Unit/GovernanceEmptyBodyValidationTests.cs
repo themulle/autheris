@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Domain.Security;
 using System;
 using System.IO;
 using System.Linq;
@@ -35,7 +36,7 @@ public sealed class GovernanceEmptyBodyValidationTests
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test", ClaimTypes.Name, ClaimTypes.Role))
         };
         context.Response.Body = new MemoryStream();
-        context.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        context.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
         return context;
     }
 

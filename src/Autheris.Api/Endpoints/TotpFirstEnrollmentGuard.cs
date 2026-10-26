@@ -272,9 +272,11 @@ internal static class TotpFirstEnrollmentGuard
         {
             tenant = EndpointSecurity.GetRequestTenant(context);
         }
-        catch
+        catch (Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            tenant = TenantId.LegacySingleTenant;
+            // A tenant-less principal (ClusterAdmin without default tenant) is recorded in the platform bucket: an audit-only record
+            // (DT-A-6), never a decision. No legacy sentinel.
+            tenant = TenantId.Platform;
         }
 
         var authenticatedAt = GetAuthenticationTime(context.User);

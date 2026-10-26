@@ -70,7 +70,7 @@ public static class DevStartupBanner
                 : (options.Dev.ShowPasswords ? user.Password : "<hidden>");
 
             var roles = user.Roles.Count == 0 ? "-" : string.Join(",", user.Roles);
-            sb.Append($"    {user.Username,-12} pw {password,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user)}");
+            sb.Append($"    {user.Username,-12} pw {password,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user) ?? "(default tenant)"}");
             if (sessionActive)
             {
                 var redirectPath = options.GraphQL.EnableBananaCakePop

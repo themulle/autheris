@@ -110,7 +110,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                     ? TenantBindingSpecification.Fixed(new TenantId(config.FixedTenantId))
                     : (config.TenantClaimName != null && config.TenantClaimMapping != null
                         ? TenantBindingSpecification.ClaimMapped(config.TenantClaimName, config.TenantClaimMapping.ToDictionary(k => k.Key, v => new TenantId(v.Value)))
-                        : TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant));
+                        : TenantBindingSpecification.Unbound());
 
                 var allowedRoles = new HashSet<GatewayRole>();
                 foreach (var r in config.AllowedGatewayRoles)
@@ -172,7 +172,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                 AllowedClientIds: null,
                 UserKeyClaim: "oid",
                 UpnClaim: "upn",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
+                TenantBinding: TenantBindingSpecification.Unbound(),
                 GroupSource: RealmGroupSource.Token,
                 ResolverChain: ["scim-store", "entra-app-roles"],
                 Provisioning: RealmProvisioningMode.None,
@@ -200,7 +200,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                 AllowedClientIds: null,
                 UserKeyClaim: "sub",
                 UpnClaim: "upn",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
+                TenantBinding: TenantBindingSpecification.Unbound(),
                 GroupSource: RealmGroupSource.Token,
                 ResolverChain: ["static-mapping"],
                 Provisioning: RealmProvisioningMode.None,
@@ -222,7 +222,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                 AllowedClientIds: null,
                 UserKeyClaim: "sub",
                 UpnClaim: "name",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
+                TenantBinding: TenantBindingSpecification.Unbound(),
                 GroupSource: RealmGroupSource.Token,
                 ResolverChain: ["static-mapping"],
                 Provisioning: RealmProvisioningMode.None,
@@ -244,7 +244,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                 AllowedClientIds: null,
                 UserKeyClaim: "sub",
                 UpnClaim: "name",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
+                TenantBinding: TenantBindingSpecification.Unbound(),
                 GroupSource: RealmGroupSource.Token,
                 ResolverChain: ["static-mapping"],
                 Provisioning: RealmProvisioningMode.None,
@@ -266,7 +266,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                 AllowedClientIds: null,
                 UserKeyClaim: "sub",
                 UpnClaim: "upn",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
+                TenantBinding: TenantBindingSpecification.Unbound(),
                 GroupSource: RealmGroupSource.Token,
                 ResolverChain: ["static-mapping"],
                 Provisioning: RealmProvisioningMode.None,

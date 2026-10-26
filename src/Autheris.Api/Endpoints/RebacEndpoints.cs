@@ -103,7 +103,7 @@ public static class RebacEndpoints
 
         if (!secContext.IsClusterAdmin)
         {
-            if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
+            if (string.IsNullOrWhiteSpace(secContext.TenantId.Value))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -197,7 +197,7 @@ public static class RebacEndpoints
 
         if (!secContext.IsClusterAdmin)
         {
-            if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+            if (string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
                 !string.Equals(secContext.TenantId.Value, canonicalTuple.TenantId, StringComparison.OrdinalIgnoreCase))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -262,7 +262,7 @@ public static class RebacEndpoints
             }
             else
             {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
+                if (string.IsNullOrWhiteSpace(secContext.TenantId.Value))
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
@@ -303,7 +303,7 @@ public static class RebacEndpoints
 
             if (!secContext.IsClusterAdmin)
             {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+                if (string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
                     !string.Equals(secContext.TenantId.Value, check.TenantId, StringComparison.OrdinalIgnoreCase))
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -356,7 +356,7 @@ public static class RebacEndpoints
 
             if (!secContext.IsClusterAdmin)
             {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+                if (string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
                     !string.Equals(secContext.TenantId.Value, batchCheck.TenantId, StringComparison.OrdinalIgnoreCase))
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);

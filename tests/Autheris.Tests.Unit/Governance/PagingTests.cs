@@ -1,3 +1,4 @@
+using Autheris.Domain.Security;
 using System.Security.Claims;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
@@ -169,7 +170,7 @@ public sealed class PagingTests
         if (owners != null) services.AddSingleton(owners);
         var ctx = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, role), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ME")], "test"));
-        ctx.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId(tenant);
+        ctx.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId(tenant);
         return ctx;
     }
 

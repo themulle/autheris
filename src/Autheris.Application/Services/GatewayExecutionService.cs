@@ -2,6 +2,8 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
+using Autheris.Application.Tenancy;
+using Autheris.Domain.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -408,6 +410,26 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
     }
 
+    private static bool TryReadTenantHeader(IReadOnlyDictionary<string, string[]>? requestHeaders, out TenantId tenant)
+    {
+        tenant = default;
+        // One spelling: HTTP header names are case-insensitive; the dictionary of a non-HTTP caller is matched ordinally ignoring case.
+        if (requestHeaders is null)
+        {
+            return false;
+        }
+
+        foreach (var (name, values) in requestHeaders)
+        {
+            if (string.Equals(name, "X-Tenant-ID", StringComparison.OrdinalIgnoreCase) && values.Length > 0 && TenantId.TryParse(values[0], out tenant))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// G5: Resolves catalog metadata and the effective access decision (consents, cache, Casbin ABAC and row filters)
     /// for one table, without auditing and without reading data. A denied decision is returned, not thrown.
@@ -445,23 +467,51 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        // Resolve TenantId upfront for cache and consent isolation
-        // RR-L4-02: identical semantics to SecurityContextFactory (single source of truth for HTTP ingress):
-        // a tenant header may only select a tenant for canonical cluster admins whose identity was not asserted
-        // via ForwardAuth headers, or for the development-only anonymous principal (danger_allow_anonymous_access).
-        var tenantId = principal.GetTenantId();
-        if (requestHeaders != null &&
-            (requestHeaders.TryGetValue("X-Tenant-ID", out var tHeaders) || requestHeaders.TryGetValue("X-Tenant-Id", out tHeaders)) &&
-            tHeaders.Length > 0 && TenantId.TryParse(tHeaders[0], out var parsedFromHeader) &&
+        // Resolve TenantId upfront for cache and consent isolation (DT-A-12 / DT-SC-09).
+        // The tenant is the stamped claim tenant (claims only; the HTTP ingress and the MCP session built it from a resolved tenant). The
+        // development anonymous principal has no claim: it gets the configured default tenant only, and none without one (unresolved, 403).
+        // A tenant header selects a tenant for a canonical ClusterAdmin only (same rule as SecurityContextFactory); a differing header from
+        // any other principal, the dev-anonymous one included, is rejected without any state change.
+        TenantId tenantId;
+        var isDevAnonymous = string.Equals(principal.Identity?.AuthenticationType, "InsecureAnonymousAuth", StringComparison.Ordinal);
+        if (isDevAnonymous)
+        {
+            tenantId = TenantResolver.EffectiveDefaultOf(_options?.Tenancy) is { } devDefault && devDefault.Value is not null
+                ? devDefault
+                : throw new TenantUnresolvedException();
+        }
+        else
+        {
+            var principalClaim = TenantClaimReader.Read(principal);
+            if (principalClaim.Kind == ClaimTenantKind.Valid)
+            {
+                tenantId = principalClaim.Tenant;
+            }
+            else if (principalClaim.Kind == ClaimTenantKind.Invalid)
+            {
+                throw new TenantClaimInvalidException();
+            }
+            else if (Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal) && TryReadTenantHeader(requestHeaders, out var adminHeaderTenant))
+            {
+                tenantId = adminHeaderTenant; // ClusterAdmin without a tenant claim: the header names the tenant of the tenant-scoped operation
+            }
+            else
+            {
+                throw new TenantUnresolvedException();
+            }
+        }
+
+        if (TryReadTenantHeader(requestHeaders, out var parsedFromHeader) &&
             !string.Equals(parsedFromHeader.Value, tenantId.Value, StringComparison.OrdinalIgnoreCase))
         {
-            var isAnonymousDev = principal.Identity?.IsAuthenticated != true;
-            if (isAnonymousDev || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+            if (Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
             {
                 tenantId = parsedFromHeader;
             }
-            // Non-admins keep the tenant from their token (header ignored, fail-safe). HTTP ingress already rejects
-            // such mismatches with 403 in SecurityContextResolutionMiddleware.
+            else
+            {
+                throw new GatewaySecurityException("Cross-tenant access forbidden.", "CROSS_TENANT_ACCESS_FORBIDDEN");
+            }
         }
 
         // Verify table existence in metadata catalog (SG-12: inactive tables treated as not found)

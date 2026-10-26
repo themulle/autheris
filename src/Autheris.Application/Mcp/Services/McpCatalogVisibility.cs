@@ -104,7 +104,7 @@ internal static class McpCatalogVisibility
         {
             return principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return TenantId.LegacySingleTenant;
         }

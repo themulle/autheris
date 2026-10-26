@@ -7,6 +7,7 @@ using Autheris.Application.ResourceGroups;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
@@ -194,7 +195,7 @@ public sealed class ResourceGroupMiddleware
     internal static string ResolveTenantKey(HttpContext context)
     {
         string? rawTenantId = null;
-        if (context.Items.TryGetValue(TenantResolutionMiddleware.TenantIdItemKey, out var tObj))
+        if (context.Items.TryGetValue(SecurityPrincipalContext.TenantIdItemKey, out var tObj))
         {
             rawTenantId = tObj switch
             {
