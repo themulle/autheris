@@ -41,7 +41,7 @@ public sealed class CdcChannelRaceGql8Tests
             try { await leavingMove; } catch (OperationCanceledException) { }
             await leaving.DisposeAsync();
 
-            await Task.Delay(1);
+            await Task.Delay(1); // scenario: widens the leave/join race window
             await channel.PublishAsync(Event($"e{round}"));
 
             (await join).ShouldBeTrue($"round {round}: the joining subscriber missed the event");

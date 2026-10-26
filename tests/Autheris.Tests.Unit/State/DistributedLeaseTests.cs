@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.State;
 
 using System;
@@ -86,7 +87,7 @@ public sealed class DistributedLeaseTests
         time.Advance(TimeSpan.FromSeconds(10)); // the extend is sent now
         time.Advance(TimeSpan.FromSeconds(5));
         lease.Extend.SetResult(true);
-        await Task.Delay(50);
+        await Task.Delay(50); // quiet period: the extend completion has no observable signal
 
         lease.LastConfirmedAt.ShouldBe(start + TimeSpan.FromSeconds(10));
     }
@@ -101,7 +102,7 @@ public sealed class DistributedLeaseTests
         await lease.DisposeAsync();
         lease.Extend.SetResult(false); // the late answer must not signal a loss
 
-        await Task.Delay(50);
+        await Task.Delay(50); // quiet period before a negative assertion: no late loss signal may arrive
         lease.LeaseLost.IsCancellationRequested.ShouldBeTrue(); // cancelled by dispose itself
     }
 

@@ -121,7 +121,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
         try
         {
             write = _repository.RecordAuditEventAsync(NewAudit(1));
-            await Task.Delay(300);
+            await Task.Delay(300); // quiet period (300 ms) before a negative assertion: the write must stay blocked
             write.IsCompleted.ShouldBeFalse("a write must wait while another writer holds the gate");
         }
         finally

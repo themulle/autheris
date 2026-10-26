@@ -470,7 +470,7 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         var first = Apply(h, StageHarness.Context(), preds);
         await started.Task.WaitAsync(Wait);
         var second = Apply(h, StageHarness.Context(), preds);
-        await Task.Delay(100);
+        await Task.Delay(100); // quiet period (100 ms) so the second request is in flight before the gate opens
         gate.SetResult();
         var results = await Task.WhenAll(first, second).WaitAsync(Wait);
 
@@ -542,7 +542,7 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         var first = Apply(h, StageHarness.Context(), preds);
         await started.Task.WaitAsync(Wait);
         var second = Apply(h, StageHarness.Context(), preds);
-        await Task.Delay(100);
+        await Task.Delay(100); // quiet period (100 ms) so the second request is in flight before the gate opens
         gate.SetResult();
         var results = await Task.WhenAll(first, second).WaitAsync(Wait);
 

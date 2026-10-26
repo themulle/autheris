@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Streaming;
 
 using System;
@@ -468,11 +469,15 @@ public sealed class CdcWebhookDeliveryServiceTests
         var service = f.Create();
 
         await service.StartAsync(default);
-        for (var i = 0; i < 50 && f.Outbox.Rows.IsEmpty; i++)
-        {
-            await Task.Delay(20);
-            f.Time.Advance(TimeSpan.FromSeconds(31));
-        }
+        // Each poll advances the fake clock past the subscription retry back-off.
+        await WaitHelper.WaitUntil(
+            () =>
+            {
+                f.Time.Advance(TimeSpan.FromSeconds(31));
+                return !f.Outbox.Rows.IsEmpty;
+            },
+            WaitHelper.HangGuard,
+            "the outbox never received a row");
 
         await service.StopAsync(default);
         f.Channel.Subscriptions.ShouldBeGreaterThanOrEqualTo(2);
