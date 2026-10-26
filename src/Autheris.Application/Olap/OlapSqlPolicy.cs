@@ -46,14 +46,14 @@ public static class OlapSqlPolicy
         ArgumentNullException.ThrowIfNull(inspection);
         if (inspection.StatementCount != 1)
         {
-            throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "Only a single SELECT statement is permitted in OLAP queries.");
+            throw new OlapSqlRejectedException(OlapSqlRejectionReason.SingleSelectOnly);
         }
 
         foreach (var function in inspection.Functions.Concat(inspection.TableFunctions))
         {
             if (BlockedFunctions.Contains(function))
             {
-                throw new OlapSqlRejectedException(OlapSqlRejectedException.Invalid, "The SQL statement uses a function that is prohibited in OLAP queries.");
+                throw new OlapSqlRejectedException(OlapSqlRejectionReason.ProhibitedFunction);
             }
         }
     }
@@ -111,5 +111,5 @@ public static class OlapSqlPolicy
     }
 
     private static OlapSqlRejectedException Construct() =>
-        new(OlapSqlRejectedException.ConstructNotAllowed, "The SQL statement uses a construct that is not permitted in cross-source OLAP queries.");
+        new(OlapSqlRejectionReason.ConstructNotAllowed);
 }
