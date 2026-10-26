@@ -1,4 +1,3 @@
-#pragma warning disable CA1708 // adding a member to the generated partial classes makes the analyzer compare the generated names (case-only differences)
 namespace TrinoSqlEngine;
 
 using Antlr4.Runtime.Atn;
@@ -6,6 +5,7 @@ using TrinoSqlEngine.Parsing;
 
 // ARCH-MNT-15: binds a generated recognizer to an ANTLR cache generation. The simulator setter is protected, so this has to live in the class.
 // Called by AntlrCacheGenerations only.
+#pragma warning disable CA1708 // a member in the generated partial makes the analyzer compare the generated names (case-only differences)
 public partial class SqlBaseLexer
 {
     internal AntlrCacheGeneration? CacheGeneration { get; private set; }
@@ -16,7 +16,9 @@ public partial class SqlBaseLexer
         CacheGeneration = generation;
     }
 }
+#pragma warning restore CA1708
 
+#pragma warning disable CA1708 // a member in the generated partial makes the analyzer compare the generated names (case-only differences)
 public partial class SqlBaseParser
 {
     internal AntlrCacheGeneration? CacheGeneration { get; private set; }
@@ -28,3 +30,4 @@ public partial class SqlBaseParser
         CacheGeneration = generation;
     }
 }
+#pragma warning restore CA1708

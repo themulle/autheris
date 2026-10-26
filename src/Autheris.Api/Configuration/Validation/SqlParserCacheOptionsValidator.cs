@@ -27,6 +27,7 @@ public sealed class SqlParserCacheOptionsValidator : IValidateOptions<GatewayOpt
     {
         MaxStatesPerGeneration = options.MaxStatesPerGeneration,
         GenerationCheckInterval = options.GenerationCheckInterval,
-        MinParsesPerGeneration = options.MinParsesPerGeneration
+        MinParsesPerGeneration = options.MinParsesPerGeneration,
+        HardCapFactor = options.HardCapFactor
     };
 }

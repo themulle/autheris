@@ -16,7 +16,9 @@ public sealed class AntlrCacheGenerations : IDisposable
     /// <summary>Meter name of the swap metrics. No tags: only counters and gauges (SC-09).</summary>
     public const string MeterName = "Autheris.SqlParserCache";
 
-    private readonly Func<AntlrCacheGeneration, long> _stateCounter;
+    private readonly object _configureLock = new();
+    private Func<AntlrCacheGeneration, long> _stateCounter;
+    private bool _configured;
     private readonly Meter _meter;
     private readonly Counter<long> _swaps;
     private AntlrCacheOptions _options;
@@ -45,8 +47,43 @@ public sealed class AntlrCacheGenerations : IDisposable
     /// <summary>How many times a generation was replaced.</summary>
     public long SwapCount => Volatile.Read(ref _swapCount);
 
-    /// <summary>Replaces the bounds. Invalid options throw and leave the old bounds in place.</summary>
-    public void Configure(AntlrCacheOptions options) => Volatile.Write(ref _options, Validated(options));
+    /// <summary>
+    /// Sets the bounds once (at start-up). Invalid options throw. A second call with different options throws too (fail closed): the bounds
+    /// of a running process never change; the same options again are accepted (a second host in one process).
+    /// </summary>
+    /// <exception cref="ArgumentException">The options are outside their bounds.</exception>
+    /// <exception cref="InvalidOperationException">Already configured with different options.</exception>
+    public void Configure(AntlrCacheOptions options)
+    {
+        var valid = Validated(options);
+        lock (_configureLock)
+        {
+            if (_configured && !valid.Equals(_options))
+            {
+                throw new InvalidOperationException("The ANTLR cache generations are already configured with different options.");
+            }
+
+            _configured = true;
+            Volatile.Write(ref _options, valid);
+        }
+    }
+
+    /// <summary>Test seam: back to the default options, unconfigured, with an optional replacement state counter.</summary>
+    internal void ResetForTests(AntlrCacheOptions? options = null, Func<AntlrCacheGeneration, long>? stateCounter = null)
+    {
+        lock (_configureLock)
+        {
+            _configured = false;
+            Volatile.Write(ref _options, Validated(options ?? new AntlrCacheOptions()));
+            Volatile.Write(ref _stateCounter, stateCounter ?? AntlrCacheGeneration.CountStates);
+        }
+    }
+
+    /// <summary>
+    /// Publishes a fresh generation now (what a swap does). The previous one stays valid for its in-flight users. Used by the fuzz harness to bound
+    /// the caches of a long run; it clears nothing in place.
+    /// </summary>
+    public void ForceSwap() => Publish(Current);
 
     /// <summary>A lexer bound to the current generation. Counts the use first, which may swap (SC-03, SC-10).</summary>
     /// <exception cref="ParseCanceledException">Binding or counting failed; the caller must treat the input as rejected (SC-05).</exception>
@@ -125,15 +162,27 @@ public sealed class AntlrCacheGenerations : IDisposable
             return;
         }
 
-        long states = _stateCounter(used);
+        long states = Volatile.Read(ref _stateCounter)(used);
         Volatile.Write(ref _lastStateCount, states);
-        if (states <= options.MaxStatesPerGeneration || uses < options.MinParsesPerGeneration)
+        if (states <= options.MaxStatesPerGeneration)
         {
             return;
         }
 
-        var next = new AntlrCacheGeneration(used.Number + 1);
-        if (ReferenceEquals(Interlocked.CompareExchange(ref _current, next, used), used))
+        // The hard ceiling overrides the minimum number of uses, so a flood of distinct statements cannot outgrow it for long.
+        bool overHardCap = states > (long)options.MaxStatesPerGeneration * options.HardCapFactor;
+        if (uses < options.MinParsesPerGeneration && !overHardCap)
+        {
+            return;
+        }
+
+        Publish(used);
+    }
+
+    private void Publish(AntlrCacheGeneration replaced)
+    {
+        var next = new AntlrCacheGeneration(replaced.Number + 1);
+        if (ReferenceEquals(Interlocked.CompareExchange(ref _current, next, replaced), replaced))
         {
             Interlocked.Increment(ref _swapCount);
             _swaps.Add(1);

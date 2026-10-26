@@ -294,8 +294,10 @@ public sealed partial class FuzzHarnessTests
         Should.Throw<OutOfMemoryException>(() => FuzzRunner.RunOne([1], _ => ran = true, oom));
         ran.ShouldBeFalse();
 
-        // The real reset clears the shared DFA and parsing still works afterwards.
+        // The real reset swaps the shared ANTLR cache generation (ARCH-MNT-15) and parsing still works afterwards.
+        var generationBefore = TrinoSqlEngine.Parsing.AntlrCacheGenerations.Shared.Current.Number;
         new FuzzDfaReset(1).OnInputBoundary(false).ShouldBeTrue();
+        TrinoSqlEngine.Parsing.AntlrCacheGenerations.Shared.Current.Number.ShouldBeGreaterThan(generationBefore);
         FuzzRunner.RunOne("SELECT id FROM orders WHERE id > 1"u8.ToArray(), null, new FuzzDfaReset(1)).Outcome.ShouldBe(FuzzOutcome.Accepted);
         FuzzDfaReset.DefaultInterval.ShouldBe(250_000);
 

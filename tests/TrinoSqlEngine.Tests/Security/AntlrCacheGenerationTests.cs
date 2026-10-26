@@ -349,7 +349,9 @@ public class AntlrCacheGenerationTests
     {
         const int minParses = 50;
         const int parses = 500;
-        var generations = Generations(1, 1, minParses);
+        // the hard ceiling (which overrides the minimum) is set out of reach here; it has its own test
+        var generations = new AntlrCacheGenerations(
+            new AntlrCacheOptions { MaxStatesPerGeneration = 1_000, GenerationCheckInterval = 1, MinParsesPerGeneration = minParses, HardCapFactor = AntlrCacheOptions.MaxHardCapFactor });
         var engine = new FastSqlEngine(generations);
         var random = new Random(10_2026);
 
@@ -361,5 +363,94 @@ public class AntlrCacheGenerationTests
         // at most two cache uses per parse (lexer and parser); a swap needs minParses uses of the generation it replaces
         long maxSwaps = parses * 2L / minParses;
         Assert.InRange(generations.SwapCount, 1, maxSwaps);
+    }
+
+    // ---- D2b: hard ceiling -------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Swap_HardCeiling_OverridesMinParses_UnderAdversarialStatements()
+    {
+        const int cap = 200;
+        const int factor = 2;
+        const int slackPerParse = 4_000;
+        var observed = new List<long>();
+        var generations = new AntlrCacheGenerations(
+            new AntlrCacheOptions { MaxStatesPerGeneration = cap, GenerationCheckInterval = 1, MinParsesPerGeneration = AntlrCacheOptions.MaxAllowedCount, HardCapFactor = factor },
+            g =>
+            {
+                long count = AntlrCacheGeneration.CountStates(g);
+                observed.Add(count);
+                return count;
+            });
+        var engine = new FastSqlEngine(generations);
+        var random = new Random(16_2026);
+
+        for (int i = 0; i < 400; i++)
+        {
+            engine.Parse(DistinctStatement(random, i).AsMemory());
+        }
+
+        // MinParsesPerGeneration is never reached, so every swap here comes from the hard ceiling
+        Assert.True(generations.SwapCount >= 1);
+        Assert.True(observed.Max() <= (long)cap * factor + slackPerParse);
+    }
+
+    // ---- D3: the lexer use is counted on the failure path too --------------------------------------------------------------
+
+    [Fact]
+    public void Lexer_FailingInput_StillRunsTheIntervalCheck()
+    {
+        int checks = 0;
+        var generations = Generations(1_000_000, 1, 1, g =>
+        {
+            Interlocked.Increment(ref checks);
+            return AntlrCacheGeneration.CountStates(g);
+        });
+        var engine = new FastSqlEngine(generations);
+
+        Assert.ThrowsAny<ParseCanceledException>(() => engine.Parse("SELECT 'unterminated".AsMemory()));
+
+        Assert.True(checks >= 1, "the lexer of a failing statement must have been counted");
+    }
+
+    // ---- D4: configure once -----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Configure_TwiceWithDifferentOptions_Fails_SameOptionsAgainIsAccepted()
+    {
+        var generations = new AntlrCacheGenerations(new AntlrCacheOptions());
+        var first = new AntlrCacheOptions { MaxStatesPerGeneration = 1_000 };
+
+        generations.Configure(first);
+        generations.Configure(first with { });
+        Assert.Throws<InvalidOperationException>(() => generations.Configure(new AntlrCacheOptions { MaxStatesPerGeneration = 2_000 }));
+        Assert.Throws<ArgumentException>(() => generations.Configure(new AntlrCacheOptions { MaxStatesPerGeneration = 0 }));
+    }
+
+    // ---- D5: an unavailable cache rejects the parameter extraction without SQL text ------------------------------------------
+
+    [ThreadStatic]
+    private static bool s_failCountOnThisThread;
+
+    [Fact]
+    public void SqlParameterExtractor_UnavailableCache_RejectsWithAGenericMessage()
+    {
+        const string marker = "zz_secret_marker_91c2";
+        AntlrCacheGenerations.Shared.ResetForTests(
+            new AntlrCacheOptions { GenerationCheckInterval = 1 },
+            g => s_failCountOnThisThread ? throw new InvalidOperationException(marker) : AntlrCacheGeneration.CountStates(g));
+        try
+        {
+            s_failCountOnThisThread = true;
+            var ex = Assert.Throws<ParseCanceledException>(() => Analysis.SqlParameterExtractor.ExtractTokens($"SELECT '{marker}' FROM t WHERE a = @p"));
+
+            Assert.DoesNotContain(marker, ex.Message, StringComparison.Ordinal);
+            Assert.Null(ex.InnerException);
+        }
+        finally
+        {
+            s_failCountOnThisThread = false;
+            AntlrCacheGenerations.Shared.ResetForTests();
+        }
     }
 }
