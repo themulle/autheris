@@ -300,7 +300,7 @@ public class CasbinHotReloadTests : IDisposable
                 var text = counter % 2 == 0 ? policy2 : policy1;
                 _service.LoadPolicyFromText(text);
                 counter++;
-                await Task.Delay(10);
+                await Task.Delay(10); // scenario: paces the concurrent writer
             }
         });
 

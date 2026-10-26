@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Sql.Errors;
 
 using System;
@@ -307,12 +308,12 @@ public sealed class SqlErrorSurfacesTests
 
             await worker.StartAsync(CancellationToken.None);
             AsyncJobDescriptor? failed = null;
-            for (var i = 0; i < 100 && failed is null; i++)
+            await WaitHelper.WaitUntil(async () =>
             {
                 var job = await manager.GetJobAsync(descriptor.JobId, new TenantId("t"), "alice");
                 failed = job?.State == AsyncJobState.Failed ? job : null;
-                if (failed is null) await Task.Delay(50);
-            }
+                return failed is not null;
+            }, TimeSpan.FromSeconds(10), pollInterval: TimeSpan.FromMilliseconds(50));
             await worker.StopAsync(CancellationToken.None);
 
             failed.ShouldNotBeNull();

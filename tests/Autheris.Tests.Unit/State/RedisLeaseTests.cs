@@ -64,7 +64,7 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
         await using var lease = await _provider.TryAcquireLeaseAsync("job", TimeSpan.FromSeconds(6));
         lease.ShouldNotBeNull();
 
-        await Task.Delay(8000);
+        await Task.Delay(8000); // scenario: real-time renewal beyond the 6 s TTL against Redis
 
         lease.LeaseLost.IsCancellationRequested.ShouldBeFalse();
         (await _provider.TryAcquireLeaseAsync("job", Ttl)).ShouldBeNull();
@@ -124,7 +124,7 @@ public sealed class RedisLeaseTests : IAsyncLifetime, IDisposable
             await db.KeyDeleteAsync(key); // the store restarted without persistence
         }
 
-        await Task.Delay(20);
+        await Task.Delay(20); // quiet period (20 ms) against a real Redis
         await using var second = await _provider.TryAcquireLeaseAsync("job", Ttl);
 
         second!.Token.ShouldBeGreaterThan(oldToken);

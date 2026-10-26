@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit;
 
 using System;
@@ -54,18 +55,8 @@ public class SecurityReview20261002EndpointTests
 
     private static async Task<HitLApprovalTicket> WaitForPendingTicketAsync(HitLStepUpApprovalService service, string tenant)
     {
-        for (var i = 0; i < 100; i++)
-        {
-            var tickets = service.GetPendingTickets(tenant);
-            if (tickets.Count > 0)
-            {
-                return tickets[0];
-            }
-
-            await Task.Delay(10);
-        }
-
-        throw new InvalidOperationException("HitL ticket was not registered in time.");
+        await WaitHelper.WaitUntil(() => service.GetPendingTickets(tenant).Count > 0, TimeSpan.FromSeconds(10), "HitL ticket was not registered in time.");
+        return service.GetPendingTickets(tenant)[0];
     }
 
     [Fact]

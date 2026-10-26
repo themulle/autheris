@@ -135,7 +135,8 @@ public sealed class CdcSubscriptionGovernorClusterTests
     [Fact]
     public async Task Cluster_ExpiredSlotOfCrashedInstance_NoLongerCounted()
     {
-        var clusterState = new InMemoryClusterStateProvider();
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var clusterState = new InMemoryClusterStateProvider(time);
         const string setKey = "cdc:subs:tenant-test";
 
         // Crashed instance acquired a slot with a very short TTL (50 ms)
@@ -147,7 +148,7 @@ public sealed class CdcSubscriptionGovernorClusterTests
         blocked.ShouldBe(false);
 
         // Wait for crashed instance slot to expire
-        await Task.Delay(120);
+        time.Advance(TimeSpan.FromMilliseconds(120));
 
         // New instance can now acquire slot; expired slot is pruned and no longer counted
         var newAcquire = await clusterState.TryAcquireSlotAsync(setKey, "new-guid", 1, TimeSpan.FromMinutes(2));

@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Security;
 
 using System;
@@ -37,14 +38,15 @@ public sealed class RebacClusterInvalidationTests
         await store.DeleteTupleAsync(tuple);
         await replicaA.InvalidateTenantCacheAsync("tenant-a");                 // revocation handled on A
 
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        bool allowedOnB;
-        do
+        var allowedOnB = true;
+        try
         {
-            await Task.Delay(20);
-            allowedOnB = (await replicaB.CheckAsync(check)).Allowed;
+            await WaitHelper.WaitUntil(async () => !(allowedOnB = (await replicaB.CheckAsync(check)).Allowed), TimeSpan.FromSeconds(5));
         }
-        while (allowedOnB && DateTime.UtcNow < deadline);
+        catch (TimeoutException)
+        {
+            // fall through: the assertion below reports the stale ALLOW
+        }
 
         allowedOnB.ShouldBeFalse();
     }
