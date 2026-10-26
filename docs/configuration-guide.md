@@ -52,6 +52,8 @@ Steuert das Verkehrs-Draining bei Rolling Deployments und Pod-Terminierungen.
 | `ShutdownTimeoutSeconds` | `int` | `10 .. 180` | `40` | Maximale Zeitspanne, die aktiven Anfragen eingeräumt wird, um regulär zu beenden. |
 | `TerminationGracePeriodSeconds` | `int` | `20 .. 300` | `60` | Kubelet Pod-Grace-Period-Korridor zur Vermeidung von abruptem SIGKILL. |
 
+The Helm chart renders these four keys as `Gateway__HighAvailability__*` from `gateway.drainDelaySeconds`, `gateway.shutdownTimeoutSeconds`, `gateway.queryTimeoutSeconds` and `terminationGracePeriodSeconds`. The chart default `gateway.queryTimeoutSeconds` is 20 (the application default is 30). The chart renders only values inside the ranges above and enforces the stricter NF-HA-01b `TerminationGracePeriodSeconds >= 2 * DrainDelaySeconds + ShutdownTimeoutSeconds + 10`, because the `preStop` sleep also consumes the drain time; the render fails otherwise. See [f-ops-02](features/f-ops-02-high-availability-kubernetes-helm.md) section 5.2.
+
 ```json
 "HighAvailability": {
   "DrainDelaySeconds": 5,

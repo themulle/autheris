@@ -217,3 +217,48 @@ Admin API exposure (SEC-281-6): "true" only when ingress.exposeAdmin is the bool
 {{- define "autheris.exposeAdmin" -}}
 {{- if and (kindIs "bool" .Values.ingress.exposeAdmin) .Values.ingress.exposeAdmin -}}true{{- end -}}
 {{- end }}
+
+{{/*
+WAVE3-STARTUP-SC-03: one HA timing value. Only a positive whole number is accepted (a number from values or --set); unset, a string or
+out of the application range (HighAvailabilityOptions [Range]) fails the render, so a rendered config never fails app startup and there is no silent
+default that could pass the NF-HA-01 checks. Usage: include "autheris.haSeconds" (dict "key" "gateway.x" "value" .Values.gateway.x "min" 1 "max" 30)
+*/}}
+{{- define "autheris.haSeconds" -}}
+{{- if not (or (kindIs "float64" .value) (kindIs "int64" .value) (kindIs "int" .value)) -}}
+{{- fail (printf "%s must be a positive whole number of seconds (NF-HA-01)" .key) -}}
+{{- end -}}
+{{- $f := float64 .value -}}
+{{- if or (le $f 0.0) (ne (floor $f) $f) -}}
+{{- fail (printf "%s must be a positive whole number of seconds (NF-HA-01)" .key) -}}
+{{- end -}}
+{{- if or (lt $f (float64 .min)) (gt $f (float64 .max)) -}}
+{{- fail (printf "%s must be between %d and %d seconds (NF-HA-01)" .key (int64 .min) (int64 .max)) -}}
+{{- end -}}
+{{- int64 .value -}}
+{{- end }}
+
+{{/*
+NF-HA-01 wiring (ARCH-MNT-06-FU-04): renders the four Gateway__HighAvailability__* env vars from values only and fails the render when
+(a) shutdown < query + 10 (01a) or (b) grace < 2 * drain + shutdown + 10. The grace budget is stricter than the application check
+(drain + shutdown + 10) because the kubelet grace period also covers the preStop sleep, which uses the same drain value.
+*/}}
+{{- define "autheris.highAvailabilityEnv" -}}
+{{- $drain := int64 (include "autheris.haSeconds" (dict "key" "gateway.drainDelaySeconds" "value" .Values.gateway.drainDelaySeconds "min" 1 "max" 30)) -}}
+{{- $shutdown := int64 (include "autheris.haSeconds" (dict "key" "gateway.shutdownTimeoutSeconds" "value" .Values.gateway.shutdownTimeoutSeconds "min" 10 "max" 180)) -}}
+{{- $query := int64 (include "autheris.haSeconds" (dict "key" "gateway.queryTimeoutSeconds" "value" .Values.gateway.queryTimeoutSeconds "min" 5 "max" 120)) -}}
+{{- $grace := int64 (include "autheris.haSeconds" (dict "key" "terminationGracePeriodSeconds" "value" .Values.terminationGracePeriodSeconds "min" 20 "max" 300)) -}}
+{{- if lt $shutdown (add $query 10) -}}
+{{- fail (printf "NF-HA-01a: gateway.shutdownTimeoutSeconds (%d) must be at least gateway.queryTimeoutSeconds (%d) + 10" $shutdown $query) -}}
+{{- end -}}
+{{- if lt $grace (add (mul 2 $drain) $shutdown 10) -}}
+{{- fail (printf "NF-HA-01b: terminationGracePeriodSeconds (%d) must be at least 2 * gateway.drainDelaySeconds (%d) + gateway.shutdownTimeoutSeconds (%d) + 10" $grace $drain $shutdown) -}}
+{{- end -}}
+- name: Gateway__HighAvailability__DrainDelaySeconds
+  value: {{ $drain | quote }}
+- name: Gateway__HighAvailability__ShutdownTimeoutSeconds
+  value: {{ $shutdown | quote }}
+- name: Gateway__HighAvailability__QueryTimeoutSeconds
+  value: {{ $query | quote }}
+- name: Gateway__HighAvailability__TerminationGracePeriodSeconds
+  value: {{ $grace | quote }}
+{{- end }}
