@@ -47,6 +47,12 @@ public sealed record BenchThresholds
 
     /// <summary>Buckets that must be present; a missing bucket fails the gate (fail closed).</summary>
     public IReadOnlyList<string> RequiredBuckets { get; init; } = ["0.5KB", "4KB", "64KB"];
+
+    /// <summary>
+    /// ARCH-MNT-15-FU-01: the cold-cache parse (ANTLR cap forced to 1) may be at most this multiple of the warm P99. A ratio, so it does not depend
+    /// on the runner. Value: see the measurement recorded next to it; raise it only together with a new recorded measurement (SC-07).
+    /// </summary>
+    public double MaxColdWarmP99Ratio { get; init; } = 48.0;
 }
 
 public sealed record BenchViolation(string Rule, string Bucket, string Message);

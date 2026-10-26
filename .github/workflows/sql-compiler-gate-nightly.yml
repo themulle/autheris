@@ -22,7 +22,7 @@ jobs:
   sql-compiler-gate-nightly:
     name: SQL Compiler Gate (${{ inputs.profile || 'nightly' }})
     runs-on: ubuntu-latest # Docker is available for Testcontainers
-    timeout-minutes: 180
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -55,20 +55,10 @@ jobs:
         run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       - name: G8 performance benchmark
-        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
+        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" "*SqlParserCache*" --job short --inProcess --exporters json --artifacts benchmarks/results
 
       - name: G8 thresholds
         run: dotnet run -c Release --no-restore --project tools/SqlGate.BenchCheck -- benchmarks/results benchmarks/baselines
-
-      # G7 mutation score (plan 9.3, M-12): the scope, the Debug configuration (the security mutant hooks exist only there) and the break
-      # threshold (85%) live in stryker-config.json. Run on the nightly head and, with the cutover profile, on the cutover PR head.
-      - name: Restore pinned tools
-        run: dotnet tool restore
-
-      # Stryker.NET 4.x runs from the test project directory; mutants outside the configured scope are reported as ignored.
-      - name: G7 mutation testing (Stryker.NET)
-        working-directory: tests/TrinoSqlEngine.Tests
-        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json
 
       - name: Upload gate report
         if: always()
@@ -78,8 +68,65 @@ jobs:
           path: |
             sqlgate-report
             benchmarks/results
-            tests/TrinoSqlEngine.Tests/StrykerOutput
           if-no-files-found: ignore
+
+  # G7 mutation score (plan 9.3, M-12), in its own job so that a G8 failure does not hide it and its runtime does not eat the gate budget.
+  # The scope, the Debug configuration (the security mutant hooks exist only there) and the break threshold (85%) live in stryker-config.json.
+  # g7-scope.sh marks the files outside the `mutate` globs with `// Stryker disable all` in this ephemeral checkout, so Stryker does not
+  # instrument the other ~9k mutants (ARCH-MNT wave 3, G7 timeout fix). Run on the nightly head and, with the cutover profile, on the cutover PR head.
+  # A timeout fails the step (step timeout below the job timeout), so the job ends as failure, never as cancelled. No continue-on-error.
+  sql-compiler-gate-g7:
+    name: SQL Compiler Gate G7 (mutation, ${{ inputs.profile || 'nightly' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Restore pinned tools
+        run: dotnet tool restore
+
+      - name: G7 scope (mark files outside the mutate globs)
+        run: bash tools/sqlgate/g7-scope.sh --apply
+
+      # Stryker.NET 5.x runs from the test project directory; mutants outside the configured scope are created as ignored.
+      - name: G7 mutation testing (Stryker.NET)
+        working-directory: tests/TrinoSqlEngine.Tests
+        timeout-minutes: 100
+        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json --log-to-file
+
+      # Fails closed on a missing report (timeout or cancel), an in-scope file without mutants, a total below the floor
+      # or a non-ignored mutant outside the globs.
+      - name: G7 summary
+        if: always()
+        run: |
+          git checkout -- src/TrinoSqlEngine
+          bash tools/sqlgate/g7-scope.sh --list > "$RUNNER_TEMP/g7-inscope.txt"
+          python3 tools/sqlgate/g7-summary.py \
+            --report-glob 'tests/TrinoSqlEngine.Tests/StrykerOutput/*/reports/mutation-report.json' \
+            --in-scope-list "$RUNNER_TEMP/g7-inscope.txt" \
+            --log-glob 'tests/TrinoSqlEngine.Tests/StrykerOutput/*/logs/*.log' \
+            --floor 2500
+
+      - name: Upload G7 report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sqlgate-g7-${{ github.run_id }}
+          path: tests/TrinoSqlEngine.Tests/StrykerOutput
+          if-no-files-found: warn
 
   # G9: the execution suites against a live Databricks SQL warehouse. Bound to the protected environment
   # `databricks-g9` (required reviewers, deployment branches limited to main) so the secrets are only released after approval.

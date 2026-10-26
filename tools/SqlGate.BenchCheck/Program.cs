@@ -65,8 +65,18 @@ try
         Console.Error.WriteLine($"G8 violation [{violation.Rule}] {violation.Bucket}: {violation.Message}");
     }
 
-    Console.WriteLine(verdict.Passed ? "G8: all thresholds met." : "G8: FAILED.");
-    return verdict.Passed ? 0 : 1;
+    // ARCH-MNT-15-FU-01: cold-cache parse latency, fail closed when the report is missing.
+    var cacheReports = Directory.GetFiles(resultsDir, "*SqlParserCacheBenchmarks-report-full*.json", SearchOption.AllDirectories)
+        .OrderBy(File.GetLastWriteTimeUtc).Select(File.ReadAllText).ToList();
+    var cacheVerdict = ParserCacheGate.Check(cacheReports, new BenchThresholds());
+    foreach (var violation in cacheVerdict.Violations)
+    {
+        Console.Error.WriteLine($"G8 violation [{violation.Rule}] {violation.Bucket}: {violation.Message}");
+    }
+
+    bool passed = verdict.Passed && cacheVerdict.Passed;
+    Console.WriteLine(passed ? "G8: all thresholds met." : "G8: FAILED.");
+    return passed ? 0 : 1;
 }
 catch (BenchCheckInputException ex)
 {
