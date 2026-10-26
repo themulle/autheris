@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Security;
 using Microsoft.Extensions.Hosting;
@@ -73,6 +74,45 @@ public sealed class KeyVaultCdcKekProviderTests
         p.TryGetKek("k2", out _).ShouldBeFalse();
         p.TryGetKek("nope", out _).ShouldBeFalse();
         p.TryGetKek("", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ResolveKek_SecretProviderThrows_Unavailable()
+    {
+        _secrets.GetSecretBytes("boom").Returns(_ => throw new InvalidOperationException("vault down"));
+        Create(Opts("k1", ("k1", "boom"))).ResolveKek("k1", out _).ShouldBe(CdcKekLookup.Unavailable);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ResolveKek_UnknownId_Unknown()
+    {
+        _secrets.GetSecretBytes("s1").Returns(RandomNumberGenerator.GetBytes(32));
+        var p = Create(Opts("k1", ("k1", "s1")));
+        p.ResolveKek("removed", out _).ShouldBe(CdcKekLookup.Unknown);
+        p.ResolveKek("k1", out _).ShouldBe(CdcKekLookup.Available);
+        p.ResolveKek("", out _).ShouldBe(CdcKekLookup.Unavailable);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ResolveKek_ShortSecret_Unavailable()
+    {
+        _secrets.GetSecretBytes("short").Returns(new byte[16]);
+        Create(Opts("k1", ("k1", "short"))).ResolveKek("k1", out _).ShouldBe(CdcKekLookup.Unavailable);
+    }
+
+    [Fact]
+    public void TryGetKek_FalseForUnknownAndUnavailable()
+    {
+        _secrets.GetSecretBytes("short").Returns(new byte[16]);
+        var p = Create(Opts("k1", ("k1", "short")));
+        p.TryGetKek("k1", out _).ShouldBeFalse();
+        p.TryGetKek("removed", out _).ShouldBeFalse();
+        ICdcKeyEncryptionKeyProvider asInterface = new FakeKekProvider().Add("a").MakeUnavailable("u");
+        asInterface.TryGetKek("u", out _).ShouldBeFalse();
+        asInterface.TryGetKek("unknown", out _).ShouldBeFalse();
     }
 
     [Fact]

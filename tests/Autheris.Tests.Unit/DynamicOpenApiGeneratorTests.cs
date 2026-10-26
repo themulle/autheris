@@ -87,8 +87,101 @@ public sealed class DynamicOpenApiGeneratorTests
 
         var props = invoiceSchema.GetProperty("properties");
         props.GetProperty("id").GetProperty("type").GetString().ShouldBe("integer");
-        props.GetProperty("amount").GetProperty("type").GetString().ShouldBe("number");
+        props.GetProperty("amount").GetProperty("type").EnumerateArray().Select(e => e.GetString()).ShouldBe(new[] { "number", "null" });
         props.GetProperty("iban").GetProperty("x-sensitive").GetBoolean().ShouldBeTrue();
+    }
+
+    private static async Task<JsonElement> GetInvoiceSchemaAsync(List<TableMetadata> tables)
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var json = await generator.GenerateOpenApiJsonAsync(null);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("finance_dbo_invoices").Clone();
+    }
+
+    private static TableMetadata WithColumns(TableMetadata t, List<TableColumn> columns) => new()
+    {
+        Identifier = t.Identifier,
+        Table = t.Table,
+        PrimaryKeyColumns = t.PrimaryKeyColumns,
+        Columns = columns
+    };
+
+    private static string[] TypeNames(JsonElement prop) =>
+        prop.GetProperty("type").EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+    [Fact]
+    public async Task EntitySchema_NonKeyColumn_IsTypeArrayWithNull()
+    {
+        var schema = await GetInvoiceSchemaAsync(CreateSampleTables());
+        var props = schema.GetProperty("properties");
+
+        TypeNames(props.GetProperty("customer_name")).ShouldBe(new[] { "string", "null" });
+        TypeNames(props.GetProperty("amount")).ShouldBe(new[] { "number", "null" });
+        TypeNames(props.GetProperty("iban")).ShouldBe(new[] { "string", "null" });
+    }
+
+    [Fact]
+    public async Task EntitySchema_KeyColumn_SingleTypeAndRequired()
+    {
+        var schema = await GetInvoiceSchemaAsync(CreateSampleTables());
+
+        schema.GetProperty("properties").GetProperty("id").GetProperty("type").GetString().ShouldBe("integer");
+        schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldBe(new[] { "id" });
+    }
+
+    [Fact]
+    public async Task EntitySchema_NullableDateTime_KeepsFormat()
+    {
+        var tables = CreateSampleTables();
+        tables[0] = WithColumns(tables[0], [.. tables[0].Columns, new TableColumn { ColumnName = "created_at", DataType = "timestamp" }]);
+
+        var schema = await GetInvoiceSchemaAsync(tables);
+        var created = schema.GetProperty("properties").GetProperty("created_at");
+
+        TypeNames(created).ShouldBe(new[] { "string", "null" });
+        created.GetProperty("format").GetString().ShouldBe("date-time");
+        TypeNames(schema.GetProperty("properties").GetProperty("invoice_date")).ShouldBe(new[] { "string", "null" });
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task EntitySchema_NullabilityIndependentOfMaskingRules()
+    {
+        // A4-S1: the generator takes no caller, consent or masking input, so the schema of a table must not depend
+        // on column sensitivity or metadata that drives masking (Mask / NULLIFY rules); every non-key column is nullable.
+        // Structural test: it varies only IsSensitive on all non-key columns (plain vs. sensitive tables) and compares the emitted types.
+        var plain = CreateSampleTables();
+        var masked = CreateSampleTables();
+        masked[0] = WithColumns(masked[0], [.. masked[0].Columns.Select(c => c.ColumnName == "id" ? c : new TableColumn { ColumnName = c.ColumnName, DataType = c.DataType, IsSensitive = true })]);
+
+        var plainProps = (await GetInvoiceSchemaAsync(plain)).GetProperty("properties");
+        var maskedProps = (await GetInvoiceSchemaAsync(masked)).GetProperty("properties");
+
+        foreach (var name in new[] { "customer_name", "amount", "iban", "invoice_date" })
+        {
+            TypeNames(maskedProps.GetProperty(name)).ShouldBe(TypeNames(plainProps.GetProperty(name)));
+            TypeNames(maskedProps.GetProperty(name)).ShouldContain("null");
+        }
+
+        maskedProps.GetProperty("id").GetProperty("type").GetString().ShouldBe("integer");
+    }
+
+    [Fact]
+    public async Task OpenApiYaml_RendersNullableTypeArray()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+
+        var yaml = await generator.GenerateOpenApiYamlAsync(null);
+
+        yaml.ShouldContain("- \"null\"");
+        yaml.ShouldContain("- \"number\"");
     }
 
     [Fact]

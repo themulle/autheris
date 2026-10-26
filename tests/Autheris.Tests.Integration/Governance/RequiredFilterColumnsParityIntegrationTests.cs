@@ -103,16 +103,7 @@ public sealed class RequiredFilterColumnsParityIntegrationTests : IClassFixture<
     {
         var c = _fixture.Client();
         c.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
-        for (int attempt = 0; ; attempt++)
-        {
-            var r = await c.PostAsJsonAsync("/graphql", new { query });
-            var body = await r.Content.ReadAsStringAsync();
-            if (body.Contains("does not exist", StringComparison.Ordinal) && attempt < 50)
-            {
-                await Task.Delay(200);
-                continue;
-            }
-            return JsonDocument.Parse(body);
-        }
+        var r = await c.PostAsJsonAsync("/graphql", new { query });
+        return JsonDocument.Parse(await r.Content.ReadAsStringAsync());
     }
 }

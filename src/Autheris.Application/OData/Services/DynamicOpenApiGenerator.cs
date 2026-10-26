@@ -331,6 +331,12 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             {
                 requiredCols.Add(col.ColumnName);
             }
+            else
+            {
+                // Masking (consent Mask rules, NULLIFY) can null any non-key column for some caller. The schema is
+                // caller-independent (cached per structure version), so every non-key column is nullable (A4-S1).
+                MakeNullable(colProp);
+            }
         }
 
         if (keyView.Indexes.Count > 0)
@@ -453,6 +459,14 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
         }
 
         return node;
+    }
+
+    private static void MakeNullable(JsonObject colProp)
+    {
+        if (colProp["type"] is JsonValue typeValue && typeValue.TryGetValue<string>(out var type))
+        {
+            colProp["type"] = new JsonArray(type, "null");
+        }
     }
 
     private static string FormatSchemaName(TableIdentifier id)

@@ -87,20 +87,35 @@ public static class CdcStreamAdminEndpoints
         }
 
         // The resync (and a discard) is already committed: the audit write never takes the request token.
-        if (outcome.Status == CdcResyncStatus.Done || outcome.DiscardedEvents > 0)
+        if (outcome.Status is CdcResyncStatus.Done or CdcResyncStatus.KeyUnavailable || outcome.DiscardedEvents > 0)
         {
-            await RecordAsync(context, audit, AuditEventTypes.CdcStreamResync, new
-            {
-                streamId = streamId.Value,
-                discardUnreadable,
-                discardedEvents = outcome.DiscardedEvents,
-                restarted = outcome.Status == CdcResyncStatus.Done
-            }).ConfigureAwait(false);
+            var keyRefused = outcome.Status == CdcResyncStatus.KeyUnavailable;
+            await RecordAsync(context, audit, AuditEventTypes.CdcStreamResync, keyRefused
+                ? (object)new
+                {
+                    streamId = streamId.Value,
+                    discardUnreadable,
+                    discardedEvents = 0,
+                    restarted = false,
+                    refused = CdcActivationCodes.KeyUnavailable
+                }
+                : new
+                {
+                    streamId = streamId.Value,
+                    discardUnreadable,
+                    discardedEvents = outcome.DiscardedEvents,
+                    restarted = outcome.Status == CdcResyncStatus.Done
+                }).ConfigureAwait(false);
         }
 
-        return outcome.Status == CdcResyncStatus.Done
-            ? Results.Ok(new { streamId = streamId.Value, discardedEvents = outcome.DiscardedEvents })
-            : Results.Json(new { error = "The stream could not be restarted now; retry later.", discardedEvents = outcome.DiscardedEvents }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        return outcome.Status switch
+        {
+            CdcResyncStatus.Done => Results.Ok(new { streamId = streamId.Value, discardedEvents = outcome.DiscardedEvents }),
+            CdcResyncStatus.KeyUnavailable => Results.Json(new { error = CdcActivationCodes.KeyUnavailable }, statusCode: StatusCodes.Status503ServiceUnavailable),
+            CdcResyncStatus.Unavailable => Results.Json(
+                new { error = "The stream could not be restarted now; retry later.", discardedEvents = outcome.DiscardedEvents }, statusCode: StatusCodes.Status503ServiceUnavailable),
+            _ => throw new InvalidOperationException("Unhandled CDC resync status.")
+        };
     }
 
     internal static async Task<IResult> RotateImageKeyAsync(

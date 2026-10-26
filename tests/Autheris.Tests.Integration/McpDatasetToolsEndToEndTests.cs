@@ -107,14 +107,9 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
         });
     }
 
-    /// <summary>The catalog was written after start-up; rebuild the GraphQL schema now instead of waiting for the refresh timer.</summary>
-    private async Task RefreshGraphQlSchemaAsync()
-    {
-        var module = _factory.Services.GetRequiredService<Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule>();
-        var check = typeof(Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule).GetMethod(
-            "CheckForCatalogChangesAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        await (Task<bool>)check.Invoke(module, [System.Threading.CancellationToken.None])!;
-    }
+    private Task RefreshGraphQlSchemaAsync(string field) =>
+        TestSupport.GraphQlSchemaReadiness.AwaitCatalogSchemaAsync(
+            _factory.Services, [field], TestSupport.GraphQlSchemaReadiness.DefaultTimeout);
 
     private HttpClient Client()
     {
@@ -160,16 +155,9 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
         // GraphQL is the preferred query path: describe_dataset names the field, query_graphql runs the query.
         var graphQl = description.GetProperty("graphQl");
         var field = graphQl.GetProperty("queryField").GetString()!;
-        await RefreshGraphQlSchemaAsync();
+        await RefreshGraphQlSchemaAsync(field);
 
-        // HotChocolate swaps the rebuilt schema in asynchronously; until then the field is unknown (fixed GRAPHQL_VALIDATION_FAILED, no engine text).
         var (exampleError, example) = await CallAsync(client, "query_graphql", new { query = graphQl.GetProperty("exampleQuery").GetString() });
-        for (var attempt = 0; exampleError && example.ToString().Contains("GRAPHQL_VALIDATION_FAILED", StringComparison.Ordinal) && attempt < 50; attempt++)
-        {
-            await Task.Delay(200);
-            (exampleError, example) = await CallAsync(client, "query_graphql", new { query = graphQl.GetProperty("exampleQuery").GetString() });
-        }
-
         exampleError.ShouldBeFalse(example.ToString());
         example.GetProperty("data").GetProperty(field).GetArrayLength().ShouldBe(3);
 

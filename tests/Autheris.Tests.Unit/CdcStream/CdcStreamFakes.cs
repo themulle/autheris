@@ -85,12 +85,33 @@ internal sealed class FakeKekProvider : ICdcKeyEncryptionKeyProvider
 
     public void Remove(string id) => _keys.TryRemove(id, out _);
 
-    public bool TryGetKek(string kekId, out ReadOnlyMemory<byte> key)
+    private readonly ConcurrentDictionary<string, byte> _unavailable = new();
+    private readonly ConcurrentDictionary<string, string> _throwing = new();
+
+    /// <summary>The secret provider is transiently down for this KEK id.</summary>
+    public FakeKekProvider MakeUnavailable(string id)
     {
-        if (_keys.TryGetValue(kekId, out var k)) { key = k; return true; }
-        key = default;
-        return false;
+        _unavailable[id] = 0;
+        return this;
     }
+
+    /// <summary>Resolving this KEK id throws an unexpected exception carrying the given text.</summary>
+    public FakeKekProvider ThrowFor(string id, string exceptionText)
+    {
+        _throwing[id] = exceptionText;
+        return this;
+    }
+
+    public CdcKekLookup ResolveKek(string kekId, out ReadOnlyMemory<byte> key)
+    {
+        key = default;
+        if (_throwing.TryGetValue(kekId, out var text)) throw new InvalidOperationException(text);
+        if (_unavailable.ContainsKey(kekId)) return CdcKekLookup.Unavailable;
+        if (_keys.TryGetValue(kekId, out var k)) { key = k; return CdcKekLookup.Available; }
+        return CdcKekLookup.Unknown;
+    }
+
+    public bool TryGetKek(string kekId, out ReadOnlyMemory<byte> key) => ResolveKek(kekId, out key) == CdcKekLookup.Available;
 }
 
 /// <summary>Minimal in-memory stream for hub and retention tests (the production stores belong to I1-A).</summary>
