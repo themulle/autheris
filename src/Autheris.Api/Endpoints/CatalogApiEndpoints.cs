@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
@@ -723,7 +724,7 @@ public static class CatalogApiEndpoints
         return Results.Ok(result);
     }
 
-    private static async Task<IResult> RegisterDatasourceHandler(
+    internal static async Task<IResult> RegisterDatasourceHandler(
         DatasourceRegistrationRequest request,
         ICatalogDiscoveryService discoveryService,
         HttpContext httpContext,
@@ -742,7 +743,8 @@ public static class CatalogApiEndpoints
         }
         catch (ArgumentException ex) when (ex.ParamName == "secretRef")
         {
-            return Results.BadRequest(new { error = ex.Message });
+            ApiProblems.LogFailure(httpContext, ex, ApiErrorCodes.InvalidSecretRef);
+            return ApiProblems.BadRequest(ApiErrorCodes.InvalidSecretRef, "The secret reference is invalid.", httpContext);
         }
     }
 

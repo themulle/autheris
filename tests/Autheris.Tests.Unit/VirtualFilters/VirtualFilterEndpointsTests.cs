@@ -142,7 +142,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task InvalidInput_Returns400_WithReason()
+    public async Task InvalidInput_Returns400_WithGovernedCode_NotTheExceptionText()
     {
         var context = Context(Tenant, DavidProfileBody(), "FilterAdmin");   // binds an unknown filter
 
@@ -150,7 +150,9 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Position = 0;
-        (await new StreamReader(context.Response.Body).ReadToEndAsync()).ShouldContain("nicht_ausgelieferte_krane");
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+        body.ShouldContain("BAD_REQUEST");
+        body.ShouldNotContain("nicht_ausgelieferte_krane");
     }
 
     [Fact]

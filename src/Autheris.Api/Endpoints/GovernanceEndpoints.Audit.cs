@@ -1,10 +1,12 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
@@ -341,54 +343,7 @@ public static partial class GovernanceEndpoints
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        app.MapPost("/api/governance/differential-privacy/perturb", async (
-            DifferentialPrivacyPerturbationRequest request,
-            IDifferentialPrivacyEngine dpEngine,
-            HttpContext context) =>
-        {
-            try
-            {
-                var authenticatedClientId = context.User.FindFirst("client_id")?.Value
-                                            ?? context.User.FindFirst("azp")?.Value
-                                            ?? context.User.FindFirst("sub")?.Value
-                                            ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                                            ?? context.User.Identity?.Name;
-
-                var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
-
-                if (!isPrivileged || string.IsNullOrWhiteSpace(request.ClientId))
-                {
-                    if (string.IsNullOrWhiteSpace(authenticatedClientId))
-                    {
-                        return Results.Unauthorized();
-                    }
-                    request = request with { ClientId = authenticatedClientId };
-                }
-
-                var targetKey = ResolveTenantBoundClientId(context, request.ClientId, out var isForbidden);
-                if (isForbidden)
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-
-                var boundRequest = request with { ClientId = targetKey };
-                var result = await dpEngine.PerturbAsync(boundRequest, context.RequestAborted);
-                context.Response.Headers["X-Privacy-Budget-Consumed"] = result.ConsumedEpsilon.ToString("F2");
-                context.Response.Headers["X-Privacy-Budget-Remaining"] = result.RemainingEpsilon.ToString("F2");
-                return Results.Ok(result with { ClientId = request.ClientId });
-            }
-            catch (PrivacyBudgetExhaustedException ex)
-            {
-                context.Response.Headers["X-Privacy-Budget-Exhausted"] = "true";
-                return Results.Json(new
-                {
-                    error = ex.Message,
-                    clientId = ex.ClientId,
-                    consumed = ex.ConsumedEpsilon,
-                    totalBudget = ex.TotalBudget
-                }, statusCode: StatusCodes.Status429TooManyRequests);
-            }
-        }).RequireAuthorization()
+        app.MapPost("/api/governance/differential-privacy/perturb", HandlePerturbAsync).RequireAuthorization()
           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // F-AI-12-B: EU AI Act Article 10 Compliance Certificate Endpoint
@@ -574,5 +529,58 @@ public static partial class GovernanceEndpoints
         }
 
         return false;
+    }
+
+    internal static async Task<IResult> HandlePerturbAsync(
+        DifferentialPrivacyPerturbationRequest request,
+        IDifferentialPrivacyEngine dpEngine,
+        HttpContext context)
+    {
+        try
+        {
+            var authenticatedClientId = context.User.FindFirst("client_id")?.Value
+                                        ?? context.User.FindFirst("azp")?.Value
+                                        ?? context.User.FindFirst("sub")?.Value
+                                        ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                                        ?? context.User.Identity?.Name;
+
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
+
+            if (!isPrivileged || string.IsNullOrWhiteSpace(request.ClientId))
+            {
+                if (string.IsNullOrWhiteSpace(authenticatedClientId))
+                {
+                    return Results.Unauthorized();
+                }
+                request = request with { ClientId = authenticatedClientId };
+            }
+
+            var targetKey = ResolveTenantBoundClientId(context, request.ClientId, out var isForbidden);
+            if (isForbidden)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var boundRequest = request with { ClientId = targetKey };
+            var result = await dpEngine.PerturbAsync(boundRequest, context.RequestAborted);
+            context.Response.Headers["X-Privacy-Budget-Consumed"] = result.ConsumedEpsilon.ToString("F2");
+            context.Response.Headers["X-Privacy-Budget-Remaining"] = result.RemainingEpsilon.ToString("F2");
+            return Results.Ok(result with { ClientId = request.ClientId });
+        }
+        catch (PrivacyBudgetExhaustedException ex)
+        {
+            context.Response.Headers["X-Privacy-Budget-Exhausted"] = "true";
+            ApiProblems.LogFailure(context, ex, ApiErrorCodes.PrivacyBudgetExhausted);
+            return ApiProblems.TooManyRequests(
+                ApiErrorCodes.PrivacyBudgetExhausted,
+                "The privacy budget for this client is exhausted.",
+                context,
+                extraExtensions: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["clientId"] = ex.ClientId,
+                    ["consumed"] = ex.ConsumedEpsilon,
+                    ["totalBudget"] = ex.TotalBudget
+                });
+        }
     }
 }

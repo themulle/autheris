@@ -42,14 +42,14 @@ public static class ApiProblems
     public static IResult Unprocessable(string code, string detail, HttpContext? httpContext = null) =>
         Problem(StatusCodes.Status422UnprocessableEntity, code, detail, httpContext, title: "Unprocessable Entity");
 
-    public static IResult TooManyRequests(string code, string detail, HttpContext? httpContext = null, int? retryAfterSeconds = null)
+    public static IResult TooManyRequests(string code, string detail, HttpContext? httpContext = null, int? retryAfterSeconds = null, IDictionary<string, object?>? extraExtensions = null)
     {
         if (httpContext != null && retryAfterSeconds is > 0)
         {
             httpContext.Response.Headers.RetryAfter = retryAfterSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        return Problem(StatusCodes.Status429TooManyRequests, code, detail, httpContext, title: "Too Many Requests");
+        return Problem(StatusCodes.Status429TooManyRequests, code, detail, httpContext, title: "Too Many Requests", extraExtensions: extraExtensions);
     }
 
     public static IResult ServiceUnavailable(string code = ApiErrorCodes.ServiceUnavailable, string detail = "The service is temporarily unavailable.", HttpContext? httpContext = null) =>
@@ -126,7 +126,8 @@ public static class ApiProblems
     {
         ArgumentNullException.ThrowIfNull(exception);
         var logger = context?.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger(LogCategory);
-        logger?.LogWarning(exception, "Request failed with code {ErrorCode} (trace {TraceId}).", code, ResolveTraceId(context));
+        var traceId = ResolveTraceId(context);
+        logger?.LogWarning(exception, "Request failed with code {ErrorCode} (correlation {CorrelationId}, trace {TraceId}).", code, ResolveCorrelationId(context, traceId), traceId);
     }
 
     public static string ResolveTraceId(HttpContext? context) =>

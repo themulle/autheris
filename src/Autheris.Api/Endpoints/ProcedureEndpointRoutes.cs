@@ -8,6 +8,7 @@ using System.Data.Common;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Audit;
@@ -351,7 +352,7 @@ public static class ProcedureEndpointRoutes
         return sb.ToString();
     }
 
-    private static async Task ExecuteAsync(
+    internal static async Task ExecuteAsync(
         string name,
         IReadOnlyDictionary<string, object?>? inputs,
         HttpContext http,
@@ -392,7 +393,9 @@ public static class ProcedureEndpointRoutes
         }
         catch (ArgumentException ex)
         {
-            await WriteErrorAsync(http, StatusCodes.Status400BadRequest, ex.Message, ct).ConfigureAwait(false);
+            // The text may echo caller-supplied input names or values: log it, return a fixed problem body.
+            logger.LogWarning("Invalid procedure arguments ({ExceptionType}).", ex.GetType().Name);
+            await WriteProblemAsync(http, StatusCodes.Status400BadRequest, ApiErrorCodes.ProcedureArgumentInvalid, "The procedure arguments are invalid.", ct).ConfigureAwait(false);
         }
         catch (ProcedureBusinessException ex)
         {
@@ -423,5 +426,13 @@ public static class ProcedureEndpointRoutes
     {
         http.Response.StatusCode = status;
         return http.Response.WriteAsJsonAsync(new { error = message }, ct);
+    }
+
+    /// <summary>Governed problem body for caller faults; the anti-enumeration branches above keep their byte-identical bodies (SEC-PROC152-01).</summary>
+    private static Task WriteProblemAsync(HttpContext http, int status, string code, string detail, CancellationToken ct)
+    {
+        http.Response.StatusCode = status;
+        var problem = ApiProblems.CreateProblemDetails(status, code, detail, http);
+        return http.Response.WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json", ct);
     }
 }

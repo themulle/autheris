@@ -61,6 +61,16 @@ public static class VirtualFilterErrorCodes
     /// <summary>A binding's <c>max_pushdown_keys</c> is outside <c>1..1000</c> or above the gateway-wide <c>MaxPushdownKeys</c>; rejected when the profile is written (HTTP 400).</summary>
     public const string PushdownKeyBudgetInvalid = "VF_PUSHDOWN_KEY_BUDGET_INVALID";
 
+    private static readonly HashSet<string> GovernedCodes = new(StringComparer.Ordinal)
+    {
+        PatternEvaluationFailed, EnforcementIncomplete, KeyTypeMismatch, KeySourceUnsupported, KeySetTooLarge, BindingMisconfigured,
+        SourceUnavailable, EnforcementUnavailable, ScanNotPermitted, PushdownUnavailable, PushdownLimitExceeded,
+        PushdownArgumentConflict, PathTemplateUnfillable, BindingInvalid, PushdownFormatUnsupported, PushdownKeyBudgetInvalid
+    };
+
+    /// <summary>True when <paramref name="code"/> is one of the governed codes above (anything else must never reach a client).</summary>
+    public static bool IsGoverned(string? code) => code != null && GovernedCodes.Contains(code);
+
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
