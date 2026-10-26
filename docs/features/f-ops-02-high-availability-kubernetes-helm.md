@@ -174,8 +174,8 @@ topologySpreadConstraints:
   whenUnsatisfiable: DoNotSchedule
 
 gateway:
-  drainDelaySeconds: 5          # preStop sleep and Gateway__DrainDelaySeconds
-  shutdownTimeoutSeconds: 30
+  drainDelaySeconds: 5          # preStop sleep only (not forwarded to the gateway)
+  shutdownTimeoutSeconds: 30    # not rendered by any chart template
   production:
     enforceRequiredSettings: false   # true in values.production.yaml
   authentication:
@@ -207,6 +207,8 @@ monitoring:
 ```
 
 `values.production.yaml` additionally sets `replicaCount: 3`, `image.requireDigest: true`, `gateway.drainDelaySeconds: 10`, `gateway.shutdownTimeoutSeconds: 45` and `terminationGracePeriodSeconds: 75`.
+
+The Helm values `gateway.drainDelaySeconds` and `gateway.shutdownTimeoutSeconds` are not passed to the gateway process: `drainDelaySeconds` only sets the `preStop` sleep and `shutdownTimeoutSeconds` is not rendered by any template. The in-process drain is configured through `Gateway:HighAvailability:DrainDelaySeconds`, `ShutdownTimeoutSeconds` and `TerminationGracePeriodSeconds` (validated by NF-HA-01; see the configuration guide), which must fit inside the pod `terminationGracePeriodSeconds`.
 
 ### 5.3 Production Render Guards
 
