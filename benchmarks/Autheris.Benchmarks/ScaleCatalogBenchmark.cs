@@ -35,7 +35,6 @@ public class ScaleCatalogBenchmark
     private readonly Dictionary<TableIdentifier, List<TableRelation>> _relationsByChild = new(RelatedTableCount);
     private readonly List<TableIdentifier> _hierarchyRootTables = new();
     private readonly ConsentResolutionService _resolutionService = new();
-    private readonly ChunkedQueryExecutor _chunkedExecutor = new(defaultChunkSize: 500);
 
     public record CatalogScaleMetrics(
         double GenerationTimeSeconds,
@@ -50,8 +49,7 @@ public class ScaleCatalogBenchmark
         double BytesPerCacheEntry,
         int TotalRelationsCount,
         int MaxHierarchyDepth,
-        double TraversalDepth8P99Us,
-        double CompositeBatchThroughputOps);
+        double TraversalDepth8P99Us);
 
     public CatalogScaleMetrics ExecuteFullScaleSpike()
     {
@@ -406,45 +404,6 @@ public class ScaleCatalogBenchmark
         Console.WriteLine($"  P99 Latenz               : {travP99:F2} µs ({travP99 / 1000.0:F4} ms)");
         Console.WriteLine();
 
-        // 6. Composite Key Batching & Parameter Budgeting Benchmark
-        Console.WriteLine($"[6] Composite Key Batching mit strikter Parameter-Budgetierung:");
-        var testBudget = new ParameterBudget(KeyColumnCount: 3, ContextParameterCount: 20, Dialect: DatabaseDialect.Sqlite);
-        var compositeKeys = Enumerable.Range(1, 1_000)
-            .Select(i => new CompositeKey("TENANT_01", 2026, $"DOC_{i:D6}"))
-            .ToList();
-
-        const int batchIterations = 20_000;
-        var swBatch = Stopwatch.StartNew();
-        int totalQueriesDispatched = 0;
-
-        for (int i = 0; i < batchIterations; i++)
-        {
-            // Simulate chunk partitioning with budget limit
-            int effectiveChunkSize = _chunkedExecutor.CalculateEffectiveChunkSize(
-                testBudget.KeyColumnCount,
-                testBudget.ContextParameterCount,
-                testBudget.Dialect,
-                testBudget.SafetyBuffer);
-
-            var chunks = compositeKeys.Chunk(effectiveChunkSize).ToList();
-            totalQueriesDispatched += chunks.Count;
-
-            // Assert parameter safety in benchmark
-            foreach (var chunk in chunks)
-            {
-                int paramCount = chunk.Length * testBudget.KeyColumnCount + testBudget.ContextParameterCount;
-                if (paramCount > 999) throw new InvalidOperationException($"Parameter overflow: {paramCount} > 999!");
-            }
-        }
-        swBatch.Stop();
-
-        double batchThroughput = batchIterations / swBatch.Elapsed.TotalSeconds;
-        Console.WriteLine($"  Batch-Aufteilungen       : {batchIterations:N0} (je 1.000 Composite Keys)");
-        Console.WriteLine($"  Durchsatz                : {batchThroughput:N0} partitionings/sec");
-        Console.WriteLine($"  Parameter-Sicherheit     : 100% compliant (kein Overflow über SQLite-Limit 999)");
-        Console.WriteLine($"  Verbrauchte Parameter    : max. {((999 - 20 - 50) / 3) * 3 + 20} <= 999");
-        Console.WriteLine();
-
         return new CatalogScaleMetrics(
             swGen.Elapsed.TotalSeconds,
             memDiffMb,
@@ -458,8 +417,7 @@ public class ScaleCatalogBenchmark
             bytesPerCacheEntry,
             totalRelationsCreated,
             MaxRelationDepth,
-            travP99,
-            batchThroughput);
+            travP99);
     }
 
     private int TraverseHierarchy(TableIdentifier current, int targetDepth, int currentDepth = 1)

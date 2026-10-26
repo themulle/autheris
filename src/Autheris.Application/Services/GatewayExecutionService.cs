@@ -20,7 +20,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
     private readonly IColumnMaskingProvider _maskingProvider;
-    private readonly IChunkedQueryExecutor _chunkedQueryExecutor;
     private readonly GatewayOptions? _options;
     private readonly ITrafficDrainController? _drainController;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
@@ -29,7 +28,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
-    private readonly BatchRelationLoader _batchLoader;
     private readonly IConsumerUsageRecorder? _usageRecorder;
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
@@ -37,8 +35,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex EchoableColumnNameRegex();
-
-    public int LastDispatchedChildQueryCount => _batchLoader.LastDispatchedChildQueryCount;
 
     [ActivatorUtilitiesConstructor]
     public GatewayExecutionService(
@@ -48,7 +44,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IConsentResolutionService resolutionService,
         IConsentCacheService cacheService,
         IColumnMaskingProvider maskingProvider,
-        IChunkedQueryExecutor? chunkedQueryExecutor = null,
         IOptions<GatewayOptions>? options = null,
         ITrafficDrainController? drainController = null,
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
@@ -78,7 +73,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _resolutionService = resolutionService;
         _cacheService = cacheService;
         _maskingProvider = maskingProvider;
-        _chunkedQueryExecutor = chunkedQueryExecutor ?? new ChunkedQueryExecutor(500);
         _options = options?.Value;
         _drainController = drainController;
         _dataSourceExecutors = dataSourceExecutors ?? Array.Empty<IDataSourceExecutor>();
@@ -87,7 +81,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _connectorRegistry = connectorRegistry;
         _concurrencyGate = concurrencyGate;
         _rebacEvaluator = rebacEvaluator;
-        _batchLoader = new BatchRelationLoader(_metadataRepository, _dataSourceExecutors, _maskingProvider, _chunkedQueryExecutor, _drainController, _options, CheckTableAccessAsync);
     }
 
     public GatewayExecutionService(
@@ -95,12 +88,11 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IConsentResolutionService resolutionService,
         IConsentCacheService cacheService,
         IColumnMaskingProvider maskingProvider,
-        IChunkedQueryExecutor? chunkedQueryExecutor = null,
         IOptions<GatewayOptions>? options = null,
         ITrafficDrainController? drainController = null,
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IPolicyEnforcementService? policyEnforcementService = null)
-        : this(repository, repository, repository, resolutionService, cacheService, maskingProvider, chunkedQueryExecutor, options, drainController, dataSourceExecutors, policyEnforcementService)
+        : this(repository, repository, repository, resolutionService, cacheService, maskingProvider, options, drainController, dataSourceExecutors, policyEnforcementService)
     {
     }
 
@@ -683,12 +675,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         return decision;
     }
-
-    public Task<IReadOnlyDictionary<string, List<InvoiceItemRecord>>> LoadInvoiceItemsBatchAsync(
-        ClaimsPrincipal? principal,
-        IReadOnlyList<string> invoiceIds,
-        CancellationToken ct = default) =>
-        _batchLoader.LoadInvoiceItemsBatchAsync(principal, invoiceIds, ct);
 
     internal static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 

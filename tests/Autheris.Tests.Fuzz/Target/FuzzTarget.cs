@@ -84,11 +84,15 @@ public sealed record FuzzRunResult(FuzzOutcome Outcome, string? ExceptionType, T
 /// <summary>Runs one input on a dedicated thread (16 MB stack like <c>FastSqlEngine.DefaultParseThreadStackSize</c>) with a 2 s <c>Join</c>.</summary>
 public static class FuzzRunner
 {
+    private static Thread? _abandoned;
+
     /// <param name="input">The input bytes.</param>
     /// <param name="target">Test seam; the default is <see cref="FuzzTarget.Execute"/>.</param>
-    public static FuzzRunResult RunOne(byte[] input, Action<byte[]>? target = null)
+    /// <param name="dfaReset">Test seam; the default is <see cref="FuzzDfaReset.Shared"/>.</param>
+    public static FuzzRunResult RunOne(byte[] input, Action<byte[]>? target = null, FuzzDfaReset? dfaReset = null)
     {
         target ??= FuzzTarget.Execute;
+        (dfaReset ?? FuzzDfaReset.Shared).OnInputBoundary(Volatile.Read(ref _abandoned) is { IsAlive: true });
         Exception? error = null;
         var thread = new Thread(
             () =>
@@ -113,6 +117,7 @@ public static class FuzzRunner
         if (!thread.Join(FuzzOutcomeClassifier.HangLimit))
         {
             // The thread is abandoned (background thread); the caller exits the process on a hang in AFL mode.
+            Volatile.Write(ref _abandoned, thread);
             return new FuzzRunResult(FuzzOutcome.Hang, "Timeout", clock.Elapsed, null);
         }
 

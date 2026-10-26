@@ -12,7 +12,7 @@ Akzeptiert
 1. **Dialektspezifischer Composite-Key-Generator:**
    - PostgreSQL, SQLite, Databricks: Verwendung von nativem Tuple-IN (`("colA", "colB") IN (($1, $2), ($3, $4))`).
    - SQL Server: Verwendung von disjunktiven Klammerausdrücken (`(([colA] = @p1 AND [colB] = @p2) OR ...)`), ab größeren Mengen `INNER JOIN (VALUES ...)`.
-2. **Dynamisches Parameter-Budgeting (`IChunkedQueryExecutor`):**
+2. **Dynamisches Parameter-Budgeting (`IChunkedQueryExecutor`, entfernt: der Executor hatte keinen Produktionsaufrufer mehr):**
    - Die effektive Batch-Chunk-Größe wird dynamisch zur Laufzeit berechnet:
      $$\text{ChunkSize} = \max\left(1, \min\left(\text{DefaultChunkSize}, \frac{\text{MaxParams} - \text{ContextParams} - \text{SafetyBuffer}}{\text{KeyColumnCount}}\right)\right)$$
    - Dies garantiert deterministische Einhaltung aller DB-Parameterlimits selbst bei 8-fach zusammengesetzten Schlüsseln und aktiven RLS-Prädikaten.

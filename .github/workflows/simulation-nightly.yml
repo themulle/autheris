@@ -255,8 +255,6 @@ jobs:
           name: sim-report-parser
           path: |
             ${{ github.workspace }}/sim-report-parser
-            ${{ runner.temp }}/afl/default/crashes
-            ${{ runner.temp }}/afl/default/hangs
           retention-days: 7
           if-no-files-found: ignore
 
@@ -401,7 +399,5 @@ jobs:
           name: sim-report-parser-weekly
           path: |
             ${{ github.workspace }}/sim-report-parser-weekly
-            ${{ runner.temp }}/afl/default/crashes
-            ${{ runner.temp }}/afl/default/hangs
           retention-days: 7
           if-no-files-found: ignore
