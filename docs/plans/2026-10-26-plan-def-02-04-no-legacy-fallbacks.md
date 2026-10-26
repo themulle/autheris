@@ -155,3 +155,57 @@ FU scope: O-3, O-5 a, b step 1, c rename, d, f, O-6 (est. +150/-300 LOC), plus F
 
 ### Out of scope (confirmed)
 F1 (FU-1), F3-F5 (FU-3), all class D/DT sites, O-1..O-6. O-4 (`X-Tenant-ID` for unauthenticated principal) and O-2 (Redis revocation fail-open in Development) are security-relevant: keep as high-priority owner items for the default-tenant lane.
+
+## Phase 3 binding conditions for O-x follow-ups (csharp-security-expert, 2026-10-26)
+
+**Verdicts.** PR `fix/no-legacy-followups` (O-3, O-5a, O-5b step 1, O-5c rename, O-5d, O-5f, O-6): **APPROVED WITH CONDITIONS**. PR `fix/no-legacy-error-bodies` (O-5b step 2): **APPROVED WITH CONDITIONS** (the guardrail detector must cover the new shape before the bare detector is deleted, see SC-26). O-1, O-2, O-4 (default-tenant lane) are not conditioned here; see the notes at the end.
+Facts verified: the loop is the only role-to-right path in `FunctionalRightMapper.cs`; `IsLegacyErrorShape` accepts only an object with a string `error` plus an optional string `message`, so a ProblemDetails body (extra members) is NOT detected by it today and `TryGetExecutorError` otherwise needs `isError: true`; the GitOps fallback is the single literal at `DeclarativeConsentApplyService.cs:59`.
+
+### PR fix/no-legacy-followups
+- **NL-SC-01 (O-3)** Delete the loop; role claims reach rights only via configured assignments (`GetRightsForGroupsAndRolesAsync`). No replacement default, no startup auto-assignment, no config switch. Unknown or unassigned role yields zero rights (deny).
+- **NL-SC-02 (O-3)** The startup report lists every GatewayRole without an assignment, at Warning (not Information: a silent privilege loss must be visible). It logs role names only (config data, no claim values), is bounded (cap, e.g. 50 names plus a count) and never blocks startup (fail closed is by the empty grant, not by a crash loop).
+- **NL-SC-03 (O-3)** Rights granted via a configured assignment are identical before and after (no widening, no narrowing); group-derived rights are untouched. The 11 `src/` checks keep denying on empty rights.
+- **NL-SC-04 (O-5a)** Remove only the top-level `error` member. `code`, `detail`, `status`, `title`, `type` unchanged; no new member, no echo of exception text. The AI guardrail and any in-repo consumer reading `error` from ProblemDetails (grep `"error"` readers in `src/`, UI, SDK) are migrated to `code` in the same PR; an unmigrated reader must not fail open.
+- **NL-SC-05 (O-5b step 1)** Ratchet test fails closed: any bare `{ error = ... }` anonymous object in an endpoint response outside the baseline fails the build; a baseline entry that disappears must be removed (baseline can only shrink); baseline is a checked-in file with site and count, no wildcard or directory-level allowance; the scan covers `src/` (including `Autheris.Extensions`) and all of `Results.*`/`TypedResults.*`/`WriteAsJsonAsync` forms.
+- **NL-SC-06 (O-5c)** The rename `IsLegacyErrorShape` to `IsBareErrorShape` is behaviour-neutral: same accept set, same DENY audit, same `isError: true` return. Golden/behaviour tests unchanged and green; no relaxation of the "nothing else" rule (a looser shape would let data rows through as errors, a stricter one fails open).
+- **NL-SC-07 (O-5d)** A write carrying a non-empty `assignedSubjects` returns 400 `ACCESS_PROFILE_PLAIN_SUBJECTS_REMOVED` through the governed ProblemDetails mapper with no state change (validated before any store call, no partial reconcile). The property is deleted from the model, store, in-memory repo and endpoint DTO; a model that still binds the member silently is not acceptable (strict binding or explicit check). Empty list or omitted member is not an error and clears nothing by itself beyond what typed assignments say.
+- **NL-SC-08 (O-5d)** Typed assignments are the only source: reconcile never derives a subject from a plain string; existing stored plain-subject rows are not translated, not granted and not kept as grants (no silent widening); startup or load logs a Warning with profile id and count only if such rows exist. No subject outside the typed set can appear after reconcile.
+- **NL-SC-09 (O-5f)** Options validation fails startup for any `TeamToGroupSidMap` key without `id:`/`fqn:`/`name:` prefix, with an invalid GUID after `id:`, empty value or an invalid SID value. The error names the option path and the key position, never the SID value. The sync-time warn-and-skip branches (`:1056`, `:1139`) are removed; no key is ever accepted unvalidated. Duplicate keys that resolve to the same team fail too.
+- **NL-SC-10 (O-6)** `GetUserSid() is null` throws `SecurityException` with a fixed message (no principal dump) before any read or write, audit or state change. Delete the `GITOPS-SYNC` literal everywhere (grep must be empty in `src/` and tests); no replacement constant fallback. A background sync passes an explicit actor from configuration that is a real SID, validated at startup; a missing configured actor fails startup for that sync, not at first apply.
+- **NL-SC-11 (O-6)** The audit actor of an apply is always the supplied authenticated or configured SID; never the literal of a former fallback, never `anonymous`.
+- **NL-SC-12 (sequence)** Order in the PR: O-5c rename and the NL-SC-04 consumer migration land together with or before O-5a (never remove `error` first). Release notes per item as in section 9.
+
+### Mandatory tests (all `[Trait("Category","Security")]`)
+- **NL-T-01** `Gateway_Role_Claim_Alone_Grants_No_Functional_Right` (every role in the configured set, plus an unknown role).
+- **NL-T-02** `Configured_Role_Right_Assignment_Still_Grants_Right` (exact right set equals the configured one, no extra).
+- **NL-T-03** `Startup_Reports_Roles_Without_Right_Assignment_At_Warning_Bounded` (names only, cap respected, startup not blocked).
+- **NL-T-04** `Problem_Details_Has_No_Top_Level_Error` and `Guardrail_Denies_ProblemDetails_Tool_Result_After_Error_Member_Removal`.
+- **NL-T-05** `No_New_Bare_Error_Bodies` (fails for a synthetic new site; fails when a baseline entry is stale).
+- **NL-T-06** `Guardrail_Bare_Error_Shape_Still_Audited_Deny_After_Rename` (error only, error+message, extra member not an error, non-string error, empty error).
+- **NL-T-07** `AccessProfile_Plain_Subjects_Are_Rejected` (create, update, import paths; 400 code; no store write) and `AccessProfile_Typed_Assignments_Are_Authoritative`.
+- **NL-T-08** `AccessProfile_Legacy_Stored_Plain_Subjects_Grant_Nothing`.
+- **NL-T-09** `OpenMetadata_Unprefixed_Team_Key_Fails_Validation` (unprefixed, bad GUID, empty value, bad SID, duplicate; message contains no SID value).
+- **NL-T-10** `Declarative_Apply_Without_Caller_Sid_Is_Rejected` (no state change, no audit row) and `No_Fixed_Gitops_Sid_Literal_Remains` (source scan).
+- **NL-T-11** `Declarative_Apply_Audit_Actor_Is_Supplied_Sid`.
+
+### PR fix/no-legacy-error-bodies (O-5b step 2)
+- **NL-SC-20** Per migrated site only the body shape changes: HTTP status, authorization/route guards, the decision taken, ordering of side effects and log/audit rows are identical. Each group is a separate commit with a before/after status+code table in the message; a status change needs a separate owner-visible line.
+- **NL-SC-21** No message echo: ProblemDetails `detail` uses fixed governed text or an existing safe code text; never `ex.Message`, SQL, raw input, tenant ids of other tenants, file paths, or upstream response bodies. Sites that today return `{ error = ex.Message }` must be mapped to a governed code, not copied across.
+- **NL-SC-22** Anti-enumeration and procedure bodies (unknown-vs-forbidden pairs, ITSM/webhook unknown instance, login/token/ext-authz style endpoints, and any endpoint whose protocol mandates a body such as OAuth/Iceberg REST/Backstage client contracts) stay byte-identical where a client or an indistinguishability condition depends on them (DEF-SC-12 stays binding). Such sites are listed as class-C exceptions with a protocol reference and stay in a named allowlist of the ratchet; they are not migrated blindly. The Iceberg REST catalog and other third-party-spec endpoints must keep the spec error body.
+- **NL-SC-23** The baseline shrinks per group with the migration in the same commit; at the end the baseline is empty and the test has no allowlist except the NL-SC-22 protocol list.
+- **NL-SC-24** Migrated bodies carry no new content-bearing member (no stack, no inner, no input echo); a unified helper is the only writer so redaction is in one place.
+- **NL-SC-25** Order: the bare detector is deleted only after the baseline is empty AND NL-SC-26 holds.
+- **NL-SC-26 (AI guardrail, fail closed)** Before any group whose tools feed the AI guardrail is migrated, `TryGetExecutorError` recognises the governed ProblemDetails shape (object with integer `status` >= 400 and string `code`/`type`) as an error result, audited DENY. Today a ProblemDetails result would pass as success; migration without this turns each migrated endpoint into a fail-open for the guardrail. Deleting `IsBareErrorShape` is blocked until a test proves every MCP-reachable tool error shape is still denied.
+
+### Mandatory tests (all `[Trait("Category","Security")]`)
+- **NL-T-20** `Bare_Error_Migration_Preserves_Status_And_Code_Per_Group` (table-driven per group: old status equals new status, code present).
+- **NL-T-21** `Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input` (inject a canary message/value; assert absent).
+- **NL-T-22** `AntiEnumeration_Error_Bodies_Are_Byte_Identical_Before_And_After` (golden bytes for the NL-SC-22 sites).
+- **NL-T-23** `Protocol_Mandated_Error_Bodies_Keep_Spec_Shape` (Iceberg REST, Backstage, others on the list).
+- **NL-T-24** `Guardrail_Denies_ProblemDetails_Tool_Result` and `Guardrail_Denies_All_Mcp_Reachable_Error_Shapes` (runs before and after deleting the bare detector).
+- **NL-T-25** `Bare_Error_Baseline_Is_Empty_Except_Protocol_Allowlist`.
+
+### Moves and notes
+- Consider splitting O-5d from the FU PR if the touched REST contract is consumed by the UI/SDK: ship with the consumer change. Everything else may stay together.
+- O-5b step 2 groups with protocol-mandated bodies (NL-SC-22) should be reviewed first and may be excluded rather than migrated.
+- Default-tenant lane (not conditioned): O-2 must keep `LegacySwitchGuard` failing on key presence regardless of value (DEF-SC-11) and test rejection under Development; O-4 must deny a tenant header for any unauthenticated principal in all environments, never fall back to a header value, and use the configured tenant only; O-1 must fail startup (not warn) when an enabled provider has no explicit realm, with no implicit realm resurrected through defaults, and remove un-namespaced group mapping without widening (unmapped groups map to nothing).
