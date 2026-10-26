@@ -165,7 +165,13 @@ public sealed class DialectSqlGoldenArchitectureTests
             .ToList();
         foreach (var type in candidates)
         {
-            type.FullName.ShouldNotContain("GovernanceRepository", Case.Sensitive, $"{type.FullName} would be skipped by ConsentQueryTenantArchitectureTests");
+            type.Name.ShouldNotContain("GovernanceRepository", Case.Sensitive);
+            if (type.Name.EndsWith("SqlCore", StringComparison.Ordinal))
+            {
+                // The cores are top-level types: a nested core would inherit the repository name and be skipped by the tenant guard.
+                type.IsNested.ShouldBeFalse($"{type.FullName} must be top-level");
+                type.FullName.ShouldNotContain("GovernanceRepository", Case.Sensitive, $"{type.FullName} would be skipped by ConsentQueryTenantArchitectureTests");
+            }
         }
     }
 
