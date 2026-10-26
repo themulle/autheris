@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Sql.Policy;
 
 using Autheris.Application.Sql.Policy.RowFilterKeySets;
@@ -306,13 +307,6 @@ public sealed class RowFilterKeySetCacheTests : IDisposable
         cache.TryGetRaw(Key).ShouldBeNull();
     }
 
-    private static async Task WaitUntil(Func<bool> condition)
-    {
-        var deadline = DateTime.UtcNow + Wait;
-        while (!condition())
-        {
-            DateTime.UtcNow.ShouldBeLessThan(deadline);
-            await Task.Delay(5);
-        }
-    }
+    private static Task WaitUntil(Func<bool> condition) =>
+        WaitHelper.WaitUntil(condition, Wait, pollInterval: TimeSpan.FromMilliseconds(5));
 }

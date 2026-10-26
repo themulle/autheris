@@ -136,7 +136,7 @@ public sealed class TrustedDocumentAppRegistryTests
         using var registry = Create();
 
         var calls = Enumerable.Range(0, 32).Select(_ => Task.Run(async () => await registry.GetAsync(default))).ToArray();
-        await Task.Delay(100);
+        await Task.Delay(100); // quiet period (100 ms) so the callers pile up at the gate before it opens
         gate.SetResult();
         await Task.WhenAll(calls);
 

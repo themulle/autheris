@@ -88,10 +88,10 @@ public sealed class Wave2MarketFeaturesTests
         var queuedTask = Task.Run(async () => await manager.TryAcquireLeaseAsync(ResourceGroupTier.AutonomousAgents, "tenant-2", cts.Token));
 
         // Allow task to hit the queue
-        for (var i = 0; i < 100 && manager.GetMetrics().Tiers.First(t => t.Tier == ResourceGroupTier.AutonomousAgents).QueuedRequests == 0; i++)
-        {
-            await Task.Delay(20);
-        }
+        await WaitHelper.WaitUntil(
+            () => manager.GetMetrics().Tiers.First(t => t.Tier == ResourceGroupTier.AutonomousAgents).QueuedRequests != 0,
+            WaitHelper.HangGuard,
+            "the second request never reached the queue");
 
         // 3. Next request exceeds queue depth -> immediate QueueFull rejection
         var rejectedResult = await manager.TryAcquireLeaseAsync(ResourceGroupTier.AutonomousAgents, "tenant-3");
@@ -513,7 +513,10 @@ public sealed class Wave2MarketFeaturesTests
         // 2. Put request 2 into queue
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var queued2Task = Task.Run(async () => await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t2", cts.Token));
-        await Task.Delay(50); // Ensure queued
+        await WaitHelper.WaitUntil(
+            () => manager.GetMetrics().Tiers.Single(t => t.Tier == ResourceGroupTier.Interactive).QueuedRequests == 1,
+            WaitHelper.HangGuard,
+            "request 2 never reached the queue");
 
         var metrics = manager.GetMetrics();
         var tierMetrics = Assert.Single(metrics.Tiers, t => t.Tier == ResourceGroupTier.Interactive);

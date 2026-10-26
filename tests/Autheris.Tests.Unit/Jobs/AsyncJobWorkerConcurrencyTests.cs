@@ -141,7 +141,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
 
         (await manager.CancelJobAsync(job.JobId, new TenantId("t"), "alice")).ShouldBeTrue();
         release.SetResult();
-        await Task.Delay(500);
+        await Task.Delay(500); // quiet period (500 ms): lets the token-ignoring driver finish before the cancelled-state assertions
         await worker.StopAsync(CancellationToken.None);
 
         var final = await manager.GetJobAsync(job.JobId, new TenantId("t"), "alice");
@@ -192,7 +192,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         for (var i = 0; i < 6; i++) channel.Writer.TryWrite(Item("t" + i));
 
         await WaitUntilAsync(() => Volatile.Read(ref running) == 2);
-        await Task.Delay(200);
+        await Task.Delay(200); // quiet period (200 ms) before a negative assertion: no third job may start
         Volatile.Read(ref peak).ShouldBe(2);
         gate.SetResult();
         await WaitUntilAsync(() => Volatile.Read(ref finished) == 6);
@@ -454,7 +454,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
         var third = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 3"), User("alice", "u"), new TenantId("u"));
         await worker.StartAsync(CancellationToken.None);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await Task.Delay(200);
+        await Task.Delay(200); // quiet period (200 ms) before a negative assertion: no further job may start
 
         await worker.StopAsync(CancellationToken.None);
 

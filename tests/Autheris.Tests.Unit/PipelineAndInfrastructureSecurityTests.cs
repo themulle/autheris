@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Interfaces;
@@ -25,14 +26,16 @@ public class PipelineAndInfrastructureSecurityTests
 
         // Slow subscriber to hold consumption
         var tcs = new TaskCompletionSource();
+        var picked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var sub = bus.Subscribe<object>("test_chan", async _ =>
         {
+            picked.TrySetResult();
             await tcs.Task;
         });
 
         // 1st item picked up by consumer
         await bus.PublishAsync("test_chan", new { Msg = 1 });
-        await Task.Delay(50);
+        await picked.Task.WaitAsync(WaitHelper.HangGuard);
 
         // Fill capacity and overflow: should NOT block the publisher!
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));

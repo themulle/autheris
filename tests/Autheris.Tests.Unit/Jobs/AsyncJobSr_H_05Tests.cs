@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Jobs;
 
 using System;
@@ -61,13 +62,8 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
         var worker = new AsyncQueryJobBackgroundWorker(manager, manager, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _audit, NullLogger<AsyncQueryJobBackgroundWorker>.Instance, options);
         var d = await manager.SubmitJobAsync(request, User(), new TenantId("t"));
         await worker.StartAsync(CancellationToken.None);
-        for (int i = 0; i < 100 && captured is null; i++) await Task.Delay(50);
-        for (int i = 0; i < 100; i++)
-        {
-            var j = await manager.GetJobAsync(d.JobId, new TenantId("t"), "alice");
-            if (j?.State == AsyncJobState.Completed) break;
-            await Task.Delay(50);
-        }
+        await WaitHelper.WaitUntil(() => captured is not null, TimeSpan.FromSeconds(10));
+        await WaitHelper.WaitUntil(async () => (await manager.GetJobAsync(d.JobId, new TenantId("t"), "alice"))?.State == AsyncJobState.Completed, TimeSpan.FromSeconds(10), pollInterval: TimeSpan.FromMilliseconds(50));
         await worker.StopAsync(CancellationToken.None);
         captured.ShouldNotBeNull();
         return captured;
@@ -119,7 +115,7 @@ public sealed class AsyncJobSr_H_05Tests : IDisposable
         await channel.Writer.WriteAsync(new AsyncJobExecutionItem(descriptor, request, User(), jobCts));
 
         await worker.StartAsync(CancellationToken.None);
-        for (int i = 0; i < 100 && captured is null; i++) await Task.Delay(50);
+        await WaitHelper.WaitUntil(() => captured is not null, TimeSpan.FromSeconds(10));
         await worker.StopAsync(CancellationToken.None);
 
         captured.ShouldNotBeNull();

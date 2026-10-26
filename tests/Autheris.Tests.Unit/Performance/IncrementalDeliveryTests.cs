@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit.Performance;
 
 using System;
@@ -84,10 +85,13 @@ public sealed class IncrementalDeliveryTests
         streamCts.Token.IsCancellationRequested.ShouldBeFalse();
 
         // Wait for timeout (options configured with 500ms); allow up to 5s for ThreadPool timer queue under heavy CI load.
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!streamCts.Token.IsCancellationRequested && sw.ElapsedMilliseconds < 5000)
+        try
         {
-            await Task.Delay(25);
+            await WaitHelper.WaitUntil(() => streamCts.Token.IsCancellationRequested, TimeSpan.FromSeconds(5), pollInterval: TimeSpan.FromMilliseconds(25));
+        }
+        catch (TimeoutException)
+        {
+            // fall through: the assertion below reports the missing cancellation
         }
 
         // Assert
