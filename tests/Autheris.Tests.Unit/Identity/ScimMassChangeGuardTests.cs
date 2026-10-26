@@ -48,6 +48,23 @@ public sealed class ScimMassChangeGuardTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task WAVE3_SCIM_BlockedLog_StripsLineBreaksFromRealmId()
+    {
+        Count(3);
+        await Should.ThrowAsync<ScimMassChangeBlockedException>(
+            () => Create().EnsureAllowedAsync(Tenant, "realm\r\nFORGED ENTRY", User));
+
+        var logged = _logger.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == "Log")
+            .Select(c => c.GetArguments()[2]?.ToString() ?? string.Empty)
+            .ToList();
+        logged.ShouldNotBeEmpty();
+        logged.ShouldAllBe(m => !m.Contains('\r') && !m.Contains('\n'));
+        logged.ShouldContain(m => m.Contains("realmFORGED ENTRY", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task WAVE3_SCIM_T01_UnderLimit_Allows()
     {
         Count(2);

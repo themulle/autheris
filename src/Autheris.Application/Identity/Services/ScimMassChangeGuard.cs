@@ -120,7 +120,7 @@ public sealed class ScimMassChangeGuard
 
         _logger.LogWarning(
             "SCIM mass-change protection blocked deprovisioning in realm {RealmId}: {Count} users locked within {WindowMinutes} minutes (limit {Limit}).",
-            realmId, count, settings.WindowMinutes, settings.MaxDestructiveOperations);
+            ForLog(realmId), count, settings.WindowMinutes, settings.MaxDestructiveOperations);
 
         var entry = new AuditLogEntry
         {
@@ -157,4 +157,8 @@ public sealed class ScimMassChangeGuard
             throw;
         }
     }
+
+    // Realm ids come from the request route; strip line breaks so a crafted value cannot forge log entries.
+    private static string ForLog(string? value) =>
+        (value ?? string.Empty).Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
 }
