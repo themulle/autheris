@@ -47,4 +47,14 @@ public static class ApiErrorCodes
     public const string DbtProposalConflict = "DBT_PROPOSAL_CONFLICT";
     public const string DbtManifestInvalid = "DBT_MANIFEST_INVALID";
     public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
+    public const string InvalidSecretRef = "INVALID_SECRET_REF";
+    public const string DataContractInvalid = "DATA_CONTRACT_INVALID";
+    public const string OlapQueryFailed = "OLAP_QUERY_FAILED";
+    public const string OlapResultTooLarge = "OLAP_RESULT_TOO_LARGE";
+    public const string PrivacyBudgetExhausted = "PRIVACY_BUDGET_EXHAUSTED";
+    public const string GovernancePlanInvalid = "GOVERNANCE_PLAN_INVALID";
+    public const string ProcedureArgumentInvalid = "PROCEDURE_ARGUMENT_INVALID";
+    public const string VirtualFilterConflict = "VIRTUAL_FILTER_CONFLICT";
+    public const string ResourceLocked = "RESOURCE_LOCKED";
+    public const string VirtualFilterInvalid = "VIRTUAL_FILTER_INVALID";
 }

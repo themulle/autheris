@@ -181,7 +181,6 @@ public static class ArrowExportEndpoints
             // RR-L3-03: never echo exception, parser or database messages (table/column oracle, backend details).
             var logger = httpContext.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger("Autheris.Api.Endpoints.ArrowExport");
             var traceId = httpContext.TraceIdentifier;
-            var isProduction = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
 
             if (SqlCompilerErrorMapper.TryMap(ex, out var mapping))
             {
@@ -199,7 +198,7 @@ public static class ArrowExportEndpoints
             {
                 case System.Security.SecurityException secEx:
                     logger?.LogWarning(secEx, "Arrow export rejected by security policy. TraceId={TraceId}", traceId);
-                    return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, (!isProduction && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage, httpContext, "Forbidden", new Dictionary<string, object?> { ["traceId"] = traceId });
+                    return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, WebSqlEndpoints.GenericForbiddenMessage, httpContext, "Forbidden", new Dictionary<string, object?> { ["traceId"] = traceId });
                 case ArgumentException argEx:
                     logger?.LogWarning(argEx, "Arrow export bad request. TraceId={TraceId}", traceId);
                     return ApiProblems.Problem(StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, WebSqlEndpoints.GenericBadRequestMessage, httpContext, "Bad Request", new Dictionary<string, object?> { ["traceId"] = traceId });

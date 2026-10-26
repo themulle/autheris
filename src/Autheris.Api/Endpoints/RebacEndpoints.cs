@@ -52,7 +52,7 @@ public static class RebacEndpoints
         }, CancellationToken.None).ConfigureAwait(false);   // post-commit: a client disconnect must not drop the record
     }
 
-    private static async Task AuditInvalidationFailureAsync(
+    internal static async Task AuditInvalidationFailureAsync(
         IAuditWriter auditWriter, HttpContext http, TenantId callerTenant, string tenantId, Exception ex)
     {
         TenantId tenant;
@@ -73,7 +73,7 @@ public static class RebacEndpoints
             TargetTable = string.Empty,
             Decision = "DENY",
             TraceId = http.TraceIdentifier,
-            DetailsJson = JsonSerializer.Serialize(new { error = ex.Message, tenant = tenantId })
+            DetailsJson = JsonSerializer.Serialize(new { reasonType = ex.GetType().Name, tenant = tenantId })
         }, CancellationToken.None).ConfigureAwait(false);   // post-commit: a client disconnect must not drop the record
     }
 

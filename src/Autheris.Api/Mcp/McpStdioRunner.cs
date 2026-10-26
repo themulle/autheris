@@ -56,8 +56,10 @@ public sealed class McpStdioRunner(
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogError(ex, "Error processing JSON-RPC stdio message: {Message}", ex.Message);
-                    var errorResponse = $"{{\"jsonrpc\":\"2.0\",\"error\":{{\"code\":-32603,\"message\":{System.Text.Json.JsonSerializer.Serialize(ex.Message)}}},\"id\":null}}";
+                    // The exception goes to the log only; the client gets a generic JSON-RPC error carrying a random correlation id.
+                    var correlationId = Guid.NewGuid().ToString("D");
+                    _logger?.LogError(ex, "Error processing JSON-RPC stdio message (correlation {CorrelationId}).", correlationId);
+                    var errorResponse = $"{{\"jsonrpc\":\"2.0\",\"error\":{{\"code\":-32603,\"message\":\"Internal error\",\"data\":{{\"correlationId\":\"{correlationId}\"}}}},\"id\":null}}";
                     await output.WriteLineAsync(errorResponse.AsMemory(), cancellationToken).ConfigureAwait(false);
                     await output.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
