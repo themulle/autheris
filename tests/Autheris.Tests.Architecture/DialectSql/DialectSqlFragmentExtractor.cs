@@ -6,7 +6,7 @@ namespace Autheris.Tests.Architecture.DialectSql;
 
 /// <summary>One governed persistence area whose per-dialect SQL is pinned (ARCH-MNT-22).</summary>
 /// <param name="Name">Area name used in golden file names and in the <c>{Area}Sql</c> / <c>{Area}SqlCore</c> type names.</param>
-/// <param name="Roots">Root methods of the dialect repository, as <c>Name</c> or <c>Name(FirstParameterTypeName)</c> (overload disambiguation).</param>
+/// <param name="Roots">Root methods of the dialect repository, as <c>Name</c> or <c>Name(FirstParameterTypeName)</c> (overload disambiguation); a trailing <c>?</c> marks a root that only exists after a refactoring step (its strings join the set).</param>
 internal sealed record DialectSqlArea(string Name, string[] Roots);
 
 /// <summary>Ordered string fragments of one root method plus its <c>set_Transaction</c> call count.</summary>
@@ -34,7 +34,7 @@ internal static class DialectSqlFragmentExtractor
         new("WebhookOutbox",
         [
             "EnqueueAsync(WebhookOutboxMessage)", "ClaimBatchAsync", "CompleteAsync", "RescheduleAsync", "DeadLetterAsync", "FencedUpdateAsync",
-            "DeferSubscriptionAsync", "ListDeadLettersAsync", "CountPendingAsync", "PurgeAsync(DateTimeOffset)"
+            "DeferSubscriptionAsync", "ListDeadLettersAsync", "CountPendingAsync", "PurgeAsync(DateTimeOffset)", "BindFencedUpdate?"
         ]),
         new("ConsentGrants",
         [
@@ -55,6 +55,11 @@ internal static class DialectSqlFragmentExtractor
         foreach (var root in area.Roots)
         {
             var rootMethod = ResolveRoot(repo, root);
+            if (rootMethod is null)
+            {
+                continue; // optional root (trailing '?') that does not exist in this shape of the code
+            }
+
             var fragments = new List<string>();
             var transactionCalls = 0;
             Collect(repo, rootMethod, fragments, ref transactionCalls);
@@ -211,8 +216,14 @@ internal static class DialectSqlFragmentExtractor
         }
     }
 
-    private static MethodDefinition ResolveRoot(TypeDefinition repo, string root)
+    private static MethodDefinition? ResolveRoot(TypeDefinition repo, string root)
     {
+        var optional = root.EndsWith('?');
+        if (optional)
+        {
+            root = root[..^1];
+        }
+
         var open = root.IndexOf('(');
         var name = open < 0 ? root : root[..open];
         var firstParameter = open < 0 ? null : root[(open + 1)..^1];
@@ -220,6 +231,11 @@ internal static class DialectSqlFragmentExtractor
             .Where(m => m.Name == name)
             .Where(m => firstParameter is null || (m.Parameters.Count > 0 && m.Parameters[0].ParameterType.Name == firstParameter))
             .ToList();
+        if (optional && matches.Count == 0)
+        {
+            return null;
+        }
+
         if (matches.Count != 1)
         {
             throw new InvalidOperationException($"{repo.Name}: root '{root}' resolved to {matches.Count} methods (expected exactly 1)");

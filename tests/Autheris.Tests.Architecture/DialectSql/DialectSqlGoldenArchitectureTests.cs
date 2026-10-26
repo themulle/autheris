@@ -72,7 +72,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     public void EveryManifestMethod_HasFragments(string dialect, string area)
     {
         var golden = LoadGolden(dialect, area);
-        foreach (var root in Area(area).Roots)
+        foreach (var root in Area(area).Roots.Where(r => !r.EndsWith('?')))
         {
             golden.Methods.ContainsKey(root).ShouldBeTrue($"{dialect}.{area}: golden lacks method '{root}'");
             golden.Methods[root].ShouldNotBeEmpty($"{dialect}.{area}: method '{root}' has no fragments, the extractor would not notice a change");
