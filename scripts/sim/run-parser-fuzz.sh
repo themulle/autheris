@@ -231,7 +231,7 @@ sampler_loop() {
     for pid in $(pgrep -x dotnet 2>/dev/null); do
       [[ "$pid" =~ ^[0-9]{1,8}$ ]] || continue
       # Only the AFL target (exact argv), not publish leftovers such as MSBuild or compiler server nodes.
-      mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || continue
+      mapfile -d '' -t argv 2>/dev/null < "/proc/$pid/cmdline" || continue
       [[ ${#argv[@]} -eq 3 && "${argv[0]}" == "dotnet" && "${argv[1]}" == "$FUZZ_BIN/Autheris.Tests.Fuzz.dll" && "${argv[2]}" == "--afl" ]] || continue
       vm=0; rss=0; thr=0
       while read -r key value _; do
@@ -240,7 +240,7 @@ sampler_loop() {
           VmRSS:) rss="$value" ;;
           Threads:) thr="$value" ;;
         esac
-      done < "/proc/$pid/status" 2>/dev/null
+      done 2>/dev/null < "/proc/$pid/status"
       [[ "$vm" =~ ^[0-9]{1,12}$ && "$rss" =~ ^[0-9]{1,12}$ && "$thr" =~ ^[0-9]{1,6}$ ]] || continue
       (( vm > pvm )) && pvm=$vm
       (( rss > prss )) && prss=$rss
