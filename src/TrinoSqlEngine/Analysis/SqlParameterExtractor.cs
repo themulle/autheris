@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime;
+using TrinoSqlEngine.Parsing;
 using Antlr4.Runtime.Tree;
 
 public sealed record ExtractedParameter(
@@ -45,7 +46,7 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
         try
         {
             var charStream = new ZeroCopyCaseInsensitiveStream(sql.AsMemory());
-            var lexer = new SqlBaseLexer(charStream);
+            var lexer = AntlrCacheGenerations.Shared.CreateLexer(charStream);
             lexer.RemoveErrorListeners();
             var tokens = new CommonTokenStream(lexer);
             tokens.Fill();
@@ -64,6 +65,11 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
                     ranges.Add((tok.StartIndex, tok.StopIndex, true));
                 }
             }
+        }
+        catch (Antlr4.Runtime.Misc.ParseCanceledException)
+        {
+            // ARCH-MNT-15-SC-05: an unavailable parser cache rejects the input; it never falls back to "no excluded ranges".
+            throw;
         }
         catch
         {

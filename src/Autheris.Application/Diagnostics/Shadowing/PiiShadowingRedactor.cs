@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime;
+using TrinoSqlEngine.Parsing;
 using HotChocolate.Language;
 using TrinoSqlEngine;
 
@@ -326,7 +327,7 @@ public static partial class PiiShadowingRedactor
     {
         try
         {
-            var lexer = new SqlBaseLexer(new ZeroCopyCaseInsensitiveStream(text.AsMemory()));
+            var lexer = AntlrCacheGenerations.Shared.CreateLexer(new ZeroCopyCaseInsensitiveStream(text.AsMemory()));
             lexer.RemoveErrorListeners();
             var tokens = new List<IToken>();
             foreach (var token in lexer.GetAllTokens())

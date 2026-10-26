@@ -40,6 +40,7 @@ public sealed class GatewayOptions
     public TotpOptions Totp { get; init; } = new();
     public EnvoyExtAuthzOptions EnvoyExtAuthz { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
+    [Required] public SqlParserCacheOptions SqlParserCache { get; init; } = new();
     [Required] public CrossSourceOptions CrossSource { get; init; } = new();
     [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
     [Required] public AsyncJobOptions AsyncJobs { get; init; } = new();

@@ -15,6 +15,7 @@ public static class AutherisTelemetrySources
     public const string Mcp = "Autheris.Mcp";
     public const string AsyncJobs = "Autheris.AsyncJobs";
     public const string GovernanceClassification = "Autheris.Governance.Classification";
+    public const string SqlParserCache = TrinoSqlEngine.Parsing.AntlrCacheGenerations.MeterName;
 
     public static readonly string[] AllActivitySources =
     [
@@ -31,7 +32,8 @@ public static class AutherisTelemetrySources
         SqlCompiler,
         Mcp,
         AsyncJobs,
-        GovernanceClassification
+        GovernanceClassification,
+        SqlParserCache
     ];
 
     public static bool IsExposedMeter(Instrument instrument)

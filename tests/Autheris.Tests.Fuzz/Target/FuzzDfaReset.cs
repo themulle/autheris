@@ -1,12 +1,15 @@
-using TrinoSqlEngine;
+using TrinoSqlEngine.Parsing;
 
 namespace Autheris.Tests.Fuzz.Target;
 
 /// <summary>
-/// Bounds the process-wide ANTLR caches (static <c>decisionToDFA</c> of the generated parser and lexer) during a long AFL run (SEC-PF-07).
+/// Bounds the process-wide ANTLR caches during a long AFL run (SEC-PF-07). The engine binds every parser and lexer to a cache generation
+/// (ARCH-MNT-15); the reset publishes a fresh generation of <see cref="AntlrCacheGenerations.Shared"/>. The old generation is not cleared: it
+/// stays valid for in-flight work and is collected afterwards. (Clearing the static DFA arrays of the generated classes would be a silent
+/// no-op for production parsers now.)
 /// A deterministic execution counter fires the reset every <see cref="DefaultInterval"/> inputs, only at an input boundary on the harness
 /// thread and never while an input thread abandoned by a timeout is still alive. It never swallows or retries
-/// <see cref="OutOfMemoryException"/>; harness only, the engine under src/ is unchanged.
+/// <see cref="OutOfMemoryException"/>.
 /// </summary>
 public sealed class FuzzDfaReset
 {
@@ -19,7 +22,7 @@ public sealed class FuzzDfaReset
     private bool _pending;
 
     /// <param name="interval">Executions between resets (at least 1).</param>
-    /// <param name="reset">Test seam; the default clears the shared parser and lexer DFA.</param>
+    /// <param name="reset">Test seam; the default swaps the shared ANTLR cache generation.</param>
     public FuzzDfaReset(long interval = DefaultInterval, Action? reset = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(interval, 1);
@@ -54,10 +57,5 @@ public sealed class FuzzDfaReset
         return true;
     }
 
-    private static void ClearSharedDfa()
-    {
-        // The DFA arrays are static, so one instance of each generated class reaches every pooled parser and lexer.
-        new SqlBaseParser(null).Interpreter.ClearDFA();
-        new SqlBaseLexer(null).Interpreter.ClearDFA();
-    }
+    private static void ClearSharedDfa() => AntlrCacheGenerations.Shared.ForceSwap();
 }

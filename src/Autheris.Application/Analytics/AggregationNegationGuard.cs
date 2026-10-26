@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime;
+using TrinoSqlEngine.Parsing;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Model;
 using TrinoSqlEngine;
@@ -105,7 +106,7 @@ internal static partial class AggregationNegationGuard
         var normalized = PlaceholderRegex().Replace(sql, "?");
         try
         {
-            var lexer = new SqlBaseLexer(new ZeroCopyCaseInsensitiveStream(normalized.AsMemory()));
+            var lexer = AntlrCacheGenerations.Shared.CreateLexer(new ZeroCopyCaseInsensitiveStream(normalized.AsMemory()));
             lexer.RemoveErrorListeners();
             var result = new List<IToken>();
             var depth = 0;
