@@ -269,9 +269,9 @@ Both branches below merged on 2026-10-26 (#360 and #361), so these areas are ope
 | #364 | `refactor/architecture-maintainability-3` | ARCH-MNT-15 (generation swap) | SC-01..SC-11 plus rulings D1..D7 | APPROVED; Low findings fixed | merged |
 | #365 | `refactor/architecture-maintainability-5` | ARCH-MNT-23 rest (sleep-based sync replaced, test-sleep ratchet) | not needed (tests only) | APPROVED | merged |
 | #366 | `refactor/architecture-maintainability-6` | ARCH-MNT-16, 17, 27 | 17-SC-01..05, 27-SC-01..03 | APPROVED; Low findings fixed | merged |
-| PR 4 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot) | open |
-| PR 7 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | pending | in implementation |
-| PR 8 | `refactor/architecture-maintainability-8` | ARCH-MNT-08 | 08-SC-01..09 | APPROVED; SC-01 regex widening in progress | in review |
+| #367 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot); CI startup stack overflow from the WP4.3 rename fixed (self-recursive `MapAsyncJobEndpoints` wrapper removed, `ExtensionSelfRecursionArchitectureTests`, local host start to `/health/ready` 200) | open |
+| #369 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | APPROVED; findings fixed | open (merge after #367) |
+| #368 | `refactor/architecture-maintainability-8` | ARCH-MNT-08 | 08-SC-01..09 | APPROVED after 1 round (SC-01 guard widened) | merged |
 
 Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 adds no `DateTime.UtcNow`, no `new HttpClient(`, no src file over 1,000 lines, and its new options are consumed.
 
@@ -282,6 +282,13 @@ New follow-ups found during delivery:
 - **ARCH-MNT-27:** `SecurityReviewG3EndpointAuthzTests.Envoy_ExportEmitsPathPrefixAndValidatesParameters` failed once with a `RegexMatchTimeoutException` under parallel build load. Check whether the regex timeout belongs to production code, which would mean timeouts under real load too, and fix it with a deterministic assertion or a `NonBacktracking` regex.
 - **Resolved:** ARCH-MNT-27 (#366: production Envoy regexes replaced by non-regex checks); DI decomposition is PR 4.
 - **DI snapshot maintenance:** every PR that adds or removes a DI registration must update `tests/Autheris.Tests.Unit/DependencyInjection/Snapshots/*.txt` with `AUTHERIS_UPDATE_SNAPSHOTS=1` locally (rejected in CI) and explain the diff in the PR.
+- **Lesson from #367:** a pure rename let a wrapper extension bind to itself; only a host start shows it. `ExtensionSelfRecursionArchitectureTests` now guards it, and refactors that touch the composition root must prove a local host start (`dotnet run` with `ASPNETCORE_ENVIRONMENT=Development`, `/health/ready`).
+- **ARCH-MNT-06-FU-01 (owner decision pending):** `docs/features/f-perf-13` (line 172, `MaxCostPerMinute`), `f-gov-13` (line 90, `MaskingRules`) and `f-ops-02` (`Gateway__DrainDelaySeconds`) still mention removed keys. Feature docs change only on owner request.
+- **ARCH-MNT-06-FU-02 (SC-09):** SCIM mass-change protection (`EnableMassChangeProtection`) was never implemented and its flag is deleted, so it is a known absent control.
+- **ARCH-MNT-06-FU-03:** report `Otlp:AllowInsecureTransport` in the startup danger list (`StartupChecks`); today it only logs a warning.
+- **ARCH-MNT-06-FU-04:** wire the Helm `drainDelaySeconds`/`shutdownTimeoutSeconds` to `Gateway:HighAvailability:*`, together with the `QueryTimeoutSeconds` alignment that NF-HA-01 requires.
+- **ARCH-MNT-08-FU-01:** let `OlapSqlRejectedException` accept only fixed reason codes, so no caller data can reach a response.
+- **ARCH-MNT-23-FU-01:** add `TimeProvider` seams to ReBAC tuple expiry and the `ConsentCacheService` expiry to remove the last real-time waits. `StartupWarmupTests.WarmupMetrics_RecordDurationAndOutcome_NoRequestCounters` failed once in a full run (it uses a global metrics listener) and needs isolation.
 
 ## 9. Wave 2 addendum (2026-10-26)
 
