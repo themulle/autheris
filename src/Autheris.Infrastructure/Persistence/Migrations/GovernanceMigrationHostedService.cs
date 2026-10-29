@@ -31,6 +31,7 @@ public sealed class GovernanceMigrationHostedService : IHostedService
         {
             await _runner.RunAsync(cancellationToken).ConfigureAwait(false);
             await _initializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await _runner.EmitPendingAuditAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

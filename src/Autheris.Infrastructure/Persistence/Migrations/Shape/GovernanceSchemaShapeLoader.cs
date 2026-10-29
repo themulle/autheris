@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 
 /// <summary>
-/// Loads the embedded expected shape of an engine (<c>governance-shape.&lt;engine&gt;.json</c>). Fail closed (SEC-94-08a):
+/// Loads the embedded expected shape of an engine (<c>governance-shape.&lt;engine&gt;.v0001.json</c>, the frozen v1.5.0 shape). Fail closed (SEC-94-08a):
 /// a missing, empty or unparseable snapshot throws, an empty expected shape must never pass verification.
 /// </summary>
 internal static class GovernanceSchemaShapeLoader
@@ -14,7 +14,22 @@ internal static class GovernanceSchemaShapeLoader
         PropertyNameCaseInsensitive = false
     };
 
-    public static string ResourceName(string engine) => $"governance-shape.{engine}.json";
+    public static string ResourceName(string engine) => $"governance-shape.{engine}.v0001.json";
+
+    /// <summary>The shape at <paramref name="version"/>: v0001 folded with the deltas of the steps 2..version (plan D-5).</summary>
+    public static GovernanceSchemaShape LoadAt(string engine, int version, IReadOnlyDictionary<int, GovernanceSchemaShapeDelta> deltas)
+    {
+        ArgumentNullException.ThrowIfNull(deltas);
+        var shape = LoadEmbedded(engine);
+        for (var v = 2; v <= version; v++)
+        {
+            shape = GovernanceSchemaShapeFolder.Fold(
+                shape,
+                deltas.TryGetValue(v, out var delta) ? delta : throw new InvalidOperationException($"Migration {v:D4} has no shape delta (fail closed)."));
+        }
+
+        return shape;
+    }
 
     public static GovernanceSchemaShape LoadEmbedded(string engine)
     {

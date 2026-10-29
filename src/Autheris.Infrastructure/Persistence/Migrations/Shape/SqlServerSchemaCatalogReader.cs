@@ -40,11 +40,11 @@ internal sealed class SqlServerSchemaCatalogReader : IGovernanceSchemaCatalogRea
 
             var columnRows = await RowsAsync(
                 session,
-                "SELECT c.name, TYPE_NAME(c.system_type_id) FROM sys.columns c WHERE c.object_id = @o ORDER BY c.column_id",
-                2,
+                "SELECT c.name, TYPE_NAME(c.system_type_id), c.is_nullable FROM sys.columns c WHERE c.object_id = @o ORDER BY c.column_id",
+                3,
                 ct,
                 ("@o", objectId)).ConfigureAwait(false);
-            var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[1]).ToUpperInvariant(), Family(Str(r[1])))).ToArray();
+            var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[1]).ToUpperInvariant(), Family(Str(r[1])), Bool(r[2]))).ToArray();
 
             var keyRows = await RowsAsync(
                 session,

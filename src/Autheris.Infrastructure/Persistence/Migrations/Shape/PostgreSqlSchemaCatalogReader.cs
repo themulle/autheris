@@ -46,12 +46,12 @@ internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogRe
             var name = Str(exists[0][0]);
             var columnRows = await RowsAsync(
                 session,
-                $"SELECT a.attname::text, t.typname::text, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid " +
+                $"SELECT a.attname::text, t.typname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid " +
                 $"WHERE a.attrelid = {Resolve} AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
-                3,
+                4,
                 ct,
                 ("@n", name)).ConfigureAwait(false);
-            var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[2]).ToUpperInvariant(), Family(Str(r[1])))).ToArray();
+            var columns = columnRows.Select(r => new SchemaColumn(Str(r[0]), Str(r[2]).ToUpperInvariant(), Family(Str(r[1])), Bool(r[3]))).ToArray();
 
             var keyRows = await RowsAsync(
                 session,
