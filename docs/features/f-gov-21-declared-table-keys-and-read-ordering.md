@@ -274,7 +274,7 @@ Compared with earlier builds:
 - **Explicit ordering gets a tiebreaker.** `orderBy` / `$orderby` / GraphQL `order` are followed by the default ordering columns that the caller did not name.
 - **OpenAPI ingestion no longer guesses keys** from `required`, `id`, `*_id` or the first property. Declare keys with `x-autheris-primary-key` / `x-autheris-indexes`.
 - **Paging without a stable order returns `400`** (positive offset, or a first page with more rows) instead of returning pages that may duplicate or skip rows.
-- **The governance database must be supplied in the newest schema.** Autheris does not upgrade older governance schemas; a database whose shape differs from the build fails startup with a drift report (see [F-GOV-12](f-gov-12-multi-engine-governance-storage.md#schema-shape-verification)). Existing databases need the three tables of section 3.
+- **The governance database must be at the v1.5.0 base or newer.** Later versions upgrade by forward-only steps (see [F-GOV-12](f-gov-12-multi-engine-governance-storage.md#versioned-schema-migrations)); a pre-v1.5.0 database, or any database whose shape differs from the expected version, fails startup with a drift report (`GOVERNANCE_SCHEMA_UNSUPPORTED_BASE` / `GOVERNANCE_SCHEMA_DRIFT`, see [F-GOV-12](f-gov-12-multi-engine-governance-storage.md#schema-shape-verification)). The migration login must own the existing governance objects, because steps `ALTER` them.
 - **WebSQL timeouts** are answered as RFC 9457 problem details (`application/problem+json`, see [F-DATA-02](f-data-02-governed-websql.md#44-execution-timeouts)).
 
 ---
