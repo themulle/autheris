@@ -91,6 +91,7 @@ public static class ApiErrorCodes
     public const string InvalidMetricQuery = "INVALID_METRIC_QUERY";
     public const string MetricNotFound = "METRIC_NOT_FOUND";
     public const string CallerAttributeInvalidRequest = "CALLER_ATTRIBUTE_INVALID_REQUEST";
+    public const string AggNegatedFilterRejected = "AGG_NEGATED_FILTER_REJECTED";
     public const string OlapTimeout = "OLAP_TIMEOUT";
     public const string OlapAccessDenied = "OLAP_ACCESS_DENIED";
     public const string OlapStagingTooLarge = "OLAP_STAGING_TOO_LARGE";
@@ -143,7 +144,8 @@ public static class ApiErrorCodes
             typeof(Autheris.Domain.Model.CdcActivationCodes),
             typeof(Autheris.Application.Governance.Grants.GrantErrorCodes),
             typeof(Autheris.Application.Data.Changes.ChangeDetectionErrorCodes),
-            typeof(Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes)
+            typeof(Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes),
+            typeof(Autheris.Application.Analytics.AggregationErrorCodes)
         })
         {
             foreach (var field in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
