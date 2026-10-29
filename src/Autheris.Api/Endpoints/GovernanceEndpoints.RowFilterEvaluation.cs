@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Autheris.Api.Extensions;
@@ -36,11 +37,11 @@ public static partial class GovernanceEndpoints
             .WithAudit(AuditLevel.Full, AuditEventTypes.RowFilterEvaluationChanged);
     }
 
-    private static IResult RowFilterNotFound() => Results.NotFound(new { error = "Row filter was not found." });
+    private static IResult RowFilterNotFound() => ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "Row filter was not found.");
 
-    internal static IResult DatasetNotFound() => Results.NotFound(new { error = "Dataset was not found." });
+    internal static IResult DatasetNotFound() => ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "Dataset was not found.");
 
-    private static IResult Rejected(string reason) => Results.BadRequest(new { error = reason });
+    private static IResult Rejected(string reason) => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, reason);
 
     private static object Describe(RowFilterEvaluationSettings s) => new
     {

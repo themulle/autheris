@@ -6,9 +6,11 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Governance.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
+
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Http;
@@ -142,5 +144,87 @@ public sealed class ErrorBodyMigrationEndpointTests
         var r = await BulkAsync("d", "s", Canary, string.Empty, repo);
 
         AssertGovernedProblem(r, 404, "RESOURCE_NOT_FOUND");
+    }
+
+    // ---------- WP-4 ----------
+
+    private static DefaultHttpContext AdminContext(string body = "")
+    {
+        var ctx = NewContext();
+        ctx.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-ADMIN"), new Claim(ClaimTypes.NameIdentifier, "admin"), new Claim("tenant_id", "t1"),
+             new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Test"));
+        ctx.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body));
+        return ctx;
+    }
+
+    [Fact]
+    public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_BulkConsent_BodyRequired()
+    {
+        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(null!, AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+
+        AssertGovernedProblem(r, 400, "BAD_REQUEST");
+    }
+
+    [Fact]
+    public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_BulkConsent_InvalidMaskingMode()
+    {
+        var req = new BulkConsentRequest { Subject = "alice", MaskingMode = Canary, Tables = ["a.b"], ValidDays = 30, Justification = "A sufficiently long justification." };
+
+        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+
+        AssertGovernedProblem(r, 400, "BAD_REQUEST");
+    }
+
+    [Fact]
+    public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_BulkConsent_RowFilterSyntax()
+    {
+        var req = new BulkConsentRequest { Subject = "alice", MaskingMode = "Default", Tables = ["a.b"], ValidDays = 30, Justification = "A sufficiently long justification.", RowFilter = "x = 1; DROP " + Canary };
+
+        var r = await ExecAsync(await GovernanceEndpoints.CreateBulkConsentAsync(req, AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+
+        AssertGovernedProblem(r, 400, "ROW_FILTER_SYNTAX_INVALID");
+    }
+
+    [Fact]
+    public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_ProfileById_NotFound()
+    {
+        var repo = Substitute.For<IAccessProfileRepository>();
+
+        var r = await ExecAsync(await GovernanceEndpoints.GetProfileByIdAsync(Canary, AdminContext(), repo, default));
+
+        AssertGovernedProblem(r, 404, "RESOURCE_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_ApproveAssignment_SubjectRequired()
+    {
+        var r = await ExecAsync(await GovernanceEndpoints.ApproveProfileAssignmentAsync(Canary, new ApproveProfileAssignmentRequest(), AdminContext(), Substitute.For<IAccessProfileRepository>(), default));
+
+        AssertGovernedProblem(r, 400, "BAD_REQUEST");
+    }
+
+    [Theory]
+    [InlineData("{ " + Canary)]
+    [InlineData("null")]
+    public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_ConsentManifest_Invalid(string body)
+    {
+        var r = await ExecAsync(await GovernanceEndpoints.ApplyConsentManifestAsync(AdminContext(body), Substitute.For<IDeclarativeConsentApplyService>(), default));
+
+        AssertGovernedProblem(r, 400, body == "null" ? "BAD_REQUEST" : "INVALID_JSON");
+    }
+
+    [Fact]
+    public async Task Bare_Error_Migration_Preserves_Status_And_Code_Per_Group_Plan_TotpRequired()
+    {
+        var r = await ExecAsync(await GovernancePlanEndpoints.HandleConfirmAsync(Canary, new AdminConfirmPlanRequest(Canary, string.Empty), AdminContext(), Substitute.For<IAccessPlanningService>(), default));
+
+        AssertGovernedProblem(r, 400, "GOVERNANCE_PLAN_INVALID");
+    }
+
+    [Fact]
+    public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_RowFilter_DatasetNotFound()
+    {
+        AssertGovernedProblem(await ExecAsync(GovernanceEndpoints.DatasetNotFound()), 404, "RESOURCE_NOT_FOUND");
     }
 }

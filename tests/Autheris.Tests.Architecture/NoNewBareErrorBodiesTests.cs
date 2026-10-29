@@ -67,7 +67,8 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         var measured = Measure(RepositoryScan.ProductionFiles.Select(f => (f.RelativePath, f.Text)));
         // Non-vacuity: the scan must really see the known multi-line and dictionary sites.
         RepositoryScan.ProductionFiles.Count.ShouldBeGreaterThan(500);
-        measured.Keys.ShouldContain("src/Autheris.Api/Endpoints/DbtEndpoints.cs");
+        // Pin a file that still holds bare sites; move the pin when its WP migrates it.
+        measured.Keys.ShouldContain("src/Autheris.Api/Endpoints/WebhookEndpoints.cs");
 
         if (Environment.GetEnvironmentVariable("AUTHERIS_UPDATE_BASELINES") == "1")
         {

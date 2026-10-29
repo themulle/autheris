@@ -3,13 +3,6 @@ src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|4
 src/Autheris.Api/Endpoints/DevPortalEndpoints.cs|8
 src/Autheris.Api/Endpoints/EndpointSecurity.cs|3
 src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs|2
-src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|9
-src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs|22
-src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|5
-src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs|5
-src/Autheris.Api/Endpoints/GovernanceEndpoints.RowFilterEvaluation.cs|3
-src/Autheris.Api/Endpoints/GovernanceEndpoints.SimulationSunsetting.cs|2
-src/Autheris.Api/Endpoints/GovernancePlanEndpoints.cs|4
 src/Autheris.Api/Endpoints/HitLEndpoints.cs|4
 src/Autheris.Api/Endpoints/RebacEndpoints.cs|10
 src/Autheris.Api/Endpoints/SchemaRegistryEndpoints.cs|8

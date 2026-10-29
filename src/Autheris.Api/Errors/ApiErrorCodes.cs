@@ -145,7 +145,8 @@ public static class ApiErrorCodes
             typeof(Autheris.Application.Governance.Grants.GrantErrorCodes),
             typeof(Autheris.Application.Data.Changes.ChangeDetectionErrorCodes),
             typeof(Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes),
-            typeof(Autheris.Application.Analytics.AggregationErrorCodes)
+            typeof(Autheris.Application.Analytics.AggregationErrorCodes),
+            typeof(Autheris.Domain.Model.AccessProfileAssignmentRules)
         })
         {
             foreach (var field in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
