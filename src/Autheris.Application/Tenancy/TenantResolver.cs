@@ -101,7 +101,9 @@ public sealed class TenantResolver : ITenantResolver
             }
             else
             {
-                claim = TenantClaimReader.Read(principal);
+                // No registry cannot name the realm the claim refers to: Invalid (fail closed), never the claim chain.
+                Record(TenantResolutionOutcome.Invalid);
+                return new TenantResolution(TenantResolutionOutcome.Invalid, null);
             }
         }
         else

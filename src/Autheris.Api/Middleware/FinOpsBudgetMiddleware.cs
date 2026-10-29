@@ -67,17 +67,9 @@ public sealed class FinOpsBudgetMiddleware
         }
         else
         {
-            var rawTenant = context.User.FindFirst("tenant_id")?.Value ??
-                            context.User.FindFirst("tid")?.Value ??
-                            context.User.FindFirst("tenant")?.Value;
-
-            if (string.IsNullOrWhiteSpace(rawTenant) || !TenantId.TryParse(rawTenant, out var parsedTenant))
-            {
-                await _next(context).ConfigureAwait(false);
-                return;
-            }
-
-            tenantId = parsedTenant.Value;
+            // DT-SC-03: an authenticated caller always has a resolved tenant (claims transformation); a missing or invalid claim
+            // throws (TenantUnresolved / TenantClaimInvalid) instead of skipping the budget check.
+            tenantId = context.User.GetTenantId().Value!;
             principalId = context.User.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value ??
                           context.User.FindFirst("sub")?.Value ??
                           context.User.Identity?.Name ?? "authenticated";

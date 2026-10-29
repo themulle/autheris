@@ -70,4 +70,24 @@ public sealed class TenantIngressArchitectureTests
 
         offenders.ShouldBeEmpty("autheris:tenant_source is informational (telemetry, SecurityPrincipalContext.TenantSource) and never an authorization input.");
     }
+
+    // Files that may name a tenant claim literal: the stamping itself and two diagnostics that only echo the claim.
+    private static readonly string[] RawTenantClaimSites =
+    [
+        "src/Autheris.Api/Security/TenantStamping.cs",
+        "src/Autheris.Api/Security/DevDiagnostics.cs",
+        "src/Autheris.Api/Endpoints/AuthEndpoints.cs"
+    ];
+
+    [Fact]
+    public void Tenant_Claims_Are_Read_Only_Through_TenantClaimReader()
+    {
+        var offenders = RepositoryScan.ProductionFiles
+            .Where(f => Regex.IsMatch(f.Text, @"Find(First|All|FirstValue)\s*\(\s*""(tenant_id|tid|tenant)""\s*\)"))
+            .Select(f => f.RelativePath)
+            .Where(p => !RawTenantClaimSites.Contains(p, StringComparer.Ordinal))
+            .ToList();
+
+        offenders.ShouldBeEmpty("DT-SC-03: the tenant claim chain is read by TenantClaimReader (Invalid on conflict, never first-wins) or GetTenantId.");
+    }
 }

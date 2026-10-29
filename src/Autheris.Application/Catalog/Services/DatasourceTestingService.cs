@@ -605,13 +605,19 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
     {
         try
         {
-            var tenantStr = user.FindFirst("tenant_id")?.Value ?? "default";
+            // DT-SC-03: the audit belongs to the caller's resolved tenant; a caller without a valid tenant claim gets no audit row (never a "default" bucket).
+            if (Autheris.Domain.Tenancy.TenantClaimReader.Read(user) is not { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } callerTenant)
+            {
+                _logger.LogWarning("Datasource testing audit skipped for {DatasourceId}: the caller has no valid tenant claim.", datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty));
+                return;
+            }
+
             var sidStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "system";
 
             var entry = new AuditLogEntry
             {
                 Id = Guid.NewGuid(),
-                TenantId = new TenantId(tenantStr),
+                TenantId = callerTenant.Tenant,
                 OccurredAt = DateTimeOffset.UtcNow,
                 EventType = AuditEventTypes.DatasourceTested,
                 ActorSid = new Sid(sidStr),

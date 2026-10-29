@@ -192,6 +192,10 @@ public sealed class ResourceGroupMiddleware
                path.EndsWith("/sse", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal const string UnscopedTenantKey = "_unscoped";
+
+    internal const string InvalidTenantKey = "_invalid";
+
     internal static string ResolveTenantKey(HttpContext context)
     {
         string? rawTenantId = null;
@@ -207,15 +211,19 @@ public sealed class ResourceGroupMiddleware
 
         if (string.IsNullOrWhiteSpace(rawTenantId))
         {
-            rawTenantId = context.User.FindFirst("tenant_id")?.Value
-                ?? context.User.FindFirst("tid")?.Value
-                ?? context.User.FindFirst("tenant")?.Value
-                ?? "default";
+            // DT-SC-03: the standard reader; callers without a valid tenant share reserved buckets ('_' is not a valid tenant prefix), never "default".
+            var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(context.User);
+            return claim.Kind switch
+            {
+                Autheris.Domain.Tenancy.ClaimTenantKind.Valid => claim.Tenant.Value!,
+                Autheris.Domain.Tenancy.ClaimTenantKind.Invalid => InvalidTenantKey,
+                _ => UnscopedTenantKey
+            };
         }
 
         var tenantId = rawTenantId.Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
         if (tenantId.Length > 64) tenantId = tenantId[..64];
-        return tenantId.Length == 0 ? "default" : tenantId;
+        return tenantId.Length == 0 ? UnscopedTenantKey : tenantId;
     }
 
     internal static string ResolvePrincipalKey(HttpContext context)

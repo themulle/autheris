@@ -1,5 +1,6 @@
 namespace Autheris.Api.Security;
 
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Tenancy;
@@ -12,9 +13,14 @@ using Autheris.Domain.Tenancy;
 /// </summary>
 internal static class TenantStamping
 {
+    // Identities this process stamped, with the source of the first stamping. A repeated transformation of the same identity keeps the
+    // original source (the tenant claim it re-reads is the stamped one); an inbound autheris:tenant_source never gets here (identity unknown).
+    private static readonly ConditionalWeakTable<ClaimsIdentity, string> Stamped = new();
+
     public static TenantResolution Apply(ClaimsIdentity identity, ITenantResolver resolver, bool realmBound)
     {
-        foreach (var inbound in identity.FindAll(TenantSourceClaim.ClaimType).ToList())
+        var restamp = Stamped.TryGetValue(identity, out var originalSource);
+        while (identity.FindFirst(TenantSourceClaim.ClaimType) is { } inbound)
         {
             identity.RemoveClaim(inbound);
         }
@@ -22,9 +28,13 @@ internal static class TenantStamping
         var resolution = resolver.Resolve(new ClaimsPrincipal(identity));
         if (realmBound)
         {
-            foreach (var claim in identity.Claims.Where(c => TenantClaimReader.IsTenantClaimType(c.Type)).ToList())
+            var names = TenantClaimReader.ClaimNames;
+            for (var i = 0; i < names.Count; i++)
             {
-                identity.RemoveClaim(claim);
+                while (identity.FindFirst(names[i]) is { } claim)
+                {
+                    identity.RemoveClaim(claim);
+                }
             }
         }
 
@@ -54,9 +64,15 @@ internal static class TenantStamping
                 break;
         }
 
+        if (restamp && source is not null)
+        {
+            source = originalSource;
+        }
+
         if (source is not null)
         {
             identity.AddClaim(new Claim(TenantSourceClaim.ClaimType, source));
+            Stamped.AddOrUpdate(identity, restamp ? originalSource! : source);
         }
 
         return resolution;

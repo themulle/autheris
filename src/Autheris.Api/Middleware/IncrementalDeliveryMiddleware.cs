@@ -41,7 +41,9 @@ public sealed class IncrementalDeliveryMiddleware
             return;
         }
 
-        var tenantId = context.User.FindFirst("tenant_id")?.Value;
+        // DT-SC-03: a slot key, not a decision; only a valid tenant claim contributes (an invalid or conflicting one is ignored).
+        var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(context.User);
+        var tenantId = tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? tenantClaim.Tenant.Value : null;
         var subjectId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                         ?? context.User.FindFirst("sub")?.Value
                         ?? context.User.FindFirst("oid")?.Value;
