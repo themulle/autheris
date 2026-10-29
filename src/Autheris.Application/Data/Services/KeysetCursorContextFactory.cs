@@ -17,8 +17,22 @@ using Autheris.Domain.Model;
 /// </summary>
 public static class KeysetCursorContextFactory
 {
-    /// <summary>Bulk keyset streams always seek ascending on the key columns.</summary>
+    /// <summary>The direction signature of a stream whose key columns are all ascending (also the value of every cursor issued before issue #390).</summary>
     public const string AscendingDirection = "asc";
+
+    /// <summary>
+    /// The direction signature bound into the cursor: <c>asc</c> when every column is ascending (existing cursors stay valid), otherwise one
+    /// <c>asc</c>/<c>desc</c> word per key column (e.g. <c>asc,desc</c>), so a cursor issued before a direction change fails the context check.
+    /// </summary>
+    public static string DirectionSignature(IReadOnlyList<KeyColumnDirection>? directions)
+    {
+        if (!KeyDirections.AnyDescending(directions))
+        {
+            return AscendingDirection;
+        }
+
+        return string.Join(',', directions!.Select(d => d == KeyColumnDirection.Descending ? "desc" : "asc"));
+    }
 
     /// <summary>Builds the bulk-stream cursor context.</summary>
     /// <param name="tenantId">The request tenant id value.</param>
@@ -26,12 +40,14 @@ public static class KeysetCursorContextFactory
     /// <param name="keyColumns">The resolved seek key (primary key, else the first unique index).</param>
     /// <param name="callerSid">The caller SID the cursor is issued to.</param>
     /// <param name="request">The stream request; only its filter and projection are bound (never the cursor or the slice limit).</param>
+    /// <param name="keyDirections">The declared directions of <paramref name="keyColumns"/> (empty or null = all ascending).</param>
     public static KeysetCursorContext ForBulkStream(
         string? tenantId,
         TableMetadata metadata,
         IReadOnlyList<string> keyColumns,
         string? callerSid,
-        BulkTableStreamRequest request)
+        BulkTableStreamRequest request,
+        IReadOnlyList<KeyColumnDirection>? keyDirections = null)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(keyColumns);
@@ -42,7 +58,7 @@ public static class KeysetCursorContextFactory
             TenantId: tenantId ?? string.Empty,
             DataSource: table.Domain ?? string.Empty,
             TableName: table.TableName ?? string.Empty,
-            Direction: AscendingDirection,
+            Direction: DirectionSignature(keyDirections),
             Columns: keyColumns,
             Caller: callerSid ?? string.Empty,
             Schema: table.Schema ?? string.Empty,

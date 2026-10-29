@@ -542,7 +542,13 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
             RequiredFilterColumns: table.RequiredFilterColumns.Length > 0 ? table.RequiredFilterColumns : null,
             RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null,
             Language: negotiatedLanguage,
-            RequestedLanguage: language);
+            RequestedLanguage: language,
+            // Issue #390 (I390-SC-11): order and directions come from the restricted view only, so a key with a hidden column shows neither.
+            PrimaryKeyOrder: keyView.PrimaryKeyColumns.Count == 0
+                ? null
+                : keyView.PrimaryKeyColumns
+                    .Select((c, i) => new McpKeyColumn(c, KeyDirections.ToWire(KeyDirections.IsDescending(keyView.PrimaryKeyDirections, i) ? KeyColumnDirection.Descending : KeyColumnDirection.Ascending)))
+                    .ToList());
     }
 
     /// <summary>

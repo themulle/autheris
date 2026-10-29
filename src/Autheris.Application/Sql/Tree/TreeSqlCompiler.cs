@@ -389,16 +389,17 @@ public static partial class TreeSqlCompiler
                 (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.ClearColumnComposite);
             if (useDefault)
             {
-                if (!defaultOrdering.Columns.All(c => SafeNameRegex().IsMatch(c)))
+                if (!defaultOrdering.Terms.All(t => SafeNameRegex().IsMatch(t.Name)))
                 {
                     // Fail closed (like the table-read planner): never silently drop the ORDER BY, which would make paging unstable.
                     throw new GatewayInvalidQueryException("The table cannot be read in a stable order.");
                 }
 
-                foreach (var column in defaultOrdering.Columns)
+                foreach (var term in defaultOrdering.Terms)
                 {
-                    order.Add((column, false));
-                    Need(column);
+                    // Issue #390: the declared key direction; DESC is a fixed literal chosen by this flag, never catalog text.
+                    order.Add((term.Name, term.Descending));
+                    Need(term.Name);
                 }
             }
             else if (defaultOrdering.Kind == Autheris.Application.Data.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)

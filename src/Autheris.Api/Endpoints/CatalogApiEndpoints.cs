@@ -452,26 +452,47 @@ public static class CatalogApiEndpoints
         }
 
         var pkColumns = request.PrimaryKey ?? request.PrimaryKeyColumns ?? Array.Empty<string>();
+
+        // Issue #390 (I390-SC-06/13): directions are the closed strings ASC/DESC with exactly one entry per column. Any other value or a count mismatch
+        // is refused before anything is persisted, with the generic message (the value is never echoed).
+        IReadOnlyList<KeyColumnDirection>? pkDirections = null;
+        if (request.PrimaryKeyDirections is not null && !TryParseDirections(request.PrimaryKeyDirections, pkColumns.Count, out pkDirections))
+        {
+            return Results.BadRequest(new { error = "Invalid table key or index definition." });
+        }
+
         if (request.Indexes != null && System.Linq.Enumerable.Any(request.Indexes, i => i is { Unique: not null, IsUnique: not null } && i.Unique != i.IsUnique))
         {
             // `unique` is canonical, `isUnique` an accepted alias; contradicting values are refused with the generic message.
             return Results.BadRequest(new { error = "Invalid table key or index definition." });
         }
 
-        var indexes = request.Indexes != null
-            ? System.Linq.Enumerable.Select(
-                request.Indexes,
-                i => new TableIndexDefinition(
+        var indexList = new System.Collections.Generic.List<TableIndexDefinition>();
+        if (request.Indexes != null)
+        {
+            foreach (var i in request.Indexes)
+            {
+                IReadOnlyList<KeyColumnDirection>? indexDirections = null;
+                if (i?.Directions is not null && !TryParseDirections(i.Directions, i.Columns?.Count ?? 0, out indexDirections))
+                {
+                    return Results.BadRequest(new { error = "Invalid table key or index definition." });
+                }
+
+                indexList.Add(new TableIndexDefinition(
                     i?.Name ?? string.Empty,
                     i?.Columns ?? Array.Empty<string>(),
-                    i?.Unique ?? i?.IsUnique ?? false)).ToList()
-            : (System.Collections.Generic.IReadOnlyList<TableIndexDefinition>)Array.Empty<TableIndexDefinition>();
+                    i?.Unique ?? i?.IsUnique ?? false,
+                    indexDirections));
+            }
+        }
+
+        System.Collections.Generic.IReadOnlyList<TableIndexDefinition> indexes = indexList;
 
         // The caps are enforced by the validator inside the repository before anything is allocated per element.
         TableKeyDefinitionChange? change;
         try
         {
-            change = await metadataRepository.ReplaceTableKeyDefinitionAsync(tableId.Value, pkColumns, indexes, ct: ct).ConfigureAwait(false);
+            change = await metadataRepository.ReplaceTableKeyDefinitionAsync(tableId.Value, pkColumns, indexes, pkDirections, ct).ConfigureAwait(false);
         }
         catch (TableDefinitionException)
         {
@@ -503,12 +524,34 @@ public static class CatalogApiEndpoints
             })
         }, CancellationToken.None).ConfigureAwait(false);
 
-        return Results.Ok(new
+        var response = KeyDefinitionAuditView(change.After);
+        response["datasetId"] = tableId.Value.ToString();
+        return Results.Ok(response);
+    }
+
+    /// <summary>Parses <c>ASC</c>/<c>DESC</c> strings (ignoring case); false for any other value, a count other than <paramref name="expectedCount"/> or more than the key column limit.</summary>
+    private static bool TryParseDirections(
+        System.Collections.Generic.IReadOnlyList<string?> values,
+        int expectedCount,
+        out IReadOnlyList<KeyColumnDirection>? directions)
+    {
+        directions = null;
+        if (values.Count != expectedCount || values.Count > TableKeyDefinitionValidator.MaxColumnsPerKey)
         {
-            datasetId = tableId.Value.ToString(),
-            primaryKey = change.After.PrimaryKey,
-            indexes = change.After.Indexes
-        });
+            return false;
+        }
+
+        var parsed = new KeyColumnDirection[values.Count];
+        for (var n = 0; n < parsed.Length; n++)
+        {
+            if (!KeyDirections.TryParse(values[n], out parsed[n]))
+            {
+                return false;
+            }
+        }
+
+        directions = parsed;
+        return true;
     }
 
     /// <summary>
@@ -782,12 +825,14 @@ public sealed record DatasetIndexDto(
     string Name,
     System.Collections.Generic.IReadOnlyList<string> Columns,
     bool? IsUnique = null,
-    bool? Unique = null);
+    bool? Unique = null,
+    System.Collections.Generic.IReadOnlyList<string?>? Directions = null);
 
 public sealed record SetDatasetKeysDto(
     System.Collections.Generic.IReadOnlyList<string>? PrimaryKey = null,
     System.Collections.Generic.IReadOnlyList<string>? PrimaryKeyColumns = null,
-    System.Collections.Generic.IReadOnlyList<DatasetIndexDto>? Indexes = null);
+    System.Collections.Generic.IReadOnlyList<DatasetIndexDto>? Indexes = null,
+    System.Collections.Generic.IReadOnlyList<string?>? PrimaryKeyDirections = null);
 
 
 /// <summary>Issue #111 (C-4): replace the admin-source tags of a dataset.</summary>
