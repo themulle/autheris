@@ -72,3 +72,45 @@ Parallel direction lists instead of a key-column record (D-1); all-ascending can
 - Q-4 Keyset cursor binding by direction signature (D-8): accept that all-ascending cursors stay valid and a changed direction fails closed via the existing context mismatch.
 - Q-5 PUT rejection without echo and audit details with directions (D-3, D-4): any further field to redact?
 - Q-6 Does the existing key-change invalidation (metadata cache, compiled-plan/result caches) cover a direction-only change, or must a cache key include the directions?
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-30)
+
+Verdict: APPROVED WITH CONDITIONS. No existing control is weakened: direction is a bool chosen from a closed enum, `DESC` is a fixed literal, filters/masking/RLS/explicit `orderBy` are not touched.
+
+**Rulings on Q-1..Q-6**
+- Q-1 Confirmed: no `-- phase3:` marker (no audit object touched, additive columns on key tables only). Step must still pass the I388-SC-02 base-branch gate and CODEOWNERS.
+- Q-2 Confirmed: direction of a fully visible key is physical metadata of the same class as the column list; D-5 (candidate choice independent of direction) keeps the hidden-column rule intact.
+- Q-3 Grammar confirmed with I390-SC-05.
+- Q-4 Confirmed with I390-SC-07 (all-ascending cursors stay valid, any direction change fails closed).
+- Q-5 Confirmed with I390-SC-06.
+- Q-6 Not assumed: must be proven, I390-SC-08.
+
+**Binding conditions**
+- I390-SC-01 Step 0002 satisfies every I388-SC condition: guard per dialect (PG `IF NOT EXISTS`, SQL Server `COL_LENGTH` per batch, SQLite `-- guard`), shape delta with `addColumn` for both tables, checksum golden line appended only (line 0001 untouched), lint clean (no UPDATE/EXEC/trigger/transaction/DROP), I388-SC-08 timeouts applied by the runner, no data step, no touch of `AUDIT_LOG_ENTRIES` or its trigger (post-conditions of I388-SC-06 still run).
+- I390-SC-02 Column is `NOT NULL` with constant default 0/FALSE and (SQLite) `CHECK IN (0,1)`; a PG/SQL Server equivalent CHECK is not required, but the reader must treat any value other than 0/1 as invalid definition (fail closed, key dropped, no ordering by guess).
+- I390-SC-03 Upgrade test from the v1.5.0 baseline with seeded data (2-column PK, unique index, audit entries): all rows ascending after step, audit chain and anchor verify, history row 0002 equals the golden checksum, rerun idempotent, v1-column-list insert reads ascending.
+- I390-SC-04 Ordering change is confined to default order, tie-breaker and bulk keyset. Filters, row filters, masking, the Clear requirement for ordering columns and explicit `orderBy` must produce byte-identical SQL to today; undeclared/all-ascending tables compile byte-identical SQL.
+- I390-SC-05 `KeyColumnSpec.TryParse` grammar: trim; at most one trailing whitespace-separated token, exactly `ASC` or `DESC` (ordinal-ignore-case); remainder must pass the existing column-name validation (so no quotes, brackets, dots, commas, parentheses, `NULLS FIRST/LAST`, `COLLATE`); max token length bounded (<=256) before parsing; any other shape drops the whole definition (never partial, never ascending fallback for an unparsable token) with a warning that logs no manifest text.
+- I390-SC-06 PUT and import rejections use the generic message/code and never echo direction values or column text; invalid-direction logs carry counts only. Audit details carry directions as the closed strings `ASC`/`DESC` only (never raw input), added to before/after; an audit entry is written for a direction-only change.
+- I390-SC-07 Cursor context for bulk stream binds the full direction signature when any column is descending; the signature is part of the HMAC-protected/validated context (not client-supplied); a mismatch is the existing fail-closed rejection (no fallback to restart). Cursor seek operator and `ORDER BY` for each column come from the same single direction source in one method, never recomputed separately.
+- I390-SC-08 Prove cache coherence: every cache keyed by table metadata or key (metadata cache, compiled-plan/result caches, `TableRowIdentity` consumers, MCP/catalog description caches) is invalidated, or keyed by the directions, on a direction-only change; add a test that reads, changes only the direction, reads again and observes the new order without restart. If any cache is not covered, include the direction signature in its key.
+- I390-SC-09 Keyset correctness: stream seeks use `<` exactly for descending columns, mixed asc/desc OR-chain verified for each prefix branch; NULL handling: keyset stream requires non-nullable PK columns (a nullable declared PK column with a stream request fails closed with the existing generic error, or direction is ignored with ascending as today, whichever the code already does for NULL cursor values; document and test). Default order over unique-index/PK terms with nullable columns: NULL placement is engine-defined (PG DESC puts NULLs first, SQL Server/SQLite smallest); do not add NULLS clauses, document the per-dialect behaviour in the golden tests.
+- I390-SC-10 Tie-breaker stays total and deterministic: after the caller's explicit terms, all key columns not named by the caller are appended with declared direction; the full key remains in the ORDER BY so pages never skip or duplicate rows (offset paging stable).
+- I390-SC-11 `Restrict` drops directions together with the key; `PrimaryKeyOrder`, catalog `PrimaryKeyDirections` and index `directions` are emitted only when every column of that key/index is visible to the principal; no direction for partial keys; no cross-tenant/principal data (values come from the per-table definition already tenant-scoped).
+- I390-SC-12 Ratchet: `CatalogGovernanceRatchet.Merge` must not let an import/sync downgrade or flip stored directions when the incoming side lacks a declaration, and directions always travel with the same side as their column list (a column list from one side never combined with directions from the other).
+- I390-SC-13 DoS: direction lists are bounded by the existing key column limit; a count mismatch is rejected before persistence; no per-request allocation growth beyond the existing term lists.
+
+**Mandatory tests (`[Trait("Category","Security")]`)** in addition to plan section 3 items marked S:
+- I390-T-01 `Step0002_UpgradeFromV150_WithData_PreservesRowsAndAuditChain` (all three dialects).
+- I390-T-02 `Step0002_Lint_And_Golden_AppendOnly` (existing gates green at v2).
+- I390-T-03 `KeyColumnSpec_TryParse_RejectsInjectionAndExtraTokens` (theory: `ts DESC; DROP`, `ts DESC DESC`, `ts NULLS FIRST`, `"ts" DESC`, `ts COLLATE x`, empty name, over-long token).
+- I390-T-04 `DbtConstraint_InvalidToken_DropsWholeDefinition_NoPartialKey`.
+- I390-T-05 `SetDatasetKeys_InvalidDirection_Returns400_NoEchoNoAuditLeak`.
+- I390-T-06 `Reader_InvalidIsDescendingValue_FailsClosed`.
+- I390-T-07 `OrderingChange_DoesNotAlterFilterMaskingOrExplicitOrderBySql`.
+- I390-T-08 `PlanKeysetStream_MixedDirections_NoSkipNoDuplicateAcrossPages` (data with ties on the first column, asc,desc and desc,asc, per dialect).
+- I390-T-09 `PlanKeysetStream_CursorAfterDirectionChange_FailsClosed` and `_TamperedDirectionSignature_FailsClosed`.
+- I390-T-10 `PlanKeysetStream_NullableKeyColumn_BehaviourIsDefinedAndTested`.
+- I390-T-11 `DirectionOnlyChange_InvalidatesCachesAndAudits`.
+- I390-T-12 `DescribeDataset_And_CatalogDetail_HiddenColumn_NoDirectionLeak` (PK and index, other principal sees nothing).
+- I390-T-13 `Ratchet_Merge_DirectionsNeverCrossSides`.
