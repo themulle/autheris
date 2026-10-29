@@ -126,12 +126,16 @@ public sealed partial class GovernedSqlExecutor
                     columns.Add(column.Name);
                 }
 
+                var budget = request.ResultByteBudget;
+                long totalBytes = 0;
                 while (await reader.ReadAsync(token).ConfigureAwait(false))
                 {
                     var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        row[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[columns[i]] = budget is not null
+                            ? budget.ReadValue(reader, i, ref totalBytes)
+                            : reader.IsDBNull(i) ? null : reader.GetValue(i);
                     }
                     rows.Add(row);
                 }

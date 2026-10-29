@@ -51,6 +51,11 @@ public sealed record GovernedSqlQueryRequest(
     /// internal to <c>Autheris.Application</c>, so client-facing assemblies cannot set it and JSON binding never reaches it.
     /// </summary>
     internal IReadOnlyDictionary<string, object?>? GatewayParameters { get; init; }
+
+    /// <summary>
+    /// #398: byte budget for the string cells of a buffered read (planned aggregations with text group keys). Internal; never from client input.
+    /// </summary>
+    internal ResultByteBudget? ResultByteBudget { get; init; }
 }
 
 public sealed record GovernedSqlResult(
