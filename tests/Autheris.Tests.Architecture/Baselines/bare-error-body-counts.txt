@@ -1,8 +1,5 @@
 # O-5b step 1 (NL-SC-05): bare { error = ... } response bodies per src file. Format: path|count. Counts may only fall; no wildcards.
-src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|23
 src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|4
-src/Autheris.Api/Endpoints/DataContractEndpoints.cs|2
-src/Autheris.Api/Endpoints/DbtEndpoints.cs|2
 src/Autheris.Api/Endpoints/DevPortalEndpoints.cs|8
 src/Autheris.Api/Endpoints/EndpointSecurity.cs|3
 src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs|2
@@ -19,7 +16,6 @@ src/Autheris.Api/Endpoints/SchemaRegistryEndpoints.cs|8
 src/Autheris.Api/Endpoints/StreamingCdcEndpoints.cs|6
 src/Autheris.Api/Endpoints/SubjectLifecycleEndpoints.cs|1
 src/Autheris.Api/Endpoints/SystemEndpoints.cs|3
-src/Autheris.Api/Endpoints/TableStreamEndpoints.cs|17
 src/Autheris.Api/Endpoints/TenantRegistryAdminEndpoints.cs|3
 src/Autheris.Api/Endpoints/TokenRevocationEndpoints.cs|2
 src/Autheris.Api/Endpoints/TotpFirstEnrollmentGuard.cs|3
