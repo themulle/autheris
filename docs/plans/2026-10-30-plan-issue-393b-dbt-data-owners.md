@@ -45,3 +45,41 @@
 4. `DATA_OWNERS` has no tenant column: is linking an existing owner row created by another tenant's import acceptable (read-only reuse), or must cross-tenant reuse be rejected?
 5. Provenance encoded in the `TABLE_OWNERS.id` prefix instead of a column: acceptable, or require a migration step after #402?
 6. Should `delegate` role assignments be allowed through the import, or primary only?
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-30)
+
+Verdict: APPROVED WITH CONDITIONS. Facts checked: `IsGlobalGovernanceAdmin` guards the governance endpoint (`DbtEndpoints.cs:37`); `GovernanceAdmin` already approves consents without an owner check, so an owner write grants authority to a non-admin principal (delegation, not escalation of the admin). Approver matching on sid/account/email makes every imported identifier approval-relevant.
+
+Rulings: Q1 direct apply accepted (opt-in + global admin + audit + no self-assignment; a pending state would need a new approver of the approver and is out of proportion). Q2 audit-intent before apply, outcome after (not post-commit only). Q3 SCIM existence required when a realm is configured. Q4 read-only reuse across tenants accepted, tenant gate stays on the table. Q5 prefix provenance accepted, no migration. Q6 `primary` and `delegate` both allowed (equal approval authority; role is recorded in audit).
+
+Product fit: explicit owner objects via the governance import satisfy the issue acceptance. Manifest `meta.owner` stays suggestion-only: it is a free-text team label and the manifest endpoint admits the lower-privileged `DbtAdmin`; importing it would let a DbtAdmin mint approvers. Optional later follow-up, not in this PR: under the same flag and only for a global governance admin caller, a lookup-only mapping of `meta.owner` to an existing active `DATA_OWNERS` row (never creation).
+
+Binding conditions
+- I393B-SC-01 Fail closed: flag off, missing write repository, missing audit repository, unparsable owner, or any validation or apply error rejects the whole import before any owner row; no partial owner writes. Error messages name table and field, never the identifier or e-mail value.
+- I393B-SC-02 Owner writes require `IsGlobalGovernanceAdmin` re-checked in the import service (not only at the endpoint); `DbtAdmin` alone never reaches the owner path, even with the flag on.
+- I393B-SC-03 Audit-intent: the dry-run change set is written via `RecordAuditEventsAsync` (awaited, synchronous, not the group-commit buffer) before the apply; audit failure aborts with no owner write. After apply a single outcome event (success or `dbt_owner_apply_failed`) is recorded. Details carry owner id, role, table, source; no e-mail, no account, no display name.
+- I393B-SC-04 When an identity realm is configured for the caller tenant, every owner to be created or newly linked must exist and be active in `IIdentityStoreRepository`; lookup failure or unavailability rejects (fail closed). Without a realm: format and collision checks only, and the audit event records `identity_verified=false`.
+- I393B-SC-05 Identifier comparison (self-assignment, collision, existing-row lookup) is trimmed, Unicode-normalized (FormC) and case-insensitive on all three dialects (SQLite default collation is case-sensitive); leading/trailing whitespace in identifiers is rejected. Collision check covers sid, account and email against all three columns of every row.
+- I393B-SC-06 Bounds: at most 10 owners per table (as planned) and at most 5,000 owner assignments and 1,000 new `DATA_OWNERS` rows per import; exceeding rejects. Dry run and apply use the same set; DryRun never commits.
+- I393B-SC-07 `dbt:` TABLE_OWNERS ids are created only by the import; replace deletes only rows with the `dbt:` prefix and only for tables passing `IsTenantAllowed`; the demo seed and any manual path must not emit the prefix (test pins it).
+- I393B-SC-08 Replace/removal events are audited per row; removing all owners of a table in replace mode is allowed but flagged `removed_all=true` in the audit details.
+- I393B-SC-09 Bare-string owner lookup resolves only to exactly one active row; zero or several matches reject; it never creates a row.
+- I393B-SC-10 `display_name` sanitization (control and bidi characters rejected, 200 cap) is applied before persistence; logs never contain owner identifiers or e-mail.
+- I393B-SC-11 Linking an existing owner to a table requires the table to pass `IsTenantAllowed` for the caller; the existing consent-tenant check in approval stays unchanged (no change to `IsAuthorizedApproverForTableAsync`, no weakening of `IsSelfApproval`).
+
+Mandatory tests (all `[Trait("Category","Security")]`)
+- I393B-T-01 `Import_FlagOff_WithOwner_RejectsWholeImport_NoWrites`
+- I393B-T-02 `Import_DbtAdminOnly_WithFlagOn_RejectsOwnerPath`
+- I393B-T-03 `Import_AuditIntentFails_NoOwnerRowsWritten`
+- I393B-T-04 `Import_AuditDetails_ContainNoEmailOrDisplayName`
+- I393B-T-05 `Import_RealmConfigured_UnknownOrInactivePrincipal_Rejects`; `Import_RealmConfigured_IdentityStoreUnavailable_Rejects`
+- I393B-T-06 `Import_SelfAssignment_ByCaseOrWhitespaceVariant_Rejects` (all three identifiers, sid/account/email alias)
+- I393B-T-07 `Apply_IdentifierCollision_CaseVariantAcrossColumns_Rejects` on SQLite, PostgreSQL, SQL Server
+- I393B-T-08 `Import_ExceedsOwnerCaps_Rejects`
+- I393B-T-09 `Replace_DeletesOnlyDbtPrefixedRows_AndOnlyForTenantAllowedTables`
+- I393B-T-10 `ManualOrSeedPath_NeverEmitsDbtPrefix`
+- I393B-T-11 `Import_BareStringOwner_AmbiguousOrMissing_Rejects_NeverCreates`
+- I393B-T-12 `Import_ForeignTenantTable_Rejects_NoOwnerLinked`
+- I393B-T-13 `ImportedOwner_CannotApproveConsentOfOtherTenant` (existing tenant check holds)
+- I393B-T-14 `ManifestSync_MetaOwner_WritesNoTableOwners` (as planned)
+- I393B-T-15 `Import_ErrorMessages_DoNotEchoIdentifiers`
