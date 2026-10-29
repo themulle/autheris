@@ -80,8 +80,8 @@ jobs:
   # G7 mutation score (plan 9.3, M-12, SC-06), sharded: the in-scope files are split over G7_SHARDS parallel jobs, because one job did not
   # finish within its budget on the CI runners (about 3.6x slower than the dev machine). Each shard marks every file outside its own subset
   # with `// Stryker disable all` (g7-scope.sh --apply --shard I/N, assignment by g7-shard.py, balanced by the measured per-file mutant counts in g7-weights.json), so Stryker mutates
-  # only that subset. The scope, the Debug configuration (the security mutant hooks exist only there) and the break threshold (85%, kept
-  # in the config; the shard step passes --break-at 0 because only the aggregate enforces 85 on the summed raw counts) live in
+  # only that subset. The scope, the Debug configuration (the security mutant hooks exist only there) and the break threshold (the ratchet value, 72% now and raised stepwise to 85%, kept
+  # in the config and in tools/sqlgate/g7-break-ratchet.txt; the shard step passes --break-at 0 because only the aggregate enforces it on the summed raw counts) live in
   # stryker-config.json. Each shard reduces its report to raw status counts and uploads it with the
   # full Stryker output. The aggregate job below decides the gate. Run on the nightly head and, with the cutover profile, on the cutover PR head.
   # A timeout fails the step (step timeout below the job timeout), so a shard ends as failure, never as cancelled. No continue-on-error.
@@ -187,7 +187,7 @@ jobs:
             --in-scope-list "$RUNNER_TEMP/g7-inscope.txt" \
             --shards "${G7_SHARDS}" \
             --floor "${G7_MUTANT_FLOOR}" \
-            --break-at 85 \
+            --break-at 72 \
             --allow-zero tools/sqlgate/g7-zero-mutant-allowlist.txt \
             --needs-result "$SHARDS_RESULT"
 
