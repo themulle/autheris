@@ -31,7 +31,9 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ["src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs|[\"error\"] = errorText"] =
             "Audit details dictionary of a rejected federated statement, not a response body",
         ["src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs|[\"error\"] = new Dictionary<string, object> { [\"type\"] = \"string\" },"] =
-            "OpenAPI schema property declaration, not a response body"
+            "OpenAPI schema property declaration, not a response body",
+        ["src/Autheris.Application/Governance/Services/DifferentialPrivacyEngine.cs|new { attempted = request.Epsilon, error = \"Cluster budget store unavailable\" }"] =
+            "Audit DetailsJson payload of a fail-closed privacy budget denial, not a response body (the request itself ends in an exception)"
     };
 
     /// <summary>
@@ -48,7 +50,7 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", "new { error = new { code = \"NotFound\"", 1, "OData v4 JSON error object (reshaped, fixed message)"),
         ("src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs", "new { error = new { message, type = code", 1, "Iceberg REST catalog ErrorModel {message,type,code}"),
         ("src/Autheris.Api/Endpoints/BackstageEndpoints.cs", "new { error = new { name = \"NotFoundError\"", 1, "Backstage ErrorResponseBody {error{name,message},response{statusCode}} (reshaped, fixed message)"),
-        ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", "new { error = body, status = statusCode }", 1, "Envoy ext_authz denied-response pass-through"),
+        ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", "new { error = safeBody, status = statusCode }", 1, "Envoy ext_authz denied-response pass-through"),
         ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", "[\"error\"] = trinoError", 1, "Trino in-protocol QueryResults.error (a spec member of a 200 result, not an HTTP-level error body)")
     ];
 
@@ -65,10 +67,11 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
     public void No_New_Bare_Error_Bodies()
     {
         var measured = Measure(RepositoryScan.ProductionFiles.Select(f => (f.RelativePath, f.Text)));
-        // Non-vacuity: the scan must really see the known multi-line and dictionary sites.
+        // Non-vacuity (stable): the scan covers the production tree and every exclusion and allowlist entry is live. The synthetic
+        // detector tests below prove the shapes are still recognised, so an empty baseline cannot mean a blind scanner.
         RepositoryScan.ProductionFiles.Count.ShouldBeGreaterThan(500);
-        // Pin a file that still holds bare sites; move the pin when its WP migrates it.
-        measured.Keys.ShouldContain("src/Autheris.Api/Endpoints/WebhookEndpoints.cs");
+        Exclusions.Count.ShouldBeGreaterThan(0);
+        ProtocolAllowlist.Count.ShouldBeGreaterThan(0);
 
         if (Environment.GetEnvironmentVariable("AUTHERIS_UPDATE_BASELINES") == "1")
         {
@@ -91,7 +94,6 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
     public void Baseline_Has_No_Wildcards_And_Sorted_Unique_Src_Paths()
     {
         var lines = RepositoryScan.ReadBaseline(BaselineFile);
-        lines.ShouldNotBeEmpty();
         foreach (var line in lines)
         {
             var key = line[..line.LastIndexOf('|')];
@@ -102,6 +104,13 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         }
 
         RepositoryScan.ParseCountBaseline(lines).Values.ShouldAllBe(v => v > 0);
+    }
+
+    [Fact]
+    public void Bare_Error_Baseline_Is_Empty_Except_Protocol_Allowlist()
+    {
+        // NL-T-25: no unreasoned bare error response body remains; only the reasoned exclusions and the protocol allowlist exist.
+        RepositoryScan.ParseCountBaseline(RepositoryScan.ReadBaseline(BaselineFile)).ShouldBeEmpty();
     }
 
     [Fact]

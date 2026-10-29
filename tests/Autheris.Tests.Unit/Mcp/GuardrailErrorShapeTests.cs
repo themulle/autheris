@@ -4,28 +4,22 @@ using Autheris.Application.Mcp.Services;
 using Shouldly;
 using Xunit;
 
-/// <summary>NL-SC-04 / NL-SC-06 (O-5a, O-5c): the AI guardrail error detector stays fail-closed across the bare-shape rename and recognises governed ProblemDetails.</summary>
+/// <summary>NL-SC-04 / NL-SC-06 / NL-SC-25 (O-5a, O-5c): the AI guardrail error detector recognises the executor shape, governed ProblemDetails and relayed protocol errors; the legacy bare shape is gone.</summary>
 [Trait("Category", "Security")]
 public sealed class GuardrailErrorShapeTests
 {
     [Theory]
-    [InlineData("""{"error":"InvalidParams"}""", "InvalidParams")]
-    [InlineData("""{"error":"InvalidParams","message":"m"}""", "InvalidParams")]
-    [InlineData("""{"error":"free text with blanks"}""", "ERROR")]
-    public void Guardrail_Bare_Error_Shape_Still_Audited_Deny_After_Rename(string json, string code)
-    {
-        AiDataGuardrailService.TryGetExecutorError(json, out var errorCode).ShouldBeTrue();
-        errorCode.ShouldBe(code);
-    }
-
-    [Theory]
     [InlineData("""{"error":"x","rows":[]}""")]
     [InlineData("""{"error":5}""")]
     [InlineData("""{"error":""}""")]
-    [InlineData("""{"error":"  "}""")]
+    [InlineData("""{"error":"free text"}""")]
+    [InlineData("""{"error":"x","status":200}""")]
     [InlineData("""{"message":"m"}""")]
-    public void Guardrail_Bare_Error_Shape_Rejects_Data_Rows_And_Malformed_Errors(string json)
+    [InlineData("""{"rows":[{"error":"cell"}]}""")]
+    [InlineData("""{"error":{"code":"X"}}""")]
+    public void Guardrail_Does_Not_Mistake_Data_Or_Legacy_Bare_Shapes_For_Errors(string json)
     {
+        // NL-SC-25: the legacy bare shape is no longer produced (ratchet baseline empty) and is no longer special-cased.
         AiDataGuardrailService.TryGetExecutorError(json, out _).ShouldBeFalse();
     }
 
@@ -66,7 +60,12 @@ public sealed class GuardrailErrorShapeTests
             McpToolError.Serialize("INVALID_PARAMS", "m"),
             McpToolError.Serialize("FORBIDDEN", "m", "tenant", "tool"),
             """{"isError":true,"error":{"code":"X","message":"m"}}""",
-            """{"error":"Forbidden","message":"m"}""",
+            // Relayed protocol shapes (NL-SC-29): OData, Iceberg, Backstage, JSON-RPC and the Envoy pass-through.
+            """{"error":{"code":"NotFound","message":"m"}}""",
+            """{"error":{"message":"m","type":"NoSuchTableException","code":404}}""",
+            """{"error":{"name":"NotFoundError","message":"m"},"response":{"statusCode":404}}""",
+            """{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"m"}}""",
+            """{"error":"Access Denied by Autheris PDP","status":403}""",
             """{"type":"urn:autheris:error:BAD_REQUEST","title":"Bad Request","status":400,"detail":"d","code":"BAD_REQUEST"}"""
         };
         foreach (var json in shapes)

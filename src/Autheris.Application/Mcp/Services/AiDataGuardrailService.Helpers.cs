@@ -85,10 +85,10 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), the bare
-    /// shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
-    /// nothing else) or a governed ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c> or <c>type</c>). All are audited as
-    /// DENY and returned with <c>isError: true</c>.
+    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), a governed
+    /// ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c> or <c>type</c>) or a relayed protocol error
+    /// object. All are audited as DENY and returned with <c>isError: true</c>. The legacy bare <c>{ "error": "..." }</c> shape is no longer
+    /// produced anywhere (NoNewBareErrorBodiesTests, baseline empty) and is not recognised.
     /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
@@ -98,9 +98,9 @@ public sealed partial class AiDataGuardrailService
         {
             using var doc = JsonDocument.Parse(resultJson);
             var root = doc.RootElement;
-            if (root.ValueKind == JsonValueKind.Object && IsBareErrorShape(root, out var bareCode))
+            if (root.ValueKind == JsonValueKind.Object && IsProtocolErrorShape(root, out var protocolCode))
             {
-                errorCode = bareCode;
+                errorCode = protocolCode;
                 return true;
             }
 
@@ -152,30 +152,34 @@ public sealed partial class AiDataGuardrailService
         return false;
     }
 
-    private static bool IsBareErrorShape(JsonElement root, out string? errorCode)
+    /// <summary>
+    /// Protocol-mandated error bodies that an MCP-reachable tool may relay (NL-SC-29): an object-valued <c>error</c> member with a string
+    /// <c>message</c> (JSON-RPC, OData, Iceberg, Backstage) or the Envoy pass-through <c>{ "error": "...", "status": 4xx }</c>.
+    /// </summary>
+    private static bool IsProtocolErrorShape(JsonElement root, out string? errorCode)
     {
         errorCode = null;
-        string? error = null;
-        foreach (var prop in root.EnumerateObject())
-        {
-            if (string.Equals(prop.Name, "error", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String)
-            {
-                error = prop.Value.GetString();
-            }
-            else if (!(string.Equals(prop.Name, "message", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String))
-            {
-                return false;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(error))
+        if (!root.TryGetProperty("error", out var error))
         {
             return false;
         }
 
-        // Only a code-like value (no blanks, short) is reported as the code; a free-text error is reported as ERROR.
-        errorCode = error.Length <= 64 && !error.Any(char.IsWhiteSpace) ? error : "ERROR";
-        return true;
+        if (error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+        {
+            errorCode = error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(code.GetString())
+                ? code.GetString()
+                : "ERROR";
+            return true;
+        }
+
+        if (error.ValueKind == JsonValueKind.String && root.TryGetProperty("status", out var status) &&
+            status.ValueKind == JsonValueKind.Number && status.TryGetInt32(out var statusCode) && statusCode >= 400)
+        {
+            errorCode = "ERROR";
+            return true;
+        }
+
+        return false;
     }
 
     internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(
