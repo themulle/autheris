@@ -188,9 +188,9 @@ public sealed class CatalogVisibilityServiceArchitectureTests
     public void EngineRowReturningMethods_AreTheGuardedSetPlusTheNarrowingOnlyContractFilter()
     {
         // A new public method that returns catalog rows must be added to the guarded set (or consciously allowed here), otherwise a new
-        // visibility entry point could bypass ICatalogVisibilityService unnoticed. FilterByContract only narrows by a schema contract
-        // (no consent or tier decision), so it is allowed everywhere; ComputeAccessStatus returns a status string, not rows.
-        string[] narrowingOnly = ["FilterByContract"];
+        // visibility entry point could bypass ICatalogVisibilityService unnoticed. FilterByContract only narrows by a schema contract and
+        // DropForeignVirtualTables only drops other tenants' virtual tables (no consent or tier decision), so both are allowed everywhere; ComputeAccessStatus returns a status string, not rows.
+        string[] narrowingOnly = ["FilterByContract", "DropForeignVirtualTables"];
         var module = CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
         var engine = module.GetType(Engine);
 

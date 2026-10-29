@@ -25,6 +25,9 @@ internal static class Wp0
     public static readonly TenantId TenantA = new("tenant-a");
     public static readonly TenantId TenantB = new("tenant-b");
 
+    /// <summary>The tenant claim of a Single-mode caller (DT-A-3: the claims transformation stamps it; the catalog services read claims only).</summary>
+    public const string SingleTenantClaim = "legacy-single-tenant";
+
     public static GatewayOptions Options(TenancyMode? mode = null, params string[] sharedTables) => new()
     {
         Tenancy = new TenancyOptions { Mode = mode?.ToString() },

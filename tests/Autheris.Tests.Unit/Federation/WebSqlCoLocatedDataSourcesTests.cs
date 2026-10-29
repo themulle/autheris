@@ -180,7 +180,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
             consentRepo,
             gatewayOptions: Options.Create(gatewayOptions));
 
-        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
 
         var result = await service.AnalyzeQueriesAsync(
             [
@@ -248,7 +248,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
             consentRepo,
             gatewayOptions: Options.Create(gatewayOptions));
 
-        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
 
         var result = await service.AnalyzeQueriesAsync(
             [

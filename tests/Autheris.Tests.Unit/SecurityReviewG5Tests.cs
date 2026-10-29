@@ -98,7 +98,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     }
 
     private static ClaimsPrincipal TokenPrincipal(DateTimeOffset exp) => new(new ClaimsIdentity(
-        [new Claim("exp", exp.ToUnixTimeSeconds().ToString()), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-G5")], "Bearer"));
+        [DefaultTenantCaller.Claim, new Claim("exp", exp.ToUnixTimeSeconds().ToString()), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-G5")], "Bearer"));
 
     [Fact]
     public async Task A3_Subscription_ExpiredToken_IsRejected()
@@ -412,7 +412,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     }
 
     private static ClaimsPrincipal Analyst() => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")], "Bearer"));
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")], "Bearer"));
 
     [Fact]
     public async Task Iceberg_InactiveTable_IsNotServed()

@@ -28,6 +28,7 @@ public sealed class EnterpriseClaimsTransformationDegradedTests
     {
         var registry = Substitute.For<IIdentityRealmRegistry>();
         registry.GetDefaultRealm().Returns(ResolverRealm());
+        registry.GetRealm("resolver-realm").Returns(ResolverRealm()); // DT-A-3: the tenant resolver looks the stamped realm up by id
         return registry;
     }
 

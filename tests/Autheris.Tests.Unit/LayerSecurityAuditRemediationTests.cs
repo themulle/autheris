@@ -52,7 +52,7 @@ public sealed class LayerSecurityAuditRemediationTests
         };
         var badPrincipal = new ClaimsPrincipal(new ClaimsIdentity(badClaims, "TestAuth"));
 
-        Should.Throw<SecurityException>(() => badPrincipal.GetTenantId());
+        Should.Throw<Autheris.Domain.Exceptions.TenantClaimInvalidException>(() => badPrincipal.GetTenantId());
 
         // Valid claim should parse correctly
         var goodClaims = new List<Claim>

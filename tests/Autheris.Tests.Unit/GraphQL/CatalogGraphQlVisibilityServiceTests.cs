@@ -56,7 +56,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
     public async Task GraphQl_Unrestricted_SameSetAsRestAndMcp()
     {
         // Single mode, GovernanceAdmin without tenant claim: no consent exists for either table; the engine rule is the whole catalog.
-        var admin = Wp0.User("S-GOV", null, ["GovernanceAdmin"]);
+        var admin = Wp0.User("S-GOV", Wp0.SingleTenantClaim, ["GovernanceAdmin"]);
         var tables = Wp0.Tables(Orders, Invoices);
         var consents = Wp0.Consents();
         var options = Opts(TenancyMode.Single);

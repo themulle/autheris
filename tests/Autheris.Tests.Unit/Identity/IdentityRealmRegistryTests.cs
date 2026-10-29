@@ -367,7 +367,7 @@ public sealed class IdentityRealmRegistryTests
     }
 
     [Fact]
-    public void IdentityRealmRegistry_Initialize_WithPartialClaimMapping_FallsBackToFixedLegacy()
+    public void IdentityRealmRegistry_Initialize_WithPartialClaimMapping_IsUnbound()
     {
         var registry = new IdentityRealmRegistry();
         var realmsOptions = new IdentityRealmsOptions();
@@ -383,7 +383,8 @@ public sealed class IdentityRealmRegistryTests
 
         var realm = registry.GetRealm("partial-claim");
         realm.ShouldNotBeNull();
-        realm.TenantBinding.Kind.ShouldBe(TenantBindingKind.Fixed);
+        // DT-A-11/DT-A-3: a partial mapping binds nothing (token tenant claims are ignored, the configured default fills); never a legacy tenant.
+        realm.TenantBinding.Kind.ShouldBe(TenantBindingKind.Unbound);
     }
 
     [Fact]

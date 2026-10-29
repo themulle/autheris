@@ -355,7 +355,7 @@ public sealed class DuckDbOlapSecurityTests
         // Arrange
         var httpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
         httpContext.Response.Body = new System.IO.MemoryStream();
-        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "testuser")], "Bearer"));
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "testuser")], "Bearer"));
 
         var invalidJsonBytes = System.Text.Encoding.UTF8.GetBytes("{ broken json: ");
         httpContext.Request.Body = new System.IO.MemoryStream(invalidJsonBytes);
@@ -412,7 +412,7 @@ public sealed class DuckDbOlapSecurityTests
             RequestServices = new ServiceCollection().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
         };
         httpContext.Response.Body = new MemoryStream();
-        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "Bearer"));
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "Bearer"));
 
         var json = JsonSerializer.Serialize(new
         {

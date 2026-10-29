@@ -98,7 +98,7 @@ public sealed class IntegrationGapBTests
         {
             claims.Add(new Claim("jti", jti));
         }
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth"));
     }
 
     private static (ISocketSession Session, IOperationMessagePayload Payload, DefaultHttpContext HttpContext, RecordingLifetimeFeature Lifetime) CreateSocketSession(string token)
@@ -440,6 +440,6 @@ public sealed class IntegrationGapBTests
         return new SubgraphResultMasker(provider, options, NullLogger<SubgraphResultMasker>.Instance);
     }
 
-    private static readonly ClaimsPrincipal Reader = new(new ClaimsIdentity([new Claim(ClaimTypes.Role, "Reader")], "TestAuth"));
+    private static readonly ClaimsPrincipal Reader = new(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.Role, "Reader")], "TestAuth"));
 
 }

@@ -298,7 +298,7 @@ public sealed class SecurityAttackVectorTests
         var decision = TableAccessDecision.Allowed(metadata.Identifier, columnAccess, null, hasUnconstrainedColumnAllow: false);
 
         var principal = new System.Security.Claims.ClaimsPrincipal(
-            new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-malicious-user")], "Test"));
+            new System.Security.Claims.ClaimsIdentity([DefaultTenantCaller.Claim, new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-malicious-user")], "Test"));
 
         var context = new DataSourceExecutionContext(
             SourceName: metadata.Table.SourceName,

@@ -258,10 +258,17 @@ public sealed class AccessAuditMiddleware
 
             // Tenant attribution uses the same precedence as the rest of the pipeline: the resolved SecurityPrincipalContext
             // first, then the canonical claim resolution. An invalid claim never fails the audit finalizer (API-7: that
-            // surfaced as a 500); the entry keeps the default tenant, is flagged, and never records the raw claim value.
+            // surfaced as a 500); the entry keeps the audit context default tenant (WP-DT-2 moves it to the platform bucket), is flagged, and never records the raw claim value.
             if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext principalContext)
             {
-                auditContext.TenantId = principalContext.TenantId;
+                if (principalContext.ResolvedTenant is { } resolvedTenant && resolvedTenant.Value is not null)
+                {
+                    auditContext.TenantId = resolvedTenant;
+                }
+                else if (principalContext.TenantClaimInvalid)
+                {
+                    auditContext.AdditionalDetails["tenantClaim"] = "INVALID";
+                }
             }
             else
             {

@@ -62,7 +62,7 @@ public class Issue175SecurityConditionsTests
 
     private static ClaimsPrincipal ReadOnlyPrincipal()
     {
-        var identity = new ClaimsIdentity([new Claim("oid", "33333333-3333-3333-3333-333333333333")], "Bearer");
+        var identity = new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("oid", "33333333-3333-3333-3333-333333333333")], "Bearer");
         TokenAccessScope.MarkReadOnly(identity);
         return new ClaimsPrincipal(identity);
     }
@@ -81,7 +81,7 @@ public class Issue175SecurityConditionsTests
             claims.Add(new Claim(ClaimTypes.Role, r));
             claims.Add(new Claim("roles", r));
         }
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "Bearer"));
     }
 
     private static async Task<(bool Passed, int Status)> InvokeMiddlewareAsync(

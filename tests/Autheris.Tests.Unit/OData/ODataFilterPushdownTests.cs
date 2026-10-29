@@ -93,7 +93,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
         return new DataSourceExecutionContext(
             SourceName: "sales",
             Metadata: OrderMetadata(),
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-TEST")], "Test")),
+            Principal: new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-TEST")], "Test")),
             AccessDecision: TableAccessDecision.Allowed(Orders, Access),
             Arguments: new Dictionary<string, object?>(),
             RequestedFields: ["id", "status", "amount"],

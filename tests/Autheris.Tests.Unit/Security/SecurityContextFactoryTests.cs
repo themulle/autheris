@@ -27,7 +27,9 @@ public sealed class SecurityContextFactoryTests
         ctx.ShouldNotBeNull();
         ctx.IsAuthenticated.ShouldBeFalse();
         ctx.UserSid.Value.ShouldBe("ANONYMOUS");
-        ctx.TenantId.ShouldBe(TenantId.LegacySingleTenant);
+        // DT-A-3/DT-A-4: an anonymous context has no tenant (never a default); reading it fails closed.
+        ctx.ResolvedTenant.ShouldBeNull();
+        Should.Throw<Autheris.Domain.Exceptions.TenantUnresolvedException>(() => ctx.TenantId);
     }
 
     [Fact]

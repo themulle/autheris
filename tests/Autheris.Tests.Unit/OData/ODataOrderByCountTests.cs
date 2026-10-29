@@ -93,7 +93,7 @@ INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 
         return new DataSourceExecutionContext(
             SourceName: "erp",
             Metadata: InvoiceMetadata(),
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TEST")], "Test")),
+            Principal: new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TEST")], "Test")),
             AccessDecision: TableAccessDecision.Allowed(Invoices, Access, rowFilterSql: "region = 'CH'"),
             Arguments: new Dictionary<string, object?>(),
             RequestedFields: ["id", "amount"],

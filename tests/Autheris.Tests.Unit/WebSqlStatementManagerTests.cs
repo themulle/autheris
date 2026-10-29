@@ -27,7 +27,7 @@ public sealed class WebSqlStatementManagerTests : IDisposable
     private static readonly TenantId TestTenant = new("tenant-123");
     private static readonly Sid TestOwner = new("user-abc");
     private static readonly ClaimsPrincipal TestUser = new(new ClaimsIdentity(new[]
-    {
+    { DefaultTenantCaller.Claim,
         new Claim(ClaimTypes.PrimarySid, "user-abc"),
         new Claim(ClaimTypes.Name, "Alice")
     }, "TestAuth"));
@@ -139,7 +139,7 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromMilliseconds(10));
 
         var attacker = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
+        { DefaultTenantCaller.Claim,
             new Claim(ClaimTypes.PrimarySid, "attacker-sid")
         }, "TestAuth"));
         var attackerOwner = new Sid("attacker-sid");
@@ -301,9 +301,9 @@ public sealed class WebSqlStatementManagerTests : IDisposable
     [Fact]
     public async Task TwoOidcUsersWithoutPrimarySid_CannotReadEachOthersStatement()
     {
-        var u1 = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "oidc-user-1")], "TestAuth"));
+        var u1 = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("sub", "oidc-user-1")], "TestAuth"));
         var owner1 = new Sid("oidc-user-1");
-        var u2 = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "oidc-user-2")], "TestAuth"));
+        var u2 = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("sub", "oidc-user-2")], "TestAuth"));
         var owner2 = new Sid("oidc-user-2");
 
         var tcs = new TaskCompletionSource<GovernedSqlResult>();
@@ -327,9 +327,9 @@ public sealed class WebSqlStatementManagerTests : IDisposable
             maxSessionsPerUser: 1,
             maxTotalSessions: 10);
 
-        var u1 = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "oidc-user-1")], "TestAuth"));
+        var u1 = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("sub", "oidc-user-1")], "TestAuth"));
         var owner1 = new Sid("oidc-user-1");
-        var u2 = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "oidc-user-2")], "TestAuth"));
+        var u2 = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("sub", "oidc-user-2")], "TestAuth"));
         var owner2 = new Sid("oidc-user-2");
 
         var tcs1 = new TaskCompletionSource<GovernedSqlResult>();
@@ -349,9 +349,9 @@ public sealed class WebSqlStatementManagerTests : IDisposable
     [Fact]
     public async Task Cancel_ByOtherCanonicalSid_Throws()
     {
-        var u1 = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
+        var u1 = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         var owner1 = new Sid("user-1");
-        var u2 = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-2")], "TestAuth"));
+        var u2 = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-2")], "TestAuth"));
         var owner2 = new Sid("user-2");
 
         var tcs = new TaskCompletionSource<GovernedSqlResult>();

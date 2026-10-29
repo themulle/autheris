@@ -382,7 +382,6 @@ public static partial class WebSqlEndpoints
 
         var user = httpContext.User;
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
-        var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
         var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
         if (string.IsNullOrWhiteSpace(callerIdentity))
@@ -392,6 +391,9 @@ public static partial class WebSqlEndpoints
             return;
         }
         var owner = new Sid(callerIdentity);
+
+        // DT-A-3: the tenant is read after the identity check (an anonymous caller is 401, never a tenant error); no tenant, no default.
+        var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
         var waitTimeout = TryParseWaitTimeout(httpContext.Request) ?? TimeSpan.FromSeconds(5);
 
@@ -428,7 +430,6 @@ public static partial class WebSqlEndpoints
         var ct = httpContext.RequestAborted;
         var user = httpContext.User;
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
-        var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
         var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
         if (string.IsNullOrWhiteSpace(callerIdentity))
@@ -438,6 +439,9 @@ public static partial class WebSqlEndpoints
             return;
         }
         var owner = new Sid(callerIdentity);
+
+        // DT-A-3: the tenant is read after the identity check (an anonymous caller is 401, never a tenant error); no tenant, no default.
+        var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
         if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
             !httpContext.Request.Headers.ContainsKey("X-Trino-User"))

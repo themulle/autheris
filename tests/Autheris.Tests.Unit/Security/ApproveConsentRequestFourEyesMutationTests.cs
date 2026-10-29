@@ -46,7 +46,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         };
         var context = new DefaultHttpContext
         {
-            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth", ClaimTypes.Name, ClaimTypes.Role)),
+            User = new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role)),
             RequestServices = services.BuildServiceProvider()
         };
         var accessor = Substitute.For<IHttpContextAccessor>();

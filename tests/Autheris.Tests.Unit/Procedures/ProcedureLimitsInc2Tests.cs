@@ -95,7 +95,7 @@ public class ProcedureLimitsInc2Tests
         }
     }
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
+    private static ClaimsPrincipal User() => new(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
 
     private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null, ProcedureMode mode = ProcedureMode.Read, IReadOnlyList<ProcedureErrorCode>? errorCodes = null)
     {

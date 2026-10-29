@@ -23,7 +23,7 @@ internal static class DecisionPrincipals
 
     private static ClaimsPrincipal Build(string authType, IEnumerable<Claim> claims, string[] roles)
     {
-        var all = claims.Concat(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+        var all = claims.Append(DefaultTenantCaller.Claim).Concat(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         return new ClaimsPrincipal(new ClaimsIdentity(all, authType, ClaimTypes.Name, ClaimTypes.Role));
     }
 

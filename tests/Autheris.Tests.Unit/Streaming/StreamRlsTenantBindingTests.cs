@@ -116,7 +116,7 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
 
         Sid.RealmLookup = r => r == "corp-realm" ? realm : null;
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        var principal = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity(
         [
             new Claim("autheris:realm", "corp-realm"),
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")
@@ -149,7 +149,7 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
 
         Sid.RealmLookup = r => r == "finance-realm" ? realm : null;
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        var principal = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity(
         [
             new Claim("autheris:realm", "finance-realm"),
             new Claim("finance_tid", "org-12345"),

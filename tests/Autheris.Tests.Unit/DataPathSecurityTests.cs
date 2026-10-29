@@ -95,7 +95,7 @@ public class DataPathSecurityTests : IDisposable
             }
         }
 
-        var identity = new ClaimsIdentity(claims, "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);
         var context = new DefaultHttpContext { User = principal };
         return new IsolatedHttpContextAccessor(context);
@@ -299,7 +299,7 @@ public class DataPathSecurityTests : IDisposable
         {
             new(ClaimTypes.Name, "unidentified_user")
         };
-        var identity = new ClaimsIdentity(claims, "TestAuth");
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth");
         var principal = new ClaimsPrincipal(identity);
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>

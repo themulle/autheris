@@ -33,7 +33,7 @@ public sealed class SqlTableReadExecutorOrderingTests
     private static DataSourceExecutionContext Context(TableMetadata meta, int offset = 0) => new(
         SourceName: "d",
         Metadata: meta,
-        Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X")], "Test")),
+        Principal: new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X")], "Test")),
         AccessDecision: TableAccessDecision.Allowed(Id, new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["c"] = ColumnAccessLevel.Clear }, hasUnconstrainedColumnAllow: true),
         Arguments: new Dictionary<string, object?>(),
         RequestedFields: ["c"],

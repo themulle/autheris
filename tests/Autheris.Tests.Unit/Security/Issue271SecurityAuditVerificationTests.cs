@@ -98,7 +98,7 @@ public sealed class Issue271SecurityAuditVerificationTests
                     ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
             ]);
 
-        var identity = new ClaimsIdentity([
+        var identity = new ClaimsIdentity([DefaultTenantCaller.Claim, 
             new Claim(ClaimTypes.PrimarySid, actorSid),
             new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")
         ], "TestAuth");

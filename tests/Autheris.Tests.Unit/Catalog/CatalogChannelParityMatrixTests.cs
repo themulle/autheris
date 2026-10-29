@@ -68,7 +68,7 @@ public sealed class CatalogChannelParityMatrixTests
     {
         CallerClass.ClusterAdmin => Wp0.User("S-USER", "tenant-a", ["ClusterAdmin"]),
         CallerClass.TenantGovernanceAdmin => Wp0.User("S-USER", "tenant-a", ["GovernanceAdmin"]),
-        CallerClass.UnrestrictedSingle => Wp0.User("S-USER", null, ["GovernanceAdmin"]),
+        CallerClass.UnrestrictedSingle => Wp0.User("S-USER", Wp0.SingleTenantClaim, ["GovernanceAdmin"]),
         _ => Wp0.User("S-USER", "tenant-a")
     };
 

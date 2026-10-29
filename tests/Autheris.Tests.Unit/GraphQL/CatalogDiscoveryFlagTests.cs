@@ -58,12 +58,13 @@ public sealed class CatalogDiscoveryFlagTests
 
     [Fact]
     public async Task FlagOn_ClaimlessGovernanceAdmin_Multi_IsNotAnAdministrator()
-        => (await CatalogAsync(Wp0.User("S-ADM", null, ["GovernanceAdmin"]), flag: true)).ShouldBeEmpty();
+        => (await Should.ThrowAsync<HotChocolate.GraphQLException>(() => CatalogAsync(Wp0.User("S-ADM", null, ["GovernanceAdmin"]), flag: true)))
+            .Errors.ShouldContain(e => e.Code == "UNAUTHORIZED"); // DT-A-3: no tenant claim, no default tenant
 
     [Fact]
     public async Task FlagOn_SingleModeGovernanceAdminAndClusterAdmin_Unchanged()
     {
-        (await CatalogAsync(Wp0.User("S-ADM", null, ["GovernanceAdmin"]), flag: true, TenancyMode.Single)).Count.ShouldBe(2);
+        (await CatalogAsync(Wp0.User("S-ADM", Wp0.SingleTenantClaim, ["GovernanceAdmin"]), flag: true, TenancyMode.Single)).Count.ShouldBe(2);
         (await CatalogAsync(Wp0.User("root", "tenant-a", ["ClusterAdmin"]), flag: true)).Count.ShouldBe(2);
     }
 }

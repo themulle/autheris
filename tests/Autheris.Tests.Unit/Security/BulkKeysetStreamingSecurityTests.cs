@@ -33,7 +33,7 @@ public sealed class BulkKeysetStreamingSecurityTests
 {
     private static ClaimsPrincipal CreateReadOnlyPrincipal(string sid = "user-readonly")
     {
-        var identity = new ClaimsIdentity([new Claim("oid", sid), new Claim("sid", sid)], "Bearer");
+        var identity = new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("oid", sid), new Claim("sid", sid)], "Bearer");
         TokenAccessScope.MarkReadOnly(identity);
         return new ClaimsPrincipal(identity);
     }

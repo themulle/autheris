@@ -61,7 +61,7 @@ public sealed class SecurityReview20261002HostingTests
         {
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth"));
     }
 
     // =========================================================================
@@ -429,7 +429,7 @@ public sealed class SecurityReview20261002HostingTests
         var developer = User("S-1-5-21-DEV", "Developer");
         var steward = User("S-1-5-21-STEWARD", "DataSteward");
         var clusterAdmin = User("S-1-5-21-ADMIN", "ClusterAdmin");
-        var anonymousWithRoleClaim = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "ClusterAdmin")]));
+        var anonymousWithRoleClaim = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.Role, "ClusterAdmin")]));
 
         (await authz.AuthorizeAsync(developer, GatewayPolicies.ClusterAdmin)).Succeeded.ShouldBeFalse();
         (await authz.AuthorizeAsync(developer, GatewayPolicies.Approver)).Succeeded.ShouldBeFalse();
@@ -443,7 +443,7 @@ public sealed class SecurityReview20261002HostingTests
     [Fact]
     public void M03_HasAnyRole_AcceptsRawRolesClaim()
     {
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("roles", "PrivacyAdmin")], "Bearer"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("roles", "PrivacyAdmin")], "Bearer"));
 
         GatewayPolicies.HasAnyRole(principal, GatewayPolicies.PrivacyAdminRoles).ShouldBeTrue();
         GatewayPolicies.HasAnyRole(principal, GatewayPolicies.ClusterAdminRoles).ShouldBeFalse();

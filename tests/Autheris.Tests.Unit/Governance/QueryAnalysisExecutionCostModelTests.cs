@@ -66,7 +66,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
             claims.Add(new Claim("role", role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth"));
     }
 
     private static TableMetadata CreateTable(

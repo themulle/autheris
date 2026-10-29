@@ -52,7 +52,7 @@ public sealed class SecurityReview20261002GraphQLTests
             new(ClaimTypes.PrimarySid, sid),
             new(ClaimTypes.NameIdentifier, sid)
         };
-        if (tenant != null) claims.Add(new Claim("tenant_id", tenant));
+        claims.Add(new Claim("tenant_id", tenant ?? DefaultTenantCaller.Claim.Value));
         if (clientId != null) claims.Add(new Claim("client_id", clientId));
         claims.AddRange(extra);
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));

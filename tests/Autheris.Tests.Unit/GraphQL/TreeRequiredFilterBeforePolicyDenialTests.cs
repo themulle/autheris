@@ -61,7 +61,7 @@ public sealed class TreeRequiredFilterBeforePolicyDenialTests : IDisposable
         var root = new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 };
 
         var ex = await Should.ThrowAsync<TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException>(
-            () => service.ExecuteAsync(new ClaimsPrincipal(), root, null, Guid.NewGuid().ToString("N")));
+            () => service.ExecuteAsync(DefaultTenantCaller.Principal(), root, null, Guid.NewGuid().ToString("N")));
 
         ex.Code.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing);
     }
@@ -78,7 +78,7 @@ public sealed class TreeRequiredFilterBeforePolicyDenialTests : IDisposable
         };
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(
-            () => service.ExecuteAsync(new ClaimsPrincipal(), root, null, Guid.NewGuid().ToString("N")));
+            () => service.ExecuteAsync(DefaultTenantCaller.Principal(), root, null, Guid.NewGuid().ToString("N")));
 
         ex.Message.ShouldBe("The row policy of this table is not supported in tree queries.");
     }

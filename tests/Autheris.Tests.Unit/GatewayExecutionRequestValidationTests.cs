@@ -57,7 +57,7 @@ public sealed class GatewayExecutionRequestValidationTests
 
     private static ClaimsPrincipal CreateUser(string sid = "S-1-5-21-LWE-DAVID") =>
         new(new ClaimsIdentity(
-        [
+        [DefaultTenantCaller.Claim, 
             new Claim(ClaimTypes.PrimarySid, sid),
             new Claim(ClaimTypes.NameIdentifier, sid),
             new Claim("objectSid", sid),

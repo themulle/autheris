@@ -266,7 +266,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         var normalized = Should.NotThrow(() => ClaimsNormalizer.Normalize(principal));
 
         normalized.FindFirst("tenant_id").ShouldBeNull();
-        var ex = Should.Throw<System.Security.SecurityException>(() => normalized.GetTenantId());
+        var ex = Should.Throw<Autheris.Domain.Exceptions.TenantClaimInvalidException>(() => normalized.GetTenantId());
         ex.Message.ShouldNotContain("evil");
     }
 }

@@ -71,7 +71,7 @@ public sealed class Wave2GovernanceTests
             ]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
+            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
             "test"));
 
         // Act
@@ -122,7 +122,7 @@ public sealed class Wave2GovernanceTests
             ]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
+            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
             "test"));
 
         // Act
@@ -198,7 +198,7 @@ public sealed class Wave2GovernanceTests
             resolutionService);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [
+            [DefaultTenantCaller.Claim, 
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"),
                 new Claim("scp", "Agent.Read")
             ],
@@ -249,7 +249,7 @@ public sealed class Wave2GovernanceTests
             explanationService: explanationService,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo));
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "test"));
+        var user = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "test"));
 
         // Act
         var accessInfo = await catalog.DescribeMyAccessAsync(user, "default.public.customers");

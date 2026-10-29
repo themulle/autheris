@@ -147,7 +147,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         var single = VirtualTable(TenantId.LegacySingleTenant);
         var consents = Wp0.Consents(Wp0.Allow(single.Identifier, "S-USER", TenantId.LegacySingleTenant, "id"));
 
-        (await VisibleAsync(Wp0.User("S-USER", null), TenantId.LegacySingleTenant, [single], consents, TenancyMode.Single)).ShouldBe([Id(single)]);
+        (await VisibleAsync(Wp0.User("S-USER", Wp0.SingleTenantClaim), TenantId.LegacySingleTenant, [single], consents, TenancyMode.Single)).ShouldBe([Id(single)]);
     }
 
     [Fact]
@@ -310,8 +310,19 @@ public sealed class CatalogVirtualTableVisibilityTests
         var mcpNames = (await mcp.ListDatasetsAsync(user)).Datasets.Select(d => d.Id).Order().ToList();
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
-        var graphQl = (await new Query().GetCatalogAsync(null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service))
-            .Select(t => $"{t.Domain}.{t.Schema}.{t.TableName}").Order().ToList();
+        List<string> graphQl;
+        if (caller == Caller.Claimless)
+        {
+            // DT-A-3: GraphQL refuses a caller without a tenant claim (UNAUTHORIZED); REST and MCP show it nothing. Never a default tenant.
+            (await Should.ThrowAsync<HotChocolate.GraphQLException>(() => new Query().GetCatalogAsync(null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service)))
+                .Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
+            graphQl = [];
+        }
+        else
+        {
+            graphQl = (await new Query().GetCatalogAsync(null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service))
+                .Select(t => $"{t.Domain}.{t.Schema}.{t.TableName}").Order().ToList();
+        }
 
         var expected = caller switch
         {

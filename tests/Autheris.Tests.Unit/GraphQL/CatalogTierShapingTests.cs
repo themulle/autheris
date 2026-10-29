@@ -94,7 +94,7 @@ public sealed class CatalogTierShapingTests
         {
             "global" => (TenancyMode.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
             "tenant" => (TenancyMode.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
-            _ => (TenancyMode.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
+            _ => (TenancyMode.Single, Wp0.User("gov", Wp0.SingleTenantClaim, ["GovernanceAdmin"]))
         };
 
         var result = await Catalog(principal, Opts(mode));
@@ -116,10 +116,17 @@ public sealed class CatalogTierShapingTests
         var hiddenTables = Wp0.Tables(hiddenOnly);
         var hiddenConsents = Wp0.Consents();
         var hiddenOptions = Opts(TenancyMode.Multi);
-        var result = await new Query().GetCatalogAsync(null, null, null, null, null, hiddenTables, hiddenConsents, null, null, accessor, Options.Create(hiddenOptions),
+        var run = () => new Query().GetCatalogAsync(null, null, null, null, null, hiddenTables, hiddenConsents, null, null, accessor, Options.Create(hiddenOptions),
             CatalogVisibilityTestFactory.Create(hiddenTables, hiddenConsents, hiddenOptions));
 
-        result.ShouldBeEmpty();
+        if (caller == "claimless")
+        {
+            // DT-A-3: no tenant claim, no default tenant: refused, nothing leaks.
+            (await Should.ThrowAsync<HotChocolate.GraphQLException>(run)).Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
+            return;
+        }
+
+        (await run()).ShouldBeEmpty();
     }
 
     [Fact]
@@ -159,17 +166,17 @@ public sealed class CatalogTierShapingTests
     [Fact]
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
     {
-        var result = await Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(TenancyMode.Multi));
+        // DT-A-3: a claimless caller has no tenant; the GraphQL catalog refuses it (UNAUTHORIZED), never a default tenant or a full output.
+        var ex = await Should.ThrowAsync<HotChocolate.GraphQLException>(() => Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(TenancyMode.Multi)));
 
-        result.ShouldBeEmpty();
+        ex.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
     }
 
     [Theory]
-    [InlineData(TenancyMode.Multi, 0)]
     [InlineData(TenancyMode.Single, 3)]
     public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyMode mode, int expected)
     {
-        var result = await Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(mode));
+        var result = await Catalog(Wp0.User("gov", Wp0.SingleTenantClaim, ["GovernanceAdmin"]), Opts(mode));
 
         result.Count.ShouldBe(expected);
         result.ShouldAllBe(r => r.Columns.Count == 2);

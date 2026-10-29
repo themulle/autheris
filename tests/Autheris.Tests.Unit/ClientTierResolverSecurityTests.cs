@@ -85,7 +85,7 @@ public sealed class ClientTierResolverSecurityTests
             new Claim(ClaimTypes.NameIdentifier, "user-42"),
             new Claim("tier", "Enterprise")
         };
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "Bearer"));
 
         var context = await _resolver.ResolveAsync(principal, null, "127.0.0.1");
 

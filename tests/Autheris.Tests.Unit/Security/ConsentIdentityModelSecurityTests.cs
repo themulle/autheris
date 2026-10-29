@@ -28,7 +28,7 @@ public sealed class ConsentIdentityModelSecurityTests
             new(ClaimTypes.Upn, "victim@company.com")
         };
 
-        var identity = new ClaimsIdentity(claims, "TestAuth");
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth");
         var principal = new ClaimsPrincipal(identity);
 
         // Act
@@ -68,7 +68,7 @@ public sealed class ConsentIdentityModelSecurityTests
             new("azp", agentClientId)
         };
 
-        var identity = new ClaimsIdentity(claims, "Bearer");
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "Bearer");
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext
         {
             User = new ClaimsPrincipal(identity)

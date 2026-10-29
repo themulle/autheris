@@ -153,14 +153,14 @@ public sealed class DbtSemanticManifestEndpointTests
     public async Task SingleMode_DefaultTenantCallerImports_OtherTenantsDoNotSeeTheManifest()
     {
         var host = NewHost(TenancyMode.Single);
-        var admin = Context(Principal(null, "GovernanceAdmin"), Manifest);
+        var admin = Context(Principal(DefaultTenantCaller.Claim.Value, "GovernanceAdmin"), Manifest);
 
         (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, host.Ingestion, host.Tenancy), admin)).Status.ShouldBe(200);
 
         var analyst = Context(Principal("tenant-b", "Analyst"));
         var list = await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(analyst, host.Catalog, host.Tenancy), analyst);
         list.Body.ShouldNotContain("revenue");
-        var sameTenant = Context(Principal(null, "Analyst"));
+        var sameTenant = Context(Principal(DefaultTenantCaller.Claim.Value, "Analyst"));
         (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(sameTenant, host.Catalog, host.Tenancy), sameTenant)).Body.ShouldContain("revenue");
     }
 

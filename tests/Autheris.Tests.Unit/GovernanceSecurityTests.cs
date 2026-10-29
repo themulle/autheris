@@ -50,7 +50,7 @@ public class GovernanceSecurityTests : IDisposable
             claims.Add(new Claim(ClaimTypes.Role, r));
         }
 
-        var identity = new ClaimsIdentity(claims, "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);
         // WP-0: the decision resolvers resolve the guard and the grant policy from the request services (GetRequiredService).
         var context = new DefaultHttpContext { User = principal, RequestServices = DecisionServicesForTests };

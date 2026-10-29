@@ -139,7 +139,7 @@ public class PipelineAndInfrastructureSecurityTests
             dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
+        { DefaultTenantCaller.Claim,
             new Claim("objectSid", "S-1-5-21-USER-1")
         }, "TestAuth"));
 
@@ -201,7 +201,7 @@ public class PipelineAndInfrastructureSecurityTests
             null, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
+        { DefaultTenantCaller.Claim,
             new Claim("objectSid", "S-1-5-21-AUDIT-TEST")
         }, "TestAuth"));
 

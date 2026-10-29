@@ -50,7 +50,7 @@ public sealed class CallerAttributeDisclosureTests
                 [[new ConsentRowFilter { ColumnName = "cost_center", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "secret_attribute_name" }]], [])
         };
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "test"));
+    private static ClaimsPrincipal User() => new(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "test"));
 
     [Theory]
     [InlineData(false)]

@@ -80,7 +80,7 @@ public sealed class OlapStagingService(
         ArgumentNullException.ThrowIfNull(command);
 
         var options = gatewayOptions.Value.DuckDbOlap ?? new DuckDbOlapOptions();
-        if (string.IsNullOrWhiteSpace(caller.TenantId.Value))
+        if (caller.ResolvedTenant is not { } resolvedTenant || string.IsNullOrWhiteSpace(resolvedTenant.Value))
         {
             return new OlapStagingOutcome(403, "Forbidden: Missing tenant identity.");
         }

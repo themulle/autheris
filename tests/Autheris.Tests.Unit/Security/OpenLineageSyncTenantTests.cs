@@ -42,7 +42,7 @@ public sealed class OpenLineageSyncTenantTests
         try
         {
             var context = new DefaultHttpContext();
-            context.User = new ClaimsPrincipal(new ClaimsIdentity([
+            context.User = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity([
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
                 new Claim(ClaimTypes.Role, "GovernanceAdmin"),
                 new Claim("autheris:realm", "realm-1"),
@@ -117,11 +117,10 @@ public sealed class OpenLineageSyncTenantTests
             new Claim("tenant_id", "malformed/tenant/spaces and illegal!")
         ], "TestAuth"));
 
-        var result = await GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None);
-        var status = await GetStatusCodeAsync(result, context);
-
-        // Fail closed: must return 403, never 500
-        status.ShouldBe(StatusCodes.Status403Forbidden);
+        // Fail closed (DT-A-3): the invalid claim raises TenantClaimInvalidException, which the exception handler answers with 403
+        // TENANT_CLAIM_INVALID (never 500); nothing is pushed.
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TenantClaimInvalidException>(
+            () => GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None));
         await client.DidNotReceiveWithAnyArgs().PushLineageGraphAsync(default, default);
     }
 }

@@ -87,7 +87,7 @@ public class SecurityFindingsRemediationTests
             new Claim(ClaimTypes.Name, "bob"),
             new Claim(ClaimTypes.Role, "StandardUser")
         };
-        var identity = new ClaimsIdentity(claims, "TestScheme");
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestScheme");
         context.User = new ClaimsPrincipal(identity);
         context.Request.Headers["X-Tenant-ID"] = "victim-tenant";
         context.Response.Body = new MemoryStream();
@@ -1335,7 +1335,7 @@ public class SecurityFindingsRemediationTests
             .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
 
         var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Response.Body = new MemoryStream();
 
         await WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-foreign-tenant", context, statementManager, NullLoggerFactory.Instance);
@@ -1354,7 +1354,7 @@ public class SecurityFindingsRemediationTests
             .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
 
         var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Request.Headers["X-Trino-User"] = "user-1";
 
         await WebSqlEndpoints.HandleTrinoCancelStatementRequest("stmt-foreign-tenant", context, statementManager);

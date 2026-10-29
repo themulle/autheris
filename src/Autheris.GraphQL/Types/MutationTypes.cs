@@ -315,8 +315,7 @@ public sealed class Mutation
 
     private static TenantId GetContextTenantId(IHttpContextAccessor? httpContextAccessor)
     {
-        // DT-A-3: no sentinel; an unset tenant (default struct) means "no context tenant" and ResolveTenantId falls back to the claim.
-        TenantId contextTenant = default;
+        TenantId contextTenant = default; // DT-A-3: no sentinel; unset means "no context tenant" (ResolveTenantId falls back to the claim)
         if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
             contextTenant = secCtx.ResolvedTenant ?? default;

@@ -29,7 +29,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
 
     private static ClaimsPrincipal User(params Claim[] extra) =>
         new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), .. extra],
+            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), .. extra],
             "test"));
 
     private static TableMetadata Meta(DatasetVisibility visibility = DatasetVisibility.Hidden) => new()
