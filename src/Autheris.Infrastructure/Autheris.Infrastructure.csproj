@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Persistence\Migrations\Shape\governance-shape.*.json" LogicalName="%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Persistence\Migrations\Steps\**\*.sql;Persistence\Migrations\Steps\**\*.shape.json" LogicalName="governance-step.%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

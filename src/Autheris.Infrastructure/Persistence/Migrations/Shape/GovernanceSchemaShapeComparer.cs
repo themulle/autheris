@@ -5,7 +5,7 @@ namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 /// <summary>Compares an expected shape with an actual one per plan D-3 (extra tables, columns and indexes are tolerated).</summary>
 internal static class GovernanceSchemaShapeComparer
 {
-    internal const int MaxMessageLines = 100;
+    internal const int MaxMessageLines = 50;
 
     public static IReadOnlyList<SchemaDeviation> Compare(GovernanceSchemaShape expected, GovernanceSchemaShape actual)
     {
@@ -79,7 +79,7 @@ internal static class GovernanceSchemaShapeComparer
             sb.Append("  ... and ").Append(deviations.Count - MaxMessageLines).Append(" more\n");
         }
 
-        sb.Append("Autheris does not upgrade older governance schemas. Load the governance data in the current schema or restore the matching backup; ")
+        sb.Append("Autheris upgrades governance schemas only forward from the v1.5.0 baseline. Restore the matching backup or load the data into a current schema; ")
             .Append("see docs/features/f-gov-12-multi-engine-governance-storage.md#schema-shape-verification.");
         return sb.ToString();
     }
@@ -101,6 +101,11 @@ internal static class GovernanceSchemaShapeComparer
             else if (!string.Equals(column.Family, found.Family, StringComparison.Ordinal))
             {
                 result.Add(new SchemaDeviation(SchemaDeviationKind.WrongType, expected.Name, column.Name, $"family {column.Family}", found.Family));
+            }
+            else if (column.Nullable != found.Nullable)
+            {
+                result.Add(new SchemaDeviation(
+                    SchemaDeviationKind.WrongNullability, expected.Name, column.Name, column.Nullable ? "NULL" : "NOT NULL", found.Nullable ? "NULL" : "NOT NULL"));
             }
         }
     }
@@ -141,6 +146,7 @@ internal static class GovernanceSchemaShapeComparer
         SchemaDeviationKind.WrongPrimaryKey => "wrong primary key",
         SchemaDeviationKind.MissingIndex => "missing index",
         SchemaDeviationKind.WrongIndex => "wrong index",
+        SchemaDeviationKind.WrongNullability => "wrong nullability",
         _ => "deviation"
     };
 }

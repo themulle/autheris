@@ -192,7 +192,7 @@ public sealed class GovernanceSchemaMigrationTests
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
         await NewRunner(repository, cs).RunAsync();
-        Exec(repository, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (99, 'future', 'x', 'now', 'test')");
+        Exec(repository, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (2, 'future', 'x', 'now', 'test')");
 
         await Should.ThrowAsync<GovernanceSchemaDriftException>(() => NewRunner(repository, cs).RunAsync());
         await NewRunner(repository, cs, allowNewerSchema: true).RunAsync();

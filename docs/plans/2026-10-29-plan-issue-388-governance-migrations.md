@@ -162,3 +162,7 @@ Verdict: **APPROVED WITH CONDITIONS.** The design is sound (frozen baseline, con
 1. Add the adoption pre-check (SC-04); D-5's "run step 1 then check" order would mutate unsupported databases.
 2. Enforce golden/step immutability against the base branch (SC-02); in-repo goldens alone are editable together with the step.
 3. Per-step post-conditions and timeouts (SC-06, SC-08); lint extensions (SC-07); nullability normalisation (SC-11); optional `--verify-governance` (Q-7).
+
+## Changelog
+
+- 2026-10-29 (Phase 4, WP-388-1/2): G-PLAN-REBASE check against the branch. Drift: (a) the SQLite baseline has no audit trigger, so the SC-06 trigger post-condition is vacuous on SQLite; (b) no audit anchor table exists, the lint treats every `audit_*` object as an audit object; (c) `NoRuntimeGovernanceDdlArchitectureTests` already covers Persistence and Observability, `NoGovernanceDdl_OutsideMigrations` widens it to all of Infrastructure with the plan allowlist; (d) the Verify lock (SC-09) was taken before this change and is now removed (Verify takes no lock); (e) the base-branch immutability gate is a script (`.github/scripts/check-governance-immutability.sh`) plus an Architecture test that skips with a message when `origin/main` is unavailable; wiring the script into a CI job is left to the workflow owner. Deferred out of WP-388-1/2: `RequireLeastPrivilege`, `GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED`, `GOVERNANCE_MIGRATION_RUNTIME_DDL` warning and audit event (production wiring, SC-13).
