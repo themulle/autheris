@@ -40,3 +40,35 @@ Tests: unit for IsGroupableType matrix per dialect; planner SQL golden (SqlServe
 3. Masking: group on masked column stays refused (MaskedAggregationException, ValidationAndExecution.cs:101-104); never group on masked value. Confirm refusal order leaks nothing about type.
 4. Row filters/RLS: applied in WHERE before GROUP BY, unaffected; confirm test covers (max) key.
 5. Open question (default): unknown/unparsable data types stay groupable (matches current IsOrderableType). Default: keep.
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-29)
+
+Verdict: APPROVED WITH CONDITIONS. Verified: planner (GovernedTableReadPlanner.cs:146-163) already checks unknown column, then mask, then non-Clear access, and only then the type; that order is correct and must stay.
+
+Rulings
+- Q1 Privacy: no privacy control may key off column type; (max) keys get the same min-group-size, suppression, noise and negation guard as any key. Near-unique text keys are suppressed by min-group-size by design; no new control is needed. The "other" bucket is safe only if it is built after suppression exactly as for bounded keys.
+- Q2 DoS: the row cap bounds rows, not bytes. nvarchar(max) keys can be up to 2 GB, so memory = rows x key length is unbounded. A new byte bound is required (I398-SC-04). No new group-count limit; MaxGroups stays.
+- Q3 Masking: refusal order unchanged; type refusal is reachable only for Clear columns, so no type oracle for hidden columns.
+- Q4 RLS/row filters stay in WHERE before GROUP BY; must be tested with a (max) key.
+- Unknown/unparsable type: decide FAIL-CLOSED for groupBy only (refuse with the fixed NOT_SUPPORTED), because the new predicate is an allow-list per dialect. IsOrderableType stays as is (fail-open there is unchanged, out of scope). Exception: SQLite (everything groupable) and known-groupable base types.
+
+Binding conditions
+- I398-SC-01: IsGroupableType is a separate dialect-aware allow-list; IsOrderableType behavior is byte-for-byte unchanged. Only varchar/nvarchar(max) are newly allowed (SQL Server); varbinary(max), xml, text/ntext/image, geography/geometry, sql_variant, CLR stay refused.
+- I398-SC-02: Refused types throw one typed exception mapped to AGGREGATION_NOT_SUPPORTED on GraphQL, REST and MCP paths with one fixed message: no column name, no type name, identical for all refused types; detail only in the audit entry (type name, no data values).
+- I398-SC-03: Type check stays after unknown/mask/access checks (order unchanged); a masked or unavailable column never yields the type refusal.
+- I398-SC-04: Enforce a fixed byte budget for group-key strings while materializing aggregation results (per-key cap and total cap, constants, no per-request override); exceeding it throws the existing AggregationRowCapExceeded (fixed message, no values). Reading must be streaming/capped so a 2 GB value is not fully buffered. If the existing reader already caps bytes, prove it with I398-T-06 and add nothing.
+- I398-SC-05: No CAST/LEFT/SUBSTRING of group keys (option b stays rejected); SQL must be `GROUP BY [col]`.
+- I398-SC-06: Group-key values never appear in logs, audit, exception messages or metrics labels.
+- I398-SC-07: Unknown/unparsable type on a non-SQLite dialect is refused for groupBy with SC-02 behavior (fail-closed); MySQL TEXT stays refused (max_sort_length merges distinct values and can hide small groups below min-group-size).
+
+Mandatory tests (all [Trait("Category","Security")])
+- I398_T_01_IsGroupableType_Matrix_PerDialect_AllowsOnlyDocumentedTypes (incl. unknown type per dialect refused, SQLite allowed)
+- I398_T_02_IsOrderableType_Unchanged_MaxStillNotOrderable
+- I398_T_03_RefusedTypes_AllMapToNotSupported_IdenticalFixedMessage_NoTypeOrColumnName
+- I398_T_04_MaskedMaxColumn_GroupBy_RefusedAsMasked_BeforeTypeCheck; I398_T_04b_UnavailableColumn_NoTypeOracle
+- I398_T_05_MaxKey_MinGroupSize_SuppressesSmallGroups_And_OtherBucketNotReidentifying (near-unique keys)
+- I398_T_06_OversizedMaxKey_ExceedsByteBudget_ThrowsRowCapExceeded_NoBufferingOfFullValue
+- I398_T_07_RowFilter_AppliedBeforeGroupBy_WithMaxKey_NoRowsOutsideScope
+- I398_T_08_PlannerSql_SqlServer_MaxKey_NoCast_GroupByColumnOnly
+- I398_T_09_AuditAndLogs_DoNotContainGroupKeyValues
+- I398_T_10 (integration, SQL Server Testcontainers): nvarchar(max) group result equals nvarchar(200) equivalent.
