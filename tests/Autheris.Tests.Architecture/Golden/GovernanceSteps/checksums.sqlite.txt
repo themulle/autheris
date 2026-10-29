@@ -1,0 +1,2 @@
+# version name checksum - append only (issue #388); released lines are immutable
+0001 baseline_governance_schema 5B2722FAAB8D29BE6B490F9A1B18BA3BEF882260EBF6225706E55349647575AA

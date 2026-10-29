@@ -141,10 +141,10 @@ public sealed class GovernanceSchemaVerificationTests : IDisposable
 
         var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => NewRunner(repository, cs).RunAsync());
 
-        // 0001 fails on the old AUDIT_LOG_ENTRIES (no seq column): D-4 wraps the step failure with the deviation list.
-        ex.InnerException.ShouldBeOfType<SqliteException>();
+        // The adoption pre-check rejects the old shape before any DDL runs (I388 check order), so no step is attempted.
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.MissingColumn && d.Table == "AUDIT_LOG_ENTRIES" && d.Name == "seq");
-        ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.MissingTable && d.Table == "TABLE_PRIMARY_KEY_COLUMNS");
+        // Wrong existing objects block; wholly missing tables are not reported by the adoption pre-check (the idempotent baseline creates them).
+        ex.Code.ShouldBe(GovernanceMigrationCodes.UnsupportedBase);
         Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'autheris_schema_migrations'").ShouldBe(0);
     }
 

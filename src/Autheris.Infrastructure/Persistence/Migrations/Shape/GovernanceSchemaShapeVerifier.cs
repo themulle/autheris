@@ -27,9 +27,12 @@ internal sealed class GovernanceSchemaShapeVerifier
     /// <summary>The expected shape. Throws when the snapshot is missing or empty (fail closed).</summary>
     public GovernanceSchemaShape Expected => _expected.Value;
 
-    public async Task<SchemaShapeResult> VerifyAsync(DbConnection connection, CancellationToken ct, DbTransaction? transaction = null)
+    public Task<SchemaShapeResult> VerifyAsync(DbConnection connection, CancellationToken ct, DbTransaction? transaction = null) =>
+        VerifyAsync(connection, _expected.Value, ct, transaction);
+
+    /// <summary>Verifies against an explicit expected shape (the shape at some migration version).</summary>
+    public async Task<SchemaShapeResult> VerifyAsync(DbConnection connection, GovernanceSchemaShape expected, CancellationToken ct, DbTransaction? transaction = null)
     {
-        var expected = _expected.Value;
         var actual = await _reader.ReadAsync(connection, expected.Tables.Select(t => t.Name).ToArray(), ct, transaction).ConfigureAwait(false);
         var deviations = GovernanceSchemaShapeComparer.Compare(expected, actual);
 

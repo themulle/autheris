@@ -51,7 +51,7 @@ tests/Autheris.Tests.Unit/Services/BackgroundServiceLockTests.cs|3
 tests/Autheris.Tests.Unit/Sql/Policy/RowFilterKeySetStageTests.cs|2
 tests/Autheris.Tests.Unit/SqliteExecutionHardeningTests.cs|1
 tests/Autheris.Tests.Unit/Startup/X1StartupTests.cs|1
-tests/Autheris.Tests.Unit/State/DistributedLeaseTests.cs|2
+tests/Autheris.Tests.Unit/State/DistributedLeaseTests.cs|1
 tests/Autheris.Tests.Unit/State/RedisLeaseTests.cs|2
 tests/Autheris.Tests.Unit/Streaming/CdcWebhookDeliveryServiceTests.cs|2
 tests/Autheris.Tests.Unit/VirtualFilters/Federation/FakeKeySetProvider.cs|1

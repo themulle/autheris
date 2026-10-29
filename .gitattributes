@@ -10,3 +10,7 @@
 *.cs text eol=lf
 *.csproj text eol=lf
 *.sln text eol=crlf
+
+# Governance migration steps and goldens are hashed: byte-stable LF (issue #388, I388-SC-01)
+src/Autheris.Infrastructure/Persistence/Migrations/Steps/** text eol=lf
+tests/Autheris.Tests.Architecture/Golden/** text eol=lf

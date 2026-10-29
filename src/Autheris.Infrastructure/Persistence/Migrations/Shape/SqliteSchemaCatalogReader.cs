@@ -33,9 +33,9 @@ internal sealed class SqliteSchemaCatalogReader : IGovernanceSchemaCatalogReader
             }
 
             var name = Str(exists[0][0]);
-            var columnRows = await RowsAsync(session, "SELECT name, type, pk FROM pragma_table_info(@n)", 3, ct, ("@n", name)).ConfigureAwait(false);
+            var columnRows = await RowsAsync(session, "SELECT name, type, pk, \"notnull\" FROM pragma_table_info(@n)", 4, ct, ("@n", name)).ConfigureAwait(false);
             var columns = columnRows
-                .Select(r => new SchemaColumn(Str(r[0]), Str(r[1]).ToUpperInvariant(), Family(Str(r[1]))))
+                .Select(r => new SchemaColumn(Str(r[0]), Str(r[1]).ToUpperInvariant(), Family(Str(r[1])), !Bool(r[3]) && Convert.ToInt64(r[2], System.Globalization.CultureInfo.InvariantCulture) == 0))
                 .ToArray();
             var primaryKey = columnRows
                 .Where(r => Convert.ToInt64(r[2], System.Globalization.CultureInfo.InvariantCulture) > 0)
