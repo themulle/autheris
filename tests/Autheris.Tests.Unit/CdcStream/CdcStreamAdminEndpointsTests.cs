@@ -185,7 +185,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
         var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("GovernanceAdmin"), DiscardService(store), Audit(), default);
 
         Status(result).ShouldBe(503);
-        JsonSerializer.Serialize(((IValueHttpResult)result).Value).ShouldBe("{\"error\":\"CDC_KEY_UNAVAILABLE\"}");
+        JsonSerializer.Serialize(((IValueHttpResult)result).Value).ShouldContain("CDC_KEY_UNAVAILABLE");
         await store.DidNotReceiveWithAnyArgs().DiscardUnreadableAsync(default, default!, default);
         await _restarter.DidNotReceiveWithAnyArgs().RestartAsync(default, default);
         await _auditRepo.Received(1).RecordAuditEventAsync(

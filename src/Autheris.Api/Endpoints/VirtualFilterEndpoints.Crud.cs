@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -58,7 +59,7 @@ public static partial class VirtualFilterEndpoints
             var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
             if (string.IsNullOrWhiteSpace(expectedHash))
             {
-                return Results.BadRequest(new { error = "expected_hash_required" });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The expected hash is required.");
             }
 
             var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
@@ -100,7 +101,7 @@ public static partial class VirtualFilterEndpoints
             var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
             if (string.IsNullOrWhiteSpace(expectedHash))
             {
-                return Results.BadRequest(new { error = "expected_hash_required" });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The expected hash is required.");
             }
 
             var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
