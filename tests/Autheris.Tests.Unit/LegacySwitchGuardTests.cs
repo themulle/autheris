@@ -80,6 +80,38 @@ public sealed class LegacySwitchGuardTests
         ex.Message.ShouldContain("removed");
     }
 
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("false")]
+    [InlineData("true")]
+    [InlineData("")]
+    public void DT_SC_13_FailClosedOnRevocationLookupError_Key_Fails_Startup_On_Presence(string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(
+            () => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Caching:Redis:FailClosedOnRevocationLookupError", value))));
+
+        ex.Message.ShouldContain("Gateway:Caching:Redis:FailClosedOnRevocationLookupError");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void DT_SC_13_FailClosedOnRevocationLookupError_Env_Spelling_Fails_Startup()
+    {
+        const string name = "Gateway__Caching__Redis__FailClosedOnRevocationLookupError";
+        Environment.SetEnvironmentVariable(name, "false");
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+
+            LegacySwitchGuard.FindViolations(configuration)
+                .ShouldContain(m => m.Contains("Caching:Redis:FailClosedOnRevocationLookupError", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
+    }
+
     [Fact]
     public void NewInsecureKey_IsNotFlagged() =>
         LegacySwitchGuard.FindViolations(Config(("Gateway:Insecure:danger_bypass_mcp_auth", "true"))).ShouldBeEmpty();

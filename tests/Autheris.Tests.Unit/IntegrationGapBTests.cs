@@ -341,14 +341,14 @@ public sealed class IntegrationGapBTests
     {
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(_ => throw new InvalidOperationException("redis down"));
-        // SR-L-10: this test covers the legacy fail-open behaviour; fail-closed is covered by RedisTokenRevocationFailClosedTests.
-        var failOpen = new GatewayOptions { Caching = new CachingOptions { Redis = new RedisOptions { FailClosedOnRevocationLookupError = false } } };
-        var store = new RedisTokenRevocationService(multiplexer, Options.Create(failOpen), NullLogger<RedisTokenRevocationService>.Instance);
+        var store = new RedisTokenRevocationService(multiplexer, Options.Create(new GatewayOptions()), NullLogger<RedisTokenRevocationService>.Instance);
 
         await Should.ThrowAsync<InvalidOperationException>(() => store.RevokeAsync("S-1-5-21-WS-LOCAL", DateTimeOffset.UtcNow.AddHours(1)));
 
         (await store.IsRevokedAsync(CreatePrincipal("S-1-5-21-WS-LOCAL", DateTimeOffset.UtcNow.AddMinutes(-5)))).ShouldBeTrue();
-        (await store.IsRevokedAsync(CreatePrincipal("S-1-5-21-WS-UNKNOWN", DateTimeOffset.UtcNow.AddMinutes(-5)))).ShouldBeFalse();
+        // DT-A-13: an unknown subject cannot be confirmed as not revoked while Redis is down; the lookup fails closed.
+        await Should.ThrowAsync<TokenRevocationUnavailableException>(async () =>
+            await store.IsRevokedAsync(CreatePrincipal("S-1-5-21-WS-UNKNOWN", DateTimeOffset.UtcNow.AddMinutes(-5))));
     }
 
     [Fact]

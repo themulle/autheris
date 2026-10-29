@@ -30,8 +30,7 @@ public interface ITokenRevocationService
 }
 
 /// <summary>
-/// SR-L-10: the revocation status of a token could not be determined (for example Redis is unreachable) while the
-/// fail-closed policy (<c>Caching:Redis:FailClosedOnRevocationLookupError</c>) is active.
+/// SR-L-10: the revocation status of a token could not be determined (for example Redis is unreachable) (the lookup always fails closed, DT-A-13).
 /// </summary>
 public sealed class TokenRevocationUnavailableException : Exception
 {

@@ -44,7 +44,8 @@ public static class LegacySwitchGuard
     public static IReadOnlyCollection<string> Removed { get; } =
     [
         "Itsm:warn_fallback_default_tenant_for_webhooks",
-        "Insecure:warn_fallback_default_tenant_for_webhooks"
+        "Insecure:warn_fallback_default_tenant_for_webhooks",
+        "Caching:Redis:FailClosedOnRevocationLookupError"
     ];
 
     /// <summary>Returns one message per removed key that is present (any value).</summary>
@@ -54,7 +55,7 @@ public static class LegacySwitchGuard
             .Select(r => $"'{G}{r.Key}' was removed; use '{G}{r.Value}' instead.")
             .Concat(Removed
                 .Where(k => configuration.GetSection(G + k).Exists())
-                .Select(k => $"'{G}{k}' was removed together with the behaviour it enabled (an unbound webhook is always rejected); delete the key."))
+                .Select(k => $"'{G}{k}' was removed together with the behaviour it enabled (for example an unbound webhook is always rejected, a failed token revocation lookup always rejects the token); delete the key."))
             .ToList();
 
     public static void ThrowIfLegacyKeysSet(IConfiguration configuration)

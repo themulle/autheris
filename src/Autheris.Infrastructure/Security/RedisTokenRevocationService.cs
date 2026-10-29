@@ -21,7 +21,6 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
     private readonly TimeProvider _timeProvider;
     private readonly InMemoryTokenRevocationService _local;
     private readonly string _prefix;
-    private readonly bool _failClosed;
     private readonly TimeSpan _grace;
 
     private static readonly Meter Meter = new("Autheris.Core");
@@ -37,15 +36,13 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         IConnectionMultiplexer multiplexer,
         IOptions<GatewayOptions> options,
         ILogger<RedisTokenRevocationService> logger,
-        TimeProvider? timeProvider = null,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _local = new InMemoryTokenRevocationService(_timeProvider);
-        _failClosed = options.Value.Caching.Redis.ResolveFailClosedOnRevocationLookupError(environment?.IsDevelopment() ?? false);
         _grace = TimeSpan.FromSeconds(Math.Max(0, options.Value.Caching.Redis.RevocationLookupGraceSeconds));
 
         var instance = options.Value.Caching.Redis.InstanceName;
@@ -204,18 +201,11 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
     }
 
     /// <summary>
-    /// SR-L-10: no revocation was found locally or remotely but the remote lookup was incomplete. With the policy off
-    /// the token is accepted (legacy behaviour); with it on the request is denied unless the token is younger than the grace
-    /// window.
+    /// SR-L-10 / DT-A-13: no revocation was found locally or remotely but the remote lookup was incomplete. The request is always
+    /// denied (every environment) unless the token is younger than the grace window.
     /// </summary>
     private bool HandleLookupFailure(DateTimeOffset? issuedAt, Exception? failure)
     {
-        if (!_failClosed)
-        {
-            RecordRedisFailure("lookup_fail_open");
-            return false;
-        }
-
         if (issuedAt is { } iat && _grace > TimeSpan.Zero)
         {
             var age = _timeProvider.GetUtcNow() - iat;

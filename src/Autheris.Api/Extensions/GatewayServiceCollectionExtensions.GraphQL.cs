@@ -130,6 +130,9 @@ public static partial class GatewayServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmOptionsValidator>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>, Autheris.Application.Identity.Validators.IdentityRealmsScimOptionsValidator>();
+        // DT-A-11 / DT-SC-14: enabled schemes need explicit realms; a realm without binding needs a default tenant.
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>>(
+            new Autheris.Application.Identity.Validators.IdentityRealmSchemeValidator(gatewayOptions));
         services.AddSingleton<WebSocketAuthInterceptor>();
 
         var gqlBuilder = services

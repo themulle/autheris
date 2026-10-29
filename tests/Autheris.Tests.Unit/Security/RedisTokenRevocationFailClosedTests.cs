@@ -12,7 +12,6 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Security;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -42,7 +41,7 @@ public class RedisTokenRevocationFailClosedTests
     }
 
     private static RedisTokenRevocationService Create(
-        IConnectionMultiplexer multiplexer, bool? failClosed, int graceSeconds = 60, bool development = false)
+        IConnectionMultiplexer multiplexer, int graceSeconds = 60)
     {
         var options = new GatewayOptions
         {
@@ -50,56 +49,45 @@ public class RedisTokenRevocationFailClosedTests
             {
                 Redis = new RedisOptions
                 {
-                    FailClosedOnRevocationLookupError = failClosed,
                     RevocationLookupGraceSeconds = graceSeconds
                 }
             }
         };
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(development ? "Development" : "Production");
         return new RedisTokenRevocationService(
-            multiplexer, Options.Create(options), NullLogger<RedisTokenRevocationService>.Instance, environment: env);
+            multiplexer, Options.Create(options), NullLogger<RedisTokenRevocationService>.Instance);
     }
 
     [Fact]
     public async Task IsRevokedAsync_RedisDisconnected_FailClosedOn_Throws()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: true);
+        var store = Create(DisconnectedMultiplexer());
 
         await Should.ThrowAsync<TokenRevocationUnavailableException>(async () =>
             await store.IsRevokedAsync(Principal("S-1-5-21-FC-1", DateTimeOffset.UtcNow.AddMinutes(-10))));
     }
 
     [Fact]
-    public async Task IsRevokedAsync_RedisDisconnected_FailClosedOff_ReturnsFalse()
+    public async Task Revocation_Lookup_Error_Rejects_Token_In_Development_DT_SC_15()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: false);
+        // DT-A-13: there is no Development fail-open; the lookup error rejects in every environment.
+        // The service takes no environment input any more, so a Development host gets the same fail-closed service.
+        var development = Create(DisconnectedMultiplexer());
+        var principal = Principal("S-1-5-21-FC-2", DateTimeOffset.UtcNow.AddMinutes(-10));
 
-        (await store.IsRevokedAsync(Principal("S-1-5-21-FC-2", DateTimeOffset.UtcNow.AddMinutes(-10)))).ShouldBeFalse();
+        await Should.ThrowAsync<TokenRevocationUnavailableException>(async () => await development.IsRevokedAsync(principal));
     }
 
-    [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public async Task IsRevokedAsync_DefaultPolicy_FollowsEnvironment(bool development, bool expectedFailClosed)
+    [Fact]
+    public void FailClosedOnRevocationLookupError_Option_Is_Gone_DT_SC_15()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: null, development: development);
-        var principal = Principal("S-1-5-21-FC-3", DateTimeOffset.UtcNow.AddMinutes(-10));
-
-        if (expectedFailClosed)
-        {
-            await Should.ThrowAsync<TokenRevocationUnavailableException>(async () => await store.IsRevokedAsync(principal));
-        }
-        else
-        {
-            (await store.IsRevokedAsync(principal)).ShouldBeFalse();
-        }
+        typeof(RedisOptions).GetProperty("FailClosedOnRevocationLookupError").ShouldBeNull();
+        typeof(RedisOptions).GetMethod("ResolveFailClosedOnRevocationLookupError").ShouldBeNull();
     }
 
     [Fact]
     public async Task IsRevokedAsync_TokenWithinGrace_Allowed()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: true, graceSeconds: 60);
+        var store = Create(DisconnectedMultiplexer(), graceSeconds: 60);
 
         (await store.IsRevokedAsync(Principal("S-1-5-21-FC-4", DateTimeOffset.UtcNow.AddSeconds(-5)))).ShouldBeFalse();
     }
@@ -107,7 +95,7 @@ public class RedisTokenRevocationFailClosedTests
     [Fact]
     public async Task IsRevokedAsync_TokenOlderThanGrace_Throws()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: true, graceSeconds: 60);
+        var store = Create(DisconnectedMultiplexer(), graceSeconds: 60);
 
         await Should.ThrowAsync<TokenRevocationUnavailableException>(async () =>
             await store.IsRevokedAsync(Principal("S-1-5-21-FC-5", DateTimeOffset.UtcNow.AddSeconds(-120))));
@@ -116,7 +104,7 @@ public class RedisTokenRevocationFailClosedTests
     [Fact]
     public async Task IsRevokedAsync_GraceZero_NeverAllowsOnFailure()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: true, graceSeconds: 0);
+        var store = Create(DisconnectedMultiplexer(), graceSeconds: 0);
 
         await Should.ThrowAsync<TokenRevocationUnavailableException>(async () =>
             await store.IsRevokedAsync(Principal("S-1-5-21-FC-6", DateTimeOffset.UtcNow)));
@@ -125,7 +113,7 @@ public class RedisTokenRevocationFailClosedTests
     [Fact]
     public async Task IsRevokedAsync_LocalRevocationStillWins_WhenRedisDown()
     {
-        var store = Create(DisconnectedMultiplexer(), failClosed: true);
+        var store = Create(DisconnectedMultiplexer());
         await Should.ThrowAsync<RedisConnectionException>(() => store.RevokeAsync("S-1-5-21-FC-7", DateTimeOffset.UtcNow.AddHours(1)));
 
         (await store.IsRevokedAsync(Principal("S-1-5-21-FC-7", DateTimeOffset.UtcNow.AddMinutes(-5)))).ShouldBeTrue();
@@ -139,7 +127,7 @@ public class RedisTokenRevocationFailClosedTests
             .Returns(Task.FromException<RedisValue>(new RedisTimeoutException("timeout", CommandStatus.Unknown)));
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
-        var store = Create(multiplexer, failClosed: true);
+        var store = Create(multiplexer);
 
         await Should.ThrowAsync<TokenRevocationUnavailableException>(async () =>
             await store.IsRevokedAsync(Principal("S-1-5-21-FC-8", DateTimeOffset.UtcNow.AddMinutes(-10))));

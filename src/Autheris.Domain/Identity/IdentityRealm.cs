@@ -119,8 +119,7 @@ public sealed record IdentityRealm(
     IReadOnlyList<string> ResolverChain,
     RealmProvisioningMode Provisioning,
     IReadOnlySet<GatewayRole> AllowedGatewayRoles,
-    bool Delegable = false,
-    bool IsImplicitLegacy = false
+    bool Delegable = false
 )
 {
     public string RealmId => Id;
@@ -139,8 +138,7 @@ public sealed record IdentityRealm(
         string upnClaim = "upn",
         IReadOnlyList<string>? resolverChain = null,
         IReadOnlySet<GatewayRole>? allowedGatewayRoles = null,
-        bool delegable = false,
-        bool isImplicitLegacy = false)
+        bool delegable = false)
         : this(
             id,
             kind,
@@ -155,8 +153,7 @@ public sealed record IdentityRealm(
             resolverChain ?? ["scim-store"],
             provisioning,
             allowedGatewayRoles ?? new HashSet<GatewayRole>(),
-            delegable,
-            isImplicitLegacy)
+            delegable)
     {
     }
 }

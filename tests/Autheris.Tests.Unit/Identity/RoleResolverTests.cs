@@ -59,7 +59,8 @@ public sealed class RoleResolverTests
     }
 
     [Fact]
-    public async Task RoleResolver_WorkforceRealm_PreservesLegacyGroupAndNamespaced()
+    [Trait("Category", "Security")]
+    public async Task Workforce_Groups_Are_Always_Realm_Namespaced_DT_SC_14()
     {
         var realmId = "workforce-entra";
         var realm = new IdentityRealm(
@@ -90,8 +91,8 @@ public sealed class RoleResolverTests
 
         var resolution = await sut.ResolveRolesAsync(identity);
 
-        // Both namespaced and un-namespaced legacy SID must be present
+        // DT-SC-14 / DT-A-11: groups are always realm-namespaced; the un-namespaced SID maps to nothing.
         resolution.Groups.ShouldContain("workforce-entra|S-1-5-21-12345");
-        resolution.Groups.ShouldContain("S-1-5-21-12345");
+        resolution.Groups.ShouldNotContain("S-1-5-21-12345");
     }
 }
