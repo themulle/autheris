@@ -87,7 +87,7 @@ public sealed class DistributedLeaseTests
         time.Advance(TimeSpan.FromSeconds(10)); // the extend is sent now
         time.Advance(TimeSpan.FromSeconds(5));
         lease.Extend.SetResult(true);
-        await Task.Delay(50); // quiet period: the extend completion has no observable signal
+        await WaitHelper.WaitUntil(() => lease.LastConfirmedAt != start, TimeSpan.FromSeconds(30), "the completed extend must confirm the lease");
 
         lease.LastConfirmedAt.ShouldBe(start + TimeSpan.FromSeconds(10));
     }
