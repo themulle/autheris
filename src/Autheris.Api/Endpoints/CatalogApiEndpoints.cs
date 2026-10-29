@@ -471,7 +471,7 @@ public static class CatalogApiEndpoints
         TableKeyDefinitionChange? change;
         try
         {
-            change = await metadataRepository.ReplaceTableKeyDefinitionAsync(tableId.Value, pkColumns, indexes, ct).ConfigureAwait(false);
+            change = await metadataRepository.ReplaceTableKeyDefinitionAsync(tableId.Value, pkColumns, indexes, ct: ct).ConfigureAwait(false);
         }
         catch (TableDefinitionException)
         {
@@ -498,8 +498,8 @@ public static class CatalogApiEndpoints
                 datasetId = tableId.Value.ToString(),
                 before = change.BeforeUnavailable
                     ? (object)new { unavailable = true }
-                    : new { primaryKey = change.Before.PrimaryKey, indexes = change.Before.Indexes },
-                after = new { primaryKey = change.After.PrimaryKey, indexes = change.After.Indexes }
+                    : KeyDefinitionAuditView(change.Before),
+                after = KeyDefinitionAuditView(change.After)
             })
         }, CancellationToken.None).ConfigureAwait(false);
 
@@ -509,6 +509,25 @@ public static class CatalogApiEndpoints
             primaryKey = change.After.PrimaryKey,
             indexes = change.After.Indexes
         });
+    }
+
+    /// <summary>
+    /// Audit view of a key definition (identifiers only). Issue #390: <c>primaryKeyDirections</c> appears only when a column is descending, as the
+    /// closed strings <c>ASC</c>/<c>DESC</c>, so the details of a table without a declared direction are unchanged; index directions serialize with the index.
+    /// </summary>
+    private static System.Collections.Generic.Dictionary<string, object> KeyDefinitionAuditView(TableKeyDefinition definition)
+    {
+        var view = new System.Collections.Generic.Dictionary<string, object>
+        {
+            ["primaryKey"] = definition.PrimaryKey,
+            ["indexes"] = definition.Indexes
+        };
+        if (KeyDirections.AnyDescending(definition.PrimaryKeyDirections))
+        {
+            view["primaryKeyDirections"] = KeyDirections.ToWire(definition.PrimaryKeyDirections);
+        }
+
+        return view;
     }
 
     internal static async Task<IResult> SetDatasetRequiredFiltersHandler(

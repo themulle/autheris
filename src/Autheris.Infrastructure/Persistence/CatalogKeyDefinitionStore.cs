@@ -38,7 +38,7 @@ internal static class CatalogKeyDefinitionStore
         true,
         "SELECT id FROM dbo.TABLES WITH (UPDLOCK, ROWLOCK) WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)");
 
-    internal readonly record struct PrimaryKeyRow(int Ordinal, string ColumnId);
+    internal readonly record struct PrimaryKeyRow(int Ordinal, string ColumnId, bool Descending = false);
 
     /// <summary>
     /// Per repository instance: remembers that the key tables exist, so uncached metadata reads do not probe on every call.
@@ -68,7 +68,7 @@ internal static class CatalogKeyDefinitionStore
     /// <summary>Parameters per batch query; far below SQL Server's limit of 2100 parameters per command.</summary>
     internal const int BatchChunkSize = 500;
 
-    internal readonly record struct IndexRow(string IndexId, string Name, bool IsUnique, int? Ordinal, string? ColumnId);
+    internal readonly record struct IndexRow(string IndexId, string Name, bool IsUnique, int? Ordinal, string? ColumnId, bool Descending = false);
 
     private const int MaxIndexRows = TableKeyDefinitionValidator.MaxIndexesPerTable * TableKeyDefinitionValidator.MaxColumnsPerKey;
 
@@ -78,7 +78,7 @@ internal static class CatalogKeyDefinitionStore
     /// Reads and validates the definition of a table. Declared rows win; without declared primary key rows the column Meta markers
     /// (<c>primary_key_ordinal</c>, <c>is_primary_key</c>, <c>role=primary_key</c>) are validated with the same rules and used all-or-nothing.
     /// </summary>
-    internal static async Task<(IReadOnlyList<string> PrimaryKey, IReadOnlyList<TableIndexDefinition> Indexes)> ReadAsync(
+    internal static async Task<(IReadOnlyList<string> PrimaryKey, IReadOnlyList<KeyColumnDirection> PrimaryKeyDirections, IReadOnlyList<TableIndexDefinition> Indexes)> ReadAsync(
         DbConnection conn,
         DbTransaction? tx,
         KeyDefinitionDialect dialect,
@@ -106,7 +106,7 @@ internal static class CatalogKeyDefinitionStore
         await using (var cmd = conn.CreateCommand())
         {
             Enlist(cmd, tx);
-            cmd.CommandText = $"SELECT key_ordinal, table_column_id FROM {dialect.Prefix}{PrimaryKeyTable} WHERE table_id = @tid ORDER BY key_ordinal ASC";
+            cmd.CommandText = $"SELECT key_ordinal, table_column_id, is_descending FROM {dialect.Prefix}{PrimaryKeyTable} WHERE table_id = @tid ORDER BY key_ordinal ASC";
             AddParameter(cmd, "@tid", tableId.ToString());
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -116,7 +116,7 @@ internal static class CatalogKeyDefinitionStore
                     throw new TableMetadataUnavailableException(identifier);
                 }
 
-                pkRows.Add(new PrimaryKeyRow(Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture), reader.GetString(1)));
+                pkRows.Add(new PrimaryKeyRow(Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture), reader.GetString(1), ReadDescending(reader.GetValue(2), identifier)));
             }
         }
 
@@ -124,7 +124,7 @@ internal static class CatalogKeyDefinitionStore
         await using (var cmd = conn.CreateCommand())
         {
             Enlist(cmd, tx);
-            cmd.CommandText = $@"SELECT i.id, i.index_name, i.is_unique, ic.column_ordinal, ic.table_column_id
+            cmd.CommandText = $@"SELECT i.id, i.index_name, i.is_unique, ic.column_ordinal, ic.table_column_id, ic.is_descending
                                  FROM {dialect.Prefix}{IndexTable} i
                                  LEFT JOIN {dialect.Prefix}{IndexColumnTable} ic ON i.id = ic.index_id
                                  WHERE i.table_id = @tid
@@ -143,7 +143,8 @@ internal static class CatalogKeyDefinitionStore
                     reader.GetString(1),
                     Convert.ToBoolean(reader.GetValue(2), CultureInfo.InvariantCulture),
                     reader.IsDBNull(3) ? null : Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture),
-                    reader.IsDBNull(4) ? null : reader.GetString(4)));
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    !reader.IsDBNull(5) && ReadDescending(reader.GetValue(5), identifier)));
             }
         }
 
@@ -181,7 +182,7 @@ internal static class CatalogKeyDefinitionStore
             await using (var cmd = conn.CreateCommand())
             {
                 Enlist(cmd, tx);
-                cmd.CommandText = $"SELECT table_id, key_ordinal, table_column_id FROM {dialect.Prefix}{PrimaryKeyTable} WHERE table_id IN ({inList}) ORDER BY table_id ASC, key_ordinal ASC";
+                cmd.CommandText = $"SELECT table_id, key_ordinal, table_column_id, is_descending FROM {dialect.Prefix}{PrimaryKeyTable} WHERE table_id IN ({inList}) ORDER BY table_id ASC, key_ordinal ASC";
                 for (var i = 0; i < count; i++)
                 {
                     AddParameter(cmd, names[i], tableIds[offset + i].ToString());
@@ -201,14 +202,20 @@ internal static class CatalogKeyDefinitionStore
                         continue;
                     }
 
-                    rows.PrimaryKey.Add(new PrimaryKeyRow(Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture), reader.GetString(2)));
+                    if (!TryReadDescending(reader.GetValue(3), out var pkDescending))
+                    {
+                        rows.Overflow = true; // an invalid direction value makes the definition unavailable (fail closed)
+                        continue;
+                    }
+
+                    rows.PrimaryKey.Add(new PrimaryKeyRow(Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture), reader.GetString(2), pkDescending));
                 }
             }
 
             await using (var cmd = conn.CreateCommand())
             {
                 Enlist(cmd, tx);
-                cmd.CommandText = $@"SELECT i.table_id, i.id, i.index_name, i.is_unique, ic.column_ordinal, ic.table_column_id
+                cmd.CommandText = $@"SELECT i.table_id, i.id, i.index_name, i.is_unique, ic.column_ordinal, ic.table_column_id, ic.is_descending
                                      FROM {dialect.Prefix}{IndexTable} i
                                      LEFT JOIN {dialect.Prefix}{IndexColumnTable} ic ON i.id = ic.index_id
                                      WHERE i.table_id IN ({inList})
@@ -232,12 +239,20 @@ internal static class CatalogKeyDefinitionStore
                         continue;
                     }
 
+                    var indexDescending = false;
+                    if (!reader.IsDBNull(6) && !TryReadDescending(reader.GetValue(6), out indexDescending))
+                    {
+                        rows.Overflow = true;
+                        continue;
+                    }
+
                     rows.Indexes.Add(new IndexRow(
                         reader.GetString(1),
                         reader.GetString(2),
                         Convert.ToBoolean(reader.GetValue(3), CultureInfo.InvariantCulture),
                         reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture),
-                        reader.IsDBNull(5) ? null : reader.GetString(5)));
+                        reader.IsDBNull(5) ? null : reader.GetString(5),
+                        indexDescending));
                 }
             }
         }
@@ -245,8 +260,32 @@ internal static class CatalogKeyDefinitionStore
         return result;
     }
 
+    /// <summary>
+    /// I390-SC-02: the stored direction is exactly 0/1 (boolean on PostgreSQL and SQL Server). Any other value is an invalid definition
+    /// (fail closed: the table is unavailable, no ordering by guess).
+    /// </summary>
+    internal static bool TryReadDescending(object value, out bool descending)
+    {
+        switch (value)
+        {
+            case bool b:
+                descending = b;
+                return true;
+            case byte or sbyte or short or ushort or int or uint or long or ulong:
+                var n = Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                descending = n == 1;
+                return n is 0 or 1;
+            default:
+                descending = false;
+                return false;
+        }
+    }
+
+    private static bool ReadDescending(object value, TableIdentifier identifier) =>
+        TryReadDescending(value, out var descending) ? descending : throw new TableMetadataUnavailableException(identifier);
+
     /// <summary>Pure validation of persisted rows; throws <see cref="TableMetadataUnavailableException"/> on any violation.</summary>
-    internal static (IReadOnlyList<string> PrimaryKey, IReadOnlyList<TableIndexDefinition> Indexes) Assemble(
+    internal static (IReadOnlyList<string> PrimaryKey, IReadOnlyList<KeyColumnDirection> PrimaryKeyDirections, IReadOnlyList<TableIndexDefinition> Indexes) Assemble(
         TableIdentifier identifier,
         IReadOnlyList<TableColumn> columns,
         IReadOnlyList<PrimaryKeyRow> pkRows,
@@ -259,9 +298,11 @@ internal static class CatalogKeyDefinitionStore
         }
 
         List<string>? primaryKey = null;
+        List<KeyColumnDirection>? primaryKeyDirections = null;
         if (pkRows.Count > 0)
         {
             primaryKey = new List<string>(pkRows.Count);
+            primaryKeyDirections = new List<KeyColumnDirection>(pkRows.Count);
             var expected = 1;
             foreach (var row in pkRows.OrderBy(r => r.Ordinal))
             {
@@ -271,6 +312,7 @@ internal static class CatalogKeyDefinitionStore
                 }
 
                 primaryKey.Add(name);
+                primaryKeyDirections!.Add(row.Descending ? KeyColumnDirection.Descending : KeyColumnDirection.Ascending);
             }
         }
 
@@ -294,6 +336,7 @@ internal static class CatalogKeyDefinitionStore
         foreach (var (first, rows) in perIndex)
         {
             var names = new List<string>(rows.Count);
+            var indexDirections = new List<KeyColumnDirection>(rows.Count);
             var expected = 1;
             foreach (var row in rows)
             {
@@ -303,9 +346,10 @@ internal static class CatalogKeyDefinitionStore
                 }
 
                 names.Add(name);
+                indexDirections.Add(row.Descending ? KeyColumnDirection.Descending : KeyColumnDirection.Ascending);
             }
 
-            indexes.Add(new TableIndexDefinition(first.Name, names, first.IsUnique));
+            indexes.Add(new TableIndexDefinition(first.Name, names, first.IsUnique, KeyDirections.Canonical(indexDirections)));
         }
 
         IReadOnlyList<string> resolvedKey = primaryKey ?? ResolveMarkerPrimaryKey(identifier, columns);
@@ -314,13 +358,15 @@ internal static class CatalogKeyDefinitionStore
             Identifier = identifier,
             Columns = columns,
             PrimaryKeyColumns = resolvedKey,
+            // Directions belong to declared rows only; a marker-derived key is always ascending.
+            PrimaryKeyDirections = primaryKey is null ? Array.Empty<KeyColumnDirection>() : KeyDirections.Canonical(primaryKeyDirections) ?? Array.Empty<KeyColumnDirection>(),
             Indexes = indexes
         };
 
         try
         {
             var validated = TableKeyDefinitionValidator.Validate(candidate);
-            return (validated.PrimaryKeyColumns, validated.Indexes);
+            return (validated.PrimaryKeyColumns, validated.PrimaryKeyDirections, validated.Indexes);
         }
         catch (TableDefinitionException)
         {
@@ -364,8 +410,10 @@ internal static class CatalogKeyDefinitionStore
         foreach (var column in validated.PrimaryKeyColumns)
         {
             await ExecAsync(conn, tx,
-                $"INSERT INTO {dialect.Prefix}{PrimaryKeyTable} (table_id, key_ordinal, table_column_id) VALUES (@tid, @ord, @cid)", ct,
-                ("@tid", tid), ("@ord", ordinal++), ("@cid", ColumnId(colIdByName, column))).ConfigureAwait(false);
+                $"INSERT INTO {dialect.Prefix}{PrimaryKeyTable} (table_id, key_ordinal, table_column_id, is_descending) VALUES (@tid, @ord, @cid, @desc)", ct,
+                ("@tid", tid), ("@ord", ordinal), ("@cid", ColumnId(colIdByName, column)),
+                ("@desc", KeyDirections.IsDescending(validated.PrimaryKeyDirections, ordinal - 1))).ConfigureAwait(false);
+            ordinal++;
         }
 
         await RewriteMarkersAsync(conn, tx, dialect, tableId, validated.PrimaryKeyColumns, ct).ConfigureAwait(false);
@@ -380,8 +428,9 @@ internal static class CatalogKeyDefinitionStore
             for (var i = 0; i < index.Columns.Count; i++)
             {
                 await ExecAsync(conn, tx,
-                    $"INSERT INTO {dialect.Prefix}{IndexColumnTable} (index_id, column_ordinal, table_column_id) VALUES (@idx, @ord, @cid)", ct,
-                    ("@idx", indexId), ("@ord", i + 1), ("@cid", ColumnId(colIdByName, index.Columns[i]))).ConfigureAwait(false);
+                    $"INSERT INTO {dialect.Prefix}{IndexColumnTable} (index_id, column_ordinal, table_column_id, is_descending) VALUES (@idx, @ord, @cid, @desc)", ct,
+                    ("@idx", indexId), ("@ord", i + 1), ("@cid", ColumnId(colIdByName, index.Columns[i])),
+                    ("@desc", KeyDirections.IsDescending(index.Directions, i))).ConfigureAwait(false);
             }
         }
     }
@@ -468,6 +517,7 @@ internal static class CatalogKeyDefinitionStore
         TableIdentifier table,
         IReadOnlyList<string> primaryKey,
         IReadOnlyList<TableIndexDefinition> indexes,
+        IReadOnlyList<KeyColumnDirection>? primaryKeyDirections,
         Func<Task> bumpEpoch,
         CancellationToken ct)
     {
@@ -509,8 +559,8 @@ internal static class CatalogKeyDefinitionStore
         var beforeUnavailable = false;
         try
         {
-            var (pk, idx) = await ReadAsync(conn, tx, dialect, table, tableId, columns, ct).ConfigureAwait(false);
-            before = new TableKeyDefinition(pk, idx);
+            var (pk, pkDirections, idx) = await ReadAsync(conn, tx, dialect, table, tableId, columns, ct).ConfigureAwait(false);
+            before = new TableKeyDefinition(pk, idx, KeyDirections.Canonical(pkDirections));
         }
         catch (TableMetadataUnavailableException)
         {
@@ -523,6 +573,7 @@ internal static class CatalogKeyDefinitionStore
             Identifier = table,
             Columns = columns,
             PrimaryKeyColumns = primaryKey,
+            PrimaryKeyDirections = primaryKeyDirections ?? Array.Empty<KeyColumnDirection>(),
             Indexes = indexes
         });
 
@@ -549,7 +600,7 @@ internal static class CatalogKeyDefinitionStore
         }
 
         await bumpEpoch().ConfigureAwait(false);
-        return new TableKeyDefinitionChange(before, new TableKeyDefinition(validated.PrimaryKeyColumns, validated.Indexes), beforeUnavailable);
+        return new TableKeyDefinitionChange(before, new TableKeyDefinition(validated.PrimaryKeyColumns, validated.Indexes, KeyDirections.Canonical(validated.PrimaryKeyDirections)), beforeUnavailable);
     }
 
     // ---------------------------------------------------------------- helpers

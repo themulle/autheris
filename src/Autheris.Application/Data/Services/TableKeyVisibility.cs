@@ -21,7 +21,10 @@ public static class TableKeyVisibility
         ArgumentNullException.ThrowIfNull(visibleColumns);
 
         var visible = new HashSet<string>(visibleColumns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-        var primaryKey = AllVisible(metadata.PrimaryKeyColumns, visible) ? metadata.PrimaryKeyColumns : Array.Empty<string>();
+        var primaryKeyVisible = AllVisible(metadata.PrimaryKeyColumns, visible);
+        var primaryKey = primaryKeyVisible ? metadata.PrimaryKeyColumns : Array.Empty<string>();
+        // Issue #390 (I390-SC-11): the directions leave with the key; a partial key never reveals a direction.
+        var primaryKeyDirections = primaryKeyVisible ? metadata.PrimaryKeyDirections : Array.Empty<KeyColumnDirection>();
         var indexes = metadata.Indexes
             .Where(i => i.Columns.Count > 0 && AllVisible(i.Columns, visible))
             .ToList();
@@ -42,7 +45,7 @@ public static class TableKeyVisibility
             columns = visibleColumns.Select(StripMarkers).ToList();
         }
 
-        return metadata with { Columns = columns, PrimaryKeyColumns = primaryKey, Indexes = indexes, ReplaceKeyDefinition = false };
+        return metadata with { Columns = columns, PrimaryKeyColumns = primaryKey, PrimaryKeyDirections = primaryKeyDirections, Indexes = indexes, ReplaceKeyDefinition = false };
     }
 
     private static bool AllVisible(IReadOnlyList<string> names, HashSet<string> visible) =>

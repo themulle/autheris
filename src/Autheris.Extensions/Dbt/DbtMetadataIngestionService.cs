@@ -697,6 +697,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         Columns = updatedColumns,
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
+                        PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
                         PredefinedSyntheticSamples = mergedSamples
                     };
@@ -1531,7 +1532,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                     Identifier = existingMeta.Identifier,
                     Columns = updatedCols,
                     ColumnMaskingRules = updatedMaskingRules,
-                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns
+                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
+                    PrimaryKeyDirections = existingMeta.PrimaryKeyDirections
                 };
 
                 pendingUpserts.Add(updatedMetadata);

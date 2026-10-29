@@ -88,7 +88,7 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
         bool requireLeastPrivilege = false,
         List<string>? log = null,
         List<string>? trace = null,
-        bool fullCatalogue = false)
+        bool baselineOnly = false)
     {
         var options = Opts(connectionString, mode, allowNewer, lockTimeoutSeconds, requireLeastPrivilege);
         using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
@@ -96,7 +96,7 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
             repository, options, log is null ? null : new CaptureLogger<SqlServerGovernanceMigrationRunner>(log))
         {
             AdditionalSteps = extra ?? [],
-            StepVersionCapOverride = fullCatalogue ? null : 1,
+            StepVersionCapOverride = baselineOnly ? 1 : null,
             Trace = trace is null ? null : s => { lock (trace) { trace.Add(s); } }
         };
         await runner.RunAsync();
@@ -104,18 +104,40 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
 
     protected override async Task SeedV150Async(string connectionString)
     {
+        await using var repository = GovernanceStoreFactory.CreateSqlServer(
+            Substitute.For<IEpochValidationService>(), Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false));
+        await SeedCoreAsync(repository, () => repository.FlushAuditChannelAsync());
+    }
+
+    protected override async Task SeedBaselineAsync(string connectionString)
+    {
         var options = Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false);
         using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
         await new SqlServerGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 1 }.RunAsync();
         await repository.InitializeAsync();
-        await SeedCoreAsync(repository, () => repository.FlushAuditChannelAsync());
+        for (var i = 0; i < 25; i++)
+        {
+            await repository.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
+            {
+                EventType = "UPGRADE_390",
+                ActorSid = new Autheris.Domain.Common.Sid("S-1-390-" + i),
+                TargetTable = "dbo.t",
+                TraceId = Guid.NewGuid().ToString("N")
+            });
+        }
+
+        await repository.FlushAuditChannelAsync();
+        if (!await repository.VerifyAuditHashChainAsync())
+        {
+            throw new InvalidOperationException("The seeded v1.5.0 audit chain must verify before the upgrade.");
+        }
     }
 
-    protected override async Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra, bool fullCatalogue = false)
+    protected override async Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra)
     {
         var options = Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false);
         using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
-        await new SqlServerGovernanceMigrationRunner(repository, options) { AdditionalSteps = extra, StepVersionCapOverride = fullCatalogue ? null : 1 }.RunAsync();
+        await new SqlServerGovernanceMigrationRunner(repository, options) { AdditionalSteps = extra }.RunAsync();
         await repository.InitializeAsync();
         return await repository.VerifyAuditHashChainAsync();
     }

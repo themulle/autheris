@@ -140,6 +140,8 @@ public static class CatalogGovernanceRatchet
             Columns = mergedColumns,
             ColumnMaskingRules = mergedRules,
             PrimaryKeyColumns = replace ? incoming.PrimaryKeyColumns : existing.PrimaryKeyColumns,
+            // I390-SC-12: directions always travel with the column list of the same side (never combined across sides).
+            PrimaryKeyDirections = replace ? incoming.PrimaryKeyDirections : existing.PrimaryKeyDirections,
             Indexes = replace ? incoming.Indexes : existing.Indexes,
             RowFilterEvaluation = existing.RowFilterEvaluation,
             CatalogView = existing.CatalogView,

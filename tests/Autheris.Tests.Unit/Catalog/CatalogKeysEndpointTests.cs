@@ -106,7 +106,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         var spy = Substitute.For<ITableMetadataRepository>();
         spy.GetActiveTableIdentifierByIdAsync(id, Arg.Any<CancellationToken>()).Returns(Orders);
         spy.GetActiveTableIdentifierAsync(Orders, Arg.Any<CancellationToken>()).Returns(Orders);
-        spy.ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<CancellationToken>())
+        spy.ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<IReadOnlyList<KeyColumnDirection>?>(), Arg.Any<CancellationToken>())
             .Returns(new TableKeyDefinitionChange(new([], []), new(["a"], [])));
 
         var (status, _) = await Run(await Put(id.ToString("D"), new SetDatasetKeysDto(PrimaryKey: ["a"]), spy));
@@ -120,13 +120,13 @@ public sealed class CatalogKeysEndpointTests : IDisposable
     {
         var spy = Substitute.For<ITableMetadataRepository>();
         spy.GetActiveTableIdentifierAsync(Orders, Arg.Any<CancellationToken>()).Returns(Orders);
-        spy.ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<CancellationToken>())
+        spy.ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<IReadOnlyList<KeyColumnDirection>?>(), Arg.Any<CancellationToken>())
             .Returns(new TableKeyDefinitionChange(new([], []), new(["a"], [])));
 
         await Put("sales.dbo.orders", new SetDatasetKeysDto(PrimaryKey: ["a"]), spy);
 
         await spy.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
-        await spy.Received(1).ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<CancellationToken>());
+        await spy.Received(1).ReplaceTableKeyDefinitionAsync(Orders, Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyList<TableIndexDefinition>>(), Arg.Any<IReadOnlyList<KeyColumnDirection>?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
 
         await repoSpy.DidNotReceiveWithAnyArgs().GetActiveTableIdentifierAsync(default!, default);
         await repoSpy.DidNotReceiveWithAnyArgs().GetActiveTableIdentifierByIdAsync(default, default);
-        await repoSpy.DidNotReceiveWithAnyArgs().ReplaceTableKeyDefinitionAsync(default!, default!, default!, default);
+        await repoSpy.DidNotReceiveWithAnyArgs().ReplaceTableKeyDefinitionAsync(default!, default!, default!, default!, default);
         await auditSpy.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
     }
 
@@ -375,7 +375,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
 
         public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => inner.GetAllTablesAsync(ct);
         public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) => inner.UpsertTableMetadataAsync(metadata, ct);
-        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, CancellationToken ct = default) =>
-            inner.ReplaceTableKeyDefinitionAsync(table, primaryKey, indexes, ct);
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default) =>
+            inner.ReplaceTableKeyDefinitionAsync(table, primaryKey, indexes, primaryKeyDirections, ct);
     }
 }

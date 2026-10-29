@@ -27,11 +27,11 @@ public sealed class GovernanceSqliteUpgradeTests
     private static IOptions<GatewayOptions> Opts(string cs) =>
         Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = cs, SeedDemoData = false } });
 
-    private static MigrationStep ProbeStep() =>
+    private static MigrationStep ProbeStep(int version = 2) =>
         new(
-            2,
+            version,
             StepName,
-            SqlMigrationStep.ComputeChecksum("sqlite", 2, StepName, "v1"),
+            SqlMigrationStep.ComputeChecksum("sqlite", version, StepName, "v1"),
             ctx =>
             {
                 using var cmd = ctx.Connection.CreateCommand();
@@ -64,9 +64,7 @@ public sealed class GovernanceSqliteUpgradeTests
     {
         var cs = $"Data Source=up_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         var options = Opts(cs);
-        using var repository = NewUnmigrated(options);
-        await BaselineRunner(repository, options).RunAsync();
-        await repository.InitializeAsync();
+        using var repository = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
         var tableId = Guid.NewGuid();
         var identifier = new TableIdentifier("src388", "dbo", "readings");
         await repository.UpsertTableMetadataAsync(new TableMetadata
@@ -107,10 +105,10 @@ public sealed class GovernanceSqliteUpgradeTests
         consents.ShouldBe(1);
         audit.ShouldBeGreaterThanOrEqualTo(25);
 
-        var step = ProbeStep();
-        await new SqliteGovernanceMigrationRunner(repository, options) { AdditionalSteps = [step], StepVersionCapOverride = 1 }.RunAsync();
+        var step = ProbeStep(3);
+        await new SqliteGovernanceMigrationRunner(repository, options) { AdditionalSteps = [step] }.RunAsync();
 
-        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('CONSENTS') WHERE name = 'probe_388'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM CONSENTS").ShouldBe(consents);
         Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);
@@ -162,12 +160,6 @@ public sealed class GovernanceSqliteUpgradeTests
     private static async Task SeedV150KeysAndAuditAsync(SqliteGovernanceRepository repository)
     {
         var tableId = Guid.NewGuid();
-        await repository.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "Sqlite", SourceName = "src390" },
-            Identifier = new TableIdentifier("src390", "dbo", "readings"),
-            Columns = [new TableColumn { TableId = tableId, ColumnName = "device_id", DataType = "varchar" }, new TableColumn { TableId = tableId, ColumnName = "ts", DataType = "datetime" }]
-        });
         // v1.5.0 shape: the key tables have no is_descending column, so the rows are written with the v1 column list.
         Exec(repository, $"INSERT INTO TABLE_PRIMARY_KEY_COLUMNS (table_id, key_ordinal, table_column_id) VALUES ('{tableId}', 1, 'c1'), ('{tableId}', 2, 'c2')");
         Exec(repository, "INSERT INTO TABLE_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i1', 1, 'c1'), ('i1', 2, 'c2')");
