@@ -14,7 +14,8 @@
       "low": 85,
       "break": 85
     },
-    "concurrency": 2,
+    "coverage-analysis": "perTest",
+    "concurrency": 4,
     "reporters": [
       "progress",
       "json",
