@@ -111,6 +111,31 @@ public sealed class ApiProblemsHardeningTests
     }
 
     [Fact]
+    public async Task WriteTooManyRequests_Sets_RetryAfter_Header_And_Member_Consistently()
+    {
+        var ctx = NewContext();
+        await ApiProblems.WriteTooManyRequests(ctx, ApiErrorCodes.TooManyRequests, "Slow down.", 7, CancellationToken.None);
+
+        ctx.Response.StatusCode.ShouldBe(429);
+        ctx.Response.Headers.RetryAfter.ToString().ShouldBe("7");
+        using var doc = JsonDocument.Parse(Body(ctx));
+        doc.RootElement.GetProperty("retryAfterSeconds").GetInt32().ShouldBe(7);
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("TOO_MANY_REQUESTS");
+    }
+
+    [Fact]
+    public async Task WriteAsync_Rejects_Null_Detail() =>
+        await Should.ThrowAsync<ArgumentNullException>(() => ApiProblems.WriteAsync(NewContext(), 400, "BAD_REQUEST", null!, CancellationToken.None));
+
+    [Fact]
+    public void Legacy_Forbidden_And_NotFound_Codes_Map_To_Governed_Codes()
+    {
+        // NL-T-35 / NL-SC-20: an unmapped legacy code never leaks as-is.
+        ApiProblems.CreateProblemDetails(403, "FORBIDDEN", "x").Extensions["code"].ShouldBe(ApiErrorCodes.AccessDenied);
+        ApiProblems.CreateProblemDetails(404, "NOT_FOUND", "x").Extensions["code"].ShouldBe(ApiErrorCodes.ResourceNotFound);
+    }
+
+    [Fact]
     public async Task Indistinguishable_Pair_Bodies_And_Headers_Are_Identical_Across_Principals()
     {
         // NL-T-28 / NL-SC-28

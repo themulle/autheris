@@ -220,7 +220,8 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     }
 
     [Fact]
-    public async Task PrivacyBudget429_KeepsExtensions_NoMessage()
+    [Trait("Category", "Security")]
+    public async Task PrivacyBudget_429_Keeps_Only_Allowlisted_Typed_Extensions()
     {
         var engine = Substitute.For<IDifferentialPrivacyEngine>();
         engine.PerturbAsync(default!, default).ThrowsAsyncForAnyArgs(new PrivacyBudgetExhaustedException("client-1", 4.5, 5.0));
@@ -230,10 +231,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
 
         AssertGoverned(c, 429, ApiErrorCodes.PrivacyBudgetExhausted);
         c.Headers["X-Privacy-Budget-Exhausted"].ToString().ShouldBe("true");
-        // NL-SC-27: only allowlisted scalar extensions survive; the budget figures are no longer part of the body (decision pending for WP-4).
-        c.Json.TryGetProperty("clientId", out _).ShouldBeFalse();
-        c.Json.TryGetProperty("consumed", out _).ShouldBeFalse();
-        c.Json.TryGetProperty("totalBudget", out _).ShouldBeFalse();
+        // NL-T-32 / NL-SC-32: the allowlisted typed budget figures are present.
+        c.Json.GetProperty("clientId").GetString().ShouldBe("client-1");
+        c.Json.GetProperty("consumed").GetDouble().ShouldBe(4.5);
+        c.Json.GetProperty("totalBudget").GetDouble().ShouldBe(5.0);
         c.Body.ShouldNotContain("Epsilon privacy budget exhausted");
     }
 

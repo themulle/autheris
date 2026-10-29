@@ -339,6 +339,9 @@ public sealed class WebSqlTrinoProtocolTests
         msg.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
         error.GetProperty("errorType").GetString().ShouldBe("INTERNAL_ERROR");
         error.GetProperty("errorName").GetString().ShouldBe("INTERNAL_ERROR");
+        // NL-T-33: fixed numeric code, no exception text in the protocol entry.
+        error.GetProperty("errorCode").GetInt32().ShouldBe(2);
+        error.GetRawText().ShouldNotContain("Conversion failed");
     }
 
     [Fact]

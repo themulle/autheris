@@ -95,6 +95,7 @@ public static class ApiProblems
         string? title = null,
         IReadOnlyDictionary<string, object?>? ext = null)
     {
+        ArgumentNullException.ThrowIfNull(detail);
         code = ApiErrorCodes.Resolve(statusCode, code);
         var traceId = ResolveTraceId(httpContext);
         var correlationId = ResolveCorrelationId(httpContext, traceId);
@@ -143,6 +144,15 @@ public static class ApiProblems
             ct);
     }
 
+    /// <summary>Raw-stream 429: sets <c>Retry-After</c> and the <c>retryAfterSeconds</c> member consistently, then writes the governed body.</summary>
+    public static Task WriteTooManyRequests(HttpContext httpContext, string code, string detail, int retryAfterSeconds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        httpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return WriteAsync(httpContext, StatusCodes.Status429TooManyRequests, code, detail, ct,
+            new Dictionary<string, object?> { ["retryAfterSeconds"] = retryAfterSeconds });
+    }
+
     /// <summary>
     /// A problem body for an anti-enumeration pair (NL-SC-28): the bytes are fixed per (status, code, detail), carry no traceId,
     /// instance or correlationId, and no header is added, so members of the pair cannot be told apart.
@@ -176,7 +186,9 @@ public static class ApiProblems
     // NL-SC-27: the only extension members a problem body may carry, scalar values only.
     private static readonly HashSet<string> AllowedExtensionKeys = new(StringComparer.Ordinal)
     {
-        "retryAfterSeconds", "maxValidTo", "phase", "sunsetDate", "replacement", "limit", "discardedEvents"
+        "retryAfterSeconds", "maxValidTo", "phase", "sunsetDate", "replacement", "limit", "discardedEvents",
+        // NL-SC-32: privacy-budget 429 figures (typed values of the budget decision, caller's own client id only).
+        "clientId", "consumed", "totalBudget"
     };
 
     private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)

@@ -1132,6 +1132,31 @@ public class ProcedureLimitsInc2Tests
         doc.RootElement.GetProperty("code").GetString().ShouldBe("PROCEDURE_REJECTED");
     }
 
+    [Theory]
+    [InlineData("PROCEDURE_ARGUMENT_INVALID", "PROCEDURE_ARGUMENT_INVALID")]
+    [InlineData("SQL_SYNTAX_ERROR", "PROCEDURE_REJECTED")]
+    [InlineData("ACCESS_DENIED", "PROCEDURE_REJECTED")]
+    [InlineData("INTERNAL_ERROR", "PROCEDURE_REJECTED")]
+    [Trait("Category", "Security")]
+    public async Task Route_Operator_MappedCode_Is_Restricted_To_Procedure_Codes(string mapped, string expected)
+    {
+        // NL-SC-30 (review fix): a governed but non-PROCEDURE_* operator code never surfaces on the 422.
+        var service = Substitute.For<IProcedureExecutionService>();
+        service.ExecuteAsync(default!, default, default!, default, default)
+            .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null, "abc123", mapped, "Declared text."));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = User() };
+        http.RequestServices = new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddLogging().BuildServiceProvider();
+        http.Response.Body = new MemoryStream();
+
+        await Autheris.Api.Endpoints.ProcedureEndpointRoutes.HandleGet(
+            "x", http, service, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+
+        http.Response.StatusCode.ShouldBe(422);
+        http.Response.Body.Position = 0;
+        using var doc = System.Text.Json.JsonDocument.Parse(new StreamReader(http.Response.Body).ReadToEnd());
+        doc.RootElement.GetProperty("code").GetString().ShouldBe(expected);
+    }
+
     // ---------- WP-E: ddl_hash requirement for declared mode ----------
 
     private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>

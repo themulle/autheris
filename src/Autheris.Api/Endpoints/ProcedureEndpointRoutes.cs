@@ -385,9 +385,7 @@ public static class ProcedureEndpointRoutes
         }
         catch (GatewayThrottledException ex)
         {
-            http.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            await ApiProblems.WriteAsync(http, StatusCodes.Status429TooManyRequests, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ct,
-                new Dictionary<string, object?> { ["retryAfterSeconds"] = ex.RetryAfterSeconds }).ConfigureAwait(false);
+            await ApiProblems.WriteTooManyRequests(http, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ex.RetryAfterSeconds, ct).ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
@@ -399,7 +397,9 @@ public static class ProcedureEndpointRoutes
         {
             // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
             // NL-SC-30: the operator text is control-stripped and length-capped; an operator code outside the governed set falls back to PROCEDURE_REJECTED.
-            var rejectedCode = ApiErrorCodes.IsGoverned(ex.MappedCode) ? ex.MappedCode! : ApiErrorCodes.ProcedureRejected;
+            var rejectedCode = ex.MappedCode is { } mapped && mapped.StartsWith("PROCEDURE_", StringComparison.Ordinal) && ApiErrorCodes.IsGoverned(mapped)
+                ? mapped
+                : ApiErrorCodes.ProcedureRejected;
             await ApiProblems.WriteAsync(http, StatusCodes.Status422UnprocessableEntity, rejectedCode,
                 ApiProblems.SanitizeOperatorText(ex.MappedMessage, ProcedureBusinessException.FixedMessage), ct).ConfigureAwait(false);
         }

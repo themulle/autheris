@@ -47,9 +47,7 @@ public static partial class WebSqlEndpoints
         {
             case GatewayThrottledException throttledEx:
                 logger.Warning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status429TooManyRequests, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ct,
-                    new Dictionary<string, object?> { ["retryAfterSeconds"] = throttledEx.RetryAfterSeconds });
+                await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", throttledEx.RetryAfterSeconds, ct);
                 break;
 
             case GatewayNotImplementedException notImplEx:
@@ -376,7 +374,8 @@ public static partial class WebSqlEndpoints
 
             trinoError = new
             {
-                message = msg,
+                // NL-SC-33: fixed message per denial class; the status text (SQL, table names, exception text) never reaches the protocol entry.
+                message = isInternalError ? GenericServerErrorMessage : "The SQL statement could not be executed.",
                 errorCode = isInternalError ? 2 : 1,
                 errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
                 errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
