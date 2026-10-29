@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Governance;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Threading;
@@ -286,7 +287,7 @@ public sealed class FunctionalRightMapperTests
     }
 
     [Fact]
-    public async Task FunctionalRightMapper_GetRightsForCallerAsync_ResolvesApprovedRightsAndLegacyRoles()
+    public async Task FunctionalRightMapper_GetRightsForCallerAsync_ResolvesApprovedRights()
     {
         var tenantId = new TenantId("tenant-1");
         var realmId = "workforce-entra";
@@ -313,7 +314,8 @@ public sealed class FunctionalRightMapperTests
         var rights = await _sut.GetRightsForCallerAsync(principal, tenantId, realmId);
 
         rights.ShouldContain(FunctionalRight.DataExport);
-        rights.ShouldContain(new FunctionalRight("Consumer")); // From legacy GatewayRole
+        rights.ShouldNotContain(new FunctionalRight("Consumer")); // NL-SC-01: the role claim alone grants nothing
+        rights.Count.ShouldBe(1);
 
         var hasExport = await _sut.HasRightAsync(principal, tenantId, realmId, FunctionalRight.DataExport);
         hasExport.ShouldBeTrue();
@@ -407,6 +409,44 @@ public sealed class FunctionalRightMapperTests
         var rights = await _sut.GetRightsForCallerAsync(principal, tenantId, "workforce-entra");
 
         rights.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Gateway_Role_Claim_Alone_Grants_No_Functional_Right()
+    {
+        var tenantId = new TenantId("tenant-1");
+        _repository.GetApprovedMappingsForGroupsAndRolesAsync(
+            tenantId, "workforce-entra", Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var roleNames = Enum.GetValues<Autheris.Domain.Security.GatewayRole>().Select(r => r.ToString()).Append("NoSuchRole");
+        foreach (var role in roleNames)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, role)], "TestAuth"));
+            var rights = await _sut.GetRightsForCallerAsync(principal, tenantId, "workforce-entra");
+            rights.ShouldBeEmpty(role);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Configured_Role_Right_Assignment_Still_Grants_Right()
+    {
+        var tenantId = new TenantId("tenant-1");
+        var mapping = new FunctionalRightMapping(
+            tenantId.Value, "workforce-entra", "DataSteward", FunctionalRight.DataExport,
+            ApprovedBy: "approver-bob", ApprovedAt: DateTimeOffset.UtcNow,
+            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "creator-alice", CreatedAt: DateTimeOffset.UtcNow);
+        _repository.GetApprovedMappingsForGroupsAndRolesAsync(
+            tenantId, "workforce-entra", Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns([mapping]);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, "DataSteward"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "TestAuth"));
+
+        var rights = await _sut.GetRightsForCallerAsync(principal, tenantId, "workforce-entra");
+
+        rights.ShouldBe([FunctionalRight.DataExport], ignoreOrder: true);
     }
 
     [Fact]
