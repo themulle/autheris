@@ -108,6 +108,7 @@ internal sealed partial class SqlMigrationStep
                 $"Governance migration {version:D4} '{name}' ({engine}) violates the step lint (fail closed): {string.Join("; ", violations)}.");
         }
 
+        // The SQL Server batch split and trim is a deterministic function of the checksummed, normalised text, so the executed batches are covered by the checksum.
         var batches = engine == "sqlserver"
             ? sql.Split('\n').Aggregate(
                 new List<StringBuilder> { new() },
