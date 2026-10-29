@@ -85,7 +85,7 @@ if [ -n "$shard" ]; then
   shard_count="${BASH_REMATCH[2]}"
   all_list="$(mktemp)"
   printf '%s\n' "${in_scope[@]}" > "$all_list"
-  mapfile -t mine < <(python3 -I "$script_dir/g7-shard.py" --in-scope-list "$all_list" --root "$root" --shards "$shard_count" --index "$shard_index") \
+  mapfile -t mine < <(python3 -I "$script_dir/g7-shard.py" --in-scope-list "$all_list" --root "$root" --shards "$shard_count" --index "$shard_index" --weights "$script_dir/g7-weights.json") \
     || { rm -f "$all_list"; fail "shard assignment failed"; }
   rm -f "$all_list"
   [ "${#mine[@]}" -gt 0 ] || fail "the shard is empty"

@@ -91,6 +91,41 @@ public sealed partial class G7ShardTests : IDisposable
         loads.Max().ShouldBeLessThan((int)(loads.Min() * 1.3));
     }
 
+    private string[] ShardFilesWeighted(int index, int shards, string weightsContent)
+    {
+        string weights = Path.Combine(_dir, "weights.json");
+        File.WriteAllText(weights, weightsContent);
+        var r = Py("g7-shard.py", "--in-scope-list", Path.Combine(_dir, "all.txt"), "--root", _dir, "--shards", shards.ToString(), "--index", index.ToString(), "--weights", weights);
+        r.Code.ShouldBe(0, r.Output);
+        return r.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(l => l.EndsWith(".cs", StringComparison.Ordinal)).ToArray();
+    }
+
+    [Fact]
+    public void G7Shard_MeasuredWeights_BalanceByMutantCount_AndStaleWeightsNeverFail()
+    {
+        string[] all = MakeFiles(8);
+        // One heavy file (measured 100) must sit alone; the other seven (measured 10 each, one missing from the file) share the rest.
+        string heavy = JsonSerializer.Serialize(all.Take(7).ToDictionary(f => f, f => f == all[3] ? 100 : 10).Append(new("src/TrinoSqlEngine/Gone.cs", 5)).ToDictionary());
+
+        var shards = Enumerable.Range(0, 2).Select(i => ShardFilesWeighted(i, 2, heavy)).ToArray();
+
+        shards.SelectMany(s => s).Order().ShouldBe(all.Order());
+        shards.Single(s => s.Contains(all[3])).Length.ShouldBeLessThan(shards.Single(s => !s.Contains(all[3])).Length);
+        // Garbage weights fall back to line counts and still produce a full partition.
+        var fallback = Enumerable.Range(0, 2).Select(i => ShardFilesWeighted(i, 2, "{not json")).ToArray();
+        fallback.SelectMany(s => s).Order().ShouldBe(all.Order());
+    }
+
+    [Fact]
+    public void G7Shard_CheckedInWeights_CoverTheCurrentScope()
+    {
+        string root = FindRoot();
+        var weights = JsonSerializer.Deserialize<Dictionary<string, int>>(File.ReadAllText(Path.Combine(root, "tools", "sqlgate", "g7-weights.json")))!;
+
+        weights.Values.ShouldAllBe(v => v >= 0);   // a file with 0 measured mutants falls back to its line count
+        weights.Count.ShouldBeGreaterThan(30);
+    }
+
     [Fact]
     public void G7Shard_MoreShardsThanFiles_Fails()
     {

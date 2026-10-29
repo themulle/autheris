@@ -50,9 +50,10 @@ public sealed record BenchThresholds
 
     /// <summary>
     /// ARCH-MNT-15-FU-01: the cold-cache parse (ANTLR cap forced to 1) may be at most this multiple of the warm P99. A ratio, so it does not depend
-    /// on the runner. Value: see the measurement recorded next to it; raise it only together with a new recorded measurement (SC-07).
+    /// on the runner. Value: 93.0 = about 1.5 x the 61.77x measured in CI run 40870422455 (2026-10-29, nightly profile, a single sample; the
+    /// earlier local calibration of 48 was too tight for the CI runners). Re-check after 3 nightly runs; raise it only together with a new recorded measurement (SC-07).
     /// </summary>
-    public double MaxColdWarmP99Ratio { get; init; } = 48.0;
+    public double MaxColdWarmP99Ratio { get; init; } = 93.0;
 }
 
 public sealed record BenchViolation(string Rule, string Bucket, string Message);

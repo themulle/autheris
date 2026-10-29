@@ -20,10 +20,10 @@ permissions: {}
 
 env:
   # Number of G7 shards; must equal the length of the shard matrix below (the aggregate fails on a missing shard result).
-  G7_SHARDS: '12'
-  # Floor for the summed valid in-scope mutants (vacuous-scope guard). PLACEHOLDER (local run: 3,482 mutants); calibrate from the first
-  # real CI run (set it to a bit below the observed total) and keep it in step with stryker-config.json.
-  G7_MUTANT_FLOOR: '2500'
+  G7_SHARDS: '16'
+  # Floor for the summed valid in-scope mutants (vacuous-scope guard). Calibrated from CI run 40870422455 (2026-10-29): 3,847 valid
+  # mutants (Killed+Timeout+Survived+NoCoverage); the floor is below 85% of that. Re-check when the scope or the mutators change.
+  G7_MUTANT_FLOOR: '3200'
 
 jobs:
   sql-compiler-gate-nightly:
@@ -79,7 +79,7 @@ jobs:
 
   # G7 mutation score (plan 9.3, M-12, SC-06), sharded: the in-scope files are split over G7_SHARDS parallel jobs, because one job did not
   # finish within its budget on the CI runners (about 3.6x slower than the dev machine). Each shard marks every file outside its own subset
-  # with `// Stryker disable all` (g7-scope.sh --apply --shard I/N, assignment by g7-shard.py, balanced by line count), so Stryker mutates
+  # with `// Stryker disable all` (g7-scope.sh --apply --shard I/N, assignment by g7-shard.py, balanced by the measured per-file mutant counts in g7-weights.json), so Stryker mutates
   # only that subset. The scope, the Debug configuration (the security mutant hooks exist only there) and the break threshold (85%, kept
   # in the config; the shard step passes --break-at 0 because only the aggregate enforces 85 on the summed raw counts) live in
   # stryker-config.json. Each shard reduces its report to raw status counts and uploads it with the
@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false # every shard reports, the aggregate decides
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
