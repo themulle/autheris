@@ -213,6 +213,7 @@ public sealed class McpDatasetCatalogTests
     public async Task Describe_RelationColumns_Bypass_InactiveTarget_Null()
     {
         MapOrdersRelation(["id"], ["id"]);
+        var catalog = Catalog(Bypass());
         var inactive = new TableMetadata
         {
             Identifier = Payroll,
@@ -221,7 +222,7 @@ public sealed class McpDatasetCatalogTests
         };
         _metadata.GetTableMetadataAsync(Payroll, Arg.Any<CancellationToken>()).Returns(inactive);
 
-        var result = await Catalog(Bypass()).DescribeDatasetAsync(User(), "sales.public.orders");
+        var result = await catalog.DescribeDatasetAsync(User(), "sales.public.orders");
 
         result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBeNull();
     }
