@@ -15,7 +15,7 @@ using Autheris.Domain.Model;
 /// the server-resolved request tenant. A payload tenant other than <see cref="Tenant"/> is accepted only when
 /// <see cref="IsClusterAdmin"/> (canonical ClusterAdmin) is set.
 /// </summary>
-public sealed record DbtGovernanceImportCaller(VirtualFilterActor Actor, TenantId Tenant, bool IsClusterAdmin = false);
+public sealed record DbtGovernanceImportCaller(VirtualFilterActor Actor, TenantId Tenant, bool IsClusterAdmin = false, bool IsGovernanceAdmin = false);
 
 public interface IDbtMetadataIngestionService
 {

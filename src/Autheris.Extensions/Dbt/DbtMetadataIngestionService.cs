@@ -19,7 +19,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
-public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
+public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionService
 {
     private readonly IDbtProposalRepository _proposalRepository;
     private readonly ITableMetadataRepository _metadataRepository;
@@ -33,6 +33,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
     private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
     private readonly IDbtTestTargetMap? _testTargetMap;
+    private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
+    private readonly IAuditLogRepository? _auditLog;
+    private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -176,8 +179,14 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
-        ILogger<DbtMetadataIngestionService> logger)
+        ILogger<DbtMetadataIngestionService> logger,
+        IDataOwnerAssignmentRepository? ownerAssignments = null,
+        IAuditLogRepository? auditLog = null,
+        Autheris.Application.Governance.IDataOwnerIdentityVerifier? ownerIdentityVerifier = null)
     {
+        _ownerAssignments = ownerAssignments;
+        _auditLog = auditLog;
+        _ownerIdentityVerifier = ownerIdentityVerifier;
         _tagImport = tagImport;
         _syntheticRowGenerator = syntheticRowGenerator;
         _testTargetMap = testTargetMap;
@@ -1205,6 +1214,15 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
+        // Issue #393 (part b): an owner payload is gated before anything is read or written (flag, global governance admin, repositories).
+        var ownerPayload = AnyOwnerKeys(modelsArray);
+        var ownerCollector = new OwnerImportCollector();
+        if (ownerPayload && OwnerImportGate(caller) is { } gateCode)
+        {
+            _logger.LogWarning("Dbt governance import rejected: the owner payload is not allowed ({Code}).", gateCode);
+            return OwnerFailure(gateCode, warnings);
+        }
+
         if (modelsArray.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in modelsArray.EnumerateArray())
@@ -1255,6 +1273,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         tableId = existingMeta.Identifier;
                     }
                 }
+                if (ownerPayload && DbtOwnerSpecValidator.HasOwnerKeys(item))
+                {
+                    if (existingMeta == null)
+                    {
+                        ownerCollector.Errors.Add(new OwnerImportError("dbt_owner_table_not_found", tableId.ToString(), "table"));
+                    }
+                    else
+                    {
+                        CollectOwners(item, existingMeta.Identifier, caller, ownerCollector);
+                    }
+                }
+
                 if (existingMeta == null)
                 {
                     // R-51: Distinguish routine / procedure from missing catalog tables
@@ -1566,6 +1596,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 RelaxedMaskingRulesCount: relaxedMaskingRulesCount);
         }
 
+        OwnerImportPlan? ownerPlan = null;
+        if (ownerPayload)
+        {
+            var (ownerFailure, plan) = await PrepareOwnerImportAsync(ownerCollector, caller, effectiveReplace, dryRun, warnings, ct).ConfigureAwait(false);
+            if (ownerFailure is not null)
+            {
+                return ownerFailure;
+            }
+
+            ownerPlan = plan;
+        }
+
         if (!dryRun)
         {
             foreach (var updatedMetadata in pendingUpserts)
@@ -1604,6 +1646,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
+        IReadOnlyList<DataOwnerChange> ownerChanges = ownerPlan?.Changes ?? [];
+        if (ownerPlan is not null && !dryRun)
+        {
+            var (applyFailure, applied) = await ApplyOwnersAsync(ownerCollector, ownerPlan, caller, effectiveReplace, warnings, ct).ConfigureAwait(false);
+            if (applyFailure is not null)
+            {
+                return applyFailure;
+            }
+
+            ownerChanges = applied;
+        }
+
         return new DbtGovernanceSyncResult(
             Success: true,
             UpdatedTablesCount: updatedTables,
@@ -1613,7 +1667,10 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             AccessProfilesCount: accessProfilesCount,
             Warnings: warnings,
             RemovedMaskingRulesCount: removedMaskingRulesCount,
-            RelaxedMaskingRulesCount: relaxedMaskingRulesCount
+            RelaxedMaskingRulesCount: relaxedMaskingRulesCount,
+            CreatedDataOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerCreated),
+            AssignedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerAssigned),
+            RemovedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerRemoved)
         );
     }
 

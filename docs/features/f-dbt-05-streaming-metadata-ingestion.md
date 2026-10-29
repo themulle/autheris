@@ -39,3 +39,33 @@ curl -X POST "http://localhost:5000/api/extensions/dbt/sync?mode=replace" \
   -F "manifest=@target/manifest.json" \
   -F "catalog=@target/catalog.json"
 ```
+
+## Data Owners in the Governance Import (issue #393)
+
+`POST /api/extensions/dbt/governance` can assign table data owners (the approvers of consent requests). It is off unless `Gateway:Dbt:ImportDataOwners` is `true` (see the configuration guide). The manifest sync never writes owners; `meta.owner` stays a suggested owner team.
+
+**Payload.** A table item carries `owner` (object) or `owners` (array, at most 10 per table):
+
+```json
+{ "classifications": [ {
+    "database": "sales", "schema": "dbo", "table": "orders",
+    "owners": [
+      { "sid": "S-1-5-21-123", "display_name": "Ada Owner", "email": "ada@corp.example", "account": "CORP\\ada", "role": "primary" },
+      "S-1-5-21-456"
+    ] } ] }
+```
+
+- Object fields: `sid` (required), `account` (defaults to `sid`), `display_name` (required when the owner is created), `email`, `role` (`primary` default or `delegate`). Unknown keys reject. `group` / `groups` are not supported.
+- A bare string is a lookup key (sid, account or e-mail) that must match exactly one active existing owner; it never creates an owner.
+- Format rules: identifiers have no whitespace or control characters and no `system:` or `S-1-5-21-FORWARD-GRP-` prefix; display names have no control, bidi or zero-width characters (200 characters at most); e-mail addresses must be plain addresses.
+
+**Rules.**
+- The whole import is rejected (nothing is written) on any owner error: flag off, caller not a global governance admin, unparsable or invalid owner, an owner that matches the caller itself (sid, account, e-mail or any identifier alias; trimmed, Unicode-normalised, case-insensitive), a table that is unknown or outside the caller tenant, more than 5,000 assignments or 1,000 new owners in one import.
+- Existing `DATA_OWNERS` rows are never changed: a payload attribute that differs from the stored row (`dbt_owner_conflict`), an inactive row, or a new owner whose sid, account or e-mail matches any identifier of another row (`dbt_owner_identifier_collision`) reject.
+- When an identity realm is configured, every owner that is created or newly linked must exist and be active in the SCIM identity store; a lookup failure rejects. Without a realm the audit records `identity_verified=false`.
+- New `TABLE_OWNERS` rows carry the id prefix `dbt:`. Merge mode only adds missing assignments. In replace mode, for each listed table the `dbt:` rows that are not in the payload are removed; rows without the prefix and tables that are not listed are never touched.
+- `dryRun=true` runs every check and reports `CreatedDataOwnersCount`, `AssignedTableOwnersCount` and `RemovedTableOwnersCount`; it writes nothing.
+- Audit: before anything is written the change set is recorded (`DATA_OWNER_CREATED`, `TABLE_OWNER_ASSIGNED`, `TABLE_OWNER_REMOVED`; a failure aborts the import), then one `DBT_OWNER_IMPORT_OUTCOME` event. Details carry owner id, role, table and source only, never an e-mail, account or display name.
+- Error messages name the table and field and a governed `dbt_owner_*` code, never an identifier value.
+
+Imported owners show up in `describe_dataset` and can approve consent requests of their tables like any other owner (the self-approval and consent-tenant checks are unchanged).
