@@ -104,14 +104,14 @@ public sealed partial class StrykerConfigGuardTests
         stepTimeout.ShouldBeLessThan(jobTimeout);
         string.Join('\n', stryker).ShouldContain("--log-to-file");
 
-        Step(job, "G7 summary").ShouldContain(l => Regex.IsMatch(l, @"^        if:\s*always\(\)\s*$"));
+        Step(job, "G7 shard result").ShouldContain(l => Regex.IsMatch(l, @"^        if:\s*always\(\)\s*$"));
         var upload = Step(job, "Upload");
         upload.ShouldContain(l => Regex.IsMatch(l, @"^        if:\s*always\(\)\s*$"));
         string.Join('\n', upload).ShouldContain("StrykerOutput");
     }
 
     [Fact]
-    public void Workflow_G7Job_AppliesTheScopeBeforeStryker_AndSummaryHasAFloor()
+    public void Workflow_G7Job_AppliesTheShardScopeBeforeStryker_AndAggregateHasAFloorAndBreak()
     {
         var job = Job(G7Job);
         int scope = Array.FindIndex(job, l => l.Contains("g7-scope.sh --apply", StringComparison.Ordinal));
@@ -119,7 +119,23 @@ public sealed partial class StrykerConfigGuardTests
 
         scope.ShouldBeGreaterThanOrEqualTo(0);
         stryker.ShouldBeGreaterThan(scope);
-        string.Join('\n', Step(job, "G7 summary")).ShouldMatch(@"--floor\s+[1-9]\d*");
+        job[scope].ShouldContain("--shard");
+
+        // SC-06: the aggregate runs on always(), needs every shard, takes the floor from an explicit env input and enforces break 85.
+        var aggregate = Job(G7Job + "-aggregate");
+        aggregate.ShouldContain(l => l.Trim() == "needs: " + G7Job);
+        aggregate.ShouldContain(l => Regex.IsMatch(l, @"^    if:\s*always\(\)\s*$"));
+        aggregate.ShouldNotContain(l => l.Contains("continue-on-error", StringComparison.Ordinal));
+        string verdict = string.Join('\n', Step(aggregate, "G7 aggregate verdict"));
+        verdict.ShouldContain("--break-at 85");
+        verdict.ShouldContain("--needs-result");
+        verdict.ShouldContain("--floor \"${G7_MUTANT_FLOOR}\"");
+        Regex.IsMatch(string.Join('\n', Workflow()), @"^  G7_MUTANT_FLOOR:\s*'[1-9]\d*'", RegexOptions.Multiline).ShouldBeTrue();
+        var shards = Regex.Match(string.Join('\n', Workflow()), @"^  G7_SHARDS:\s*'(\d+)'", RegexOptions.Multiline);
+        shards.Success.ShouldBeTrue();
+        var matrix = Regex.Match(string.Join('\n', job), @"shard:\s*\[([0-9, ]+)\]");
+        matrix.Success.ShouldBeTrue();
+        matrix.Groups[1].Value.Split(',').Select(x => int.Parse(x.Trim())).ShouldBe(Enumerable.Range(0, int.Parse(shards.Groups[1].Value)));
     }
 
     [Fact]

@@ -205,5 +205,8 @@ Ruling Q-P1: enum with fixed messages alone is not enough; the inner exception m
 - WAVE3-OLAP-SC-03: no constructor accepts a string message; the public `Code` constants keep their values.
 - Tests: T-01..T-03 the plan's three; T-04 `Rejection_InnerException_NotInResponseOrAudit`; T-05 `Rejection_LogContainsNoSqlText` (log capture with a canary identifier in the submitted SQL); T-06 `ColumnPolicyRejection_Maps403`.
 
+### PR-SQLGATE changelog
+- 2026-10-29: stage 2 (SC-06 shard fallback) implemented. Local evidence: with the scope injection the initial test run fell 12 -> 2.5 min and coverage capture 1h40 -> 2 min, but the 3,482 mutants did not finish in 150 min (CI about 3.6x slower). The G7 job is now a 12-shard matrix (`sql-compiler-gate-g7`, shard = files assigned by line count, `g7-scope.sh --shard I/N`, `g7-shard.py`) plus `sql-compiler-gate-g7-aggregate` (`g7-aggregate.py merge`: summed raw counts, file-set union check, break 85, floor from `G7_MUTANT_FLOOR`). Break 85 stays on every shard (SC-06). Floor 2500 and the shard timings stay placeholders until the first real CI run.
+
 ### Backlog
 06-FU-02b hard stop 409 + admin approve/reset workflow; 06-FU-02c count SCIM group deletes / role-mapping strips; DEF items untouched.
