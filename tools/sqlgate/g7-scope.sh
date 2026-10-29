@@ -37,6 +37,7 @@ project_dir="src/TrinoSqlEngine"
 [ -d "$root/$project_dir" ] || fail "$project_dir not found in $root"
 
 if [ "$mode" = "--apply" ]; then
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "not a git checkout"
   [ "${CI:-}" = "true" ] || fail "refusing to edit sources outside CI (set CI=true)"
   [ -z "$(git -C "$root" status --porcelain --untracked-files=all)" ] || fail "the working tree is not clean"
 fi

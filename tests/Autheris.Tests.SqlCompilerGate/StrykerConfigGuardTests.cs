@@ -103,6 +103,7 @@ public sealed partial class StrykerConfigGuardTests
         int stepTimeout = int.Parse(match.Groups[1].Value);
         stepTimeout.ShouldBeLessThan(jobTimeout);
         string.Join('\n', stryker).ShouldContain("--log-to-file");
+        string.Join('\n', stryker).ShouldContain("--break-at 0");   // shards never gate; the aggregate enforces 85 on the summed counts
 
         Step(job, "G7 shard result").ShouldContain(l => Regex.IsMatch(l, @"^        if:\s*always\(\)\s*$"));
         var upload = Step(job, "Upload");

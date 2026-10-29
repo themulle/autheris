@@ -81,7 +81,8 @@ jobs:
   # finish within its budget on the CI runners (about 3.6x slower than the dev machine). Each shard marks every file outside its own subset
   # with `// Stryker disable all` (g7-scope.sh --apply --shard I/N, assignment by g7-shard.py, balanced by line count), so Stryker mutates
   # only that subset. The scope, the Debug configuration (the security mutant hooks exist only there) and the break threshold (85%, kept
-  # on every shard, never lowered) live in stryker-config.json. Each shard reduces its report to raw status counts and uploads it with the
+  # in the config; the shard step passes --break-at 0 because only the aggregate enforces 85 on the summed raw counts) live in
+  # stryker-config.json. Each shard reduces its report to raw status counts and uploads it with the
   # full Stryker output. The aggregate job below decides the gate. Run on the nightly head and, with the cutover profile, on the cutover PR head.
   # A timeout fails the step (step timeout below the job timeout), so a shard ends as failure, never as cancelled. No continue-on-error.
   # The matrix list must contain exactly the indexes 0..G7_SHARDS-1; the aggregate fails when a shard result is missing.
@@ -119,7 +120,7 @@ jobs:
       - name: G7 mutation testing (Stryker.NET)
         working-directory: tests/TrinoSqlEngine.Tests
         timeout-minutes: 100
-        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json --log-to-file
+        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json --break-at 0 --log-to-file
 
       # Fails closed on a missing or unparseable report (timeout or cancel). Writes the raw counts the aggregate sums.
       - name: G7 shard result
@@ -140,6 +141,7 @@ jobs:
           name: sqlgate-g7-shard-${{ matrix.shard }}-${{ github.run_id }}
           path: tests/TrinoSqlEngine.Tests/StrykerOutput
           if-no-files-found: warn
+          overwrite: true
 
       - name: Upload G7 shard result
         if: always()
@@ -148,6 +150,7 @@ jobs:
           name: sqlgate-g7-result-${{ matrix.shard }}-${{ github.run_id }}
           path: g7-shard-result
           if-no-files-found: warn
+          overwrite: true
 
   # G7 aggregate: the gate verdict. Runs on always() so that a failed, timed-out or cancelled shard is reported here and never silent.
   # Sums the raw status counts of all shards, checks that the union of the shard file sets is the full glob set, and enforces the break (85)

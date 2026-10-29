@@ -156,6 +156,19 @@ public sealed class G7ScopeTests : IDisposable
     }
 
     [Fact]
+    public void G7Scope_NotAGitCheckout_Fails()
+    {
+        Fixture(TwoGlobs, commit: false);
+        ForceDelete(Path.Combine(_repo, ".git"));
+
+        var result = Scope("--apply");
+
+        result.Code.ShouldBe(1, result.Output);
+        result.Output.ShouldContain("not a git checkout");
+        File.ReadAllText(Path.Combine(_repo, "src/TrinoSqlEngine/Parsing/Parser.cs")).ShouldNotContain("Stryker");
+    }
+
+    [Fact]
     public void G7Scope_OutsideCi_Fails()
     {
         Fixture(TwoGlobs);
