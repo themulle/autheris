@@ -126,7 +126,7 @@ public static class BenchResultReader
         }
     }
 
-    private static JsonElement Member(JsonElement element, string name)
+    internal static JsonElement Member(JsonElement element, string name)
     {
         if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
         {
@@ -154,7 +154,7 @@ public static class BenchResultReader
     }
 
     /// <summary>Linear interpolation between the closest ranks of the sorted measurements.</summary>
-    private static double Percentile(double[] sorted, double p)
+    internal static double Percentile(double[] sorted, double p)
     {
         double rank = p * (sorted.Length - 1);
         int lower = (int)Math.Floor(rank);

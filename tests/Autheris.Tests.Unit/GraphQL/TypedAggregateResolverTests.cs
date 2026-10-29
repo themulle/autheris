@@ -207,7 +207,14 @@ public sealed class TypedAggregateResolverTests
         { new GatewayForbiddenException("Access denied."), "ACCESS_DENIED" },
         { new TableNotFoundException(new TableIdentifier("sales", "dbo", "orders")), "ACCESS_DENIED" },
         { new PrivacyBudgetExhaustedException("alice", 1.0, 0.0), "PRIVACY_BUDGET_EXHAUSTED" },
-        { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" }
+        { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" },
+        { new AggregationPrivacyRestrictedException(), "AGGREGATION_PRIVACY_RESTRICTED" },
+        { new AggregationFilterRejectedException(), "AGG_NEGATED_FILTER_REJECTED" },
+        { new TrinoSqlEngine.Ast.Builder.AstBuildException("echo secret_value"), "AGGREGATION_NOT_SUPPORTED" },
+        { new TrinoSqlEngine.SqlCompileNotSupportedException(TrinoSqlEngine.SqlCompileNotSupportedReason.Dialect, "echo secret"), "AGGREGATION_NOT_SUPPORTED" },
+        { new TrinoSqlEngine.SqlCompileNotSupportedException(TrinoSqlEngine.SqlCompileNotSupportedReason.StatementClass, "echo secret"), "AGGREGATION_NOT_SUPPORTED" },
+        { new TrinoSqlEngine.SqlCompileNotSupportedException(TrinoSqlEngine.SqlCompileNotSupportedReason.Construct, "echo secret"), "AGGREGATION_NOT_SUPPORTED" },
+        { new TrinoSqlEngine.SqlTimeZoneException(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FunctionUnsupportedDialect), "AGGREGATION_NOT_SUPPORTED" }
     };
 
     [Trait("Category", "Security")]
