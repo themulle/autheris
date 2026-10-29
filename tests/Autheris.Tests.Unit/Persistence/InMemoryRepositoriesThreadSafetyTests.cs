@@ -132,7 +132,7 @@ public sealed class InMemoryRepositoriesThreadSafetyTests
                 Name = $"Profile {i}",
                 TenantId = tenant,
                 ValidTo = DateTimeOffset.UtcNow.AddHours(1),
-                AssignedSubjects = [$"user_{i}"],
+                Assignments = TestAssign.Users($"user_{i}"),
                 TargetTables = ["*.*"]
             };
 

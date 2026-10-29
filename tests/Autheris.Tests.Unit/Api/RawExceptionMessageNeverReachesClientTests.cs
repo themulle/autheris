@@ -259,7 +259,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         var cache = Substitute.For<IAccessProfileCache>();
         cache.InvalidateTenantAsync(default, default).ThrowsAsyncForAnyArgs(new InvalidOperationException(Sentinel));
         var repo = Substitute.For<IAccessProfileRepository>();
-        repo.GetProfileAsync(default, default!, default).ReturnsForAnyArgs(new AccessProfile { ProfileId = "p1", Name = "n", TenantId = new TenantId("tenant-1"), TargetTables = ["a.b"], AssignedSubjects = [] });
+        repo.GetProfileAsync(default, default!, default).ReturnsForAnyArgs(new AccessProfile { ProfileId = "p1", Name = "n", TenantId = new TenantId("tenant-1"), TargetTables = ["a.b"], Assignments = TestAssign.Users() });
         var ctx = Ctx(["GovernanceAdmin"], configure: s => s.AddSingleton(writer).AddSingleton(cache));
 
         var result = await GovernanceEndpoints.DeleteProfileAsync("p1", ctx, repo, CancellationToken.None);

@@ -49,7 +49,7 @@ CREATE TABLE access_profile_assignments (
 -- lookup index on (tenant_id, subject_type, subject_norm)
 ```
 
-The SQL Server and SQLite baselines use the equivalent types. `AccessProfile.AssignedSubjects` lists the assigned subjects as plain strings; `AccessProfile.Assignments` carries the typed assignments with their approvals and expiry.
+The SQL Server and SQLite baselines use the equivalent types. `AccessProfile.Assignments` carries the typed assignments (users, groups, roles) with their approvals and expiry; it is the only source of who holds a profile. There is no plain subject list: a bulk-consent request that carries `assignedSubjects` is answered with 400 `ACCESS_PROFILE_PLAIN_SUBJECTS_REMOVED` before any store call.
 
 ---
 
@@ -92,7 +92,7 @@ The effective expiry of an assignment is `min(expires_at, assigned_at + maximum)
 | :--- | :--- |
 | `GetProfilesForSubjectAsync(tenant, subject)` | Effective profiles of one user subject (SID or alias), ordered by precedence. Used on the request path (`TableAccessPolicy`, query analysis, `AccessProfileCache`). |
 | `GetProfilesForSubjectsAsync(tenant, users, groups, roles)` | Effective profiles found through the caller's user ids, groups and roles, ordered by precedence. Expired, unapproved `Unmasked` and over-limit assignments are not returned. A store failure throws; it never returns an empty list. |
-| `UpsertProfileAsync(profile)` | Stores the profile and reconciles its assignments in one transaction. Typed assignments are validated and their period restarts now; plain `AssignedSubjects` become user assignments with the profile's `ValidTo` as expiry. |
+| `UpsertProfileAsync(profile)` | Stores the profile and reconciles its assignments in one transaction. Typed assignments are authoritative: they are validated, their period restarts now, and every stored assignment that is not in the list is removed (an empty list clears them all). |
 | `AssignProfileAsync(tenant, profileId, assignment)` | Adds or replaces one assignment (period starts now). Throws `AccessProfileAssignmentRejectedException` and stores nothing when a rule is violated. |
 | `ApproveAssignmentAsync(tenant, profileId, type, subject, approver)` | Records the second person. The grantee never approves; for `Unmasked` and break-glass the requester does not either. An assignment can be approved once (`ALREADY_APPROVED`). |
 | `RenewAssignmentAsync(tenant, profileId, type, subject, newExpiresAt, approver)` | Renewal with a new approval (never by the grantee), restarts the period and increments `renewal_count`. Break-glass is not renewable. |

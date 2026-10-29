@@ -47,6 +47,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.Services.ScimMassChangeGuard>();
         services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
         services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
+        services.AddHostedService<Autheris.Api.Hosting.GatewayRoleRightAssignmentReport>();
         services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
         services.AddSingleton<Autheris.Application.Governance.Recertification.IRecertificationService, Autheris.Application.Governance.Recertification.RecertificationService>();
         services.AddHostedService<Autheris.Application.Governance.Recertification.RecertificationGovernorHostedService>();

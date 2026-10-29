@@ -136,7 +136,7 @@ public sealed class AccessProfileDistributedStateTests
             Name = "InitialProfile",
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status = 'INITIAL'",
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
         await repo.UpsertProfileAsync(initialProfile);
@@ -159,7 +159,7 @@ public sealed class AccessProfileDistributedStateTests
             Name = "UpdatedProfile",
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status = 'UPDATED'",
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
         await repo.UpsertProfileAsync(updatedProfile);
@@ -194,7 +194,7 @@ public sealed class AccessProfileDistributedStateTests
             Name = "StaleProfile",
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status = 'STALE'",
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
 
@@ -205,7 +205,7 @@ public sealed class AccessProfileDistributedStateTests
             Name = "FreshProfile",
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status = 'FRESH'",
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
 

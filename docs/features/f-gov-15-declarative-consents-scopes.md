@@ -123,6 +123,7 @@ Response:
 
 - **Atomic apply:** all revocations and creations of one manifest are written by `IConsentRepository.ReplaceConsentsAsync` in **one transaction with one epoch bump**. A fault leaves nothing changed and writes no audit record; the `GITOPS_CONSENT_APPLY` audit events are written after the commit.
 - **Idempotent role grants:** role consents carry no subject SID, so existing role grants are looked up by role name (`GetActiveRoleConsentsAsync`). Applying the same role manifest twice reports `unchanged` and never creates a duplicate role consent.
+- **Authenticated caller SID required:** the apply needs a principal that carries a user SID; that SID is the actor of every audit record. A principal without one is rejected with a `SecurityException` before any read or write, and no stand-in actor exists.
 - **Ambiguous manifests are refused:** a manifest with more than one policy for the same table and grantee is rejected as a whole before anything is written.
 - **Grantee types and expiry:**
   - `Role` and `Group` grantees are standing grants. `validityDays` sets their expiry (default 365 days).

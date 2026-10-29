@@ -85,9 +85,10 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>) or the bare
-    /// legacy shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
-    /// nothing else). Both are audited as DENY and returned with <c>isError: true</c>.
+    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), the bare
+    /// shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
+    /// nothing else) or a governed ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c>). All are audited as
+    /// DENY and returned with <c>isError: true</c>.
     /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
@@ -97,9 +98,15 @@ public sealed partial class AiDataGuardrailService
         {
             using var doc = JsonDocument.Parse(resultJson);
             var root = doc.RootElement;
-            if (root.ValueKind == JsonValueKind.Object && IsLegacyErrorShape(root, out var legacyCode))
+            if (root.ValueKind == JsonValueKind.Object && IsBareErrorShape(root, out var bareCode))
             {
-                errorCode = legacyCode;
+                errorCode = bareCode;
+                return true;
+            }
+
+            if (root.ValueKind == JsonValueKind.Object && IsProblemDetailsShape(root, out var problemCode))
+            {
+                errorCode = problemCode;
                 return true;
             }
 
@@ -120,7 +127,22 @@ public sealed partial class AiDataGuardrailService
         }
     }
 
-    private static bool IsLegacyErrorShape(JsonElement root, out string? errorCode)
+    private static bool IsProblemDetailsShape(JsonElement root, out string? errorCode)
+    {
+        errorCode = null;
+        if (root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Number &&
+            status.TryGetInt32(out var statusCode) && statusCode >= 400 &&
+            root.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(code.GetString()))
+        {
+            errorCode = code.GetString();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsBareErrorShape(JsonElement root, out string? errorCode)
     {
         errorCode = null;
         string? error = null;
