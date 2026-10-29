@@ -16,6 +16,7 @@ using Autheris.Application.Sql.Dialects;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.Observability;
 using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
@@ -44,12 +45,13 @@ public static class GatewayStartupValidator
         IHostEnvironment environment,
         Func<string, string?>? getEnvVar = null,
         ILogger? logger = null,
-        ISqlDialectRegistry? dialectRegistry = null)
+        ISqlDialectRegistry? dialectRegistry = null,
+        TelemetryOptions? telemetry = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
 
-        ValidateStartup(options, environment, getEnvVar, logger, GatewayStartupChecks.All);
+        ValidateStartup(options, environment, getEnvVar, logger, GatewayStartupChecks.All, telemetry);
     }
 
     /// <summary>Runs the checks in order; the first failure propagates (no catch, no aggregation). The list is a seam for the removal mutation test.</summary>
@@ -58,13 +60,14 @@ public static class GatewayStartupValidator
         IHostEnvironment environment,
         Func<string, string?>? getEnvVar,
         ILogger? logger,
-        IReadOnlyList<StartupCheck> checks)
+        IReadOnlyList<StartupCheck> checks,
+        TelemetryOptions? telemetry = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(checks);
 
-        var context = new StartupCheckContext(options, environment, getEnvVar ?? Environment.GetEnvironmentVariable, logger);
+        var context = new StartupCheckContext(options, environment, getEnvVar ?? Environment.GetEnvironmentVariable, logger, telemetry);
         foreach (var check in checks)
         {
             check.Run(context);

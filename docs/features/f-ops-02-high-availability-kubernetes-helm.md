@@ -174,8 +174,9 @@ topologySpreadConstraints:
   whenUnsatisfiable: DoNotSchedule
 
 gateway:
-  drainDelaySeconds: 5          # preStop sleep and Gateway__DrainDelaySeconds
-  shutdownTimeoutSeconds: 30
+  drainDelaySeconds: 5          # preStop sleep and Gateway__HighAvailability__DrainDelaySeconds
+  shutdownTimeoutSeconds: 30    # Gateway__HighAvailability__ShutdownTimeoutSeconds
+  queryTimeoutSeconds: 20       # Gateway__HighAvailability__QueryTimeoutSeconds
   production:
     enforceRequiredSettings: false   # true in values.production.yaml
   authentication:
@@ -206,7 +207,9 @@ monitoring:
     enabled: true
 ```
 
-`values.production.yaml` additionally sets `replicaCount: 3`, `image.requireDigest: true`, `gateway.drainDelaySeconds: 10`, `gateway.shutdownTimeoutSeconds: 45` and `terminationGracePeriodSeconds: 75`.
+`values.production.yaml` additionally sets `replicaCount: 3`, `image.requireDigest: true`, `gateway.drainDelaySeconds: 10`, `gateway.shutdownTimeoutSeconds: 45`, `gateway.queryTimeoutSeconds: 35` and `terminationGracePeriodSeconds: 75`.
+
+The deployment renders `gateway.drainDelaySeconds`, `gateway.shutdownTimeoutSeconds`, `gateway.queryTimeoutSeconds` and `terminationGracePeriodSeconds` as the environment variables `Gateway__HighAvailability__DrainDelaySeconds`, `__ShutdownTimeoutSeconds`, `__QueryTimeoutSeconds` and `__TerminationGracePeriodSeconds`; `drainDelaySeconds` also sets the `preStop` sleep. The values are whole numbers only (no free text) inside the application ranges (drain 1..30, query 5..120, shutdown 10..180, grace 20..300). `helm template` fails when a value is unset, non-numeric or not positive, and when an NF-HA-01 inequality is violated: `shutdownTimeoutSeconds >= queryTimeoutSeconds + 10`, and `terminationGracePeriodSeconds >= 2 * drainDelaySeconds + shutdownTimeoutSeconds + 10`. The grace budget is stricter than the in-process check (`DrainDelay + ShutdownTimeout + 10`, see the configuration guide) because the kubelet grace period also covers the `preStop` sleep. Both `values.yaml` and `values.production.yaml` satisfy the inequalities.
 
 ### 5.3 Production Render Guards
 

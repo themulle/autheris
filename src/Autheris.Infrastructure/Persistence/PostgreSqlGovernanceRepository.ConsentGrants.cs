@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Autheris.Infrastructure.Persistence;
@@ -113,6 +115,13 @@ public partial class PostgreSqlGovernanceRepository
             await tx.CommitAsync(ct).ConfigureAwait(false);
             OnTransactionCommitted(tx);
         }
+        catch (ConsentTenantIntegrityException refusal)
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            await RecordTenantRefusalAuditAsync(conn, actor, refusal, ct).ConfigureAwait(false);
+            throw;
+        }
         catch
         {
             await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
@@ -161,7 +170,70 @@ public partial class PostgreSqlGovernanceRepository
         }
     }
 
-    /// <summary>Revokes one consent inside <paramref name="tx"/> with the authorisation and audit of <c>RevokeConsentAsync</c>. Returns null when it was already revoked.</summary>
+    /// <summary>
+    /// Revokes one consent: one transaction for the row lock, the approver check, the update, the audit row and the epoch bump (PERS-05), then
+    /// the post-commit cache eviction. Already revoked is a no-op without audit, epoch bump or eviction.
+    /// </summary>
+    public async Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
+    {
+        TableIdentifier? revoked;
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, ct).ConfigureAwait(false);
+            if (revoked is { } table)
+            {
+                await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+        }
+        catch (ConsentTenantIntegrityException refusal)
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
+            throw;
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+
+        if (revoked is { } committed)
+        {
+            _metadataCache.TryRemove(committed.ToString().ToLowerInvariant(), out _);
+            await _epochValidationService.InvalidateEpochAsync(committed, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// DEF-SC-02/03: after the refused revoke was rolled back, one audit row in its own short transaction (ids only, never the tenant value).
+    /// A failing audit write propagates, so the refusal is never swallowed or downgraded.
+    /// </summary>
+    private async Task RecordTenantRefusalAuditAsync(NpgsqlConnection conn, Sid actor, ConsentTenantIntegrityException refusal, CancellationToken ct)
+    {
+        _logger?.LogWarning("Consent tenant integrity refusal {Code} for consent {ConsentId}.", ConsentTenantIntegrityException.Code, refusal.ConsentId);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditEventAsync(ConsentTenantRefusalAudit.Build(actor, refusal), tx, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
+            throw;
+        }
+    }
+
+    /// <summary>Revokes one consent inside <paramref name="tx"/>: row lock, then approver check on the same transaction, then update and audit. Returns null when it was already revoked.</summary>
     private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, Guid consentId, Sid actor, string reason, CancellationToken ct)
     {
@@ -172,14 +244,7 @@ public partial class PostgreSqlGovernanceRepository
         }
 
         TableIdentifier? tableId = found.Table;
-        var tenant = TenantId.LegacySingleTenant;
-        // D2 (ARCH-MNT-22): PostgreSQL/SQL Server fall back silently to LegacySingleTenant on an unparsable tenant; SQLite throws (follow-up DEF-02).
-        if (found.TenantRaw is not null && TenantId.TryParse(found.TenantRaw, out var tid))
-        {
-            tenant = tid;
-        }
-
-        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(tableId.Value, actor, null, ct).ConfigureAwait(false))
+        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, null, ct).ConfigureAwait(false))
         {
             throw new UnauthorizedAccessException($"User '{actor}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
         }
@@ -189,6 +254,7 @@ public partial class PostgreSqlGovernanceRepository
             return null;
         }
 
+        var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, tableId.Value.ToString());
         await ConsentGrantSqlCore.MarkRevokedAsync(conn, tx, consentId, actor, reason, TimeProvider.System, ct).ConfigureAwait(false);
 
         await RecordAuditEventAsync(new AuditLogEntry
@@ -197,10 +263,65 @@ public partial class PostgreSqlGovernanceRepository
             EventType = "CONSENT_REVOKED",
             ActorSid = actor,
             TargetTable = tableId.Value.ToString(),
-            Decision = "REVOKE",
+            Decision = ConsentGrantSqlCore.RevokedDecision,
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, Reason = reason })
         }, tx, ct).ConfigureAwait(false);
         return tableId;
+    }
+
+    /// <summary>DEF-04: the approver read runs on the revoke connection and transaction (<paramref name="tx"/>), after the consent row lock.</summary>
+    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(NpgsqlConnection conn, NpgsqlTransaction? tx, TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT COUNT(*)
+                            FROM TABLES t
+                            JOIN TABLE_OWNERS tow ON t.id = tow.table_id
+                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
+                            WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
+                              AND (o.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (LOWER(o.ad_account) = LOWER(@itsmAccount) OR LOWER(o.email) = LOWER(@itsmAccount))))
+                              AND o.is_active = 1";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        cmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
+        cmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
+
+        var directOwnerCount = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+        if (directOwnerCount > 0) return true;
+
+        await using var delCmd = conn.CreateCommand();
+        delCmd.Transaction = tx;
+        delCmd.CommandText = @"SELECT COUNT(*)
+                               FROM DATA_OWNER_DELEGATIONS d
+                               JOIN DATA_OWNERS o ON d.data_owner_id = o.id
+                               JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
+                               JOIN TABLES t ON tow.table_id = t.id
+                               WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
+                                 AND (d.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(d.delegate_sid) = LOWER(@itsmAccount)))
+                                 AND d.valid_from <= @now AND d.valid_to >= @now";
+        delCmd.Parameters.AddWithValue("@domain", table.Domain);
+        delCmd.Parameters.AddWithValue("@schema", table.Schema);
+        delCmd.Parameters.AddWithValue("@table", table.TableName);
+        delCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
+        delCmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
+        delCmd.Parameters.AddWithValue("@now", TimeProvider.System.GetUtcNow().ToString("O"));
+
+        var delegateCount = Convert.ToInt64(await delCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+        if (delegateCount > 0) return true;
+
+        await using var roleCmd = conn.CreateCommand();
+        roleCmd.Transaction = tx;
+        roleCmd.CommandText = @"SELECT COUNT(*)
+                                FROM ROLES r
+                                JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
+                                WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
+                                  AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
+        roleCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
+        roleCmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
+
+        var roleAdminCount = Convert.ToInt64(await roleCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+        return roleAdminCount > 0;
     }
 }

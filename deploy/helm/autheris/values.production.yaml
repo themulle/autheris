@@ -90,6 +90,7 @@ gateway:
     requireTenantColumn: true
   drainDelaySeconds: 10
   shutdownTimeoutSeconds: 45
+  queryTimeoutSeconds: 35
   aspnetcoreEnvironment: "Production"
   redis:
     enabled: true

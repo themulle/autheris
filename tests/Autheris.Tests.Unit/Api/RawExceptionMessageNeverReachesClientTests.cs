@@ -302,7 +302,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         writer.RecordAsync(Arg.Do<AuditLogEntry>(e => captured = e), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         var ctx = Ctx(["GovernanceAdmin"]);
 
-        await RebacEndpoints.AuditInvalidationFailureAsync(writer, ctx, new TenantId("tenant-1"), "tenant-1", new InvalidOperationException(Sentinel));
+        await RebacEndpoints.AuditInvalidationFailureAsync(writer, ctx, "tenant-1", new InvalidOperationException(Sentinel));
 
         captured.ShouldNotBeNull();
         captured!.DetailsJson.ShouldNotContain(Sentinel);

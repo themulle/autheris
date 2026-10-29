@@ -77,8 +77,6 @@ src/Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs|2
 src/Autheris.Application/ResourceGroups/ResourceGroupManager.cs|1
 src/Autheris.Application/SchemaRegistry/RegisteredSchema.cs|1
 src/Autheris.Application/SchemaRegistry/SchemaRegistryService.cs|1
-src/Autheris.Application/Security/Rebac/Services/InMemoryRebacStore.cs|1
-src/Autheris.Application/Security/Rebac/Services/ZanzibarRebacEvaluator.cs|5
 src/Autheris.Application/Security/Totp/Services/TotpEnrollmentService.cs|2
 src/Autheris.Application/Security/Totp/Services/TotpVerificationService.cs|5
 src/Autheris.Application/Serialization/ArrowFlightSqlServer.cs|2
@@ -122,7 +120,6 @@ src/Autheris.GraphQL/Mcp/CatalogGraphQlMap.cs|2
 src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs|2
 src/Autheris.GraphQL/Types/MutationTypes.cs|6
 src/Autheris.GraphQL/Types/QueryTypes.cs|3
-src/Autheris.Infrastructure/Cache/ConsentCacheService.cs|4
 src/Autheris.Infrastructure/Caching/TableCache/DuckDbPersistentTableCacheStore.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/InMemoryTableCacheStore.cs|1
 src/Autheris.Infrastructure/Idempotency/InMemoryIdempotencyStore.cs|3
@@ -157,4 +154,3 @@ src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs|12
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Schema.cs|2
 src/Autheris.Infrastructure/Persistence/TenantRegistryStore.cs|1
 src/Autheris.Infrastructure/Plugins/PluginManager.cs|2
-src/Autheris.Infrastructure/Rebac/RedisRebacStore.cs|1

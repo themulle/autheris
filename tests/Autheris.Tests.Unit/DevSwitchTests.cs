@@ -91,17 +91,6 @@ public sealed class DevSwitchTests
         Bind(config).Insecure.warn_allow_all_cors_origins.ShouldBeFalse();
     }
 
-    [Fact]
-    public void LegacyProfileQuickstart_IsAliasForPreset_WithNote()
-    {
-        var (config, report) = Resolve("Development", ("Gateway:Profile", "Quickstart"));
-        var options = Bind(config);
-
-        report.Preset.ShouldBe("Quickstart");
-        report.Notes.ShouldContain(n => n.Contains("Gateway:Profile is deprecated"));
-        options.Insecure.warn_allow_all_cors_origins.ShouldBeTrue();
-    }
-
     // ---------- Legacy aliases ----------
 
     [Fact]

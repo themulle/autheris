@@ -74,8 +74,15 @@ public static class ScimUsersEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var updated = await scimService.UpdateUserAsync(tenantId, realmId, id, user, ct).ConfigureAwait(false);
-            return updated != null ? Results.Ok(updated) : Results.NotFound();
+            try
+            {
+                var updated = await scimService.UpdateUserAsync(tenantId, realmId, id, user, ct).ConfigureAwait(false);
+                return updated != null ? Results.Ok(updated) : Results.NotFound();
+            }
+            catch (ScimMassChangeBlockedException blocked)
+            {
+                return ScimMassChangeResult.TooManyRequests(blocked);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPatch("/{id}", async (
@@ -87,8 +94,15 @@ public static class ScimUsersEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var patched = await scimService.PatchUserAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
-            return patched != null ? Results.Ok(patched) : Results.NotFound();
+            try
+            {
+                var patched = await scimService.PatchUserAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
+                return patched != null ? Results.Ok(patched) : Results.NotFound();
+            }
+            catch (ScimMassChangeBlockedException blocked)
+            {
+                return ScimMassChangeResult.TooManyRequests(blocked);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapDelete("/{id}", async (
@@ -99,8 +113,15 @@ public static class ScimUsersEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var deleted = await scimService.DeleteUserAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
-            return deleted ? Results.NoContent() : Results.NotFound();
+            try
+            {
+                var deleted = await scimService.DeleteUserAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
+                return deleted ? Results.NoContent() : Results.NotFound();
+            }
+            catch (ScimMassChangeBlockedException blocked)
+            {
+                return ScimMassChangeResult.TooManyRequests(blocked);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;

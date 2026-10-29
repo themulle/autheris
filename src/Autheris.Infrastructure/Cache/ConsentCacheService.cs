@@ -26,6 +26,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private readonly string _prefix;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _tableCacheKeys = new(StringComparer.OrdinalIgnoreCase);
     private static long _keySequence;
+    private readonly TimeProvider _timeProvider;
     private readonly IDisposable? _subscription;
 
     private readonly object _syncLock = new();
@@ -54,8 +55,10 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         IConnectionMultiplexer? multiplexer = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ILogger<ConsentCacheService>? logger = null,
-        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null)
+        Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _memoryCache = memoryCache;
         _epochValidationService = epochValidationService;
         _serializer = serializer;
@@ -173,7 +176,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table)
                         && (decision = l2Env.ToDecision(_restrictionFingerprint)) != null)
                     {
-                        var remaining = l2ExpiresAt - DateTimeOffset.UtcNow;
+                        var remaining = l2ExpiresAt - _timeProvider.GetUtcNow();
                         var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
                         candidateEntries[table] = (cacheKey, l2Env.Epoch, decision, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, l2Key);
                     }
@@ -312,7 +315,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                     if (isL2EpochValid && decision != null)
                     {
                         // RR-L4-06: never extend the original (security-relevant) TTL on promotion.
-                        var remaining = l2ExpiresAt - DateTimeOffset.UtcNow;
+                        var remaining = l2ExpiresAt - _timeProvider.GetUtcNow();
                         var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
                         if (l1Ttl > TimeSpan.Zero)
                         {
@@ -401,7 +404,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
                 var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch, _restrictionFingerprint);
                 var binaryPayload = _serializer.Serialize(l2Dto);
-                var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, DateTimeOffset.UtcNow.Add(ttl));
+                var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, _timeProvider.GetUtcNow().Add(ttl));
                 await _redisDb.StringSetAsync(l2Key, protectedPayload, ttl).ConfigureAwait(false);
             }
             catch (Exception ex) when (IsL2Failure(ex))
@@ -568,7 +571,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         }
 
         var expiresAtMs = BinaryPrimitives.ReadInt64BigEndian(expiresBytes);
-        if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > expiresAtMs)
+        if (_timeProvider.GetUtcNow().ToUnixTimeMilliseconds() > expiresAtMs)
         {
             return null;
         }

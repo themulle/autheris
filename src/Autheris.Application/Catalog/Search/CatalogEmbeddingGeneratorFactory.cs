@@ -19,13 +19,13 @@ public static class CatalogEmbeddingGeneratorFactory
         {
             CatalogEmbeddingProvider.None => NoneEmbeddingGenerator.Instance,
             CatalogEmbeddingProvider.LocalOnnx => new LocalOnnxEmbeddingGenerator(
-                options.LocalOnnxModelPath,
-                options.LocalOnnxModelSha256,
+                options.ModelPath,
+                options.ModelSha256,
                 options.EmbeddingDimensions,
                 loggerFactory?.CreateLogger<LocalOnnxEmbeddingGenerator>()),
             CatalogEmbeddingProvider.Ollama => new OllamaEmbeddingGenerator(
                 options.OllamaEndpoint,
-                options.OllamaModel,
+                options.OllamaModelName,
                 options.EmbeddingDimensions,
                 httpClient,
                 loggerFactory?.CreateLogger<OllamaEmbeddingGenerator>()),

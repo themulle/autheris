@@ -39,6 +39,25 @@ public class IdentityRealmsScimOptionsValidator : IValidateOptions<IdentityRealm
             }
         }
 
+        var protection = options.Scim?.MassChangeProtection ?? new ScimMassChangeProtectionOptions();
+        if (protection.MaxDestructiveOperations is < ScimMassChangeProtectionOptions.MaxOperationsLowerBound or > ScimMassChangeProtectionOptions.MaxOperationsUpperBound)
+        {
+            return ValidateOptionsResult.Fail(
+                $"Authentication:Realms:Scim:MassChangeProtection:MaxDestructiveOperations must be between {ScimMassChangeProtectionOptions.MaxOperationsLowerBound} and {ScimMassChangeProtectionOptions.MaxOperationsUpperBound}.");
+        }
+
+        if (protection.WindowMinutes is < ScimMassChangeProtectionOptions.WindowMinutesLowerBound or > ScimMassChangeProtectionOptions.WindowMinutesUpperBound)
+        {
+            return ValidateOptionsResult.Fail(
+                $"Authentication:Realms:Scim:MassChangeProtection:WindowMinutes must be between {ScimMassChangeProtectionOptions.WindowMinutesLowerBound} and {ScimMassChangeProtectionOptions.WindowMinutesUpperBound}.");
+        }
+
+        if (!protection.Enabled)
+        {
+            _logger?.LogWarning(
+                "SCIM mass-change protection is explicitly disabled (Authentication:Realms:Scim:MassChangeProtection:Enabled=false): a compromised IdP token can deprovision every user without throttling.");
+        }
+
         if (ranges.Count == 0
             && _environment?.IsProduction() == true
             && options.Realms.Values.Any(r => r.Provisioning == RealmProvisioningMode.Scim))

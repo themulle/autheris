@@ -69,11 +69,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         "warn_allow_all_cors_origins" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
         "warn_relaxed_query_limits" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_relaxed_query_limits = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
         "warn_enable_introspection" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_enable_introspection = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
-        "warn_fallback_default_tenant_for_webhooks" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_fallback_default_tenant_for_webhooks = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
-        "catalog_legacy_payload_only_signature" => new GatewayOptions { Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
-        "itsm_legacy_global_webhook_secret" => new GatewayOptions { Itsm = new ItsmOptions { LegacyGlobalWebhookSecret = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
         "allow_development_in_container" => new GatewayOptions { AllowDevelopmentInContainer = true, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
-        "warn_allow_websql_dml" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true }, DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" } },
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "unknown switch")
     };
 
@@ -133,9 +129,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
     [Theory]
     [InlineData("warn_relaxed_query_limits")]
-    [InlineData("catalog_legacy_payload_only_signature")]
     [InlineData("allow_development_in_container")]
-    [InlineData("warn_allow_websql_dml")]
     public void SEM_WarnSwitches_AreWarn_AndStartInProduction(string name)
     {
         var options = WithWarnSwitch(name);
@@ -218,18 +212,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
     }
 
-    [Theory]
-    [InlineData("warn_fallback_default_tenant_for_webhooks")]
-    [InlineData("itsm_legacy_global_webhook_secret")]
-    public void SEM_WebhookTenantFallbackAndLegacySecret_AreDanger_AndBlockedInProduction(string name)
-    {
-        var options = WithWarnSwitch(name);
-
-        options.GetActiveDangerBypasses().ShouldContain(b => b.StartsWith("DANGER:" + name, StringComparison.Ordinal));
-        Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
-    }
-
     [Fact]
     public void SEM_AutoCreateConsents_IsDanger_AndBlockedInProduction()
     {
@@ -284,16 +266,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Development), NoEnvironmentVariables));
     }
 
-    [Fact]
-    public void SEM_LegacyDmlAlias_IsWarn_WithHintToAllowDml()
-    {
-        var insecureAlias = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true } };
-
-        insecureAlias.IsWebSqlDmlAllowed.ShouldBeTrue();
-        insecureAlias.GetActiveWarnings().ShouldContain("WARN:warn_allow_websql_dml (legacy alias, use WebSql.AllowDml)");
-        insecureAlias.HasAnyDangerBypassActive.ShouldBeFalse();
-    }
-
     // =========================================================================
     // SEM: health
     // =========================================================================
@@ -344,7 +316,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     [Fact]
     public async Task SEM_Health_WarnKeepsSecurityComponentHealthy_WithDegradedDescription()
     {
-        var options = WithWarnSwitch("catalog_legacy_payload_only_signature");
+        var options = WithWarnSwitch("warn_relaxed_query_limits");
 
         var report = await CheckHealthAsync(options, Environments.Production);
 
@@ -354,7 +326,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         component.Description.ShouldNotBeNull();
         component.Description!.ShouldStartWith("degraded: ");
         // The names of active switches are logged, never returned in the health details.
-        component.Description!.ShouldNotContain("catalog_legacy_payload_only_signature");
+        component.Description!.ShouldNotContain("warn_relaxed_query_limits");
     }
 
     [Fact]

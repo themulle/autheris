@@ -38,12 +38,6 @@ public static class DevConfiguration
             return new DevConfigurationReport(preset ?? DevOptions.PresetStandard, notes, applied);
         }
 
-        if (preset == null && string.Equals(configuration[G + "Profile"], "Quickstart", StringComparison.OrdinalIgnoreCase))
-        {
-            preset = DevOptions.PresetQuickstart;
-            notes.Add("Gateway:Profile is deprecated; use Gateway:Dev:Preset=Quickstart.");
-        }
-
         preset ??= DevOptions.PresetStandard;
         var fill = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 

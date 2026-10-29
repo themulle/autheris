@@ -516,6 +516,80 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
         return list;
     }
 
+    public async Task<ScimLockWindow> CountLocksSinceAsync(
+        TenantId tenantId,
+        string realmId,
+        IReadOnlyList<string> sources,
+        DateTimeOffset sinceUtc,
+        int cap,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        if (sources.Count == 0 || cap < 1)
+        {
+            return new ScimLockWindow(0, null);
+        }
+
+        var names = new string[sources.Count];
+        for (var i = 0; i < names.Length; i++)
+        {
+            names[i] = "@source" + i;
+        }
+
+        var where = "tenant_id = @tenantId AND realm_id = @realmId AND source IN (" + string.Join(", ", names) + ") AND locked_at >= @since";
+        var sqlServer = dialect == IdentityStoreDialect.SqlServer;
+        var table = sqlServer ? "dbo.IDENTITY_LOCKS" : "IDENTITY_LOCKS";
+
+        // Bounded scan over the (tenant_id, realm_id, user_key) primary-key prefix: at most `cap` rows are counted.
+        var countSql = sqlServer
+            ? "SELECT COUNT(*) FROM (SELECT TOP (@cap) 1 AS one FROM " + table + " WHERE " + where + ") AS capped"
+            : "SELECT COUNT(*) FROM (SELECT 1 AS one FROM " + table + " WHERE " + where + " LIMIT @cap) AS capped";
+        var oldestSql = sqlServer
+            ? "SELECT TOP (1) locked_at FROM " + table + " WHERE " + where + " ORDER BY locked_at ASC"
+            : "SELECT locked_at FROM " + table + " WHERE " + where + " ORDER BY locked_at ASC LIMIT 1";
+
+        await using var scope = await open(false, ct).ConfigureAwait(false);
+
+        void Bind(DbCommand cmd, bool withCap)
+        {
+            AddParam(cmd, "@tenantId", tenantId.Value);
+            AddParam(cmd, "@realmId", realmId);
+            for (var i = 0; i < names.Length; i++)
+            {
+                AddParam(cmd, names[i], sources[i]);
+            }
+
+            AddParam(cmd, "@since", DialectValueCodec.Ts(Sql, sinceUtc));
+            if (withCap)
+            {
+                AddParam(cmd, "@cap", cap);
+            }
+        }
+
+        int count;
+        await using (var countCmd = scope.Connection.CreateCommand())
+        {
+            countCmd.CommandText = countSql;
+            Bind(countCmd, true);
+            var scalar = await countCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            count = Convert.ToInt32(scalar, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (count == 0)
+        {
+            return new ScimLockWindow(0, null);
+        }
+
+        await using var oldestCmd = scope.Connection.CreateCommand();
+        oldestCmd.CommandText = oldestSql;
+        Bind(oldestCmd, false);
+        await using var reader = await oldestCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        DateTimeOffset? oldest = await reader.ReadAsync(ct).ConfigureAwait(false)
+            ? DialectValueCodec.ReadRequiredTs(Sql, reader, 0)
+            : null;
+        return new ScimLockWindow(count, oldest);
+    }
+
     public async Task RemoveLockAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);

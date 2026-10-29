@@ -3,6 +3,7 @@ namespace Autheris.Api.Extensions.DependencyInjection.StartupChecks;
 using System;
 using System.Collections.Generic;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.Observability;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -22,7 +23,8 @@ internal sealed class StartupCheckContext
         GatewayOptions options,
         IHostEnvironment environment,
         Func<string, string?> getEnvironmentVariable,
-        ILogger? logger)
+        ILogger? logger,
+        TelemetryOptions? telemetry = null)
     {
         Options = options;
         Environment = environment;
@@ -31,7 +33,23 @@ internal sealed class StartupCheckContext
         IsDevelopment = environment.IsDevelopment();
         DangerBypasses = options.GetActiveDangerBypasses();
         Warnings = options.GetActiveWarnings();
+        Telemetry = telemetry;
+        ExtraWarnings = BuildExtraWarnings(telemetry);
     }
+
+    /// <summary>Telemetry options (<c>Gateway:Telemetry</c>), or null when the caller does not supply them.</summary>
+    public TelemetryOptions? Telemetry { get; }
+
+    /// <summary>
+    /// WARN entries of option groups outside <see cref="GatewayOptions"/> (ARCH-MNT-06-FU-03). Reported in the startup banner only;
+    /// the health component keeps reading <see cref="GatewayOptions.GetActiveWarnings"/>. Entries name the key, never a value.
+    /// </summary>
+    public IReadOnlyList<string> ExtraWarnings { get; }
+
+    private static IReadOnlyList<string> BuildExtraWarnings(TelemetryOptions? telemetry) =>
+        telemetry is { Enabled: true, Otlp.AllowInsecureTransport: true }
+            ? [GatewayOptions.WarnPrefix + "otlp_allow_insecure_transport (Gateway:Telemetry:Otlp:AllowInsecureTransport)"]
+            : [];
 
     public GatewayOptions Options { get; }
 
