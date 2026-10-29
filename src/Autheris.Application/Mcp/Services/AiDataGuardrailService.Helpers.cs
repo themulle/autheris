@@ -92,6 +92,23 @@ public sealed partial class AiDataGuardrailService
     /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
+        var isError = TryGetExecutorErrorCore(resultJson, out var rawCode);
+        errorCode = NormalizeAuditCode(rawCode);
+        return isError;
+    }
+
+    /// <summary>
+    /// NL-SC-39: the code a tool result supplies is attacker-influenceable text; before it reaches the audit trail it must be a governed
+    /// code format (upper-case identifier, at most 64 characters), otherwise the fixed <c>ERROR</c> marker is used.
+    /// </summary>
+    private static string? NormalizeAuditCode(string? code) =>
+        code is null ? null : (code.Length <= 64 && AuditCodeFormat().IsMatch(code) ? code : "ERROR");
+
+    [GeneratedRegex("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant, 50)]
+    private static partial Regex AuditCodeFormat();
+
+    private static bool TryGetExecutorErrorCore(string? resultJson, out string? errorCode)
+    {
         errorCode = null;
         if (string.IsNullOrWhiteSpace(resultJson)) return false;
         try
@@ -164,7 +181,8 @@ public sealed partial class AiDataGuardrailService
             return false;
         }
 
-        if (error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+        // NL-SC-39 / NL-T-40: an object-valued top-level error member is an error even without a string message (fail closed).
+        if (error.ValueKind == JsonValueKind.Object)
         {
             errorCode = error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(code.GetString())
                 ? code.GetString()

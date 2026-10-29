@@ -104,6 +104,8 @@ public static partial class WebSqlEndpoints
     /// </summary>
     private static Task WriteTimeoutProblemAsync(HttpContext httpContext, string code, CancellationToken ct)
     {
+        // NL-SC-37: the same governed-code check as ApiProblems.WriteAsync; an unregistered code falls back to the status default.
+        code = ApiErrorCodes.Resolve(StatusCodes.Status504GatewayTimeout, code);
         httpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
         httpContext.Response.ContentType = "application/problem+json; charset=utf-8";
         return httpContext.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>

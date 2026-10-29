@@ -113,6 +113,14 @@ public static class ApiErrorCodes
     public const string ResourceGroupTimeout = "RESOURCE_GROUP_TIMEOUT";
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string UnauthorizedNoSid = "UNAUTHORIZED_NO_SID";
+
+    // Final fixes (no legacy bodies): table cache administration and the TOTP enrollment verification; fixed codes, never derived from input.
+    public const string InvalidTableIdentifier = "INVALID_TABLE_IDENTIFIER";
+    public const string TableNotRegistered = "TABLE_NOT_REGISTERED";
+    public const string TotpCodeRequired = "TOTP_CODE_REQUIRED";
+    public const string TotpNoPendingEnrollment = "TOTP_NO_PENDING_ENROLLMENT";
+    public const string TotpCurrentCodeRequired = "TOTP_CURRENT_CODE_REQUIRED";
+    public const string TotpCodeInvalid = "TOTP_CODE_INVALID";
     public const string TokenRevoked = "TOKEN_REVOKED";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));

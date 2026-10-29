@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Domain.Audit;
@@ -74,7 +75,7 @@ public static class GovernanceApiEndpoints
 
             if (string.IsNullOrWhiteSpace(request?.TotpCode))
             {
-                return Results.BadRequest(new TotpVerifyResult(false, "TotpCode is required."));
+                return ApiProblems.BadRequest(ApiErrorCodes.TotpCodeRequired, "A TOTP code is required.", context);
             }
 
             // Security review (TOTP TOFU): checked again on activation; the verify window covers the pending-seed lifetime.
@@ -96,11 +97,11 @@ public static class GovernanceApiEndpoints
             return outcome switch
             {
                 TotpEnrollmentOutcome.Completed => Results.Ok(new TotpVerifyResult(true)),
-                TotpEnrollmentOutcome.NoPendingEnrollment => Results.BadRequest(new TotpVerifyResult(false, "No pending enrollment found. Please call /enroll first.")),
-                TotpEnrollmentOutcome.CurrentCodeRequired => Results.BadRequest(new TotpVerifyResult(false, "CurrentTotpCode is required to replace an active 2FA secret.")),
-                TotpEnrollmentOutcome.InvalidCurrentCode => Results.BadRequest(new TotpVerifyResult(false, "Invalid or expired code for the current authenticator.")),
+                TotpEnrollmentOutcome.NoPendingEnrollment => ApiProblems.BadRequest(ApiErrorCodes.TotpNoPendingEnrollment, "No pending enrollment found. Call the enroll endpoint first.", context),
+                TotpEnrollmentOutcome.CurrentCodeRequired => ApiProblems.BadRequest(ApiErrorCodes.TotpCurrentCodeRequired, "The current TOTP code is required to replace an active second factor.", context),
+                TotpEnrollmentOutcome.InvalidCurrentCode => ApiProblems.BadRequest(ApiErrorCodes.TotpCodeInvalid, "The code is invalid or expired.", context),
                 TotpEnrollmentOutcome.StoreUnavailable => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
-                _ => Results.BadRequest(new TotpVerifyResult(false, "Invalid or expired TOTP code."))
+                _ => ApiProblems.BadRequest(ApiErrorCodes.TotpCodeInvalid, "The code is invalid or expired.", context)
             };
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 

@@ -16,7 +16,6 @@ public sealed class GuardrailErrorShapeTests
     [InlineData("""{"error":"x","status":200}""")]
     [InlineData("""{"message":"m"}""")]
     [InlineData("""{"rows":[{"error":"cell"}]}""")]
-    [InlineData("""{"error":{"code":"X"}}""")]
     public void Guardrail_Does_Not_Mistake_Data_Or_Legacy_Bare_Shapes_For_Errors(string json)
     {
         // NL-SC-25: the legacy bare shape is no longer produced (ratchet baseline empty) and is no longer special-cased.

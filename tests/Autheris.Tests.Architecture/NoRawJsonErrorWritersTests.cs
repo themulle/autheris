@@ -24,7 +24,7 @@ public sealed partial class NoRawJsonErrorWritersTests
     internal static readonly IReadOnlyList<(string Path, int Count, string Reason)> Allowed =
     [
         ("src/Autheris.Api/Endpoints/McpEndpoints.cs", 1, "JSON-RPC 2.0 batch error object (protocol allowlist)"),
-        ("src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs", 5, "OData v4 JSON error object (protocol allowlist)"),
+        ("src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs", 6, "OData v4 JSON error object (protocol allowlist)"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", 1, "OData v4 JSON error object, fixed message (protocol allowlist)"),
         ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", 2, "OData basic-auth challenge object and the fixed-text diagnostics problem of the auth handler"),
         ("src/Autheris.Api/Endpoints/ScimFilterGuard.cs", 1, "SCIM 2.0 Error message (RFC 7644 section 3.12), fixed text (protocol allowlist)"),
@@ -37,6 +37,10 @@ public sealed partial class NoRawJsonErrorWritersTests
 
     [GeneratedRegex(@"(?:Response\.WriteAsync|WriteAsJsonAsync|Results\.Json)\s*\(")]
     private static partial Regex Writer();
+
+    /// <summary>Non-2xx result factories (Results/TypedResults); <c>SafeErrorResults.X</c> and <c>ApiProblems.X</c> are not matched.</summary>
+    [GeneratedRegex(@"(?<![\w.])(?:Typed)?Results\.(?:BadRequest|NotFound|Conflict|UnprocessableEntity|Unauthorized|Forbid|Problem)\s*\(")]
+    private static partial Regex ResultsError();
 
     [GeneratedRegex(@"\b(?:errors?|message|detail|title)\s*=(?!=)|\\?""(?:errors?|message|detail|title)\\?""|\bnew\s*\{\s*error\b|\{\s*message\s*,|\berror\s*,")]
     private static partial Regex ErrorLike();
@@ -107,6 +111,36 @@ public sealed partial class NoRawJsonErrorWritersTests
     }
 
     [Fact]
+    public void Guard_Detects_Planted_Results_Error_Factories_And_Unparseable_Calls()
+    {
+        string[] planted =
+        [
+            "return Results.BadRequest($\"Invalid table '{name}'\");",
+            "return Results.BadRequest(\"bad\");",
+            "return Results.NotFound(new { Message = \"x\" });",
+            "return TypedResults.NotFound(new { error = \"x\" });",
+            "return Results.Conflict(new ErrorDto(\"x\"));",
+            "return Results.UnprocessableEntity(new { detail = 1 });",
+            "return Results.Unauthorized(new { x = 1 });",
+            "return Results.BadRequest(new TotpVerifyResult(false, \"x\"));",
+            "return Results.Problem(\"x\");",
+            // Unmatched paren (verbatim string hides the closing quote): fail closed.
+            "await response.WriteAsJsonAsync(@\"unterminated \" \"\"x\"\" "
+        ];
+
+        foreach (var text in planted)
+        {
+            Measure([("src/Planted.cs", text)]).ShouldContainKeyAndValue("src/Planted.cs", 1, text);
+        }
+    }
+
+    [Fact]
+    public void Guard_Ignores_Governed_And_Bodyless_Results()
+    {
+        Measure([("src/Ok.cs", "return Results.NotFound();\nreturn Results.BadRequest(result);\nreturn SafeErrorResults.BadRequest(\"X\", \"y\", ctx);\nreturn ApiProblems.NotFound(\"X\", \"y\", ctx);\nreturn Results.Problem(detail: \"x\", statusCode: 500);\nreturn Results.StatusCode(403);")]).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Guard_Ignores_Success_Payloads_And_Comments()
     {
         Measure([("src/Ok.cs", "await response.WriteAsJsonAsync(new { columns, rows, rowCount }, ct);\nreturn Results.Json(new { items = list });")]).ShouldBeEmpty();
@@ -157,6 +191,8 @@ public sealed partial class NoRawJsonErrorWritersTests
             var close = FindClosingParen(code, open);
             if (close < 0)
             {
+                // Fail closed: a call the scanner cannot delimit (verbatim/raw string, broken source) is a violation, never skipped.
+                count++;
                 continue;
             }
 
@@ -176,6 +212,24 @@ public sealed partial class NoRawJsonErrorWritersTests
 
             // A 2xx payload is a success body even when it carries a status message.
             if (!Regex.IsMatch(args, @"Status2\d\d") && ErrorLike().IsMatch(probe))
+            {
+                count++;
+            }
+        }
+
+        foreach (Match m in ResultsError().Matches(code))
+        {
+            var open = m.Index + m.Length - 1;
+            var close = FindClosingParen(code, open);
+            if (close < 0)
+            {
+                count++;
+                continue;
+            }
+
+            // A non-2xx Results.X(...) whose argument is an object (new ...) or a (interpolated) string literal is a legacy/echo body.
+            var args = code[(open + 1)..close].TrimStart();
+            if (Regex.IsMatch(args, @"^(?:new\b|\$?@?""|@\$"")"))
             {
                 count++;
             }
