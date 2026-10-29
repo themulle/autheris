@@ -5,7 +5,7 @@
       Reduces one shard's Stryker mutation-report.json to raw status counts per in-scope file (plus non-Ignored mutants outside
       the shard's files). Exit 1 when the report is missing or unparseable.
 
-  g7-aggregate.py merge --results-glob GLOB --in-scope-list FILE --shards N --floor N [--break-at 85] [--needs-result R] [--summary-file F]
+  g7-aggregate.py merge --results-glob GLOB --in-scope-list FILE --shards N --floor N [--break-at 85] [--needs-result R] [--allow-zero FILE] [--summary-file F]
       Merges the reduced shard results. Exit 1 when: a shard result is missing, duplicated or from a different shard count; the
       union of the shard file sets differs from the full in-scope list (or two shards cover one file); an in-scope file has no
       valid mutant; a non-Ignored mutant sits outside the files; the summed valid mutants are below the floor; the score computed
@@ -70,9 +70,31 @@ def cmd_reduce(args):
     return 0
 
 
-def merge(results, full, shards, floor, break_at, needs_result=""):
+def read_allow_zero(path):
+    """Allowlist file: `path # reason` per line; comment lines start with #. A reason is mandatory."""
+    allowed = {}
+    if not path:
+        return allowed, []
+    errors = []
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, _, reason = line.partition(" # ")
+            if not reason.strip():
+                errors.append("allowlist entry %s has no reason" % name)
+            allowed[normalize(name.strip())] = reason.strip()
+    return allowed, errors
+
+
+def merge(results, full, shards, floor, break_at, needs_result="", allow_zero=None):
     """results: list of reduced shard dicts. Returns (errors, summary_lines)."""
     errors = []
+    allow_zero = allow_zero or {}
+    for name in sorted(allow_zero):
+        if name not in full:
+            errors.append("allowlisted file %s is not in the in-scope list" % name)
     lines = ["### G7 mutation testing (Stryker.NET, %d shards)" % shards, ""]
     if needs_result and needs_result != "success":
         errors.append("the shard jobs ended as '%s', not success" % needs_result)
@@ -132,7 +154,7 @@ def merge(results, full, shards, floor, break_at, needs_result=""):
         lines.append("| %s | %s | %d |" % (name, owner.get(name, "-"), per_file.get(name, 0)))
 
     for name in full:
-        if name in owner and per_file.get(name, 0) == 0:
+        if name in owner and per_file.get(name, 0) == 0 and name not in allow_zero:
             errors.append("in-scope file %s has zero valid mutants" % name)
     for name in sorted(outside):
         errors.append("%d non-Ignored mutants outside the globs in %s" % (outside[name], name))
@@ -159,7 +181,12 @@ def cmd_merge(args):
                 results.append(json.load(handle))
         except (OSError, ValueError):
             errors.append("unreadable shard result %s" % os.path.basename(name))
-    more, lines = merge(results, full, args.shards, args.floor, args.break_at, args.needs_result)
+    try:
+        allow_zero, allow_errors = read_allow_zero(args.allow_zero)
+    except OSError as ex:
+        allow_zero, allow_errors = {}, ["cannot read the zero-mutant allowlist: %s" % ex]
+    errors.extend(allow_errors)
+    more, lines = merge(results, full, args.shards, args.floor, args.break_at, args.needs_result, allow_zero)
     errors.extend(more)
     if errors:
         lines.append("")
@@ -188,6 +215,7 @@ def main(argv):
     mrg.add_argument("--floor", type=int, required=True)
     mrg.add_argument("--break-at", type=int, default=85)
     mrg.add_argument("--needs-result", default="")
+    mrg.add_argument("--allow-zero", default="", help="file of in-scope files that may have zero valid mutants (path # reason)")
     mrg.add_argument("--summary-file", default=os.environ.get("GITHUB_STEP_SUMMARY", ""))
     args = parser.parse_args(argv)
     return cmd_reduce(args) if args.command == "reduce" else cmd_merge(args)

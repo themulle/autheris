@@ -201,12 +201,13 @@ public sealed partial class G7ShardTests : IDisposable
         return r.Code == 0 ? outFile : r.Output;
     }
 
-    private (int Code, string Output) Merge(int shards, string[] full, int floor = 1, int breakAt = 85, string needs = "success")
+    private (int Code, string Output) Merge(int shards, string[] full, int floor = 1, int breakAt = 85, string needs = "success", string? allowZero = null)
     {
         string list = Path.Combine(_dir, "full.txt");
         File.WriteAllLines(list, full);
-        return Py("g7-aggregate.py", "merge", "--results-glob", Path.Combine(_dir, "results", "g7-shard-*.json"), "--in-scope-list", list,
-            "--shards", shards.ToString(), "--floor", floor.ToString(), "--break-at", breakAt.ToString(), "--needs-result", needs);
+        string[] extra = allowZero is null ? [] : ["--allow-zero", allowZero];
+        return Py("g7-aggregate.py", [.. new[] { "merge", "--results-glob", Path.Combine(_dir, "results", "g7-shard-*.json"), "--in-scope-list", list,
+            "--shards", shards.ToString(), "--floor", floor.ToString(), "--break-at", breakAt.ToString(), "--needs-result", needs }, .. extra]);
     }
 
     private void TwoShards(Dictionary<string, string[]>? statuses = null)
@@ -331,5 +332,59 @@ public sealed partial class G7ShardTests : IDisposable
 
         r.Code.ShouldBe(1, r.Output);
         r.Output.ShouldContain("outside the globs");
+    }
+
+    private string Allowlist(string content)
+    {
+        string path = Path.Combine(_dir, "allow.txt");
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    [Fact]
+    public void Aggregate_AllowlistedFileMayHaveZeroMutants_OthersMayNot()
+    {
+        var s = Statuses();
+        s[Full[0]] = ["Ignored", "CompileError"];
+        TwoShards(s);
+        string allow = Allowlist("# header\n" + Full[0] + " # trivial type\n");
+
+        Merge(2, Full, breakAt: 0, allowZero: allow).Code.ShouldBe(0);
+        var without = Merge(2, Full, breakAt: 0);
+        without.Code.ShouldBe(1);
+        without.Output.ShouldContain("A.cs has zero valid mutants");
+        // Allowlisting one file does not excuse another.
+        var other = Merge(2, Full, breakAt: 0, allowZero: Allowlist(Full[1] + " # x\n"));
+        other.Code.ShouldBe(1);
+        other.Output.ShouldContain("A.cs has zero valid mutants");
+    }
+
+    [Fact]
+    public void Aggregate_AllowlistEntryOutsideScopeOrWithoutReason_Fails()
+    {
+        TwoShards();
+
+        var outside = Merge(2, Full, breakAt: 0, allowZero: Allowlist("src/TrinoSqlEngine/Ast/Emit/Nope.cs # gone\n"));
+        var noReason = Merge(2, Full, breakAt: 0, allowZero: Allowlist(Full[0] + "\n"));
+
+        outside.Code.ShouldBe(1);
+        outside.Output.ShouldContain("not in the in-scope list");
+        noReason.Code.ShouldBe(1);
+        noReason.Output.ShouldContain("has no reason");
+    }
+
+    [Fact]
+    public void Aggregate_CheckedInAllowlist_EntriesExistInTheSourceTree()
+    {
+        string root = FindRoot();
+        var entries = File.ReadAllLines(Path.Combine(root, "tools", "sqlgate", "g7-zero-mutant-allowlist.txt"))
+            .Where(l => l.Trim().Length > 0 && !l.StartsWith('#')).ToArray();
+
+        entries.ShouldNotBeEmpty();
+        foreach (string e in entries)
+        {
+            e.ShouldContain(" # ");
+            File.Exists(Path.Combine(root, e[..e.IndexOf(" # ", StringComparison.Ordinal)])).ShouldBeTrue(e);
+        }
     }
 }

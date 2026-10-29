@@ -188,6 +188,7 @@ jobs:
             --shards "${G7_SHARDS}" \
             --floor "${G7_MUTANT_FLOOR}" \
             --break-at 85 \
+            --allow-zero tools/sqlgate/g7-zero-mutant-allowlist.txt \
             --needs-result "$SHARDS_RESULT"
 
   # G9: the execution suites against a live Databricks SQL warehouse. Bound to the protected environment
