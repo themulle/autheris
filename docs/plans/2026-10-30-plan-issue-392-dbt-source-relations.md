@@ -47,3 +47,32 @@ Fixture `tests/Autheris.Tests.Unit/Dbt/Fixtures/manifest-sources-only-392.json` 
 3. Decision 3: is the self-relation inference (single `depends_on` node equal to the parent) safe, or must a source self relation require `attached_node`?
 4. Decision 9: may column names of a visible target with `Deny` column access appear in pairs (they are already listed by `describe_dataset` for that target)?
 5. Decision 8: should `relationships_combination` require `test_metadata.namespace` to be the project or null, to avoid a package test of the same name with other semantics?
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-30)
+
+Verdict: APPROVED WITH CONDITIONS. Principles: ambiguity fails closed (wrong parent/child = wrong join exposure); describe_dataset reveals no column or relation the caller cannot see (all-or-nothing, like `TableKeyVisibility`); tenant filter on unique ids; bounded manifest work.
+
+Rulings: Q1 keep the relation entry with `Columns = null` (existing target-visibility gate unchanged, no regression; null = "not disclosed", never an empty or partial list). Q2 no `ownerPackage` narrowing (see SC-02). Q3 self relation allowed only under the evidence rule in SC-04. Q4 pairs only if every target column passes the same column filter (including `Deny`) that `describe_dataset` applies to the target's own column list; otherwise drop all pairs. Q5 require namespace null or the project's own package, else `UNSUPPORTED_FORM`.
+
+Binding conditions:
+- I392-SC-01: The resolver returns `Resolved` only for exactly one candidate. Zero = `Unknown`, more than one = `Ambiguous`; both skip the relation with the sanitized warning. No first-wins, last-wins or name fallback anywhere (parser, lookup, ingestion).
+- I392-SC-02: Order is `depends_on` candidates, then the global index, with no package narrowing. An explicit package argument in `ref('pkg','m')` is a filter, not a tiebreaker. Any residual multiplicity across packages = `AMBIGUOUS_REFERENCE`. Decision 1 is amended accordingly.
+- I392-SC-03: With `attached_node` set, child must be that unique id and in the index; a `depends_on` mismatch (attached node missing from `depends_on`) = skip `UNKNOWN_MODEL`. Parent and child unique ids must both be set for the unique-id path; a null id never falls through to name matching except via the explicit legacy path of Decision 5.
+- I392-SC-04: Self-relation inference only when the deduplicated `depends_on` holds exactly one eligible node equal to the resolved parent and `attached_node` is empty; any other shape with no single distinct child = `AMBIGUOUS_REFERENCE`. Source key fallback (Decision 7) uses the same exactly-one rule.
+- I392-SC-05: `McpRelationColumnProjector` emits pairs only if all own columns are in the caller's listed columns of the described table and all target columns pass the target's column visibility incl. `Deny` and the row-shape requirement; otherwise `Columns = null` for the whole relation. Lookup failure, exception or missing target = null (fail closed). Pairs are catalog names only, never values, and not written to logs or audit.
+- I392-SC-06: The relation entry gate (target visibility) must be evaluated before and independently of column projection; the projector must not widen what the gate hides. Bypass path (metadata repository) must be limited to the same authorization the existing bypass uses.
+- I392-SC-07: Tenant filter checks `ParentUniqueId` and `ChildUniqueId` against `rejectedSet` in addition to names; a relation touching a rejected tenant node is dropped, and the drop reason must not name the other tenant's node.
+- I392-SC-08: `relationships_combination` accepts namespace null or the project's package only; other namespaces = `UNSUPPORTED_FORM`. Array reads bounded by `MaxKeyColumns + 1`; `depends_on` iteration capped (reuse existing manifest list bound); resolver index capacity bounded by the existing node limit; `PendingRelation` counted at collection (Decision 2) and memory-bounded by `MaxRelations`.
+- I392-SC-09: Warnings and reason codes use node names and codes only; no raw `to` expression, test kwargs or manifest free text. `describe_dataset` JSON gains only `columns`; nothing else changes.
+
+Mandatory tests (all `[Trait("Category","Security")]`):
+- I392-T-01 `Parse_RefMatchingTwoPackages_NoNarrowing_SkipsAmbiguousReference` (owner package owns one candidate, still skipped).
+- I392-T-02 `Parse_SourceRelationshipsTest_ParentFirstInDependsOn_ChildIsNotParent` and `Parse_SameTableNameInTwoDatabases_ResolvesBySourceName`.
+- I392-T-03 `Parse_SelfRelationInference_OnlyWhenSingleDependsOn` (two nodes = ambiguous skip) and `Parse_KeyTestWithTwoDependencies_SkipsAmbiguousAttachment`.
+- I392-T-04 `Parse_AttachedNodeNotInIndex_SkipsUnknownModel`.
+- I392-T-05 `Ingest_UniqueIdNotInModels_NoNameFallback` and `Ingest_NameOnlyRelation_TwoModelsSameName_ReportsAmbiguousModel`.
+- I392-T-06 `Ingest_RelationToRejectedTenantByUniqueId_Dropped_ReasonDoesNotNameForeignNode`.
+- I392-T-07 `Describe_RelationColumns_OwnColumnHidden_AllPairsNull`, `..._TargetColumnHidden_AllPairsNull`, `..._TargetColumnDenied_AllPairsNull`, `..._TargetSummaryShape_Null`, `..._LookupThrows_Null`.
+- I392-T-08 `Describe_RelationToHiddenTarget_StillOmitted_NoColumnsLeak` (serialized output contains no hidden column name).
+- I392-T-09 `Parse_RelationshipsCombination_ForeignNamespace_UnsupportedForm` and `..._TooWide_Skips`.
+- I392-T-10 `Parse_PendingRelations_CountedAtCollection_LimitHolds` (memory bound with many unresolved relations).
