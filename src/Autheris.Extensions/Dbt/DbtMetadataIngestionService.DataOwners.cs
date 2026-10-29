@@ -8,6 +8,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Governance;
+using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
+using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
@@ -20,6 +24,35 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed partial class DbtMetadataIngestionService
 {
+    /// <summary>
+    /// Composition with the owner import (issue #393 part b). The audit repository is mandatory here (L-5); <paramref name="ownerAssignments"/> may be
+    /// absent, which makes an owner payload fail closed.
+    /// </summary>
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        IRebacStore? rebacStore,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
+        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        IDbtTestTargetMap? testTargetMap,
+        ILogger<DbtMetadataIngestionService> logger,
+        IAuditLogRepository auditLog,
+        IDataOwnerAssignmentRepository? ownerAssignments = null,
+        IDataOwnerIdentityVerifier? ownerIdentityVerifier = null)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
+            virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, logger)
+    {
+        _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        _ownerAssignments = ownerAssignments;
+        _ownerIdentityVerifier = ownerIdentityVerifier;
+    }
+
     private const int MaxOwnerAssignmentsPerImport = 5000;
     private const int MaxNewOwnersPerImport = 1000;
     private const string OwnerImportSource = "dbt-governance-import";

@@ -57,7 +57,7 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         return new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
             NullLogger<DbtMetadataIngestionService>.Instance,
-            writer ?? (ownerRepo ? _repo : null), audit ?? _repo, verifier);
+            audit ?? _repo, writer ?? (ownerRepo ? _repo : null), verifier);
     }
 
     private static string Payload(TableIdentifier t, string ownersJson, string extra = "") =>
@@ -118,9 +118,13 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
     {
         // I393B-SC-01: fail closed when a dependency is not registered
         var gateway = Options.Create(new GatewayOptions { Dbt = new DbtOptions { ImportDataOwners = true } });
-        var service = new DbtMetadataIngestionService(
-            Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
-            NullLogger<DbtMetadataIngestionService>.Instance, withWriter ? _repo : null, withAudit ? _repo : null, null);
+        var service = withAudit
+            ? new DbtMetadataIngestionService(
+                Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
+                NullLogger<DbtMetadataIngestionService>.Instance, _repo, withWriter ? _repo : null, null)
+            : new DbtMetadataIngestionService(
+                Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
+                NullLogger<DbtMetadataIngestionService>.Instance);
 
         var result = await Import(service, Payload(_table, OwnerObj("S-1-5-21-5002"), ",\"description\":\"changed\""));
 
