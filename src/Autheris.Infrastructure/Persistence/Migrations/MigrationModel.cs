@@ -11,6 +11,34 @@ public interface IGovernanceMigrationRunner
 {
     /// <summary>Applies, verifies or skips the pending migrations according to <c>GovernanceDb:Migrations:Mode</c>. Throws when they cannot be satisfied.</summary>
     Task RunAsync(CancellationToken ct = default);
+
+    /// <summary>Always applies the pending migrations, whatever <c>Migrations:Mode</c> says (the <c>--migrate-governance</c> job; issue #388).</summary>
+    Task ApplyAsync(CancellationToken ct = default) => RunAsync(ct);
+
+    /// <summary>Verifies without any DDL or write, with the checks and codes of <c>Mode = Verify</c> (<c>--verify-governance</c>).</summary>
+    Task VerifyAsync(CancellationToken ct = default) => RunAsync(ct);
+
+    /// <summary>Emits audit events that could not be written during the migration because the audit store was not ready yet (best effort; never throws for audit failures).</summary>
+    Task EmitPendingAuditAsync(CancellationToken ct = default) => Task.CompletedTask;
+}
+
+/// <summary>Governed error codes of the governance schema migrations (issue #388, plan D-7). They appear in logs and CLI output, never with connection details.</summary>
+public static class GovernanceMigrationCodes
+{
+    public const string NewerThanBuild = "GOVERNANCE_SCHEMA_NEWER_THAN_BUILD";
+    public const string ChecksumMismatch = "GOVERNANCE_SCHEMA_CHECKSUM_MISMATCH";
+    public const string HistoryGap = "GOVERNANCE_SCHEMA_HISTORY_GAP";
+    public const string HistoryDuplicate = "GOVERNANCE_SCHEMA_HISTORY_DUPLICATE";
+    public const string HistoryRenamed = "GOVERNANCE_SCHEMA_HISTORY_RENAMED";
+    public const string UnsupportedBase = "GOVERNANCE_SCHEMA_UNSUPPORTED_BASE";
+    public const string Drift = "GOVERNANCE_SCHEMA_DRIFT";
+    public const string Pending = "GOVERNANCE_SCHEMA_PENDING";
+    public const string StepFailed = "GOVERNANCE_MIGRATION_STEP_FAILED";
+    public const string LockTimeout = "GOVERNANCE_MIGRATION_LOCK_TIMEOUT";
+    public const string LockFailed = "GOVERNANCE_MIGRATION_LOCK_FAILED";
+    public const string NewerAllowedWarning = "GOVERNANCE_SCHEMA_NEWER_ALLOWED";
+    public const string RuntimeDdl = "GOVERNANCE_MIGRATION_RUNTIME_DDL";
+    public const string RuntimeLoginPrivileged = "GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED";
 }
 
 /// <summary>Post-migration initialization of a governance store (audit tail, chain anchor, optional demo seed, audit processor start).</summary>
@@ -31,6 +59,9 @@ public sealed record MigrationContext(DbConnection Connection, DbTransaction? Tr
 /// </summary>
 public sealed record MigrationStep(int Version, string Name, string Checksum, Func<MigrationContext, Task> Apply, bool Transactional = false)
 {
+    /// <summary>The shape change of the step (version 2 and higher; the frozen baseline has none). Folded onto the v0001 shape (plan D-5).</summary>
+    internal GovernanceSchemaShapeDelta? ShapeDelta { get; init; }
+
     public static string ComputeChecksum(string identity)
     {
         ArgumentNullException.ThrowIfNull(identity);
@@ -46,16 +77,37 @@ public sealed class GovernanceSchemaDriftException : InvalidOperationException
 {
     private static readonly IReadOnlyList<SchemaDeviation> NoDeviations = [];
 
-    public GovernanceSchemaDriftException(string message) : base(message) { Deviations = NoDeviations; }
+    public GovernanceSchemaDriftException(string message) : this(GovernanceMigrationCodes.Drift, message) { }
 
-    public GovernanceSchemaDriftException(string message, Exception innerException) : base(message, innerException) { Deviations = NoDeviations; }
+    public GovernanceSchemaDriftException(string message, Exception innerException) : base(WithCode(GovernanceMigrationCodes.Drift, message), innerException)
+    {
+        Code = GovernanceMigrationCodes.Drift;
+        Deviations = NoDeviations;
+    }
+
+    public GovernanceSchemaDriftException(string code, string message) : base(WithCode(code, message))
+    {
+        Code = code;
+        Deviations = NoDeviations;
+    }
 
     public GovernanceSchemaDriftException(string message, IReadOnlyList<SchemaDeviation> deviations, Exception? innerException = null)
-        : base(message, innerException)
+        : this(GovernanceMigrationCodes.Drift, message, deviations, innerException)
+    {
+    }
+
+    public GovernanceSchemaDriftException(string code, string message, IReadOnlyList<SchemaDeviation> deviations, Exception? innerException = null)
+        : base(WithCode(code, message), innerException)
     {
         ArgumentNullException.ThrowIfNull(deviations);
+        Code = code;
         Deviations = deviations;
     }
+
+    /// <summary>The governed code (<see cref="GovernanceMigrationCodes"/>); the message starts with it.</summary>
+    public string Code { get; }
+
+    private static string WithCode(string code, string message) => code + ": " + message;
 
     /// <summary>The differences between the expected and the actual schema shape; empty for checksum or version drift.</summary>
     public IReadOnlyList<SchemaDeviation> Deviations { get; }

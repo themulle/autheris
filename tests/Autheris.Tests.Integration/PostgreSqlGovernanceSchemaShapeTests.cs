@@ -100,7 +100,8 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
 
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.MissingColumn && d.Table == "consent_column_rules" && d.Name == "applicable_scopes");
         ex.Message.ShouldContain("PostgreSQL database");
-        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(0);
+        // I388-SC-04: no DDL before the adoption pre-check accepted the schema, so not even the history table exists.
+        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM pg_class WHERE relname = 'autheris_schema_migrations'")).ShouldBe(0);
 
         // Fails on every start, not only the first.
         await Should.ThrowAsync<GovernanceSchemaDriftException>(
@@ -127,7 +128,9 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
             PostgreSqlBaselineSchema.Apply(conn, null); // restores the dropped tables (idempotent DDL)
         }
 
-        await ExecAsync(db.ConnectionString, "CREATE SCHEMA shadow; CREATE TABLE shadow.consent_column_rules (id TEXT PRIMARY KEY);");
+        await ExecAsync(db.ConnectionString, "CREATE SCHEMA shadow; CREATE TABLE shadow.consent_column_rules (id TEXT PRIMARY KEY); "
+            + "CREATE TABLE shadow.autheris_schema_migrations (LIKE public.autheris_schema_migrations INCLUDING ALL); "
+            + "INSERT INTO shadow.autheris_schema_migrations SELECT * FROM public.autheris_schema_migrations;");
         var shadowed = new NpgsqlConnectionStringBuilder(db.ConnectionString) { SearchPath = "shadow,public" }.ConnectionString;
         var hidden = await Should.ThrowAsync<GovernanceSchemaDriftException>(
             () => GovernanceSchemaTestSupport.RunPostgreSqlAsync(shadowed, GovernanceMigrationMode.Verify));

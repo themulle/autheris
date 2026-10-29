@@ -73,13 +73,24 @@ builder.Services.AddAsyncJobsAndDatasourceTesting(builder.Configuration);
 var app = builder.Build();
 
 // WP-ARC-B-12: init-job mode. Applies the governance schema migrations (honoring GovernanceDb:Migrations) and exits without serving.
-if (Array.IndexOf(args, "--migrate-governance") >= 0)
+if (Array.IndexOf(args, "--migrate-governance") >= 0 || Array.IndexOf(args, "--verify-governance") >= 0)
 {
+    // Issue #388: --migrate-governance always applies (Migrations:Mode is ignored and logged); --verify-governance only verifies (no DDL, no write).
+    var verifyOnlyJob = Array.IndexOf(args, "--migrate-governance") < 0;
     try
     {
         var migrationRunner = app.Services.GetRequiredService<Autheris.Infrastructure.Persistence.Migrations.IGovernanceMigrationRunner>();
-        await migrationRunner.RunAsync();
-        Console.WriteLine("Governance schema migrations completed.");
+        if (verifyOnlyJob)
+        {
+            await migrationRunner.VerifyAsync();
+            Console.WriteLine("Governance schema verification completed.");
+        }
+        else
+        {
+            await migrationRunner.ApplyAsync();
+            Console.WriteLine("Governance schema migrations completed.");
+        }
+
         Environment.ExitCode = 0;
     }
     catch (Exception ex)
