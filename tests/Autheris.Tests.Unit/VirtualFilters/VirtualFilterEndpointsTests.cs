@@ -415,7 +415,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         status.ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Position = 0;
         using var doc = await JsonDocument.ParseAsync(context.Response.Body);
-        var error = doc.RootElement.GetProperty("error").GetString();
+        var error = doc.RootElement.GetProperty("detail").GetString();
         error.ShouldNotBeNull();
         error.ShouldBe("The requested virtual filter operation is invalid.");
         error.ShouldNotContain("internal database connection string or schema leak");

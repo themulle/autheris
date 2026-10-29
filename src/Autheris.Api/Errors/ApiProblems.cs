@@ -73,9 +73,7 @@ public static class ApiProblems
         {
             ["code"] = code,
             ["correlationId"] = correlationId,
-            ["traceId"] = traceId,
-            // Decision G-9: retain top-level "error" property in serialized ProblemDetails JSON for backward compatibility.
-            ["error"] = detail
+            ["traceId"] = traceId
         };
 
         if (extraExtensions != null)
@@ -117,7 +115,6 @@ public static class ApiProblems
         problem.Extensions["code"] = code;
         problem.Extensions["correlationId"] = correlationId;
         problem.Extensions["traceId"] = traceId;
-        problem.Extensions["error"] = detail;
         return problem;
     }
 
