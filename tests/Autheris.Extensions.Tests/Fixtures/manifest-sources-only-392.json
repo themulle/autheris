@@ -1,0 +1,175 @@
+{
+  "metadata": {
+    "dbt_version": "1.12.0",
+    "project_name": "shop"
+  },
+  "nodes": {
+    "test.shop.relationships_orders_customer_id__customer_id__source_crm_customers_": {
+      "name": "relationships_orders_customer_id__customer_id__source_crm_customers_",
+      "resource_type": "test",
+      "package_name": "shop",
+      "attached_node": null,
+      "column_name": "customer_id",
+      "depends_on": {
+        "nodes": [
+          "source.shop.crm.customers",
+          "source.shop.crm.orders"
+        ]
+      },
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "column_name": "customer_id",
+          "field": "customer_id",
+          "to": "source('crm', 'customers')"
+        }
+      }
+    },
+    "test.shop.relationships_combination_crm_orders": {
+      "name": "relationships_combination_crm_orders",
+      "resource_type": "test",
+      "package_name": "shop",
+      "attached_node": null,
+      "column_name": null,
+      "depends_on": {
+        "nodes": [
+          "source.shop.crm.orders",
+          "source.shop.crm.customers"
+        ]
+      },
+      "test_metadata": {
+        "name": "relationships_combination",
+        "kwargs": {
+          "columns": [
+            "customer_id",
+            "tenant_id"
+          ],
+          "to": "source('crm', 'customers')",
+          "fields": [
+            "customer_id",
+            "tenant_id"
+          ],
+          "relation_name": "customer_tenant"
+        }
+      }
+    },
+    "test.shop.unique_crm_customers_customer_id": {
+      "name": "unique_crm_customers_customer_id",
+      "resource_type": "test",
+      "package_name": "shop",
+      "attached_node": null,
+      "column_name": "customer_id",
+      "depends_on": {
+        "nodes": [
+          "source.shop.crm.customers"
+        ]
+      },
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "customer_id"
+        }
+      }
+    },
+    "test.shop.unique_combination_crm_customers": {
+      "name": "unique_combination_crm_customers",
+      "resource_type": "test",
+      "package_name": "shop",
+      "attached_node": null,
+      "column_name": null,
+      "depends_on": {
+        "nodes": [
+          "source.shop.crm.customers"
+        ]
+      },
+      "test_metadata": {
+        "name": "unique_combination_of_columns",
+        "namespace": "dbt_utils",
+        "kwargs": {
+          "combination_of_columns": [
+            "customer_id",
+            "tenant_id"
+          ]
+        }
+      }
+    },
+    "test.shop.unique_crm_orders_order_id": {
+      "name": "unique_crm_orders_order_id",
+      "resource_type": "test",
+      "package_name": "shop",
+      "attached_node": null,
+      "column_name": "order_id",
+      "depends_on": {
+        "nodes": [
+          "source.shop.crm.orders"
+        ]
+      },
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "order_id"
+        }
+      }
+    }
+  },
+  "sources": {
+    "source.shop.crm.customers": {
+      "name": "customers",
+      "source_name": "crm",
+      "package_name": "shop",
+      "resource_type": "source",
+      "database": "db_a",
+      "schema": "raw",
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "data_type": "integer"
+        }
+      }
+    },
+    "source.shop.crm.orders": {
+      "name": "orders",
+      "source_name": "crm",
+      "package_name": "shop",
+      "resource_type": "source",
+      "database": "db_a",
+      "schema": "raw",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "data_type": "integer"
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "data_type": "integer"
+        }
+      }
+    },
+    "source.shop.erp.customers": {
+      "name": "customers",
+      "source_name": "erp",
+      "package_name": "shop",
+      "resource_type": "source",
+      "database": "db_b",
+      "schema": "raw",
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "data_type": "integer"
+        }
+      }
+    }
+  }
+}
