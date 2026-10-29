@@ -143,6 +143,55 @@ public static class DefaultReadOrdering
         "text", "ntext", "image", "clob", "nclob"
     };
 
+    private static readonly HashSet<string> GroupableBaseTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "int2", "int4", "int8", "serial", "smallserial", "bigserial",
+        "bit", "bool", "boolean",
+        "decimal", "numeric", "number", "money", "smallmoney", "float", "float4", "float8", "real", "double", "binary_float", "binary_double",
+        "date", "time", "timetz", "datetime", "datetime2", "smalldatetime", "datetimeoffset", "timestamp", "timestamptz", "interval",
+        "uuid", "uniqueidentifier",
+        "char", "nchar", "varchar", "nvarchar", "varchar2", "nvarchar2", "character", "bpchar", "citext", "string"
+    };
+
+    /// <summary>
+    /// #398 allow-list of the column types a typed aggregation may group by. Unlike <see cref="IsOrderableType"/> an unknown, blank or
+    /// unparsable type is refused (fail-closed) on every dialect except SQLite, which compares every value. <c>varchar(max)</c> and
+    /// <c>nvarchar(max)</c> are groupable on SQL Server only; <c>text</c> only on PostgreSQL and Databricks. Binary, XML, JSON, spatial,
+    /// structured and legacy LOB types (text/ntext/image, CLOB) stay refused.
+    /// </summary>
+    public static bool IsGroupableType(string? dataType, DatabaseDialect dialect)
+    {
+        if (dialect == DatabaseDialect.Sqlite)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return false;
+        }
+
+        var t = dataType.Trim().ToLowerInvariant();
+        if (t.EndsWith("[]", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var end = t.IndexOfAny(['(', ' ', '<']);
+        var baseType = end < 0 ? t : t[..end];
+        if (t.Contains("(max)", StringComparison.Ordinal))
+        {
+            return dialect == DatabaseDialect.SqlServer && baseType is "varchar" or "nvarchar";
+        }
+
+        if (baseType == "text")
+        {
+            return dialect is DatabaseDialect.PostgreSql or DatabaseDialect.Databricks;
+        }
+
+        return GroupableBaseTypes.Contains(baseType);
+    }
+
     /// <summary>
     /// False for document, binary, LOB, spatial and structured types that cannot (or should not) appear in an ORDER BY on the
     /// dialect. Unknown types count as orderable. <c>text</c> stays orderable on PostgreSQL, SQLite and Databricks.

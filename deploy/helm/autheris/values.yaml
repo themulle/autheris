@@ -197,7 +197,8 @@ gateway:
       - "192.168.0.0/16"
 
 # Optional governance schema migration job (WP-ARC-B-12): a Helm pre-install/pre-upgrade hook that runs
-# "Autheris.Api --migrate-governance" (Gateway:GovernanceDb:Migrations:Mode=Apply) before the new application pods roll out.
+# "Autheris.Api --migrate-governance" (always applies, whatever Migrations:Mode says) before the new application pods roll out;
+# databases from v1.5.0 upgrade automatically, older ones fail with GOVERNANCE_SCHEMA_UNSUPPORTED_BASE.
 # When enabled, the application runs with Migrations:Mode=Verify. The job needs the same secrets as the application
 # (governance connection string, audit and masking keys); it does not run for the SQLite provider.
 governanceMigrationJob:

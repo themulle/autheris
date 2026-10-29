@@ -121,7 +121,7 @@ public sealed class GovernanceSchemaShapeComparerTests
     }
 
     [Fact]
-    public void Message_ListsAtMostOneHundredDeviations_ThenTheRemainingCount()
+    public void Message_ListsAtMostFiftyDeviations_ThenTheRemainingCount()
     {
         var deviations = Enumerable.Range(0, 130)
             .Select(i => new SchemaDeviation(SchemaDeviationKind.MissingTable, $"T{i:D3}", null, string.Empty, null))
@@ -129,8 +129,8 @@ public sealed class GovernanceSchemaShapeComparerTests
 
         var message = GovernanceSchemaShapeComparer.FormatMessage("SQLite", "gov.db", [], [1], deviations);
 
-        message.Split('\n').Count(l => l.StartsWith("  missing table", StringComparison.Ordinal)).ShouldBe(100);
-        message.ShouldContain("  ... and 30 more\n");
+        message.Split('\n').Count(l => l.StartsWith("  missing table", StringComparison.Ordinal)).ShouldBe(50);
+        message.ShouldContain("  ... and 80 more\n");
         message.ShouldContain("applied migrations: none; pending: 0001");
     }
 }
