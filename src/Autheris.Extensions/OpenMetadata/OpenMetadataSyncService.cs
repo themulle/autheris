@@ -1028,8 +1028,8 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
     }
 
     /// <summary>
-    /// SEC E-07: Team → group SID resolution with separate indexes per key kind. Config keys may be prefixed
-    /// (<c>id:</c>, <c>fqn:</c>, <c>name:</c>); unprefixed GUID keys are ids, other unprefixed keys are FQN/name (legacy).
+    /// SEC E-07: Team → group SID resolution with separate indexes per key kind. Config keys are
+    /// <c>id:</c>, <c>fqn:</c> or <c>name:</c> prefixed (validated at startup, see <see cref="TeamToGroupSidMapRules"/>).
     /// Ids are compared as GUIDs, FQNs and names ordinally. Keys that map to different SIDs are dropped (ambiguous).
     /// </summary>
     internal sealed class TeamSidIndex
@@ -1040,37 +1040,26 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
 
         public static TeamSidIndex Build(IReadOnlyDictionary<string, string> map, Microsoft.Extensions.Logging.ILogger logger)
         {
+            // NL-SC-09: startup validation rejects an invalid map; a map that reaches here unvalidated is refused, never partially accepted.
+            if (TeamToGroupSidMapRules.Validate(map, "Gateway:OpenMetadata:TeamToGroupSidMap").Count > 0)
+            {
+                throw new InvalidOperationException("Gateway:OpenMetadata:TeamToGroupSidMap is invalid; the sync is refused.");
+            }
+
             var index = new TeamSidIndex();
             foreach (var (rawKey, sidValue) in map)
             {
-                if (string.IsNullOrWhiteSpace(rawKey) || string.IsNullOrWhiteSpace(sidValue))
+                if (!TeamToGroupSidMapRules.TryParseKey(rawKey, out var kind, out var value, out _))
                 {
-                    continue;
+                    throw new InvalidOperationException("Gateway:OpenMetadata:TeamToGroupSidMap is invalid; the sync is refused.");
                 }
 
-                var key = rawKey.Trim();
                 var sid = new Sid(sidValue.Trim());
-                if (TryStripPrefix(key, "id:", out var idPart))
+                switch (kind)
                 {
-                    if (Guid.TryParse(idPart, out var id)) index._byId.Add(id, sid);
-                    else logger.LogWarning("Ignoring TeamToGroupSidMap entry with invalid team id.");
-                }
-                else if (TryStripPrefix(key, "fqn:", out var fqnPart))
-                {
-                    index._byFqn.Add(fqnPart, sid);
-                }
-                else if (TryStripPrefix(key, "name:", out var namePart))
-                {
-                    index._byName.Add(namePart, sid);
-                }
-                else if (Guid.TryParse(key, out var legacyId))
-                {
-                    index._byId.Add(legacyId, sid);
-                }
-                else
-                {
-                    index._byFqn.Add(key, sid);
-                    index._byName.Add(key, sid);
+                    case TeamMapKeyKind.Id: index._byId.Add(Guid.Parse(value), sid); break;
+                    case TeamMapKeyKind.Fqn: index._byFqn.Add(value, sid); break;
+                    default: index._byName.Add(value, sid); break;
                 }
             }
 
