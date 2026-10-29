@@ -26,7 +26,7 @@ public sealed class AggregationPlannerRoutingTests
 {
     private static readonly TableIdentifier TableId = new("sales", "public", "orders");
 
-    private static TableMetadata Metadata(DataSourceType type = DataSourceType.Sql)
+    private static TableMetadata Metadata(DataSourceType type = DataSourceType.Sql, string sourceType = "PostgreSQL", string deptType = "varchar")
     {
         var id = Guid.NewGuid();
         return new TableMetadata
@@ -34,12 +34,12 @@ public sealed class AggregationPlannerRoutingTests
             Identifier = TableId,
             Table = new Table
             {
-                Id = id, SourceType = "PostgreSQL", SourceName = "default", SchemaName = "public", TableName = "orders",
+                Id = id, SourceType = sourceType, SourceName = "default", SchemaName = "public", TableName = "orders",
                 DataSourceType = type, IsActive = true
             },
             Columns =
             [
-                new TableColumn { TableId = id, ColumnName = "department", DataType = "varchar" },
+                new TableColumn { TableId = id, ColumnName = "department", DataType = deptType },
                 new TableColumn { TableId = id, ColumnName = "amount", DataType = "decimal" }
             ]
         };
@@ -104,10 +104,13 @@ public sealed class AggregationPlannerRoutingTests
         IReadOnlyList<IReadOnlyDictionary<string, object?>> sqlRows,
         CountingExecutor executor,
         int maxGroups = 1000,
-        DataSourceType type = DataSourceType.Sql)
+        DataSourceType type = DataSourceType.Sql,
+        string sourceType = "PostgreSQL",
+        string deptType = "varchar",
+        int minGroupSize = 1)
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(TableId, Arg.Any<CancellationToken>()).Returns(Metadata(type));
+        metaRepo.GetTableMetadataAsync(TableId, Arg.Any<CancellationToken>()).Returns(Metadata(type, sourceType, deptType));
         var requests = new List<GovernedSqlQueryRequest>();
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
@@ -124,7 +127,7 @@ public sealed class AggregationPlannerRoutingTests
             analyticsOptions: Options.Create(new AnalyticsOptions
             {
                 Aggregation = new AggregationOptions { MaxGroups = maxGroups },
-                Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 }
+                Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = minGroupSize }
             }),
             dpEngine: null);
         return (service, sql, requests);
@@ -222,5 +225,24 @@ public sealed class AggregationPlannerRoutingTests
 
         requests.Single().GatewayParameters.ShouldBeNull();
         requests.Single().Parameters.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task I398_T_05_MaxKey_MinGroupSize_SuppressesSmallGroups_And_OtherBucketNotReidentifying()
+    {
+        // A (max) text key goes through the same min-group-size suppression as any key; the groups below k are never returned singly.
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, requests) = Create(
+            [SqlRow("big", 50), SqlRow("tiny-1", 1), SqlRow("tiny-2", 2)], executor,
+            sourceType: "sqlserver", deptType: "nvarchar(max)", minGroupSize: 5);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Groups.Select(g => g.GroupKey["department"]).ShouldNotContain("tiny-1");
+        result.Groups.Select(g => g.GroupKey["department"]).ShouldNotContain("tiny-2");
+        result.Groups.Select(g => g.GroupKey["department"]).ShouldContain("big");
+        requests.Single().ResultByteBudget.ShouldNotBeNull();
+        requests.Single().Sql.ToUpperInvariant().ShouldNotContain("CAST");
     }
 }

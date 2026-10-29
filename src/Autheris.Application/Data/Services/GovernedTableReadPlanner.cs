@@ -157,9 +157,10 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                     throw UnknownColumn(rawCol, intent);
                 }
 
-                if (!DefaultReadOrdering.IsOrderableType(colMeta.DataType, metadata.Dialect))
+                // I398-SC-02/03: after the unknown, mask and access checks; one fixed refusal for every type, naming neither column nor type.
+                if (!DefaultReadOrdering.IsGroupableType(colMeta.DataType, metadata.Dialect))
                 {
-                    throw new ArgumentException($"Column '{rawCol}' has non-groupable type '{colMeta.DataType}'.", nameof(intent));
+                    throw new TrinoSqlEngine.SqlCompileNotSupportedException(TrinoSqlEngine.SqlCompileNotSupportedReason.Construct, "aggregation group key type");
                 }
 
                 if (!groupByCols.Contains(colMeta.ColumnName, StringComparer.OrdinalIgnoreCase))
