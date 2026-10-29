@@ -748,9 +748,12 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         var allowedRelationships = new List<DbtRelationshipDefinition>();
         foreach (var rel in relationships)
         {
-            if (rejectedSet.Contains(rel.ParentModelOrTable) || rejectedSet.Contains(rel.ChildModelOrTable))
+            if (rejectedSet.Contains(rel.ParentModelOrTable) || rejectedSet.Contains(rel.ChildModelOrTable) ||
+                (rel.ParentUniqueId is not null && rejectedSet.Contains(rel.ParentUniqueId)) ||
+                (rel.ChildUniqueId is not null && rejectedSet.Contains(rel.ChildUniqueId)))
             {
-                warnings.Add($"Relationship '{rel.Name}': dropped because it targets model outside caller's tenant.");
+                // I392-SC-07: the reason never names a node of another tenant.
+                warnings.Add("A relationship was dropped because it targets a model outside the caller's tenant.");
                 continue;
             }
             allowedRelationships.Add(rel);
@@ -905,24 +908,20 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         List<string> warnings,
         CancellationToken ct)
     {
-        var modelByName = new Dictionary<string, DbtModelDefinition>(StringComparer.OrdinalIgnoreCase);
-        foreach (var m in models)
-        {
-            modelByName[m.Name] = m;
-            modelByName[m.UniqueId] = m;
-        }
+        var lookup = new DbtRelationModelLookup(models);
 
-        // 1. Resolve models (UNKNOWN_MODEL).
+        // 1. Resolve models (UNKNOWN_MODEL, AMBIGUOUS_MODEL); never a first-wins or last-wins pick (issue #392).
         var resolved = new List<ResolvedRelation>(relationships.Count);
         foreach (var rel in relationships)
         {
-            if (modelByName.TryGetValue(rel.ParentModelOrTable, out var parent) && modelByName.TryGetValue(rel.ChildModelOrTable, out var child))
+            var failure = lookup.TryResolve(rel, out var parent, out var child);
+            if (failure is null && parent is not null && child is not null)
             {
                 resolved.Add(new ResolvedRelation(rel, parent, child, parent.ToTableIdentifier(), child.ToTableIdentifier()));
             }
             else
             {
-                warnings.Add(SkipWarning(rel, "UNKNOWN_MODEL"));
+                warnings.Add(SkipWarning(rel, failure ?? "UNKNOWN_MODEL"));
             }
         }
 
