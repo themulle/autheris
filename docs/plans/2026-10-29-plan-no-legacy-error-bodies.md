@@ -76,3 +76,12 @@ New conditions
 - NL-T-30 `Gateway_Denial_Mapper_And_Global_Handler_Produce_Same_Problem_Shape` [Security].
 - NL-T-31 `Operator_Mapped_Message_Is_Length_Capped_And_Sanitized` [Security].
 All new tests carry [Trait("Category","Security")].
+
+## Phase 3 rulings for part 1 issues (csharp-security-expert, 2026-10-29)
+Verdict: APPROVED WITH CONDITIONS. NL-SC-20..31 stay binding.
+
+1. Privacy-budget 429 extensions: EXTEND (consistent with ARCH-MNT-08 ruling 9). NL-SC-32: the allowlist gains clientId, consumed, totalBudget; clientId is only the caller's own client id (no other principal/tenant), consumed/totalBudget are numeric and typed (not free text, not stringified exceptions). Values come from the budget decision object, never from request input or ex.Message. Drop-on-unknown stays for every other key. NL-T-32 `PrivacyBudget_429_Keeps_Only_Allowlisted_Typed_Extensions` [Security].
+2. WebSqlEndpoints.Governance:445 (Trino QueryResults.error): ACCEPTED as protocol shape (NL-SC-29). NL-SC-33: fixed message and fixed errorName/errorType per denial class; no ex.Message, stack, SQL text, table names or principal data; errorCode numeric from a fixed table; entry listed explicitly in the ratchet allowlist (file-line independent). NL-T-33 `Trino_InProtocol_Error_Has_Fixed_Message_And_No_Exception_Text` [Security].
+3. ODataEndpoints.Query:61 echo: the echo is inside the Development-only branch; non-Development already returns the fixed ACCESS_DENIED 403 for both "missing" and "denied" (no enumeration in production). ACCEPTED as is, conditional: NL-SC-34: the echo stays strictly behind the IsDevelopment check, the value is only serialized via the JSON serializer (no HTML/format interpolation outside it), and the ratchet records it as an explicit dev-only allowlist entry. A fixed message is preferred and the developer may switch without a new ruling. NL-T-34 `OData_EntitySet_NotFound_Is_Fixed_Access_Denied_Outside_Development` [Security].
+4. FORBIDDEN/NOT_FOUND fallbacks to ACCESS_DENIED/RESOURCE_NOT_FOUND: CONFIRMED. They are the governed codes, the status table is unchanged (NL-SC-20), and the fallback is fail-closed (an unmapped code never leaks as-is). NL-T-35 `Legacy_Forbidden_And_NotFound_Codes_Map_To_Governed_Codes` [Security].
+All new tests carry [Trait("Category","Security")].
