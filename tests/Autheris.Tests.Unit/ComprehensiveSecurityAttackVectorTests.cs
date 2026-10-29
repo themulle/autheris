@@ -637,6 +637,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         var entry1 = new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
             ActorSid = new Sid("S-1-5-21-LEGIT-USER"),
@@ -671,6 +672,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         var entry1 = new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
             ActorSid = new Sid("S-1-5-21-LEGIT-USER"),

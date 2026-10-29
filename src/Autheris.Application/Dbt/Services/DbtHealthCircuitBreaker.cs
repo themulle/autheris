@@ -73,9 +73,6 @@ public sealed class DbtHealthCircuitBreaker : IDbtHealthCircuitBreaker
         return Task.FromResult(snapshot);
     }
 
-    public Task<DbtRunResultsReport> RecordRunResultsAsync(Stream runResultsStream, CancellationToken ct = default)
-        => RecordRunResultsAsync(runResultsStream, TenantId.LegacySingleTenant, ct);
-
     public async Task<DbtRunResultsReport> RecordRunResultsAsync(Stream runResultsStream, TenantId tenant, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(runResultsStream);

@@ -117,6 +117,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns([new Consent
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 TableIdentifier = ordersTable.Identifier,
                 Effect = ConsentEffect.Allow,
                 GranteeSid = new Sid("user-1"),
@@ -154,8 +155,8 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns([
-                new Consent { TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") },
-                new Consent { TableIdentifier = usersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }
+                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") },
+                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = usersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }
             ]);
 
         var service = new QueryAnalysisService(
@@ -187,7 +188,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns([new Consent { TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }]);
+            .Returns([new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }]);
 
         // Budget set very low (5)
         var service = new QueryAnalysisService(
@@ -221,7 +222,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns([new Consent { TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }]);
+            .Returns([new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }]);
 
         var service = new QueryAnalysisService(
             metadataRepo,
@@ -287,7 +288,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns([new Consent { TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }]);
+            .Returns([new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1") }]);
 
         // costAnalysisEngine is omitted / null
         var service = new QueryAnalysisService(metadataRepo, consentRepo);

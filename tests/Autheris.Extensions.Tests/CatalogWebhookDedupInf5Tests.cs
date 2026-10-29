@@ -37,7 +37,7 @@ public sealed class CatalogWebhookDedupInf5Tests
     }
 
     private static CatalogWebhookHandler Handler(IPolicyEpochRepository epochRepo, IDistributedClusterStateProvider? cluster = null) =>
-        new(Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { WebhookSecret = Secret } }),
+        new(Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "legacy-single-tenant", WebhookSecret = Secret } }),
             epochRepo, Substitute.For<IDataCatalogSyncService>(), NullLogger<CatalogWebhookHandler>.Instance, cluster);
 
     [Fact]

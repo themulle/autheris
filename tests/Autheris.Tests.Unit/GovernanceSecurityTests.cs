@@ -78,6 +78,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -109,6 +110,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -141,6 +143,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -168,6 +171,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -200,6 +204,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -263,6 +268,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var reqFinance = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = metaFinance.Table.Id,
             TableIdentifier = tableFinance,
             RequesterSid = requester,
@@ -274,6 +280,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var reqSales = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = metaSales.Table.Id,
             TableIdentifier = tableSales,
             RequesterSid = requester,
@@ -315,6 +322,7 @@ public class GovernanceSecurityTests : IDisposable
         var requester = new Sid("S-1-5-21-REQUESTER-EXPIRED");
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = metaFinance.Table.Id,
             TableIdentifier = tableFinance,
             RequesterSid = requester,
@@ -340,6 +348,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -397,6 +406,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requester,
@@ -485,6 +495,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -511,6 +522,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -539,6 +551,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -567,6 +580,7 @@ public class GovernanceSecurityTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -952,6 +966,7 @@ public class GovernanceSecurityTests : IDisposable
 
         return await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = new Sid(requester),
@@ -1005,6 +1020,7 @@ public class GovernanceSecurityTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta!.Table.Id,
             TableIdentifier = table,
             RequesterSid = new Sid("S-1-5-21-REQ-E9B"),

@@ -60,7 +60,7 @@ internal static class OpenMetadataTableIdentity
     /// Resolves the gateway identity. Returns false (with a reason) for tables outside the ServiceFilter, tables without
     /// a domain mapping (when the map is configured) and tables whose name parts are not valid identifier components.
     /// </summary>
-    public static bool TryResolve(OpenMetadataTable table, OpenMetadataOptions options, out ResolvedTable resolved, out string reason)
+    public static bool TryResolve(OpenMetadataTable table, OpenMetadataOptions options, out ResolvedTable resolved, out string reason, TenantId? defaultTenant = null)
     {
         resolved = default;
 
@@ -105,7 +105,7 @@ internal static class OpenMetadataTableIdentity
             return false;
         }
 
-        if (!TryResolveTenant(service, database, options, out var tenantId, out var tenantReason))
+        if (!TryResolveTenant(service, database, options, out var tenantId, out var tenantReason, defaultTenant))
         {
             reason = tenantReason;
             return false;
@@ -134,7 +134,8 @@ internal static class OpenMetadataTableIdentity
         string? database,
         OpenMetadataOptions options,
         out TenantId tenantId,
-        out string reason)
+        out string reason,
+        TenantId? defaultTenant = null)
     {
         tenantId = default;
         string? tenantStr = null;
@@ -154,9 +155,15 @@ internal static class OpenMetadataTableIdentity
             tenantStr = options.DefaultTenantId;
         }
 
+        // DT-A-9: with neither a mapping nor OpenMetadata.DefaultTenantId the configured default tenant D is used; without D the entry is skipped.
+        if (string.IsNullOrWhiteSpace(tenantStr) && defaultTenant is { } d)
+        {
+            tenantStr = d.Value;
+        }
+
         if (string.IsNullOrWhiteSpace(tenantStr))
         {
-            reason = $"no tenant mapping for '{service}.{database}' (configure OpenMetadata.ServiceDatabaseToTenantMap or OpenMetadata.DefaultTenantId)";
+            reason = $"no tenant mapping for '{service}.{database}' (configure OpenMetadata.ServiceDatabaseToTenantMap, OpenMetadata.DefaultTenantId or Gateway:Tenancy:DefaultTenantId)";
             return false;
         }
 

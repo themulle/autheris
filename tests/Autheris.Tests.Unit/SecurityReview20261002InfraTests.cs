@@ -118,7 +118,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
 
         using var cache = CreateCache(epochService, multiplexer, SecretProvider("cluster-master-key"));
 
-        var decision = await cache.GetCachedDecisionAsync(new Sid("S-1-5-21-ATTACKER"), table);
+        var decision = await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, new Sid("S-1-5-21-ATTACKER"), table);
 
         decision.ShouldBeNull("An unsigned/forged L2 entry must never be accepted as a consent decision.");
         _ = db.Received().KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>());
@@ -310,6 +310,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
 
     private static AuditLogEntry NewAuditEntry(int i) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = $"EVENT_{i}",
         ActorSid = new Sid($"S-1-5-21-ACTOR-{i}"),
         TargetTable = "hr.dbo.salaries",
@@ -478,7 +479,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     }
 
     private static AuditChainRecord Record(long rowId, long seq, string prev, string hash) =>
-        new(rowId, seq, new AuditLogEntry { EventType = "E", ActorSid = new Sid("S-1-5-21-1"), PrevHash = prev, EntryHash = hash });
+        new(rowId, seq, new AuditLogEntry { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, EventType = "E", ActorSid = new Sid("S-1-5-21-1"), PrevHash = prev, EntryHash = hash });
 
     [Fact]
     public async Task M31_WormExport_ContinuityGap_FailsInsteadOfReportingSuccess()

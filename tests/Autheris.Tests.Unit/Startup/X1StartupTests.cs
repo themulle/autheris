@@ -198,7 +198,7 @@ public sealed class X1StartupTests
         profiles.GetAllProfilesAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<AccessProfile>>([Profile("p-bad", $"[name] = '{SecretValue}'")]));
         var log = new CapturingLogger<DeniedTablesStartupReporter>();
-        var reporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), log);
+        var reporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "tenant-a" } }), log);
 
         await reporter.StartAsync(CancellationToken.None);
         await reporter.ExecuteTask!;   // the listing runs in the background

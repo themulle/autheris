@@ -59,6 +59,8 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         _clusterState = clusterState;
     }
 
+    private TenantId? DefaultTenant => Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy);
+
     public async Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
         if (!await SyncLock.WaitAsync(TimeSpan.FromSeconds(5), ct))
@@ -95,7 +97,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             var candidates = new List<(OpenMetadataTable Item, OpenMetadataTableIdentity.ResolvedTable Resolved)>();
             foreach (var omTable in omTables)
             {
-                if (OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason))
+                if (OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason, DefaultTenant))
                 {
                     // SR-L-23: a tenant-restricted sync only touches tables mapped to the caller's tenant (silently, no foreign names reported).
                     if (restrictToTenant.HasValue && resolved.TenantId != restrictToTenant.Value)
@@ -287,7 +289,11 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                     {
                         if (IsRuleApplicableToTable(rule, tableIdent))
                         {
-                            var tenantId = tableTenantMap.TryGetValue(tableIdent, out var tid) ? tid : TenantId.LegacySingleTenant;
+                            if (!tableTenantMap.TryGetValue(tableIdent, out var tenantId))
+                            {
+                                continue; // DT-A-9: no tenant without a mapping or a default tenant; the table was skipped at resolution
+                            }
+
                             var consent = factory(tableMeta, tenantId, effect);
                             desired.TryAdd(SyncConsentKey.From(consent), consent);
                         }
@@ -411,6 +417,10 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         if (!string.IsNullOrWhiteSpace(omOptions.DefaultTenantId))
         {
             managedTenants.Add(new TenantId(omOptions.DefaultTenantId.Trim()));
+        }
+        if (DefaultTenant is { } configuredDefault)
+        {
+            managedTenants.Add(configuredDefault);
         }
         foreach (var (_, tStr) in omOptions.ServiceDatabaseToTenantMap)
         {
@@ -762,7 +772,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                 continue;
             }
 
-            if (OpenMetadataTableIdentity.TryResolve(sibling, omOptions, out var siblingResolved, out _) &&
+            if (OpenMetadataTableIdentity.TryResolve(sibling, omOptions, out var siblingResolved, out _, DefaultTenant) &&
                 siblingResolved.Identifier == resolved.Identifier)
             {
                 candidates.Add((sibling, siblingResolved));
@@ -787,7 +797,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
             if (omTable != null)
             {
                 // SEC E-09 / EX-06: the webhook path applies the same ServiceFilter / domain mapping as the full sync.
-                if (!OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason))
+                if (!OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason, DefaultTenant))
                 {
                     _logger.LogWarning("Ignoring OpenMetadata webhook table event for {Fqn}: {Reason}.", omTable.FullyQualifiedName, reason);
                     return true;

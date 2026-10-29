@@ -82,6 +82,7 @@ public sealed class OpenMetadataSyncTenantFilterTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = true,
                 SyncIntervalMinutes = 30,

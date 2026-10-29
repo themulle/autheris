@@ -40,14 +40,14 @@ public class InfrastructureTests : IDisposable
         });
 
         // 1. Initially nothing cached
-        var cached = await _cacheService.GetCachedDecisionAsync(userSid, table);
+        var cached = await _cacheService.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
         cached.ShouldBeNull();
 
         // 2. Set cache
-        await _cacheService.SetCachedDecisionAsync(userSid, table, decision, TimeSpan.FromMinutes(5));
+        await _cacheService.SetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table, decision, TimeSpan.FromMinutes(5));
 
         // 3. Cache hit
-        var hit = await _cacheService.GetCachedDecisionAsync(userSid, table);
+        var hit = await _cacheService.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
         hit.ShouldNotBeNull();
         hit.IsAllowed.ShouldBeTrue();
         hit.ColumnAccess["amount"].ShouldBe(ColumnAccessLevel.Clear);
@@ -56,7 +56,7 @@ public class InfrastructureTests : IDisposable
         await _epochService.InvalidateEpochAsync(table);
 
         // 5. Subsequent lookup fails because epoch has changed
-        var invalidated = await _cacheService.GetCachedDecisionAsync(userSid, table);
+        var invalidated = await _cacheService.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
         invalidated.ShouldBeNull();
     }
 
@@ -82,6 +82,7 @@ public class InfrastructureTests : IDisposable
         // Record 3 events
         await _repository.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             EventType = "TABLE_QUERY",
             ActorSid = actorSid,
             TargetTable = "finance.dbo.finance_table_1",
@@ -92,6 +93,7 @@ public class InfrastructureTests : IDisposable
 
         await _repository.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             EventType = "TABLE_QUERY",
             ActorSid = actorSid,
             TargetTable = "hr.dbo.hr_table_1",
@@ -102,6 +104,7 @@ public class InfrastructureTests : IDisposable
 
         await _repository.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             EventType = "CONSENT_REVOKED",
             ActorSid = actorSid,
             TargetTable = "sales.dbo.sales_table_1",
@@ -141,6 +144,7 @@ public class InfrastructureTests : IDisposable
             {
                 await repo1.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     EventType = "INITIAL_EVENT_1",
                     ActorSid = actorSid,
                     TargetTable = "finance.dbo.finance_table_1",
@@ -149,6 +153,7 @@ public class InfrastructureTests : IDisposable
                 });
                 await repo1.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     EventType = "INITIAL_EVENT_2",
                     ActorSid = actorSid,
                     TargetTable = "finance.dbo.finance_table_1",
@@ -162,6 +167,7 @@ public class InfrastructureTests : IDisposable
             {
                 await repo2.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     EventType = "POST_RESTART_EVENT_3",
                     ActorSid = actorSid,
                     TargetTable = "finance.dbo.finance_table_1",
@@ -199,6 +205,7 @@ public class InfrastructureTests : IDisposable
 
         var req = new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -254,6 +261,7 @@ public class InfrastructureTests : IDisposable
 
         var request = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = sensitiveTable.Table.Id,
             TableIdentifier = sensitiveTable.Identifier,
             RequesterSid = requesterSid,
@@ -285,6 +293,7 @@ public class InfrastructureTests : IDisposable
 
         await _repository.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             EventType = "CONFIG_CHANGE",
             ActorSid = actorSid,
             TargetTable = "finance.dbo.finance_table_1",
@@ -299,6 +308,7 @@ public class InfrastructureTests : IDisposable
         // Record subsequent event
         await newRepo.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             EventType = "CONFIG_CHANGE",
             ActorSid = actorSid,
             TargetTable = "finance.dbo.finance_table_1",
@@ -320,6 +330,7 @@ public class InfrastructureTests : IDisposable
 
         await _repository.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = originalId,
             EventType = "CONFIG_CHANGE",
             ActorSid = actorSid,
@@ -355,6 +366,7 @@ public class InfrastructureTests : IDisposable
 
         var consent = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = targetTable,
             Effect = ConsentEffect.Allow,
@@ -428,6 +440,7 @@ public class InfrastructureTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -455,14 +468,14 @@ public class InfrastructureTests : IDisposable
         var userSid = new Sid("S-1-5-21-EVICT-USER");
         var decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>());
 
-        await _cacheService.SetCachedDecisionAsync(userSid, table, decision, TimeSpan.FromMilliseconds(50));
+        await _cacheService.SetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table, decision, TimeSpan.FromMilliseconds(50));
         _cacheService.GetTrackedKeyCount(table).ShouldBe(1);
 
         // Accessing cache triggers expiration callback in MemoryCache, so poll through the cache until the entry has expired.
         await WaitHelper.WaitUntil(
             async () =>
             {
-                _ = await _cacheService.GetCachedDecisionAsync(userSid, table);
+                _ = await _cacheService.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
                 return _cacheService.GetTrackedKeyCount(table) == 0;
             },
             WaitHelper.HangGuard,
@@ -485,6 +498,7 @@ public class InfrastructureTests : IDisposable
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -534,6 +548,7 @@ public class InfrastructureTests : IDisposable
         var consentId = Guid.NewGuid();
         var consent = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = consentId,
             TableId = meta.Table.Id,
             TableIdentifier = table,

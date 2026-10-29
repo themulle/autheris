@@ -253,6 +253,7 @@ WHERE tenant_id = @tenantId AND campaign_id = @campaignId AND item_id = @itemId 
 
     private static void AddParam(DbCommand cmd, string name, object? value)
     {
+        SqlCoreBinding.GuardTenantParameter(name, value);
         var p = cmd.CreateParameter();
         p.ParameterName = name;
         p.Value = value ?? DBNull.Value;

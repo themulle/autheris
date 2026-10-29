@@ -776,7 +776,7 @@ public class AccessPlanningService : IAccessPlanningService
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = !string.IsNullOrWhiteSpace(tenantId) ? new TenantId(tenantId) : TenantId.LegacySingleTenant,
+            TenantId = TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform,
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_REGISTER_DATASOURCE",
             ActorSid = new Sid(adminSid),
@@ -845,7 +845,7 @@ public class AccessPlanningService : IAccessPlanningService
         var auditEntry = new AuditLogEntry
         {
             Id = Guid.NewGuid(),
-            TenantId = !string.IsNullOrWhiteSpace(tenantId) ? new TenantId(tenantId) : TenantId.LegacySingleTenant,
+            TenantId = TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform,
             OccurredAt = DateTimeOffset.UtcNow,
             EventType = "ADMIN_SET_DATASET_STATE",
             ActorSid = new Sid(adminSid),

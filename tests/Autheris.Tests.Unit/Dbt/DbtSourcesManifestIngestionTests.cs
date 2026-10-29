@@ -143,7 +143,7 @@ public sealed class DbtSourcesManifestIngestionTests
         // Dry-run verification
         using (var dryRunStream = new MemoryStream(Encoding.UTF8.GetBytes(SourcesOnlyManifestJson)))
         {
-            var dryRunResult = await service.IngestManifestStreamAsync(dryRunStream, dryRun: true);
+            var dryRunResult = await service.IngestManifestStreamAsClusterAdminAsync(dryRunStream, dryRun: true);
             dryRunResult.Success.ShouldBeTrue();
             dryRunResult.ParsedModelsCount.ShouldBe(1);
             dryRunResult.GeneratedProposalsCount.ShouldBeGreaterThanOrEqualTo(2);
@@ -155,7 +155,7 @@ public sealed class DbtSourcesManifestIngestionTests
         // Live ingestion verification
         using (var liveStream = new MemoryStream(Encoding.UTF8.GetBytes(SourcesOnlyManifestJson)))
         {
-            var result = await service.IngestManifestStreamAsync(liveStream, dryRun: false);
+            var result = await service.IngestManifestStreamAsClusterAdminAsync(liveStream, dryRun: false);
 
             result.Success.ShouldBeTrue();
             result.ParsedModelsCount.ShouldBe(1);

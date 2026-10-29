@@ -125,6 +125,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     TableIdentifier = ordersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("user-1"),
@@ -238,6 +239,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     TableIdentifier = customersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("analyst-1"),
@@ -322,6 +324,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     TableIdentifier = usersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("dev-1"),
@@ -330,6 +333,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 },
                 new Consent
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     TableIdentifier = auditTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("dev-1"),
@@ -493,6 +497,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                     {
                         new Consent
                         {
+                            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                             TableIdentifier = ordersTable.Identifier,
                             Effect = ConsentEffect.Allow,
                             GranteeSid = new Sid("member-granted"),

@@ -70,6 +70,7 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
 
     private static AuditLogEntry CreateEntry(int index, DateTimeOffset occurredAt) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         Id = Guid.NewGuid(),
         EventType = AuditEventTypes.AuthSucceeded,
         ActorSid = new Sid($"S-1-5-21-{index}"),

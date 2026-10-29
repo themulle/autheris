@@ -71,9 +71,9 @@ public sealed class RowFilterKeySetGeneratedSqlTests
 
     private static ConsentRowFilter Simple(string column = "region", string value = "\"US\"") => new() { ColumnName = column, Operator = "EQ", ValueJson = value };
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = filters };
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Deny, RowFilters = filters };
 
     private PolicyPredicate Policy(Consent[] allow, Consent[]? deny = null, TableIdentity? table = null) =>
         _builder.BuildCombined(allow, deny ?? [], table ?? Air1)!;

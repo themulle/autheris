@@ -22,7 +22,7 @@ public sealed class OpenMetadataKeyConstraintTests
 
     private OpenMetadataSyncService Service()
     {
-        var options = new GatewayOptions { OpenMetadata = new OpenMetadataOptions { Enabled = true } };
+        var options = new GatewayOptions { OpenMetadata = new OpenMetadataOptions { Enabled = true, DefaultTenantId = "legacy-single-tenant" } };
         _client.GetPoliciesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([]));
         _client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([]));
         _client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));

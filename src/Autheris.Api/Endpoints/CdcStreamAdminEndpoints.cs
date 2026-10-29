@@ -177,7 +177,7 @@ public static class CdcStreamAdminEndpoints
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            tenant = default;
+            tenant = TenantId.Platform; // audit-only record of a caller without a tenant (DT-A-6)
         }
 
         await audit.RecordAsync(new AuditLogEntry

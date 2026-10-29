@@ -630,6 +630,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
 
     private static void AddParam(DbCommand cmd, string name, object? value)
     {
+        SqlCoreBinding.GuardTenantParameter(name, value);
         var p = cmd.CreateParameter();
         p.ParameterName = name;
         p.Value = value ?? DBNull.Value;

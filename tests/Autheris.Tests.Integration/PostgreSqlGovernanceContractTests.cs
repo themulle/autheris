@@ -71,6 +71,7 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
 
     private static AuditLogEntry Entry(string type, string actor) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = type,
         ActorSid = new Sid(actor),
         TargetTable = "dbo.t",

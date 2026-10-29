@@ -88,7 +88,7 @@ using Xunit;
             SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
         };
         var predicate = new TypedRowFilterBuilder().BuildCombined(
-            [new Consent { Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], new TableIdentity("public", "orders"))!;
+            [new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], new TableIdentity("public", "orders"))!;
         var decision = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer()));
         var resolution = Substitute.For<IConsentResolutionService>();

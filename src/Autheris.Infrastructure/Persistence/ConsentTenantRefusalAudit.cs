@@ -14,9 +14,9 @@ internal static class ConsentTenantRefusalAudit
 {
     /// <summary>
     /// The explicit platform audit bucket of the refusal (DEF-SC-04). It is not a fallback for the consent's tenant, is referenced only by
-    /// <see cref="Build"/> and is the single replacement point for the default-tenant lane; never use it as a tenant for a non-audit decision.
+    /// <see cref="Build"/> and is the platform bucket (DT-A-6); never use it as a tenant for a non-audit decision.
     /// </summary>
-    public static TenantId IntegrityAuditTenant => TenantId.LegacySingleTenant;
+    public static TenantId IntegrityAuditTenant => TenantId.Platform;
 
     /// <summary>Ids only, never the tenant value (DEF-SC-01/02).</summary>
     public static AuditLogEntry Build(Sid actor, ConsentTenantIntegrityException refusal) => new()

@@ -46,9 +46,9 @@ public sealed class CorrelatedKeySetSubstitutionTests
     private static ConsentRowFilter Simple(string column = "region", string value = "\"EU\"", int group = 0) =>
         new() { FilterGroup = group, ColumnName = column, Operator = "EQ", ValueJson = value };
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = filters };
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Deny, RowFilters = filters };
 
     private PolicyPredicate Build(Consent[] allow, Consent[] deny) => _builder.BuildCombined(allow, deny, Orders)!;
 

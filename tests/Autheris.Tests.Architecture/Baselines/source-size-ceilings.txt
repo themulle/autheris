@@ -6,14 +6,14 @@ src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|2173
 src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs|1346
 src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs|1139
 src/Autheris.GraphQL/Types/MutationTypes.cs|1385
-src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|1452
+src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|1449
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs|1575
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|1920
-src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|1508
+src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|1505
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs|1597
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|1952
 src/Autheris.Infrastructure/Persistence/SqlServerWindowsAuthConfigurator.cs|1242
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|1437
+src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|1425
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|1662
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs|2026
 src/TrinoSqlEngine/Ast/Builder/SqlAstBuilder.cs|1673

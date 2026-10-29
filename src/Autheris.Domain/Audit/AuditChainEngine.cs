@@ -87,7 +87,7 @@ public static class AuditChainEngine
             var entry = batch[i];
             currentSeq++;
             entry.PrevHash = currentPrevHash;
-            var effectiveTenantId = string.IsNullOrWhiteSpace(entry.TenantId.Value) ? TenantId.LegacySingleTenant.Value : entry.TenantId.Value;
+            var effectiveTenantId = StoredTenant.RequireWritable(entry.TenantId);
 
             entry.EntryHash = ComputeEntryHash(
                 hmacKey,
@@ -133,9 +133,7 @@ public static class AuditChainEngine
             long? sequence = startSequence.HasValue ? startSequence.Value + i : entry.ChainSequence;
             entry.ChainSequence = sequence;
             entry.PrevHash = currentPrevHash;
-            string effectiveTenantId = string.IsNullOrWhiteSpace(entry.TenantId.Value)
-                ? TenantId.LegacySingleTenant.Value
-                : entry.TenantId.Value;
+            string effectiveTenantId = StoredTenant.RequireWritable(entry.TenantId);
             entry.EntryHash = ComputeEntryHash(
                 hmacKey,
                 sequence,

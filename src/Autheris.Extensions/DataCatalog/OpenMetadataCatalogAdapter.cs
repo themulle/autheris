@@ -39,6 +39,8 @@ public sealed class OpenMetadataCatalogAdapter : IDataCatalogClient
         _options = options;
     }
 
+    private TenantId? DefaultTenant => Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options?.Value.Tenancy);
+
     private OpenMetadataOptions OmOptions => _options?.Value.OpenMetadata ?? new OpenMetadataOptions();
 
     public async Task<IReadOnlyList<CatalogTableAsset>> GetTablesAsync(string? filter = null, CancellationToken ct = default)
@@ -50,7 +52,7 @@ public sealed class OpenMetadataCatalogAdapter : IDataCatalogClient
         var candidates = new List<(OpenMetadataTable Item, OpenMetadataTableIdentity.ResolvedTable Resolved)>(omTables.Count);
         foreach (var omTable in omTables)
         {
-            if (OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason))
+            if (OpenMetadataTableIdentity.TryResolve(omTable, omOptions, out var resolved, out var reason, DefaultTenant))
             {
                 candidates.Add((omTable, resolved));
             }
@@ -87,7 +89,7 @@ public sealed class OpenMetadataCatalogAdapter : IDataCatalogClient
             }
 
             // SEC E-09: the returned table must pass the ServiceFilter / domain mapping and resolve to the requested identity.
-            if (!OpenMetadataTableIdentity.TryResolve(omTable, OmOptions, out var resolved, out var reason))
+            if (!OpenMetadataTableIdentity.TryResolve(omTable, OmOptions, out var resolved, out var reason, DefaultTenant))
             {
                 _logger.LogWarning("Ignoring OpenMetadata catalog table {Fqn}: {Reason}.", omTable.FullyQualifiedName, reason);
                 return null;

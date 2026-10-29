@@ -30,9 +30,9 @@ public sealed class Inf03ConsentCacheKeyAmbiguityTests
         var second = new TableIdentifier("a", "b:c", "t");
 
         await cache.SetCachedDecisionAsync(
-            user, first, TableAccessDecision.Allowed(first, new Dictionary<string, ColumnAccessLevel>()), TimeSpan.FromMinutes(5));
+            Autheris.Domain.Common.TenantId.LegacySingleTenant, user, first, TableAccessDecision.Allowed(first, new Dictionary<string, ColumnAccessLevel>()), TimeSpan.FromMinutes(5));
 
-        (await cache.GetCachedDecisionAsync(user, first)).ShouldNotBeNull();
-        (await cache.GetCachedDecisionAsync(user, second)).ShouldBeNull();
+        (await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user, first)).ShouldNotBeNull();
+        (await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user, second)).ShouldBeNull();
     }
 }

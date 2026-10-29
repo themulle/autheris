@@ -29,6 +29,7 @@ public sealed class OpenMetadataSyncServiceTests
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 WebhookSecret = webhookSecret ?? string.Empty,
                 TagToMaskingRuleMap = new Dictionary<string, string>
@@ -64,6 +65,7 @@ public sealed class OpenMetadataSyncServiceTests
             DataMasking = baseOptions.DataMasking,
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 WebhookSecret = baseOptions.OpenMetadata.WebhookSecret,
                 TagToMaskingRuleMap = baseOptions.OpenMetadata.TagToMaskingRuleMap,
@@ -410,6 +412,7 @@ public sealed class OpenMetadataSyncServiceTests
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 WebhookSecret = "test-secret",
                 RoleToGatewayRoleMap = new Dictionary<string, string>

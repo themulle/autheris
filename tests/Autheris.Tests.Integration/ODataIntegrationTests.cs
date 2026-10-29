@@ -69,6 +69,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
         var meta = (await repo.GetTableMetadataAsync(RowsTable))!;
         await repo.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = RowsTable,
             Effect = ConsentEffect.Allow,
@@ -106,6 +107,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
             {
                 await consentRepo.CreateConsentAsync(new Consent
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     TableId = meta.Table.Id,
                     TableIdentifier = tableId,
                     Effect = ConsentEffect.Allow,

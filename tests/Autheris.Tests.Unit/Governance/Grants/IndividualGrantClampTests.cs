@@ -17,6 +17,7 @@ public sealed class IndividualGrantClampTests : IDisposable
 
     private static Consent C(GranteeType type, DateTimeOffset validTo) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         GranteeType = type,
         GranteeSid = type is GranteeType.User or GranteeType.ServicePrincipal ? new Sid("S-1-5-21-X") : (Sid?)null,
         RoleName = type == GranteeType.Role ? "R" : null,
@@ -43,6 +44,7 @@ public sealed class IndividualGrantClampTests : IDisposable
     {
         var deny = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Deny, GranteeType = type, GranteeSid = new Sid("S-1-5-21-X"),
             ValidFrom = From, ValidTo = DateTimeOffset.MaxValue
         };
@@ -58,10 +60,11 @@ public sealed class IndividualGrantClampTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var deny = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableIdentifier = table, Effect = ConsentEffect.Deny, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"),
             ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(50)
         };
-        var roleAllow = new Consent { TableIdentifier = table, GranteeType = GranteeType.Role, RoleName = "analyst", ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
+        var roleAllow = new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = table, GranteeType = GranteeType.Role, RoleName = "analyst", ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
 
         var decision = new Autheris.Application.Services.ConsentResolutionService().ResolveAccess(
             new Sid("S-1-5-21-X"), new HashSet<Sid>(), new HashSet<string> { "analyst" }, table, [deny, roleAllow]);
@@ -89,6 +92,7 @@ public sealed class IndividualGrantClampTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var clamped = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"), ValidFrom = now.AddDays(-180).AddMinutes(2), ValidTo = now.AddYears(5)
         };
 

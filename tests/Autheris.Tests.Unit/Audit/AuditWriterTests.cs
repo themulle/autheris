@@ -18,6 +18,7 @@ public sealed class AuditWriterTests
 {
     private static AuditLogEntry Entry(string eventType = AuditEventTypes.AuditConfigChanged) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = eventType,
         ActorSid = new Sid("S-1-5-21-ADMIN"),
         TargetTable = "governance",

@@ -189,6 +189,7 @@ public partial class SqlServerGovernanceRepository
 
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        StoredTenant.RequireWritable(entry.TenantId); // DT-SC-04: a missing tenant is refused at the door, not dead-lettered later
         // Tier-B events are only enqueued (no connection); they must not be accepted before the audit processor runs.
         ThrowIfNotReady();
 
@@ -251,6 +252,11 @@ public partial class SqlServerGovernanceRepository
 
     public async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
     {
+        foreach (var candidate in entries ?? throw new ArgumentNullException(nameof(entries)))
+        {
+            StoredTenant.RequireWritable(candidate.TenantId); // DT-SC-04
+        }
+
         ArgumentNullException.ThrowIfNull(entries);
         if (entries.Count == 0)
         {
@@ -681,7 +687,7 @@ public partial class SqlServerGovernanceRepository
             long currentSequence = ++lastSequence;
             var currentPrevHash = lastEntryHash;
 
-            var effectiveTenantId = GuardLength(string.IsNullOrWhiteSpace(entry.TenantId.Value) ? TenantId.LegacySingleTenant.Value : entry.TenantId.Value, 128);
+            var effectiveTenantId = GuardLength(StoredTenant.RequireWritable(entry.TenantId), 128);
             var eventType = GuardLength(entry.EventType, 128);
             var actorSid = GuardLength(entry.ActorSid.Value, 256);
             var targetTable = GuardLength(entry.TargetTable, 512);
@@ -804,7 +810,7 @@ public partial class SqlServerGovernanceRepository
             long currentSequence = ++lastSequence;
             var currentPrevHash = lastEntryHash;
 
-            var effectiveTenantId = GuardLength(string.IsNullOrWhiteSpace(entry.TenantId.Value) ? TenantId.LegacySingleTenant.Value : entry.TenantId.Value, 128);
+            var effectiveTenantId = GuardLength(StoredTenant.RequireWritable(entry.TenantId), 128);
             var eventType = GuardLength(entry.EventType, 128);
             var actorSid = GuardLength(entry.ActorSid.Value, 256);
             var targetTable = GuardLength(entry.TargetTable, 512);
@@ -968,24 +974,21 @@ public partial class SqlServerGovernanceRepository
         return list;
     }
 
-    private static AuditLogEntry ReadAuditEntry(SqlDataReader reader)
+    private static AuditLogEntry ReadAuditEntry(SqlDataReader reader, int o = 0) => new()
     {
-        return new AuditLogEntry
-        {
-            Id = Guid.Parse(reader.GetString(0)),
-            OccurredAt = DateTimeOffset.Parse(reader.GetString(1)),
-            EventType = reader.GetString(2),
-            ActorSid = new Sid(reader.GetString(3)),
-            TargetTable = reader.GetString(4),
-            TargetColumn = reader.IsDBNull(5) ? null : reader.GetString(5),
-            Decision = reader.GetString(6),
-            TraceId = reader.GetString(7),
-            DetailsJson = reader.GetString(8),
-            PrevHash = reader.GetString(9),
-            EntryHash = reader.GetString(10),
-            TenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant : (TenantId.TryParse(reader.GetString(11), out var tid) ? tid : TenantId.LegacySingleTenant)
-        };
-    }
+        Id = Guid.Parse(reader.GetString(o)),
+        OccurredAt = DateTimeOffset.Parse(reader.GetString(o + 1)),
+        EventType = reader.GetString(o + 2),
+        ActorSid = new Sid(reader.GetString(o + 3)),
+        TargetTable = reader.GetString(o + 4),
+        TargetColumn = reader.IsDBNull(o + 5) ? null : reader.GetString(o + 5),
+        Decision = reader.GetString(o + 6),
+        TraceId = reader.GetString(o + 7),
+        DetailsJson = reader.GetString(o + 8),
+        PrevHash = reader.GetString(o + 9),
+        EntryHash = reader.GetString(o + 10),
+        TenantId = StoredTenant.ParseAudit(reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11))
+    };
 
     public async Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
         Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
@@ -1114,7 +1117,15 @@ public partial class SqlServerGovernanceRepository
             var prevHash = reader.GetString(9);
             var entryHash = reader.GetString(10);
             long? sequence = reader.IsDBNull(11) ? null : reader.GetInt64(11);
-            var tenantId = reader.IsDBNull(12) ? TenantId.LegacySingleTenant.Value : reader.GetString(12);
+            var storedTenant = reader.IsDBNull(12) ? null : reader.GetString(12);
+            if (!StoredTenant.IsValidAudit(storedTenant))
+            {
+                // DT-SC-16: an unparsable stored tenant fails verification (it is never skipped or defaulted); the value is not logged.
+                FlagAuditChainViolation("Audit entry carries an invalid stored tenant (STORED_TENANT_INVALID).");
+                return false;
+            }
+
+            var tenantId = storedTenant!;
 
             if (checkpoint != null && sequence.HasValue && sequence.Value < checkpoint.FirstSurvivingSequence)
             {
@@ -1266,21 +1277,7 @@ public partial class SqlServerGovernanceRepository
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             long? seq = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-            var entry = new AuditLogEntry
-            {
-                Id = Guid.Parse(reader.GetString(2)),
-                OccurredAt = DateTimeOffset.Parse(reader.GetString(3)),
-                EventType = reader.GetString(4),
-                ActorSid = new Sid(reader.GetString(5)),
-                TargetTable = reader.GetString(6),
-                TargetColumn = reader.IsDBNull(7) ? null : reader.GetString(7),
-                Decision = reader.GetString(8),
-                TraceId = reader.GetString(9),
-                DetailsJson = reader.GetString(10),
-                PrevHash = reader.GetString(11),
-                EntryHash = reader.GetString(12),
-                TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : (TenantId.TryParse(reader.GetString(13), out var tid) ? tid : TenantId.LegacySingleTenant)
-            };
+            var entry = ReadAuditEntry(reader, 2);
             list.Add(new AuditChainRecord(reader.GetInt64(0), seq, entry));
         }
         return list;

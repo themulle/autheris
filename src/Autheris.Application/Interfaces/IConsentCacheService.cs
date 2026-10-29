@@ -7,9 +7,6 @@ namespace Autheris.Application.Interfaces;
 
 public interface IConsentCacheService
 {
-    Task<TableAccessDecision?> GetCachedDecisionAsync(Sid userSid, TableIdentifier table, string? contextHash = null, CancellationToken ct = default)
-        => GetCachedDecisionAsync(TenantId.LegacySingleTenant, userSid, table, contextHash, ct);
-
     Task<TableAccessDecision?> GetCachedDecisionAsync(TenantId tenant, Sid userSid, TableIdentifier table, string? contextHash = null, CancellationToken ct = default);
 
     Task<IReadOnlyDictionary<TableIdentifier, TableAccessDecision?>> GetCachedDecisionsAsync(
@@ -18,9 +15,6 @@ public interface IConsentCacheService
         IReadOnlyList<TableIdentifier> tables,
         string? contextHash = null,
         CancellationToken ct = default);
-
-    Task SetCachedDecisionAsync(Sid userSid, TableIdentifier table, TableAccessDecision decision, TimeSpan ttl, string? contextHash = null, CancellationToken ct = default)
-        => SetCachedDecisionAsync(TenantId.LegacySingleTenant, userSid, table, decision, ttl, contextHash, ct);
 
     Task SetCachedDecisionAsync(TenantId tenant, Sid userSid, TableIdentifier table, TableAccessDecision decision, TimeSpan ttl, string? contextHash = null, CancellationToken ct = default);
 

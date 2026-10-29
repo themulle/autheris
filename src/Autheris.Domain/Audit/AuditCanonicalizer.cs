@@ -33,7 +33,7 @@ public static class AuditCanonicalizer
         ArgumentNullException.ThrowIfNull(hmacKey);
         ArgumentNullException.ThrowIfNull(entry);
 
-        var tenantId = string.IsNullOrWhiteSpace(entry.TenantId.Value) ? "legacy-single-tenant" : entry.TenantId.Value;
+        var tenantId = StoredTenant.RequireWritable(entry.TenantId);
         return ComputeEntryHash(
             hmacKey,
             sequence,

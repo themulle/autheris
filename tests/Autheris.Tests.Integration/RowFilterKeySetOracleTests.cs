@@ -103,7 +103,7 @@ public sealed class RowFilterKeySetOracleTests
             DependentTable = new TableIdentifier("default", AstCompilerOracleFixture.AppUser, "ENTITLEMENTS"), DependentTableAlias = "e",
             ForeignKeyColumn = "ID", PrimaryKeyColumn = "ORDER_ID"
         };
-        var exists = new TypedRowFilterBuilder().BuildCombined([new Consent { Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!;
+        var exists = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!;
         var node = exists.Expression switch
         {
             ExistsExpression e => e,

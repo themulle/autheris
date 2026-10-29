@@ -79,6 +79,7 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var requester = "S-1-5-21-REQ-" + suffix;
         return await Repo.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = id,
             RequesterSid = new Sid(requester),

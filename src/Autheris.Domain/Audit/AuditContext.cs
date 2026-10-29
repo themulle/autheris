@@ -14,7 +14,8 @@ public sealed class AuditContext
     public string Channel { get; set; } = "REST";
     public string? SourceIp { get; set; }
     public Sid ActorSid { get; set; } = new Sid("S-1-0-0");
-    public TenantId TenantId { get; set; } = TenantId.LegacySingleTenant;
+    /// <summary>The tenant of the audited request; no default (DT-A-9): an unset value is <c>default(TenantId)</c>, which audit writers refuse.</summary>
+    public TenantId TenantId { get; set; }
     public string Target { get; set; } = string.Empty;
     public string Decision { get; set; } = "ALLOW";
     public string? EventType { get; set; }

@@ -100,13 +100,6 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private static void RecordCacheMiss() =>
         CacheRequests.Add(1, new KeyValuePair<string, object?>("autheris.cache.name", "consent"), new KeyValuePair<string, object?>("autheris.cache.result", "miss"));
 
-    public Task<TableAccessDecision?> GetCachedDecisionAsync(
-        Sid userSid,
-        TableIdentifier table,
-        string? contextHash = null,
-        CancellationToken ct = default)
-        => GetCachedDecisionAsync(TenantId.LegacySingleTenant, userSid, table, contextHash, ct);
-
     public async Task<IReadOnlyDictionary<TableIdentifier, TableAccessDecision?>> GetCachedDecisionsAsync(
         TenantId tenant,
         Sid userSid,
@@ -344,15 +337,6 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     }
 
     public Task SetCachedDecisionAsync(
-        Sid userSid,
-        TableIdentifier table,
-        TableAccessDecision decision,
-        TimeSpan ttl,
-        string? contextHash = null,
-        CancellationToken ct = default)
-        => SetCachedDecisionAsync(TenantId.LegacySingleTenant, userSid, table, decision, ttl, contextHash, ct);
-
-    public Task SetCachedDecisionAsync(
         TenantId tenant,
         Sid userSid,
         TableIdentifier table,
@@ -526,6 +510,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
 
     private static string BuildCacheKey(TenantId tenant, Sid userSid, TableIdentifier table, string? contextHash = null)
     {
+        StoredTenant.RequireWritable(tenant); // DT-SC-04: default(TenantId) never keys a cache entry
         var safeSid = Uri.EscapeDataString(userSid.Value.ToUpperInvariant());
         var safeContext = Uri.EscapeDataString(string.IsNullOrWhiteSpace(contextHash) ? "default" : contextHash);
         return $"{tenant.Value}:consent:{safeSid}:{safeContext}:{EscapeTablePart(table.Domain)}:{EscapeTablePart(table.Schema)}:{EscapeTablePart(table.TableName)}";

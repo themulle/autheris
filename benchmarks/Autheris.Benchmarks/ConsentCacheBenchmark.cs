@@ -46,12 +46,12 @@ public class ConsentCacheBenchmark : IDisposable
         };
         var decision = TableAccessDecision.Allowed(_table, colAccess, "amount > 100");
 
-        _cacheService.SetCachedDecisionAsync(_userSid, _table, decision, TimeSpan.FromMinutes(10)).GetAwaiter().GetResult();
+        _cacheService.SetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, _userSid, _table, decision, TimeSpan.FromMinutes(10)).GetAwaiter().GetResult();
     }
 
     public Task<TableAccessDecision?> RunCacheHitAsync()
     {
-        return _cacheService.GetCachedDecisionAsync(_userSid, _table);
+        return _cacheService.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, _userSid, _table);
     }
 
     public void Dispose()

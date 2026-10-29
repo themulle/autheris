@@ -48,6 +48,7 @@ public sealed class AuditChainViolationLatchTests : IDisposable
 
     private static AuditLogEntry TierA(int i) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = AuditEventTypes.AuditConfigChanged,
         ActorSid = new Sid($"S-1-5-21-ADMIN-{i}"),
         TargetTable = "governance",
@@ -58,6 +59,7 @@ public sealed class AuditChainViolationLatchTests : IDisposable
 
     private static AuditLogEntry TierB(int i) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = AuditEventTypes.TableQuery,
         ActorSid = new Sid($"S-1-5-21-USER-{i}"),
         TargetTable = "hr.dbo.salaries",

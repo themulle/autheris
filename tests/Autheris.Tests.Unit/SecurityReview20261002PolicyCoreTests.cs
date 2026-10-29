@@ -50,6 +50,7 @@ public sealed class SecurityReview20261002PolicyCoreTests
 
         return new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableIdentifier = HrTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -567,6 +568,7 @@ public sealed class SecurityReview20261002PolicyCoreTests
         var consent = AllowConsent(null);
         var soonExpiring = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableIdentifier = HrTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,

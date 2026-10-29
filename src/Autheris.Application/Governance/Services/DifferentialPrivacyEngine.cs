@@ -227,7 +227,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
         {
             await _auditLog!.RecordAuditEventAsync(new AuditLogEntry
             {
-                TenantId = TenantId.LegacySingleTenant,
+                TenantId = TenantId.Platform, // tenant-less engine audit (DT-A-6)
                 EventType = eventType,
                 ActorSid = new Sid(clientId),
                 TargetTable = "DifferentialPrivacy",

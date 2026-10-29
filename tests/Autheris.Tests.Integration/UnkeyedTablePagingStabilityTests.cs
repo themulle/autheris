@@ -68,6 +68,7 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
             var vehicle = meta.Columns.Single(c => c.ColumnName == "vehicle");
             await repo.CreateConsentAsync(new Consent
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 TableId = meta.Table.Id,
                 TableIdentifier = identifier,
                 Effect = ConsentEffect.Allow,

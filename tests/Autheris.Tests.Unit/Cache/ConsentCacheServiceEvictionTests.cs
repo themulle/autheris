@@ -57,27 +57,27 @@ public sealed class ConsentCacheServiceEvictionTests
         {
             var user = new Sid($"S-1-5-21-{i}");
             var decision = TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel> { ["col1"] = ColumnAccessLevel.Clear });
-            await cache.SetCachedDecisionAsync(user, Table, decision, TimeSpan.FromMinutes(10), ct: CancellationToken.None);
+            await cache.SetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user, Table, decision, TimeSpan.FromMinutes(10), ct: CancellationToken.None);
         }
 
         // The oldest key (user 0) should have been evicted when count exceeded 5000 (oldest 1000 keys evicted)
         var user0 = new Sid("S-1-5-21-0");
-        var res0 = await cache.GetCachedDecisionAsync(user0, Table, ct: CancellationToken.None);
+        var res0 = await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user0, Table, ct: CancellationToken.None);
         res0.ShouldBeNull();
 
         // User 999 should also be evicted (since 1000 keys were evicted)
         var user999 = new Sid("S-1-5-21-999");
-        var res999 = await cache.GetCachedDecisionAsync(user999, Table, ct: CancellationToken.None);
+        var res999 = await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user999, Table, ct: CancellationToken.None);
         res999.ShouldBeNull();
 
         // User 1000 should still be retained in L1
         var user1000 = new Sid("S-1-5-21-1000");
-        var res1000 = await cache.GetCachedDecisionAsync(user1000, Table, ct: CancellationToken.None);
+        var res1000 = await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user1000, Table, ct: CancellationToken.None);
         res1000.ShouldNotBeNull();
 
         // The latest key (user 5000) should be present
         var user5000 = new Sid("S-1-5-21-5000");
-        var res5000 = await cache.GetCachedDecisionAsync(user5000, Table, ct: CancellationToken.None);
+        var res5000 = await cache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, user5000, Table, ct: CancellationToken.None);
         res5000.ShouldNotBeNull();
     }
 }

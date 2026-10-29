@@ -121,6 +121,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
 
             var consent = new Consent
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 TableId = meta.Table.Id,
                 TableIdentifier = meta.Identifier,
                 Effect = ConsentEffect.Allow,

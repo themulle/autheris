@@ -46,7 +46,7 @@ public sealed class DeniedTablesStartupReporter(
                 var tenants = TenantCollisionGuard.ConfiguredTenantIds(options.Value)
                     .Select(static id => id is not null && TenantId.TryParse(id, out var tenant) ? tenant : (TenantId?)null)
                     .OfType<TenantId>()
-                    .Append(TenantId.LegacySingleTenant)
+                    .Concat(Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(options.Value.Tenancy) is { } defaultTenant ? [defaultTenant] : [])
                     .Distinct()
                     .ToList();
                 foreach (var tenant in tenants)

@@ -108,15 +108,12 @@ public sealed record RequestContext(
 {
     public ClaimsPrincipal User { get; init; } = User ?? new ClaimsPrincipal(new ClaimsIdentity());
 
-    public RequestContext() : this(TenantId.LegacySingleTenant, new Sid("anonymous"), null, null, new ClaimsPrincipal(new ClaimsIdentity()), null, null) { }
+    public RequestContext() : this(default, new Sid("anonymous"), null, null, new ClaimsPrincipal(new ClaimsIdentity()), null, null) { }
 
     public RequestContext(ClaimsPrincipal user, TenantId tenantId, string? clientIp = null, string? language = null)
         : this(tenantId, user.GetUserSid() ?? new Sid("anonymous"), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(user.Claims, c => c.Type == ClaimTypes.Role), c => c.Value)), null, user, clientIp, language)
     {
     }
-
-    public static RequestContext FromUser(ClaimsPrincipal user, TenantId? tenantId = null, string? clientIp = null, string? language = null) =>
-        new(user, tenantId ?? TenantId.LegacySingleTenant, clientIp, language);
 
     public static RequestContext FromCaller(CallerSecurityContext caller, string? correlationId = null, string? language = null) =>
         new(caller.Tenant, caller.UserSid, caller.Roles, correlationId, null, null, language);

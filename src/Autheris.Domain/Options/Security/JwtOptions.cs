@@ -28,7 +28,7 @@ public sealed class ForwardAuthOptions
     public string GroupsHeader { get; init; } = "X-Forwarded-Groups";
     public string RolesHeader { get; init; } = "X-Forwarded-Roles";
     public string TenantHeader { get; init; } = "X-Forwarded-Tenant";
-    public string? DefaultTenantId { get; init; } = TenantId.LegacySingleTenant.Value;
+    public string? DefaultTenantId { get; init; }
     public string? SharedSecretKeyVaultRef { get; init; }
     public string? SharedSecret { get; init; }
     public string SharedSecretHeader { get; init; } = "X-Forwarded-Secret";
@@ -155,7 +155,7 @@ public sealed class BasicAuthUserConfig
     public string Username { get; init; } = string.Empty;
     public string Password { get; init; } = string.Empty;
     public string? Sid { get; init; }
-    public string? TenantId { get; init; } = Autheris.Domain.Common.TenantId.LegacySingleTenant.Value;
+    public string? TenantId { get; init; }
     public List<string> Roles { get; init; } = [];
     public List<string> GroupSids { get; init; } = [];
 }

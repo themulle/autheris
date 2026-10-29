@@ -43,6 +43,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         var sid = requester ?? "S-1-5-21-REQ-" + Guid.NewGuid().ToString("N")[..8];
         return await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             TableId = meta.Table.Id,
             TableIdentifier = table.Value,
             RequesterSid = new Sid(sid),

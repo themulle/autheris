@@ -65,6 +65,7 @@ public abstract class UnkeyedTableODataReadBase : IDisposable
             meta.PrimaryKeyColumns.ShouldBeEmpty();
             await repo.CreateConsentAsync(new Consent
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 TableId = meta.Table.Id,
                 TableIdentifier = identifier,
                 Effect = ConsentEffect.Allow,

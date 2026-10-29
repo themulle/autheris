@@ -163,6 +163,7 @@ public class MultiDomainCrossDialectRlsTests
     {
         var allowWithFilter = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Allow,
             RowFilters = new[]
             {
@@ -172,6 +173,7 @@ public class MultiDomainCrossDialectRlsTests
 
         var allowUnconstrained = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Allow,
             RowFilters = Array.Empty<ConsentRowFilter>() // No filters -> Unrestricted!
         };
@@ -190,6 +192,7 @@ public class MultiDomainCrossDialectRlsTests
     {
         var allow1 = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Allow,
             RowFilters = new[]
             {
@@ -199,6 +202,7 @@ public class MultiDomainCrossDialectRlsTests
 
         var allow2 = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Allow,
             RowFilters = new[]
             {
@@ -208,6 +212,7 @@ public class MultiDomainCrossDialectRlsTests
 
         var deny1 = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Deny,
             RowFilters = new[]
             {
@@ -217,6 +222,7 @@ public class MultiDomainCrossDialectRlsTests
 
         var deny2 = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Effect = ConsentEffect.Deny,
             RowFilters = new[]
             {

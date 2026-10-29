@@ -48,9 +48,9 @@ public sealed class OpenMetadataOptions
 
     /// <summary>
     /// EX-03: Default tenant assigned to OpenMetadata imported consents and catalog entries.
-    /// Default: "legacy-single-tenant". Can be set to a specific tenant.
+    /// Default: none (entries without a mapping use Gateway:Tenancy:DefaultTenantId, or are skipped when none is configured).
     /// </summary>
-    public string DefaultTenantId { get; init; } = TenantId.LegacySingleTenant.Value;
+    public string? DefaultTenantId { get; init; }
 
     /// <summary>
     /// EX-03: Explicit mapping "service.database" or "service" (OpenMetadata) -&gt; Gateway tenant.

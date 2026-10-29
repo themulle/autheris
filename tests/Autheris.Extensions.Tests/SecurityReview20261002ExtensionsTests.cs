@@ -496,6 +496,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = autoCreateConsents,
                 ActivateNewTables = true,
@@ -527,7 +528,7 @@ public sealed class SecurityReview20261002ExtensionsTests
     [Fact]
     public async Task H19_AutoCreateConsentsDisabledByDefault_OnlyProposes()
     {
-        new OpenMetadataOptions().AutoCreateConsents.ShouldBeFalse();
+        new OpenMetadataOptions { DefaultTenantId = "legacy-single-tenant" }.AutoCreateConsents.ShouldBeFalse();
 
         var (service, _, created) = CreateOmSync(
             [new OpenMetadataRule { Name = "ViewEmployees", Effect = "allow", Resources = ["employees"], Operations = ["ViewAll"] }],
@@ -560,6 +561,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         var table = new TableIdentifier("hr_service", "dbo", "employees");
         var staleSyncConsent = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = Guid.NewGuid(),
             TableIdentifier = table,
             GranteeType = GranteeType.Role,
@@ -571,6 +573,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         };
         var manualConsent = new Consent
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = Guid.NewGuid(),
             TableIdentifier = table,
             GranteeType = GranteeType.Role,
@@ -703,7 +706,7 @@ public sealed class SecurityReview20261002ExtensionsTests
             });
 
         const string secret = "om-secret-m32";
-        var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { Enabled = true, WebhookSecret = secret } });
+        var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "legacy-single-tenant", Enabled = true, WebhookSecret = secret } });
         var service = new OpenMetadataSyncService(client, repo, Substitute.For<IConsentRepository>(), Substitute.For<IPolicyEpochRepository>(),
             options, NullLogger<OpenMetadataSyncService>.Instance);
 
@@ -944,6 +947,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = true,
                 RoleToGatewayRoleMap = new Dictionary<string, string> { ["OrderReader"] = "OrderReader" }
@@ -1004,6 +1008,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = true,
                 UserToUserSidMap = new Dictionary<string, string> { ["admin@corp.local"] = "S-1-5-21-ADMIN-SID" },
@@ -1056,6 +1061,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = true,
                 RoleToGatewayRoleMap = new Dictionary<string, string>() // empty allowlist
@@ -1112,6 +1118,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = true,
                 RoleToGatewayRoleMap = new Dictionary<string, string> { ["DoctorRole"] = "Doctor" }
@@ -1172,6 +1179,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 AutoCreateConsents = true,
                 ActivateNewTables = false,
@@ -1258,6 +1266,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "legacy-single-tenant",
                 Enabled = true,
                 RoleToGatewayRoleMap = new Dictionary<string, string> { ["BlockedRole"] = "GatewayBlocked" },
                 ServiceDatabaseToTenantMap = new Dictionary<string, string>

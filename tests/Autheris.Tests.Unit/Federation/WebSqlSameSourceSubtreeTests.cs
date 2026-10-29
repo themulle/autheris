@@ -267,9 +267,9 @@ public sealed class WebSqlSameSourceSubtreeTests
                 Arg.Any<CancellationToken>())
             .Returns(new[]
             {
-                new Consent { TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
-                new Consent { TableIdentifier = itemsTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
-                new Consent { TableIdentifier = stocksTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) }
+                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
+                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = itemsTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
+                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = stocksTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) }
             });
 
         var analysisService = new QueryAnalysisService(

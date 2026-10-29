@@ -57,6 +57,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             var actorSid = new Sid($"S-1-5-21-WORKER-{i % 5}");
             await _repository.RecordAuditEventAsync(new AuditLogEntry
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 EventType = "CONCURRENT_DATA_ACCESS",
                 ActorSid = actorSid,
                 TargetTable = "finance.dbo.finance_table_1",
@@ -98,6 +99,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             var userSid = new Sid($"S-1-5-21-CONCURRENT-USER-{i}");
             var consent = new Consent
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 TableId = meta.Table.Id,
                 TableIdentifier = table,
                 Effect = ConsentEffect.Allow,
@@ -138,6 +140,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             {
                 await inst1.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     EventType = "INSTANCE_1_EVENT",
                     ActorSid = new Sid("S-1-5-21-INST-1"),
                     TargetTable = "crm.dbo.contacts",
@@ -154,6 +157,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             {
                 await inst2.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     EventType = "INSTANCE_2_EVENT",
                     ActorSid = new Sid("S-1-5-21-INST-2"),
                     TargetTable = "crm.dbo.contacts",
@@ -168,6 +172,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         {
             await inst3.RecordAuditEventAsync(new AuditLogEntry
             {
+                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                 EventType = "INSTANCE_3_EVENT",
                 ActorSid = new Sid("S-1-5-21-INST-3"),
                 TargetTable = "crm.dbo.contacts",
@@ -205,6 +210,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
 
                 await repo.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     Id = id,
                     EventType = $"EVENT_{i}",
                     ActorSid = new Sid($"S-1-5-21-ACTOR-{i}"),
@@ -253,6 +259,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
 
                 await repo.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
                     Id = id,
                     EventType = $"AUDIT_DELETE_EVENT_{i}",
                     ActorSid = new Sid($"S-1-5-21-USER-{i}"),
@@ -284,6 +291,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         // 1. Audit event records only actor_sid
         await _repository.RecordAuditEventAsync(new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             EventType = "GDPR_TEST_EVENT",
             ActorSid = actorSid,
             TargetTable = "finance.dbo.finance_table_1",

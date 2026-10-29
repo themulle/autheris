@@ -110,7 +110,7 @@ public sealed class CatalogGovernanceHostedService : BackgroundService
         {
             await _audit.RecordBestEffortAsync(new AuditLogEntry
             {
-                TenantId = TenantId.LegacySingleTenant,
+                TenantId = TenantId.Platform, // tenant-less background audit (DT-A-6)
                 EventType = AuditEventTypes.CatalogVisibilityChanged,
                 ActorSid = new Sid("S-1-5-18"),
                 TargetTable = string.Empty,

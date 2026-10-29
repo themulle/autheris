@@ -186,11 +186,8 @@ public static class StreamingCdcEndpoints
             statusCode: StatusCodes.Status501NotImplemented);
     }
 
-    private static string ResolveTenant(HttpContext context)
-    {
-        var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-        return string.IsNullOrWhiteSpace(tenantId) ? "default" : tenantId;
-    }
+    // DT-A-9: the request tenant is the resolved tenant; an unresolved request has none (GetRequestTenant throws) and is never mapped to a literal.
+    private static string ResolveTenant(HttpContext context) => EndpointSecurity.GetRequestTenant(context).Value;
 
     internal static async Task<IResult> ListSubscriptionsAsync(HttpContext context)
     {

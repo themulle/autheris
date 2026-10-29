@@ -12,7 +12,7 @@ public sealed class SecurityReviewRecheck4Tests
 {
     private static ConsentRequest Request(string requester, params string[] identifiers)
     {
-        var req = new ConsentRequest { RequesterSid = new Sid(requester), Status = "PENDING_EXTERNAL_APPROVAL" };
+        var req = new ConsentRequest { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, RequesterSid = new Sid(requester), Status = "PENDING_EXTERNAL_APPROVAL" };
         req.RequesterIdentifiers.AddRange(identifiers);
         return req;
     }

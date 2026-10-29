@@ -79,7 +79,7 @@ public sealed class ItsmWebhookNoLegacyFallbackTests
     {
         // L6: an instance without a tenant mapping never reaches a tenant-less ticket lookup.
         var repo = Substitute.For<IConsentApprovalRepository>();
-        repo.GetConsentRequestByTicketIdAsync("CHG1", Arg.Any<CancellationToken>()).Returns(new ConsentRequest { Id = Guid.NewGuid(), Status = "PENDING_EXTERNAL_APPROVAL", ItsmTicketId = "CHG1" });
+        repo.GetConsentRequestByTicketIdAsync("CHG1", Arg.Any<CancellationToken>()).Returns(new ConsentRequest { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Id = Guid.NewGuid(), Status = "PENDING_EXTERNAL_APPROVAL", ItsmTicketId = "CHG1" });
 
         var accepted = await Handler(new NoSecrets(), repo, Bypass()).HandleStatusChangeAsync(Payload, "unused", DateTimeOffset.UtcNow, null);
 

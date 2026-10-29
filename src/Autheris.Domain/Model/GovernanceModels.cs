@@ -43,7 +43,7 @@ public sealed class ConsentRequest
     public DateTimeOffset RequestedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset RequestedValidTo { get; init; }
     public string? ItsmTicketId { get; set; }
-    public TenantId TenantId { get; set; } = TenantId.LegacySingleTenant;
+    public TenantId TenantId { get; set; }
     public string? ContextJson { get; set; }
     public List<string> RequesterIdentifiers { get; init; } = new();
     public List<ApprovalStep> ApprovalSteps { get; init; } = new();
@@ -73,7 +73,7 @@ public sealed class AuditLogEntry
     private string _detailsJson = "{}";
 
     public Guid Id { get; init; } = Guid.NewGuid();
-    public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
+    public TenantId TenantId { get; init; }
     public DateTimeOffset OccurredAt { get; init; } = DateTimeOffset.UtcNow;
     public string EventType { get; init; } = string.Empty;
     public Sid ActorSid { get; init; }

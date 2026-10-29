@@ -186,7 +186,7 @@ public abstract class ConsumerParityBase<TDatabase>(ParityFixture<TDatabase> fix
         // 1. a renderer that drops the whole predicate (admits every row of the tenant)
         // 2. a renderer that drops the deny part of the combined filter
         var allowOnly = new Autheris.Application.Services.RowFilterSqlBuilder().BuildCombinedRowFilterParameterized(
-            [new Autheris.Domain.Model.Consent { Effect = Autheris.Domain.Model.ConsentEffect.Allow, RowFilters = [new Autheris.Domain.Model.ConsentRowFilter { ColumnName = "status", Operator = "EQ", ValueJson = "\"open\"" }] }],
+            [new Autheris.Domain.Model.Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = Autheris.Domain.Model.ConsentEffect.Allow, RowFilters = [new Autheris.Domain.Model.ConsentRowFilter { ColumnName = "status", Operator = "EQ", ValueJson = "\"open\"" }] }],
             [], env.Context.Database);
         var broken = new Dictionary<string, FilterText>
         {

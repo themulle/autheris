@@ -56,7 +56,7 @@ public sealed class DbtDatasetTagTests
     public async Task ModelTags_AreImportedAfterTheUpsert_ColumnTagsAreNot()
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
-        await Service().IngestManifestStreamAsync(stream, dryRun: false);
+        await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         _order.ShouldBe(["upsert", "tags"]);
         await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("db", "dbo", "orders"),
@@ -67,7 +67,7 @@ public sealed class DbtDatasetTagTests
     public async Task DryRun_ImportsNothing()
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
-        await Service().IngestManifestStreamAsync(stream, dryRun: true);
+        await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: true);
 
         _tags.ReceivedCalls().ShouldBeEmpty();
     }
@@ -79,7 +79,7 @@ public sealed class DbtDatasetTagTests
             .Returns(new DatasetTagImportResult(false, 1, 2, Failed: true));
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
 
-        var result = await Service().IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Warnings.ShouldContain(w => w.Contains("'db.dbo.orders'") && w.Contains("tags"));
     }
@@ -91,7 +91,7 @@ public sealed class DbtDatasetTagTests
             .Returns(new DatasetTagImportResult(true, 1, 2, false));
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
 
-        var result = await Service().IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Warnings.ShouldContain(w => w.Contains("1 invalid") && w.Contains("2 over the cap"));
         result.Warnings.ShouldNotContain(w => w.Contains("PII"));

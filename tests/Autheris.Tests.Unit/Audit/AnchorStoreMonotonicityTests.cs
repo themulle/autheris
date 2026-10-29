@@ -132,6 +132,7 @@ public sealed class AnchorStoreMonotonicityTests : IDisposable
 
     private static AuditLogEntry NewEntry(int i) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = $"EVENT_{i}",
         ActorSid = new Sid($"S-1-5-21-ACTOR-{i}"),
         TargetTable = "hr.dbo.salaries",

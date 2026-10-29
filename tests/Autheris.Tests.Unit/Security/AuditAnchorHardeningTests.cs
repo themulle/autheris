@@ -198,6 +198,7 @@ public sealed class AuditAnchorHardeningTests : IDisposable
 
     private static AuditLogEntry NewEntry(int i, string? eventType = null) => new()
     {
+        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
         EventType = eventType ?? $"EVENT_{i}",
         ActorSid = new Sid($"S-1-5-21-ACTOR-{i}"),
         TargetTable = "hr.dbo.salaries",

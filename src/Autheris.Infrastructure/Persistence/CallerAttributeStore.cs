@@ -465,6 +465,7 @@ internal static class CallerAttributeStore
         cmd.CommandText = sql;
         foreach (var (name, value) in parameters)
         {
+            SqlCoreBinding.GuardTenantParameter(name, value);
             var p = cmd.CreateParameter();
             p.ParameterName = name;
             p.Value = value ?? DBNull.Value;

@@ -369,6 +369,7 @@ public sealed class SecurityAttackVectorTests
         // Insert valid consecutive audit records
         var entry1 = new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-5),
             ActorSid = new Sid("S-1-5-21-admin"),
@@ -383,6 +384,7 @@ public sealed class SecurityAttackVectorTests
 
         var entry2 = new AuditLogEntry
         {
+            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-4),
             ActorSid = new Sid("S-1-5-21-analyst"),

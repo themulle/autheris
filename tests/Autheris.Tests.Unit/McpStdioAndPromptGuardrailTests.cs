@@ -85,7 +85,7 @@ public class McpStdioAndPromptGuardrailTests
         var output = new StringWriter();
 
         // Act
-        await runner.RunAsync(input, output);
+        await runner.RunAsync(input, output, tenantId: "tenant-a");
 
         // Assert
         var response = output.ToString().Trim();
