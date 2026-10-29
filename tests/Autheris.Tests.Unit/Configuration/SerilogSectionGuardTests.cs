@@ -14,7 +14,6 @@ public sealed class SerilogSectionGuardTests
     [Fact]
     public void NullConfiguration_ThrowsArgumentNullException()
     {
-        Should.Throw<ArgumentNullException>(() => SerilogSectionGuard.CheckConfiguration(null!));
         Should.Throw<ArgumentNullException>(() => SerilogSectionGuard.ThrowIfConfigured(null!));
     }
 
@@ -29,81 +28,31 @@ public sealed class SerilogSectionGuardTests
             })
             .Build();
 
-        using var writer = new StringWriter();
-        SerilogSectionGuard.CheckConfiguration(config, writer);
-
-        writer.ToString().ShouldBeEmpty();
+        Should.NotThrow(() => SerilogSectionGuard.ThrowIfConfigured(config));
     }
 
-    [Fact]
-    public void SerilogSection_WithDefaultGracefulTolerance_EmitsWarning_DoesNotThrow()
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData(null)]
+    [InlineData("true")]
+    [InlineData("false")]
+    public void Serilog_Section_Always_Fails_Startup(string? legacySwitch)
     {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Serilog:MinimumLevel:Default"] = "Information",
-                ["Serilog:WriteTo:0:Name"] = "Console"
-            })
-            .Build();
+        // L1 / DEF-SC-11: the AUTHERIS_ALLOW_LEGACY_CONFIG switch is gone; the removed section fails startup whatever the value of the switch.
+        // The message names the section and never a value.
+        using var env = new EnvVarScope("AUTHERIS_ALLOW_LEGACY_CONFIG", legacySwitch);
+        var values = new Dictionary<string, string?> { ["Serilog:MinimumLevel"] = "SECRET-VALUE-MUST-NOT-LEAK" };
+        if (legacySwitch is not null)
+        {
+            values["AUTHERIS_ALLOW_LEGACY_CONFIG"] = legacySwitch;
+        }
 
-        using var writer = new StringWriter();
-        SerilogSectionGuard.CheckConfiguration(config, writer);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
-        var output = writer.ToString();
-        output.ShouldContain("WARNING: The 'Serilog' configuration section is deprecated and ignored in Autheris v1.2.5+");
-        output.ShouldContain("Logging:LogLevel");
-        output.ShouldContain("Gateway:Telemetry:Otlp");
-    }
+        var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.ThrowIfConfigured(config));
 
-    [Fact]
-    public void SerilogSection_WithAllowLegacyTrue_EmitsWarning_DoesNotThrow()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AUTHERIS_ALLOW_LEGACY_CONFIG"] = "true",
-                ["Serilog:MinimumLevel"] = "Debug"
-            })
-            .Build();
-
-        using var writer = new StringWriter();
-        SerilogSectionGuard.CheckConfiguration(config, writer);
-
-        writer.ToString().ShouldContain(SerilogSectionGuard.DeprecationWarningMessage);
-    }
-
-    [Fact]
-    public void SerilogSection_WithAllowLegacyFalseInConfig_ThrowsInvalidOperationException()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AUTHERIS_ALLOW_LEGACY_CONFIG"] = "false",
-                ["Serilog:MinimumLevel"] = "Debug"
-            })
-            .Build();
-
-        using var writer = new StringWriter();
-        var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.CheckConfiguration(config, writer));
         ex.Message.ShouldContain("The 'Serilog' configuration section is no longer supported");
-        writer.ToString().ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void SerilogSection_WithEnvVarAllowLegacyFalse_ThrowsInvalidOperationException()
-    {
-        using var env = new EnvVarScope("AUTHERIS_ALLOW_LEGACY_CONFIG", "false");
-
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Serilog:MinimumLevel"] = "Debug"
-            })
-            .Build();
-
-        using var writer = new StringWriter();
-        var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.CheckConfiguration(config, writer));
-        ex.Message.ShouldContain("The 'Serilog' configuration section is no longer supported");
+        ex.Message.ShouldNotContain("SECRET-VALUE-MUST-NOT-LEAK");
     }
 
     [Fact]
@@ -136,19 +85,16 @@ public sealed class SerilogSectionGuardTests
     }
 
     [Fact]
-    public void OtlpHeaders_ThrowsEvenWhenLegacyConfigAllowed()
+    public void OtlpHeaders_Always_Throw()
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["AUTHERIS_ALLOW_LEGACY_CONFIG"] = "true",
-                ["Serilog:MinimumLevel"] = "Information",
                 ["Gateway:Telemetry:Otlp:Headers:X-ApiKey"] = "secret123"
             })
             .Build();
 
-        using var writer = new StringWriter();
-        var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.CheckConfiguration(config, writer));
+        var ex = Should.Throw<InvalidOperationException>(() => SerilogSectionGuard.ThrowIfConfigured(config));
         ex.Message.ShouldContain("SEC-OT06-14");
     }
 }

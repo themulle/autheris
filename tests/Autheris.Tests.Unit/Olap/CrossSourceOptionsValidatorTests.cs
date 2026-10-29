@@ -189,17 +189,20 @@ public sealed class CrossSourceOptionsValidatorTests
             .AddInMemoryCollection(values.Select(v => new System.Collections.Generic.KeyValuePair<string, string?>(v.Key, v.Value)))
             .Build();
 
+    [Trait("Category", "Security")]
     [Theory]
     [InlineData("MaxMemory")]
     [InlineData("MaxTempDirectorySize")]
-    public void LegacyCrossSourceKeys_LogAWarning(string key)
+    public void Removed_CrossSource_Keys_Fail_Validation(string key)
     {
-        var logger = new CapturingLogger();
-        var validator = new CrossSourceOptionsValidator(Config(($"Gateway:WebSql:CrossSource:{key}", "256MB")), logger);
+        // L7: the removed keys no longer only warn; they fail validation, name the key and the replacement and never echo the value.
+        var validator = new CrossSourceOptionsValidator(Config(($"Gateway:WebSql:CrossSource:{key}", "256MB-SECRET")), new CapturingLogger());
 
-        validator.Validate(null, new GatewayOptions()).Succeeded.ShouldBeTrue();
+        var result = validator.Validate(null, new GatewayOptions());
 
-        logger.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains(key, StringComparison.Ordinal));
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains($"Gateway:WebSql:CrossSource:{key}", StringComparison.Ordinal) && f.Contains("Gateway:DuckDbOlap", StringComparison.Ordinal));
+        result.Failures.ShouldNotContain(f => f.Contains("256MB-SECRET", StringComparison.Ordinal));
     }
 
     [Fact]

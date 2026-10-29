@@ -173,10 +173,9 @@ public sealed class IntegrationGapATests
     [Fact]
     public void GAP04_ProductionWarnings_AndRegularDml_DoNotAbortStartup()
     {
-        // WARN entries (e.g. Catalog.AllowLegacyPayloadOnlySignature) and the regular option WebSql.AllowDml + DmlWriterRoles are allowed in Production.
+        // The regular option WebSql.AllowDml + DmlWriterRoles are allowed in Production.
         var options = new GatewayOptions
         {
-            Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true },
             WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }, Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
@@ -201,38 +200,15 @@ public sealed class IntegrationGapATests
     }
 
     [Fact]
-    public void GAP04_LegacyWarnDmlSwitch_IsWarn_AndStartsInProduction()
+    public void GAP04_ContainerOptIn_IsReported()
     {
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { DmlWriterRoles = ["WebSqlWriter"] },
-            Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true },
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }, Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
-        };
-
-        options.GetActiveWarnings().ShouldContain(w => w.StartsWith("WARN:warn_allow_websql_dml", StringComparison.Ordinal) &&
-                                                       w.Contains("use WebSql.AllowDml", StringComparison.Ordinal));
-        options.HasAnyDangerBypassActive.ShouldBeFalse();
-
-        Should.NotThrow(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
-    }
-
-    [Fact]
-    public void GAP04_LegacyAndContainerOptIns_AreReported()
-    {
-        var options = new GatewayOptions
-        {
-            Itsm = new ItsmOptions { LegacyGlobalWebhookSecret = true },
-            Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true },
             AllowDevelopmentInContainer = true
         };
 
         options.HasAnySecurityBypassActive.ShouldBeTrue();
-        options.HasAnyDangerBypassActive.ShouldBeTrue();
         var bypasses = options.GetAllActiveBypasses();
-        bypasses.ShouldContain(b => b.StartsWith("DANGER:itsm_legacy_global_webhook_secret", StringComparison.Ordinal));
-        bypasses.ShouldContain(b => b.StartsWith("WARN:catalog_legacy_payload_only_signature", StringComparison.Ordinal));
         bypasses.ShouldContain(b => b.StartsWith("WARN:allow_development_in_container", StringComparison.Ordinal));
     }
 

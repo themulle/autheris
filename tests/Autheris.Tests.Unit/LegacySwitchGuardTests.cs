@@ -26,11 +26,58 @@ public sealed class LegacySwitchGuardTests
         ex.Message.ShouldContain(newKey);
     }
 
-    [Fact]
-    public void RemovedKeySetToFalse_OrAbsent_IsTolerated()
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("false")]
+    [InlineData("true")]
+    [InlineData("SECRET-VALUE-MUST-NOT-LEAK")]
+    public void Legacy_Switch_Guard_Fails_On_Presence_Even_When_False(string value)
     {
-        LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Mcp:danger_bypass_mcp_auth", "false")));
+        // DEF-SC-11: a removed key fails startup on presence, whatever its value; the message names the key and never the value.
+        var ex = Should.Throw<InvalidOperationException>(
+            () => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Mcp:danger_bypass_mcp_auth", value))));
+
+        ex.Message.ShouldContain("Gateway:Mcp:danger_bypass_mcp_auth");
+        ex.Message.ShouldNotContain(value);
         LegacySwitchGuard.ThrowIfLegacyKeysSet(Config());
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("Quickstart")]
+    [InlineData("Strict")]
+    public void Gateway_Profile_Key_Fails_Startup(string value)
+    {
+        // L2: Gateway:Profile (alias of Dev:Preset) is removed.
+        var ex = Should.Throw<InvalidOperationException>(() => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Profile", value))));
+
+        ex.Message.ShouldContain("Gateway:Profile");
+        ex.Message.ShouldContain("Gateway:Dev:Preset");
+        ex.Message.ShouldNotContain(value);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void Legacy_WebSql_Dml_Alias_Fails_Startup()
+    {
+        // L3: Insecure.warn_allow_websql_dml (alias of WebSql.AllowDml) is removed.
+        var ex = Should.Throw<InvalidOperationException>(
+            () => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Insecure:warn_allow_websql_dml", "false"))));
+
+        ex.Message.ShouldContain("Gateway:Insecure:warn_allow_websql_dml");
+        ex.Message.ShouldContain("Gateway:WebSql:AllowDml");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void Insecure_Webhook_Tenant_Fallback_Key_Fails_Startup()
+    {
+        // L6: the unbound-webhook tenant fallback is removed (unbound webhooks are always rejected); the key fails startup with a removal message.
+        var ex = Should.Throw<InvalidOperationException>(
+            () => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Insecure:warn_fallback_default_tenant_for_webhooks", "true"))));
+
+        ex.Message.ShouldContain("Gateway:Insecure:warn_fallback_default_tenant_for_webhooks");
+        ex.Message.ShouldContain("removed");
     }
 
     [Fact]

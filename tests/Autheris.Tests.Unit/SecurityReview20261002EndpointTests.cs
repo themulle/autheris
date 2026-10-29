@@ -234,13 +234,12 @@ public class SecurityReview20261002EndpointTests
     private const string SecretB = "per-instance-secret-B-91ef";
     private const string GlobalSecret = "legacy-global-secret-0000";
 
-    private static IOptions<GatewayOptions> CreateItsmOptions(bool legacyGlobal = false)
+    private static IOptions<GatewayOptions> CreateItsmOptions()
         => Options.Create(new GatewayOptions
         {
             Itsm = new ItsmOptions
             {
                 Enabled = true,
-                LegacyGlobalWebhookSecret = legacyGlobal,
                 InstanceToTenantMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["inst-a"] = "tenant-a",
@@ -371,7 +370,7 @@ public class SecurityReview20261002EndpointTests
     }
 
     [Fact]
-    public async Task H06_GlobalSecret_IsOnlyAcceptedWithExplicitLegacyOption()
+    public async Task H06_GlobalSecret_IsNeverAccepted()
     {
         // Provider that only knows the global secret and returns it for every "itsm:*" alias,
         // exactly like DefaultEnvironmentSecretProvider's fallback aliases.
@@ -385,9 +384,6 @@ public class SecurityReview20261002EndpointTests
 
         (await CreateHandler(repo, globalOnly).HandleStatusChangeAsync(payload, signature, ts, null, null, CancellationToken.None)).ShouldBeFalse();
         repo.Activations.ShouldBeEmpty();
-
-        (await CreateHandler(repo, globalOnly, CreateItsmOptions(legacyGlobal: true)).HandleStatusChangeAsync(payload, signature, ts, null, null, CancellationToken.None)).ShouldBeTrue();
-        repo.Activations.Count.ShouldBe(1);
     }
 
     [Fact]

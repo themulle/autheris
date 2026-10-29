@@ -20,7 +20,7 @@ CONSENT_REVOKED
 Consent with ID '
 N
 O
-REVOKE
+REVOKED
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,\n                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,\n                                       c.is_revoked, c.tenant_id\n                                FROM CONSENTS c\n                                JOIN TABLES t ON c.table_id = t.id\n                                WHERE t.source_name_lc = LOWER(@domain) AND t.schema_name_lc = LOWER(@schema) AND t.table_name_lc = LOWER(@table)\n                                  AND c.is_revoked = 0
 SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked\n                                FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)\n                                JOIN TABLES t ON c.table_id = t.id\n                                WHERE c.id = @id
 SELECT valid_to FROM CONSENTS WHERE id = @id AND tenant_id = @t AND is_revoked = 0
@@ -66,6 +66,6 @@ UPDATE CONSENTS SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, rev
 O
 @reason
 CONSENT_REVOKED
-REVOKE
+REVOKED
 N
 ## set_Transaction 2

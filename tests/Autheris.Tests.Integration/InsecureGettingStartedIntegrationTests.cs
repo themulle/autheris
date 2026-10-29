@@ -28,7 +28,6 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
             builder.UseSetting("Gateway:Insecure:danger_bypass_webhook_signature_validation", "true");
             builder.UseSetting("Gateway:Insecure:danger_allow_untrusted_certificates", "true");
             builder.UseSetting("Gateway:Insecure:warn_ignore_webhook_timestamp_tolerance", "true");
-            builder.UseSetting("Gateway:Insecure:warn_fallback_default_tenant_for_webhooks", "true");
             builder.UseSetting("Gateway:Insecure:warn_mock_external_systems_if_unreachable", "true");
             builder.UseSetting("Gateway:Insecure:warn_allow_all_cors_origins", "true");
             builder.UseSetting("Gateway:Insecure:warn_disable_rate_limiting", "true");
@@ -37,11 +36,12 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:Itsm:Enabled", "true");
+            // The ITSM instance is bound to the tenant of the consent request; an unbound instance is always rejected, also in insecure mode.
+            builder.UseSetting("Gateway:Itsm:InstanceToTenantMap:snow-dev", "tenant-x");
         });
     }
 
-    [Fact]
-    public async Task Webhook_WithNoSignatureOrOldTimestamp_SucceedsInInsecureMode()
+    private async Task<(HttpClient Client, string TicketId, TableIdentifier TableId, Guid ConsentRequestId)> SeedPendingRequestAsync()
     {
         var client = _factory.CreateClient();
 
@@ -87,11 +87,19 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
             consentRequestId = req.Id;
         }
 
-        // 2. Call incoming webhook WITHOUT signature, with 10-hour old timestamp, and unmapped instance
+        return (client, ticketId, tableId, consentRequestId);
+    }
+
+    [Fact]
+    public async Task Webhook_WithNoSignatureOrOldTimestamp_SucceedsInInsecureMode()
+    {
+        var (client, ticketId, tableId, consentRequestId) = await SeedPendingRequestAsync();
+
+        // 2. Call incoming webhook WITHOUT signature, with 10-hour old timestamp, from the tenant-bound instance
         var payload = JsonSerializer.Serialize(new
         {
             TicketId = ticketId,
-            InstanceId = "unknown-instance-dev",
+            InstanceId = "snow-dev",
             Action = "APPROVE"
         });
 
@@ -117,6 +125,25 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
                 [new Sid("S-1-5-21-USER1")], tableId, DateTimeOffset.UtcNow);
             activeConsents.Count.ShouldBeGreaterThan(0);
         }
+    }
+
+    [Fact]
+    public async Task Webhook_FromUnmappedInstance_IsRejectedEvenInInsecureMode()
+    {
+        // Fail closed: insecure mode bypasses signature and timestamp checks only; an instance without a tenant binding never activates a consent.
+        var (client, ticketId, _, consentRequestId) = await SeedPendingRequestAsync();
+        var payload = JsonSerializer.Serialize(new { TicketId = ticketId, InstanceId = "unknown-instance-dev", Action = "APPROVE" });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/webhooks/itsm/status-change");
+        request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        request.Headers.Add("X-ITSM-Timestamp", DateTimeOffset.UtcNow.AddHours(-10).ToString("O"));
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        using var scope = _factory.Services.CreateScope();
+        var updatedReq = await scope.ServiceProvider.GetRequiredService<IConsentApprovalRepository>().GetConsentRequestAsync(consentRequestId);
+        updatedReq!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
     }
 
     [Fact]

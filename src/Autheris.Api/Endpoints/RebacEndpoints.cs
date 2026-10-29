@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
@@ -28,17 +29,10 @@ public static class RebacEndpoints
 {
     /// <summary>Review E-10: relationship changes decide access and belong in the audit hash chain.</summary>
     private static async Task AuditTupleChangeAsync(
-        IAuditWriter auditWriter, HttpContext http, TenantId callerTenant, string eventType, string decision, RebacTuple tuple)
+        IAuditWriter auditWriter, HttpContext http, string eventType, string decision, RebacTuple tuple)
     {
-        TenantId tenant;
-        try
-        {
-            tenant = new TenantId(tuple.TenantId);
-        }
-        catch (ArgumentException)
-        {
-            tenant = callerTenant;
-        }
+        // DEF-SC-13: the tuple tenant was validated before the mutation (see InvalidTupleTenant); it is never replaced by the caller tenant.
+        var tenant = new TenantId(tuple.TenantId);
 
         await auditWriter.RecordAsync(new AuditLogEntry
         {
@@ -52,18 +46,18 @@ public static class RebacEndpoints
         }, CancellationToken.None).ConfigureAwait(false);   // post-commit: a client disconnect must not drop the record
     }
 
+    /// <summary>DEF-SC-13: a tuple tenant must be a valid tenant id before the tuple is stored, removed or audited.</summary>
+    private static bool InvalidTupleTenant(string tenantId) => !TenantId.TryParse(tenantId, out _);
+
+    /// <summary>400 with the governed code and no echo of the submitted value.</summary>
+    private static IResult InvalidTenantResult() =>
+        Results.BadRequest(new { error = "The ReBAC tuple tenant is not a valid tenant id.", errorCode = ApiErrorCodes.InvalidTenantId });
+
     internal static async Task AuditInvalidationFailureAsync(
-        IAuditWriter auditWriter, HttpContext http, TenantId callerTenant, string tenantId, Exception ex)
+        IAuditWriter auditWriter, HttpContext http, string tenantId, Exception ex)
     {
-        TenantId tenant;
-        try
-        {
-            tenant = new TenantId(tenantId);
-        }
-        catch (ArgumentException)
-        {
-            tenant = callerTenant;
-        }
+        // DEF-SC-13: callers validate the tuple tenant before any mutation; it is never replaced by the caller tenant.
+        var tenant = new TenantId(tenantId);
 
         await auditWriter.RecordAsync(new AuditLogEntry
         {
@@ -98,6 +92,11 @@ public static class RebacEndpoints
                 (t.Object.Contains(':') && (string.IsNullOrWhiteSpace(t.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(t.Object.Split(':')[1]))))
             {
                 return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
+            }
+
+            if (InvalidTupleTenant(t.TenantId))
+            {
+                return InvalidTenantResult();
             }
         }
 
@@ -159,10 +158,10 @@ public static class RebacEndpoints
             }
             catch (Exception ex)
             {
-                await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, secContext.TenantId, t.TenantId, ex).ConfigureAwait(false);
+                await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, t.TenantId, ex).ConfigureAwait(false);
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
-            await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleAdded, "ALLOW", t).ConfigureAwait(false);
+            await AuditTupleChangeAsync(auditWriter, request.HttpContext, AuditEventTypes.RebacTupleAdded, "ALLOW", t).ConfigureAwait(false);
         }
 
         return Results.Ok(new { status = "Tuples added", count = canonicalTuples.Count });
@@ -188,6 +187,11 @@ public static class RebacEndpoints
             return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
         }
 
+        if (InvalidTupleTenant(tuple.TenantId))
+        {
+            return InvalidTenantResult();
+        }
+
         var parsed = RebacSubject.Parse(tuple.User);
         if (!parsed.IsValid)
         {
@@ -211,10 +215,10 @@ public static class RebacEndpoints
         }
         catch (Exception ex)
         {
-            await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, secContext.TenantId, canonicalTuple.TenantId, ex).ConfigureAwait(false);
+            await AuditInvalidationFailureAsync(auditWriter, request.HttpContext, canonicalTuple.TenantId, ex).ConfigureAwait(false);
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
-        await AuditTupleChangeAsync(auditWriter, request.HttpContext, secContext.TenantId, AuditEventTypes.RebacTupleRemoved, removed ? "REVOKED" : "NOOP", canonicalTuple).ConfigureAwait(false);
+        await AuditTupleChangeAsync(auditWriter, request.HttpContext, AuditEventTypes.RebacTupleRemoved, removed ? "REVOKED" : "NOOP", canonicalTuple).ConfigureAwait(false);
 
         return Results.Ok(new { removed });
     }

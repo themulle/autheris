@@ -102,6 +102,37 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
         (await Identity.GetLocksAsync(Tenant, Realm)).ShouldContain(l => l.UserKey == key && l.LockedAt == lockedAt);
     }
 
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WAVE3_SCIM_T10_CountLocksSince_ScopedDistinctWindowedAndBounded()
+    {
+        if (!Available) return;
+        var realm = Id("realm");
+        var other = Id("realm");
+        var otherTenant = new TenantId(Id("tenant"));
+        var now = Now();
+        string[] scim = ["SCIM_PUT", "SCIM_PATCH", "SCIM_DELETE"];
+
+        await Identity.AddLockAsync(new ScimLock(Tenant, realm, "a", "r", "SCIM_DELETE", now.AddMinutes(-30)));
+        await Identity.AddLockAsync(new ScimLock(Tenant, realm, "b", "r", "SCIM_PUT", now.AddMinutes(-20)));
+        await Identity.AddLockAsync(new ScimLock(Tenant, realm, "c", "r", "SCIM_PATCH", now.AddMinutes(-10)));
+        await Identity.AddLockAsync(new ScimLock(Tenant, realm, "old", "r", "SCIM_DELETE", now.AddMinutes(-90)));
+        await Identity.AddLockAsync(new ScimLock(Tenant, realm, "admin", "r", "admin-sid", now.AddMinutes(-5)));
+        await Identity.AddLockAsync(new ScimLock(Tenant, other, "x", "r", "SCIM_DELETE", now.AddMinutes(-5)));
+        await Identity.AddLockAsync(new ScimLock(otherTenant, realm, "y", "r", "SCIM_DELETE", now.AddMinutes(-5)));
+        // a repeat on an already-locked user is one row, still counted once
+        await Identity.AddLockAsync(new ScimLock(Tenant, realm, "a", "r", "SCIM_DELETE", now.AddMinutes(-29)));
+
+        var window = await Identity.CountLocksSinceAsync(Tenant, realm, scim, now.AddMinutes(-60), 100);
+        window.Count.ShouldBe(3);
+        window.Oldest.ShouldBe(now.AddMinutes(-29));
+
+        (await Identity.CountLocksSinceAsync(Tenant, realm, scim, now.AddMinutes(-60), 2)).Count.ShouldBe(2);
+        var empty = await Identity.CountLocksSinceAsync(Tenant, Id("none"), scim, now.AddMinutes(-60), 5);
+        (empty.Count, empty.Oldest).ShouldBe((0, null));
+    }
+
     // ------------------------------------------------------------------ identity: deletion (PERS-07)
 
     private async Task<(string User, string Group)> UserInGroupAsync()

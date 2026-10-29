@@ -22,6 +22,7 @@ public static class ApiErrorCodes
     public const string CrossTenantAccessForbidden = "CROSS_TENANT_ACCESS_FORBIDDEN";
     public const string TenantUnresolved = "TENANT_UNRESOLVED";
     public const string TenantClaimInvalid = "TENANT_CLAIM_INVALID";
+    public const string ConsentTenantInvalid = "CONSENT_TENANT_INVALID";
     public const string ReadOnlyToken = "READ_ONLY_TOKEN";
     public const string CsrfValidationFailed = "CSRF_VALIDATION_FAILED";
     public const string UntrustedOrigin = "UNTRUSTED_ORIGIN";

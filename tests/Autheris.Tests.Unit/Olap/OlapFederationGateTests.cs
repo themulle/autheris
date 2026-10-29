@@ -30,7 +30,7 @@ using Xunit;
 /// PLAN-SEC-OLAP-01: federation gate, classification, ordering (authorize all before any read), guardrails, budgets and audit of the
 /// OLAP staging service. Runs the real DuckDB engine and the real gateway SQL engine over recording connector fakes.
 /// </summary>
-public sealed class OlapFederationGateTests
+public sealed partial class OlapFederationGateTests
 {
     private const string GateDenied = "Cross-source queries are not enabled for this endpoint.";
 
@@ -62,7 +62,8 @@ public sealed class OlapFederationGateTests
     private static Harness Build(
         IReadOnlyList<TableDef> defs,
         CrossSourceOptions? cross = null,
-        DuckDbOlapOptions? olap = null)
+        DuckDbOlapOptions? olap = null,
+        Microsoft.Extensions.Logging.ILogger<OlapStagingService>? logger = null)
     {
         var domains = defs.Select(d => d.Domain).Distinct().ToList();
         var options = Options.Create(new GatewayOptions
@@ -134,7 +135,7 @@ public sealed class OlapFederationGateTests
 
         harness.Sut = new OlapStagingService(
             new DuckDbOlapEngine(options, NullLogger<DuckDbOlapEngine>.Instance),
-            repo, registry, resolver, masking, options, harness.Audit, NullLogger<OlapStagingService>.Instance,
+            repo, registry, resolver, masking, options, harness.Audit, logger ?? NullLogger<OlapStagingService>.Instance,
             new FederationGate(options), FastSqlEngine.Default, new OlapRequestLimiter(options));
 
         return harness;

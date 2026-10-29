@@ -94,16 +94,6 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
             var signedContent = BuildSignedContent(timestamp!.Value, rawPayload);
             var valid = VerifyHmacSignature(signedContent, signature, secret);
 
-            if (!valid && opts.Catalog.AllowLegacyPayloadOnlySignature)
-            {
-                // Explicit opt-in backward compatibility (payload-only signature); replay protection then relies on event-ID deduplication.
-                valid = VerifyHmacSignature(rawPayload, signature, secret);
-                if (valid)
-                {
-                    _logger.LogWarning("Catalog webhook accepted with legacy payload-only signature (AllowLegacyPayloadOnlySignature=true).");
-                }
-            }
-
             if (!valid)
             {
                 _logger.LogWarning("Catalog webhook rejected: invalid HMAC signature.");

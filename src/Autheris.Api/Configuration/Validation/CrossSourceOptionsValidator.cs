@@ -14,7 +14,7 @@ namespace Autheris.Api.Configuration.Validation;
 /// PLAN-SEC-OLAP-01: fail-closed start-up validation of the federation and OLAP options. An <c>AllowedTransports</c> entry must be a
 /// registered transport name (a typo would silently deny a transport, or, in a deny-minded list, silently allow one); limits must be
 /// positive instead of falling back to silent defaults. Failure messages name option paths and the offending transport name only.
-/// Warnings (never failures): legacy <c>CrossSource:MaxMemory</c> / <c>MaxTempDirectorySize</c> keys that have no effect, and
+/// The removed <c>CrossSource:MaxMemory</c> / <c>MaxTempDirectorySize</c> keys fail validation; the only warning left is
 /// <c>Olap</c> listed while the federation switch is off.
 /// </summary>
 public sealed class CrossSourceOptionsValidator : IValidateOptions<GatewayOptions>
@@ -36,6 +36,7 @@ public sealed class CrossSourceOptionsValidator : IValidateOptions<GatewayOption
         var crossSource = options.WebSql?.CrossSource ?? new CrossSourceOptions();
         ValidateCrossSource(crossSource, failures);
         ValidateDuckDbOlap(options.DuckDbOlap ?? new DuckDbOlapOptions(), failures);
+        RejectRemovedKeys(failures);
         LogWarnings(crossSource);
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
     }
@@ -106,24 +107,28 @@ public sealed class CrossSourceOptionsValidator : IValidateOptions<GatewayOption
         }
     }
 
+    /// <summary>L7: the removed keys fail validation (names only, never values) instead of being ignored with a warning.</summary>
+    private void RejectRemovedKeys(List<string> failures)
+    {
+        if (_configuration == null)
+        {
+            return;
+        }
+
+        foreach (var removed in new[] { "MaxMemory", "MaxTempDirectorySize" })
+        {
+            if (_configuration.GetSection($"{GatewayOptions.SectionName}:WebSql:CrossSource:{removed}").Exists())
+            {
+                failures.Add($"{GatewayOptions.SectionName}:WebSql:CrossSource:{removed} was removed; configure {GatewayOptions.SectionName}:DuckDbOlap:{removed} instead.");
+            }
+        }
+    }
+
     private void LogWarnings(CrossSourceOptions crossSource)
     {
         if (_logger == null)
         {
             return;
-        }
-
-        if (_configuration != null)
-        {
-            foreach (var legacy in new[] { "MaxMemory", "MaxTempDirectorySize" })
-            {
-                if (_configuration.GetSection($"{GatewayOptions.SectionName}:WebSql:CrossSource:{legacy}").Exists())
-                {
-                    _logger.LogWarning(
-                        "Gateway:WebSql:CrossSource:{Key} is no longer an option and has no effect. Configure Gateway:DuckDbOlap:MaxMemory and MaxTempDirectorySize instead.",
-                        legacy);
-                }
-            }
         }
 
         if (!crossSource.Enabled &&

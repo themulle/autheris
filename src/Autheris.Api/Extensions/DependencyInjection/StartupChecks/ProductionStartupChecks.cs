@@ -104,6 +104,14 @@ internal static class ProductionStartupChecks
                 "opt-in (AllowInsecureWarnFlagsInProduction = true).");
         }
 
+        // WAVE3-STARTUP-SC-01: insecure OTLP transport needs the same explicit opt-in as the other WARN flags outside Development
+        if (context.ExtraWarnings.Count > 0 && !options.AllowInsecureWarnFlagsInProduction)
+        {
+            throw new ValidationException(
+                "Security violation: Outside Development, Gateway:Telemetry:Otlp:AllowInsecureTransport may be active only with an explicit " +
+                "opt-in (AllowInsecureWarnFlagsInProduction = true).");
+        }
+
         // Sicherheits-Invariante 2: Mcp.EnableDeveloperCors is strictly prohibited outside Development and cannot be bypassed
         if (options.Mcp.EnableDeveloperCors)
         {

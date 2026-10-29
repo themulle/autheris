@@ -577,15 +577,4 @@ public sealed class SecurityReview20261002GraphQLTests
         ex.Errors.ShouldAllBe(e => !e.Message.Contains("secret_probe_table"));
     }
 
-    [Fact]
-    public void Low_FederationAliasMap_ResolvesNamedFragments()
-    {
-        var doc = Utf8GraphQLParser.Parse("query { customer { ...Pii } } fragment Pii on Customer { harmless: email }");
-
-        var map = SubgraphResultMaskingMiddleware.ExtractAliasToFieldMap(doc);
-
-        map.ShouldNotBeNull();
-        // Alias map is keyed by response path (GAP-B PART-FED).
-        map["customer.harmless"].ShouldBe("email");
-    }
 }

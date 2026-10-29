@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 
 namespace Autheris.Infrastructure.Persistence;
@@ -101,7 +102,7 @@ internal sealed class AccessProfileStore(
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var profile = ReadProfile(reader, tenantId, 0);
+                var profile = ReadProfile(reader, 0);
                 var assignment = ReadAssignment(reader, 10);
                 if (!wanted.Contains((assignment.SubjectType, ConsentSubjectFilter.Normalize(assignment.Subject.Trim()))) ||
                     !AccessProfileAssignmentRules.IsEffective(profile, assignment, now))
@@ -156,7 +157,7 @@ internal sealed class AccessProfileStore(
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var p = ReadProfile(reader, tenantId, 0);
+                var p = ReadProfile(reader, 0);
                 profiles.Add(p);
                 map[p.ProfileId] = p;
             }
@@ -436,7 +437,7 @@ internal sealed class AccessProfileStore(
         return reader.GetFieldValue<DateTimeOffset>(ordinal);
     }
 
-    private AccessProfile ReadProfile(DbDataReader reader, TenantId fallbackTenant, int o)
+    internal AccessProfile ReadProfile(DbDataReader reader, int o)
     {
         // Unknown or undefined (e.g. a numeric "7", which Enum.TryParse accepts) mode: most restrictive.
         var mode = Enum.TryParse<MaskingPolicyMode>(reader.GetString(o + 3), true, out var m) && Enum.IsDefined(m) ? m : MaskingPolicyMode.Strict;
@@ -446,7 +447,9 @@ internal sealed class AccessProfileStore(
         return new AccessProfile
         {
             ProfileId = reader.GetString(o),
-            TenantId = TenantId.TryParse(reader.GetString(o + 1), out var t) ? t : fallbackTenant,
+            // DEF-SC-14: an unparsable stored tenant never becomes the caller's tenant (that would expose a foreign or corrupt row); both loading
+            // queries are tenant-filtered, so such a row is an integrity failure: refuse with a governed code and no echo.
+            TenantId = TenantId.TryParse(reader.GetString(o + 1), out var t) ? t : throw new AccessProfileTenantIntegrityException(),
             Name = reader.GetString(o + 2),
             MaskingMode = mode,
             TargetTables = targets,

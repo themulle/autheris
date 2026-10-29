@@ -413,7 +413,6 @@ public sealed class Phase1AndPhase2SecurityExpertTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            Profile = "Strict",
             DuckDbOlap = new DuckDbOlapOptions
             {
                 Enabled = true,

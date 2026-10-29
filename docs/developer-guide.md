@@ -132,7 +132,7 @@ Environment variables work as usual, for example `Gateway__Dev__Persist__Enabled
 | Preset | Meaning |
 |---|---|
 | `Standard` (default) | All convenience on; test auth, introspection, Banana Cake Pop and demo data on; security otherwise strict. |
-| `Quickstart` | `Standard` plus `Insecure.warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests` and `OpenSchema`. For a first look without setting up consents. Replaces the deprecated `Gateway:Profile: Quickstart`. |
+| `Quickstart` | `Standard` plus `Insecure.warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests` and `OpenSchema`. For a first look without setting up consents. The former `Gateway:Profile` key was removed and fails startup. |
 | `Strict` | Like `Standard`, but no test auth and no introspection. Use it to reproduce production-like access. |
 
 A preset is a set of concrete values, not hidden logic. What it applied is visible in `/api/dev/info`, in the banner and in the active bypass list.
@@ -253,9 +253,9 @@ During early development or when onboarding third-party webhooks (e.g. ServiceNo
 
 > [!WARNING]
 > **Migration Notice (R-API-1 / API-1)**:
-> Outside of the `Development` environment, setting `Itsm.LegacyGlobalWebhookSecret = true` or enabling any `DANGER:` bypass flags strictly blocks application startup with a `ValidationException`.
-> Deployments that previously relied on the global ITSM webhook secret must migrate to per-instance webhook secrets (`itsm:webhook-secret:<instanceId>`).
-> Never commit `danger_* = true` or `Itsm.LegacyGlobalWebhookSecret = true` in non-development configuration files.
+> Outside of the `Development` environment, enabling any `DANGER:` bypass flag strictly blocks application startup with a `ValidationException`.
+> The global ITSM webhook secret is no longer accepted: deployments must use per-instance webhook secrets (`itsm:webhook-secret:<instanceId>`).
+> Never commit `danger_* = true` in non-development configuration files.
 
 ---
 

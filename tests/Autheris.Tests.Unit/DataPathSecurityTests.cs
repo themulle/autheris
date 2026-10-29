@@ -179,7 +179,7 @@ public class DataPathSecurityTests : IDisposable
     {
         var options = Options.Create(new GatewayOptions { OpenSchema = true });
         var httpContext = new DefaultHttpContext();
-        httpContext.Items["DomainScope"] = "finance";
+        httpContext.Items["Autheris.DomainScope"] = "finance";
         var accessor = new HttpContextAccessor { HttpContext = httpContext };
 
         var catalogFromScope = await _query.GetCatalogAsync(domain: null, first: null, after: null, search: null,

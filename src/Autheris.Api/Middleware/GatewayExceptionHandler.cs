@@ -75,6 +75,12 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             code = (exception as GatewaySecurityException) is { } denied
                 ? GatewayDenialStatusMapper.SpecificCode(denied) ?? CodeForStatus(status)
                 : CodeForStatus(status);
+
+            // DEF-02: a data-integrity refusal of a consent is a deliberate deny (403, fixed title); the governed code tells operators which one.
+            if (exception is ConsentTenantIntegrityException)
+            {
+                code = ApiErrorCodes.ConsentTenantInvalid;
+            }
         }
 
         if (status >= StatusCodes.Status500InternalServerError)

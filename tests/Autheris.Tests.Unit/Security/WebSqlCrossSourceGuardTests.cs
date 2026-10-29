@@ -180,7 +180,6 @@ public sealed class WebSqlCrossSourceGuardTests
 
         var options = Options.Create(new GatewayOptions
         {
-            Profile = "Strict",
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true }
         });
         var engine = Substitute.For<IDuckDbOlapEngine>();

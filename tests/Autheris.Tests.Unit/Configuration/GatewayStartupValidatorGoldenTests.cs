@@ -110,7 +110,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 
             // 11 OperationalInvariants
             Prod("OperationalInvariants_DmlWithoutRoles", ("WebSql:AllowDml", "true")),
-            Prod("OperationalInvariants_QuickstartInProduction", ("Profile", "Quickstart")),
+            Prod("OperationalInvariants_QuickstartInProduction", ("Dev:Preset", "Quickstart")),
             Prod("OperationalInvariants_ShutdownTimeout", ("HighAvailability:QueryTimeoutSeconds", "30"), ("HighAvailability:ShutdownTimeoutSeconds", "35")),
             Prod("OperationalInvariants_TerminationGrace", ("HighAvailability:TerminationGracePeriodSeconds", "20")),
             Prod("OperationalInvariants_DevOptions", ("Dev:Preset", "bogus")),

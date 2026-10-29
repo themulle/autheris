@@ -47,13 +47,16 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     public static string GetTenantGenerationKey(string tenant) => $"rebac:generation:{tenant}";
 
     private readonly IEventBus? _eventBus;
+    private readonly TimeProvider _timeProvider;
 
     public ZanzibarRebacEvaluator(
         IRebacStore store,
         IOptions<GatewayOptions> gatewayOptions,
         ILogger<ZanzibarRebacEvaluator> logger,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         if (gatewayOptions.Value?.Rebac?.PerCheckMemoMaxEntries <= 0)
@@ -143,7 +146,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             return 0L;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var cacheMs = _gatewayOptions.Value.Rebac?.GenerationCacheMilliseconds ?? 1000;
         if (cacheMs > 0 && _tenantGenerationCache.TryGetValue(tenant, out var cached) && cached.ExpiresAt > now)
         {
@@ -206,7 +209,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             if (currentGen.HasValue &&
                 _cache.TryGetValue(tenant, out var tenantCache) &&
                 tenantCache.TryGetValue(cacheKey, out var entry) &&
-                entry.Expiry > DateTimeOffset.UtcNow &&
+                entry.Expiry > _timeProvider.GetUtcNow() &&
                 entry.Generation == currentGen.Value)
             {
                 return entry.Allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
@@ -230,7 +233,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             if (!isDegraded && currentGen.HasValue)
             {
                 var ttl = rebacOptions.CacheTtlSeconds;
-                var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
+                var expiry = _timeProvider.GetUtcNow().AddSeconds(ttl);
                 if (allowed && tracker.Earliest is { } tupleExpiry && tupleExpiry < expiry)
                 {
                     expiry = tupleExpiry; // WP-SC-16: a decision never outlives the time-bound tuple it rests on
@@ -280,7 +283,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
         if (tc.Count >= MaxCachedDecisionsPerTenant)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _timeProvider.GetUtcNow();
             foreach (var kvp in tc)
             {
                 if (kvp.Value.Expiry <= now)
@@ -373,7 +376,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         {
             // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
             // WP-SC-16: expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
-            var now = DateTimeOffset.UtcNow;
+            var now = _timeProvider.GetUtcNow();
             var directTuples = await GetTuplesWithMemoAsync(memo, memoMaxEntries, tenantId, user, relation, obj, ct).ConfigureAwait(false);
             var direct = directTuples
                 .Where(t => !t.IsExpired(now) && !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase))

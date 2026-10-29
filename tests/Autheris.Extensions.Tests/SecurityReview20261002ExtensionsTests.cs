@@ -718,13 +718,13 @@ public sealed class SecurityReview20261002ExtensionsTests
 
     // ------------------------------------------------------------------ M-34
 
-    private static (CatalogWebhookHandler Handler, IPolicyEpochRepository Epochs) CreateWebhookHandler(string secret, bool allowLegacy = false)
+    private static (CatalogWebhookHandler Handler, IPolicyEpochRepository Epochs) CreateWebhookHandler(string secret)
     {
         var epochs = Substitute.For<IPolicyEpochRepository>();
         var handler = new CatalogWebhookHandler(
             Options.Create(new GatewayOptions
             {
-                Catalog = new DataCatalogOptions { WebhookSecret = secret, AllowLegacyPayloadOnlySignature = allowLegacy }
+                Catalog = new DataCatalogOptions { WebhookSecret = secret }
             }),
             epochs,
             Substitute.For<IDataCatalogSyncService>(),
@@ -736,7 +736,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         $"{{\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"m34.public.{table}\",\"nonce\":\"{Guid.NewGuid():N}\"}}";
 
     [Fact]
-    public async Task M34_PayloadOnlySignature_IsRejected_TimestampBoundSignature_IsAccepted()
+    public async Task Catalog_Webhook_Payload_Only_Signature_Is_Rejected_TimestampBoundSignature_IsAccepted()
     {
         const string secret = "catalog-secret-m34";
         var (handler, _) = CreateWebhookHandler(secret);
@@ -797,19 +797,6 @@ public sealed class SecurityReview20261002ExtensionsTests
 
         result.Success.ShouldBeFalse();
         result.Status.ShouldBe("REJECTED_MISSING_TIMESTAMP");
-    }
-
-    [Fact]
-    public async Task M34_LegacyPayloadOnlySignature_OnlyWithExplicitOption()
-    {
-        const string secret = "catalog-secret-m34-legacy";
-        var (handler, _) = CreateWebhookHandler(secret, allowLegacy: true);
-        var payload = CatalogPayload("orders_e");
-
-        var result = await handler.HandleWebhookAsync(payload, "sha256=" + Hmac(payload, secret), DateTimeOffset.UtcNow);
-
-        result.Success.ShouldBeTrue();
-        new DataCatalogOptions().AllowLegacyPayloadOnlySignature.ShouldBeFalse();
     }
 
     [Fact]

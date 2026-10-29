@@ -90,9 +90,9 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task Revoke_GranteeSelf_IsAllowedWithoutApproverRights_AndAuditsTheDecisionLiteral_D1()
+    public async Task Revoke_GranteeSelf_IsAllowedWithoutApproverRights_AndAuditsTheDecisionLiteral()
     {
-        // Pins D1 at runtime for SQLite: the audit decision literal is "REVOKED" (PostgreSQL/SQL Server write "REVOKE"; follow-up DEF-03).
+        // The audit decision literal is "REVOKED" in every dialect (DEF-03).
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantA));
 

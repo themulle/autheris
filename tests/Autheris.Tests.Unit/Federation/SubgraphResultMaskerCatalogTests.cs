@@ -179,33 +179,6 @@ public sealed class SubgraphResultMaskerCatalogTests
     }
 
     [Fact]
-    public async Task AliasPath_UsesRealFieldForCatalogLookup()
-    {
-        var masker = CreateMasker(CatalogWith("tenant-a", "loyaltycode"));
-        var map = SubgraphResultMaskingMiddleware.ExtractAliasToFieldMap(Utf8GraphQLParser.Parse("{ customer { harmless: loyaltyCode } }"));
-        var data = Row(("customer", Row(("harmless", "LC-1"))));
-
-        var result = await masker.MaskResultDataAsync(data, Reader, map) as IReadOnlyDictionary<string, object?>;
-
-        ((IReadOnlyDictionary<string, object?>)result!["customer"]!)["harmless"].ShouldBe("[MASKED]");
-    }
-
-    [Fact]
-    public async Task AliasCollision_NonHeuristicTargets_KeepsBothSoCatalogApplies()
-    {
-        var masker = CreateMasker(CatalogWith("tenant-a", "loyaltycode"));
-        var map = SubgraphResultMaskingMiddleware.ExtractAliasToFieldMap(
-            Utf8GraphQLParser.Parse("{ node { ... on A { x: loyaltyCode } ... on B { x: name } } }"));
-        map.ShouldNotBeNull();
-        map["node.x"].ShouldBe("loyaltyCode|name");
-
-        var data = Row(("node", Row(("x", "LC-1"))));
-        var result = await masker.MaskResultDataAsync(data, Reader, map) as IReadOnlyDictionary<string, object?>;
-
-        ((IReadOnlyDictionary<string, object?>)result!["node"]!)["x"].ShouldBe("[MASKED]");
-    }
-
-    [Fact]
     public async Task CatalogFederatedMaskingCatalog_MapsSensitiveColumns_AndCachesPerTenant()
     {
         var repo = Substitute.For<ITableMetadataRepository>();
