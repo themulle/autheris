@@ -89,6 +89,7 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-ADMIN");
         client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-a"); // DT-A-3: a tenant-less caller is refused at the gate (Multi, no default)
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         return client;
     }

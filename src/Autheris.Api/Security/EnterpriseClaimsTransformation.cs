@@ -82,6 +82,11 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
         // DT-A-3 / DT-SC-05: the one tenant decision of the ingress. Inbound tenant_source claims are removed, the resolved tenant is stamped.
         var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null);
+        if (realm == null)
+        {
+            // The unregistered fallback id is stamped after the tenant decision (the resolver must not treat it as a realm); route-realm guards read it.
+            identity.AddClaim(new Claim("autheris:realm", realmId));
+        }
 
         // 3. Resolve groups/roles if resolver mode
         if (realm != null && realm.GroupSource == RealmGroupSource.Resolver && _roleResolver != null)

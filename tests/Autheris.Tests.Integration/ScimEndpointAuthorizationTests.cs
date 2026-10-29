@@ -46,7 +46,7 @@ public sealed class ScimEndpointAuthorizationTests : IClassFixture<WebApplicatio
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ScimSecret);
 
         var response = await client.GetAsync("/scim/v2/workforce-entra/Users");
-        ((int)response.StatusCode).ShouldBeInRange(200, 299);
+        ((int)response.StatusCode).ShouldBeInRange(200, 299, await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
