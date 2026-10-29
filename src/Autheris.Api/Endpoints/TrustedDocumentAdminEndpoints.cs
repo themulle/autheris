@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System.Text.Json;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
@@ -61,7 +62,7 @@ public static class TrustedDocumentAdminEndpoints
 
         if (!AppIdentity.IsValidAppId(appId) || !AppIdentity.IsValidVersion(version))
         {
-            return Invalid(TrustedDocumentAdminException.InvalidAppId);
+            return Invalid();
         }
 
         var (body, error) = await EndpointSecurity.TryReadBodyAsync(context.Request, MaxPutBodyBytes, "The request body is too large.", context.RequestAborted).ConfigureAwait(false);
@@ -77,12 +78,12 @@ public static class TrustedDocumentAdminEndpoints
         }
         catch (JsonException)
         {
-            return Invalid("InvalidBody");
+            return Invalid();
         }
 
         if (request is null)
         {
-            return Invalid("InvalidBody");
+            return Invalid();
         }
 
         try
@@ -92,7 +93,7 @@ public static class TrustedDocumentAdminEndpoints
         }
         catch (TrustedDocumentAdminException ex)
         {
-            return ex.IsConflict ? Results.Json(new { error = ex.Code }, statusCode: StatusCodes.Status409Conflict) : Invalid(ex.Code);
+            return ex.IsConflict ? ApiProblems.Conflict(ApiErrorCodes.Conflict, "The trusted document version conflicts with the current state.") : Invalid();
         }
     }
 
@@ -105,7 +106,7 @@ public static class TrustedDocumentAdminEndpoints
 
         if (!AppIdentity.IsValidAppId(appId) || !AppIdentity.IsValidVersion(version))
         {
-            return Invalid(TrustedDocumentAdminException.InvalidAppId);
+            return Invalid();
         }
 
         try
@@ -113,9 +114,9 @@ public static class TrustedDocumentAdminEndpoints
             var outcome = await service.RetireAsync(appId, version, actor!, context.RequestAborted).ConfigureAwait(false);
             return outcome == TrustedDocumentRetireOutcome.NotFound ? Results.NotFound() : Results.NoContent();
         }
-        catch (TrustedDocumentAdminException ex)
+        catch (TrustedDocumentAdminException)
         {
-            return Invalid(ex.Code);
+            return Invalid();
         }
     }
 
@@ -128,7 +129,7 @@ public static class TrustedDocumentAdminEndpoints
 
         if (!AppIdentity.IsValidAppId(appId))
         {
-            return Invalid(TrustedDocumentAdminException.InvalidAppId);
+            return Invalid();
         }
 
         var view = await service.GetAppAsync(appId, context.RequestAborted).ConfigureAwait(false);
@@ -167,5 +168,5 @@ public static class TrustedDocumentAdminEndpoints
 
     private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
 
-    private static IResult Invalid(string code) => Results.Json(new { error = code }, statusCode: StatusCodes.Status400BadRequest);
+    private static IResult Invalid() => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The trusted document request is invalid.");
 }

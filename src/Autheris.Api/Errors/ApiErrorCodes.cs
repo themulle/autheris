@@ -98,6 +98,23 @@ public static class ApiErrorCodes
     public const string OlapFailed = "OLAP_FAILED";
     public const string OlapCapacity = "OLAP_CAPACITY";
 
+    // O-5b step 2 (WP-5): codes of the middleware that used to write raw JSON; each is a fixed code, never derived from input.
+    public const string AuthPluginFailed = "AUTH_PLUGIN_FAILED";
+    public const string AuthPluginTimeout = "AUTH_PLUGIN_TIMEOUT";
+    public const string TenantRegistryUnavailable = "TENANT_REGISTRY_UNAVAILABLE";
+    public const string TenantUnknown = "TENANT_UNKNOWN";
+    public const string TenantRegistrationRateLimited = "TENANT_REGISTRATION_RATE_LIMITED";
+    public const string TokenRevocationUnavailable = "TOKEN_REVOCATION_UNAVAILABLE";
+    public const string FinOpsBudgetExceeded = "FINOPS_BUDGET_EXCEEDED";
+    public const string IncrementalStreamLimitExceeded = "INCREMENTAL_STREAM_LIMIT_EXCEEDED";
+    public const string InvalidSchemaContract = "INVALID_SCHEMA_CONTRACT";
+    public const string PersistentConnectionLimitExceeded = "PERSISTENT_CONNECTION_LIMIT_EXCEEDED";
+    public const string ResourceGroupQueueFull = "RESOURCE_GROUP_QUEUE_FULL";
+    public const string ResourceGroupTimeout = "RESOURCE_GROUP_TIMEOUT";
+    public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
+    public const string UnauthorizedNoSid = "UNAUTHORIZED_NO_SID";
+    public const string TokenRevoked = "TOKEN_REVOKED";
+
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 
     // Registered codes: this class plus the stable code sets of the domain/application layers that surface through dynamic sources

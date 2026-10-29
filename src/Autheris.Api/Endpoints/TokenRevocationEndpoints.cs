@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading;
@@ -46,14 +47,14 @@ public static class TokenRevocationEndpoints
     {
         if (request == null || string.IsNullOrWhiteSpace(request.SubjectOrJti))
         {
-            return Results.BadRequest(new { error = "subjectOrJti is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "subjectOrJti is required.");
         }
 
         var now = DateTimeOffset.UtcNow;
         var until = ResolveUntil(request.Until, now);
         if (until <= now)
         {
-            return Results.BadRequest(new { error = "until must be in the future." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "until must be in the future.");
         }
 
         // Review E-8: only a canonical ClusterAdmin revokes globally. Tenant administrators revoke a tenant-scoped

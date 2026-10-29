@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Linq;
 using System.Text.Json;
@@ -38,19 +39,7 @@ public sealed class ReadOnlyTokenMiddleware
             return;
         }
 
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(new
-        {
-            errors = new[]
-            {
-                new
-                {
-                    message = "This token only permits read access.",
-                    extensions = new { code = "READ_ONLY_TOKEN" }
-                }
-            }
-        }), context.RequestAborted).ConfigureAwait(false);
+        await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.ReadOnlyToken, "This token only permits read access.", context.RequestAborted).ConfigureAwait(false);
     }
 
     private bool IsPermitted(HttpRequest request)
