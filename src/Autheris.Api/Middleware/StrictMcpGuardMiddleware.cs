@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -36,11 +37,7 @@ public sealed class StrictMcpGuardMiddleware
             McpPathResolver.IsMcpRequest(context.Request.Path, _options) &&
             !GatewayApplicationBuilderExtensions.IsJsonContentType(context.Request.ContentType))
         {
-            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
-            await context.Response.WriteAsJsonAsync(new
-            {
-                error = "MCP requests must use 'Content-Type: application/json'."
-            }, context.RequestAborted).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(context, StatusCodes.Status415UnsupportedMediaType, ApiErrorCodes.UnsupportedMediaType, "MCP requests must use 'Content-Type: application/json'.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 

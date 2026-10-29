@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -62,8 +63,7 @@ public static class McpEndpoints
             {
                 if (context.Request.ContentLength > MaxMcpMessageBytes)
                 {
-                    context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-                    await context.Response.WriteAsJsonAsync(new { error = "MCP message exceeds maximum allowed size (1 MB)." }, context.RequestAborted).ConfigureAwait(false);
+                    await ApiProblems.WriteAsync(context, StatusCodes.Status413PayloadTooLarge, ApiErrorCodes.PayloadTooLarge, "MCP message exceeds maximum allowed size (1 MB).", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
 

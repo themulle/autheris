@@ -73,7 +73,7 @@ public static class McpDocTools
         {
             if (searchService == null)
             {
-                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+                return McpToolError.Serialize("NOT_AVAILABLE", "Doc search service is not configured.");
             }
             return await ExecuteSearchDocsAsync(searchService, argumentsJson, sessionContext, ct).ConfigureAwait(false);
         }
@@ -82,7 +82,7 @@ public static class McpDocTools
         {
             if (searchService == null)
             {
-                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+                return McpToolError.Serialize("NOT_AVAILABLE", "Doc search service is not configured.");
             }
             return await ExecuteLookupErrorCodeAsync(searchService, argumentsJson, sessionContext, ct).ConfigureAwait(false);
         }
@@ -91,7 +91,7 @@ public static class McpDocTools
         {
             if (searchService == null)
             {
-                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+                return McpToolError.Serialize("NOT_AVAILABLE", "Doc search service is not configured.");
             }
             return await ExecuteGetProcedureAsync(searchService, argumentsJson, sessionContext, ct).ConfigureAwait(false);
         }
@@ -100,7 +100,7 @@ public static class McpDocTools
         {
             if (searchService == null)
             {
-                return JsonSerializer.Serialize(new { error = "Doc search service is not configured." });
+                return McpToolError.Serialize("NOT_AVAILABLE", "Doc search service is not configured.");
             }
             return await ExecuteListDocTopicsAsync(searchService, argumentsJson, sessionContext, ct).ConfigureAwait(false);
         }
@@ -109,7 +109,7 @@ public static class McpDocTools
         {
             if (docStore == null)
             {
-                return JsonSerializer.Serialize(new { error = "Universal doc store is not configured." });
+                return McpToolError.Serialize("NOT_AVAILABLE", "Universal doc store is not configured.");
             }
             return await ExecuteListApplicationsAsync(docStore, argumentsJson, ct).ConfigureAwait(false);
         }
@@ -118,12 +118,12 @@ public static class McpDocTools
         {
             if (docStore == null)
             {
-                return JsonSerializer.Serialize(new { error = "Universal doc store is not configured." });
+                return McpToolError.Serialize("NOT_AVAILABLE", "Universal doc store is not configured.");
             }
             return await ExecuteDepositDocumentationAsync(docStore, argumentsJson, sessionContext, ct).ConfigureAwait(false);
         }
 
-        return JsonSerializer.Serialize(new { error = $"Unknown doc tool '{toolName}'." });
+        return McpToolError.Serialize("NOT_FOUND", "Unknown doc tool.");
     }
 
     public static IEnumerable<McpToolDefinition> Definitions()
@@ -255,7 +255,7 @@ public static class McpDocTools
                     // MCP-08: only an integer is accepted, and it is clamped to 1..MaxSearchLimit.
                     if (l.ValueKind != JsonValueKind.Number || !l.TryGetInt32(out var parsedLimit))
                     {
-                        return JsonSerializer.Serialize(new { error = "Argument 'limit' must be an integer." });
+                        return McpToolError.Serialize("INVALID_PARAMS", "Argument 'limit' must be an integer.");
                     }
 
                     limit = Math.Clamp(parsedLimit, 1, MaxSearchLimit);
@@ -268,7 +268,7 @@ public static class McpDocTools
 
         if (string.IsNullOrWhiteSpace(query))
         {
-            return JsonSerializer.Serialize(new { error = "Argument 'query' is required." });
+            return McpToolError.Serialize("INVALID_PARAMS", "Argument 'query' is required.");
         }
 
         var results = await searchService.SearchAsync(query, ScopeOf(sessionContext), category, limit, ct).ConfigureAwait(false);
@@ -315,13 +315,13 @@ public static class McpDocTools
 
         if (string.IsNullOrWhiteSpace(errorCode))
         {
-            return JsonSerializer.Serialize(new { error = "Argument 'errorCode' is required." });
+            return McpToolError.Serialize("INVALID_PARAMS", "Argument 'errorCode' is required.");
         }
 
         var def = await searchService.LookupErrorCodeAsync(errorCode, ScopeOf(sessionContext), ct).ConfigureAwait(false);
         if (def == null)
         {
-            return JsonSerializer.Serialize(new { error = $"Error code '{errorCode}' was not found in documentation." });
+            return McpToolError.Serialize("NOT_FOUND", "The error code was not found in documentation.");
         }
 
         return SerializeDocPayload(def, def.TenantId is not null);
@@ -353,13 +353,13 @@ public static class McpDocTools
 
         if (string.IsNullOrWhiteSpace(identifierStr) || !DocChunkIdentifier.TryParse(identifierStr, out var identifier))
         {
-            return JsonSerializer.Serialize(new { error = "A valid 'identifier' (AppId::Category::DocId#SectionId) is required." });
+            return McpToolError.Serialize("INVALID_PARAMS", "A valid 'identifier' (AppId::Category::DocId#SectionId) is required.");
         }
 
         var chunk = await searchService.GetChunkAsync(identifier!, ScopeOf(sessionContext), ct).ConfigureAwait(false);
         if (chunk == null)
         {
-            return JsonSerializer.Serialize(new { error = $"Document section '{identifierStr}' was not found." });
+            return McpToolError.Serialize("NOT_FOUND", "The document section was not found.");
         }
 
         return SerializeDocPayload(chunk, chunk.TenantId is not null);
@@ -447,7 +447,7 @@ public static class McpDocTools
         {
             if (sessionContext.IsReadOnly)
             {
-                return JsonSerializer.Serialize(new { error = "ReadOnlySession", message = "Cannot deposit documentation in a read-only MCP session." });
+                return McpToolError.Serialize("FORBIDDEN", "Cannot deposit documentation in a read-only MCP session.");
             }
 
             var roles = sessionContext.Roles ?? [];
@@ -455,19 +455,19 @@ public static class McpDocTools
                            roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
             if (!isAdmin)
             {
-                return JsonSerializer.Serialize(new { error = "Forbidden", message = "Depositing documentation requires ClusterAdmin or GovernanceAdmin role." });
+                return McpToolError.Serialize("FORBIDDEN", "Depositing documentation requires ClusterAdmin or GovernanceAdmin role.");
             }
 
             // A tenant deposit is attributed to its tenant; without one it could not be scoped and would read as official documentation.
             if (!IsClusterAdmin(sessionContext) && string.IsNullOrWhiteSpace(sessionContext.TenantId))
             {
-                return JsonSerializer.Serialize(new { error = "Forbidden", message = "Depositing documentation requires a tenant-bound session." });
+                return McpToolError.Serialize("FORBIDDEN", "Depositing documentation requires a tenant-bound session.");
             }
         }
 
         if (string.IsNullOrWhiteSpace(argumentsJson))
         {
-            return JsonSerializer.Serialize(new { error = "Arguments payload cannot be empty." });
+            return McpToolError.Serialize("INVALID_PARAMS", "Arguments payload cannot be empty.");
         }
 
         string appId;
@@ -485,7 +485,7 @@ public static class McpDocTools
 
             if (!root.TryGetProperty("appId", out var aProp) || aProp.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(aProp.GetString()))
             {
-                return JsonSerializer.Serialize(new { error = "Property 'appId' is required." });
+                return McpToolError.Serialize("INVALID_PARAMS", "Property 'appId' is required.");
             }
             appId = aProp.GetString()!;
 
@@ -498,7 +498,7 @@ public static class McpDocTools
 
                 if (isGlobalApp && !roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase))
                 {
-                    return JsonSerializer.Serialize(new { error = "Forbidden", message = "Depositing documentation for global application requires ClusterAdmin role." });
+                    return McpToolError.Serialize("FORBIDDEN", "Depositing documentation for global application requires ClusterAdmin role.");
                 }
             }
 
@@ -512,13 +512,13 @@ public static class McpDocTools
 
             if (!root.TryGetProperty("title", out var tProp) || tProp.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(tProp.GetString()))
             {
-                return JsonSerializer.Serialize(new { error = "Property 'title' is required." });
+                return McpToolError.Serialize("INVALID_PARAMS", "Property 'title' is required.");
             }
             title = tProp.GetString()!;
 
             if (!root.TryGetProperty("content", out var ctProp) || ctProp.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(ctProp.GetString()))
             {
-                return JsonSerializer.Serialize(new { error = "Property 'content' is required." });
+                return McpToolError.Serialize("INVALID_PARAMS", "Property 'content' is required.");
             }
             content = ctProp.GetString()!;
 
@@ -542,9 +542,9 @@ public static class McpDocTools
                 }
             }
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            return JsonSerializer.Serialize(new { error = $"Invalid JSON arguments: {ex.Message}" });
+            return McpToolError.Serialize("INVALID_JSON", "Arguments must be valid JSON.");
         }
 
         // Documents deposited by a tenant administrator belong to that tenant: they are served only to the same tenant and are
@@ -570,7 +570,7 @@ public static class McpDocTools
             if (!roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) &&
                 await docStore.DocumentExistsAsync(request, ct).ConfigureAwait(false))
             {
-                return JsonSerializer.Serialize(new { error = "Forbidden", message = "Overwriting an existing document requires ClusterAdmin role." });
+                return McpToolError.Serialize("FORBIDDEN", "Overwriting an existing document requires ClusterAdmin role.");
             }
         }
 

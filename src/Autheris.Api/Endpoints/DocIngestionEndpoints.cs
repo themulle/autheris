@@ -5,6 +5,7 @@ using System.IO;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Docs.Interfaces;
@@ -45,7 +46,7 @@ public static class DocIngestionEndpoints
                 const long maxRawSize = 50 * 1024 * 1024;
                 if (request.ContentLength > maxRawSize)
                 {
-                    return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Bundle archive exceeds maximum permitted size of 50 MB.", request.HttpContext);
                 }
 
                 using var ms = new MemoryStream();
@@ -57,14 +58,14 @@ public static class DocIngestionEndpoints
                     totalBytes += bytesRead;
                     if (totalBytes > maxRawSize)
                     {
-                        return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                        return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Bundle archive exceeds maximum permitted size of 50 MB.", request.HttpContext);
                     }
                     await ms.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
                 }
 
                 if (ms.Length == 0)
                 {
-                    return Results.BadRequest(new { error = "No documentation bundle file found in the request." });
+                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "No documentation bundle file found in the request.", request.HttpContext);
                 }
 
                 ms.Position = 0;
@@ -76,13 +77,13 @@ public static class DocIngestionEndpoints
             var file = form.Files.GetFile("bundle") ?? (form.Files.Count > 0 ? form.Files[0] : null);
             if (file == null || file.Length == 0)
             {
-                return Results.BadRequest(new { error = "No documentation bundle file found in the request." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "No documentation bundle file found in the request.", request.HttpContext);
             }
 
             // Guard against oversized archives (e.g. 50 MB limit)
             if (file.Length > 50 * 1024 * 1024)
             {
-                return Results.BadRequest(new { error = "Bundle archive exceeds maximum permitted size of 50 MB." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Bundle archive exceeds maximum permitted size of 50 MB.", request.HttpContext);
             }
 
             await using var stream = file.OpenReadStream();
@@ -103,12 +104,12 @@ public static class DocIngestionEndpoints
         {
             if (!Enum.TryParse<DocCategory>(category, true, out var parsedCategory))
             {
-                return Results.BadRequest(new { error = $"Invalid document category '{category}'." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The document category is invalid.", httpContext);
             }
 
             if (string.IsNullOrWhiteSpace(body.Content))
             {
-                return Results.BadRequest(new { error = "Document content cannot be empty." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Document content cannot be empty.", httpContext);
             }
 
             // Cluster administrators deposit official documentation; every other caller's document belongs to the caller's tenant
@@ -174,7 +175,7 @@ public static class DocIngestionEndpoints
             var manifest = await docStore.GetManifestAsync(appId, ct).ConfigureAwait(false);
             return manifest != null
                 ? Results.Ok(manifest)
-                : Results.NotFound(new { error = $"Manifest for application '{appId}' was not found." });
+                : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The application manifest was not found.");
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
 
         // 5. Search documentation REST API
@@ -188,7 +189,7 @@ public static class DocIngestionEndpoints
         {
             if (string.IsNullOrWhiteSpace(query))
             {
-                return Results.BadRequest(new { error = "Query parameter 'query' is required." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Query parameter 'query' is required.", httpContext);
             }
 
             DocCategory? parsedCategory = null;
@@ -222,7 +223,7 @@ public static class DocIngestionEndpoints
             var def = await searchService.LookupErrorCodeAsync(errorCode, DocEndpointAccess.ResolveReadScope(httpContext), ct).ConfigureAwait(false);
             return def != null
                 ? Results.Ok(def)
-                : Results.NotFound(new { error = $"Error code '{errorCode}' was not found in documentation." });
+                : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The error code was not found in documentation.", httpContext);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
 
         // 8. Retrieve procedure instructions REST API
@@ -234,13 +235,13 @@ public static class DocIngestionEndpoints
         {
             if (!DocChunkIdentifier.TryParse(identifier, out var id) || id == null)
             {
-                return Results.BadRequest(new { error = $"Invalid document identifier format '{identifier}'." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The document identifier format is invalid.", httpContext);
             }
 
             var chunk = await searchService.GetChunkAsync(id, DocEndpointAccess.ResolveReadScope(httpContext), ct).ConfigureAwait(false);
             return chunk != null
                 ? Results.Ok(chunk)
-                : Results.NotFound(new { error = $"Document section '{identifier}' was not found." });
+                : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The document section was not found.", httpContext);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.DocDiscoveryRead);
 
         // 9. Sync existing documents from filesystem storage REST API
@@ -344,7 +345,7 @@ internal static class DocEndpointAccess
         result.FilePath is null ? result : result with { FilePath = DocProvenance.ToSafeSourcePath(result.FilePath) };
 
     public static IResult Forbidden(string message) =>
-        Results.Json(new { error = "Forbidden", message }, statusCode: StatusCodes.Status403Forbidden);
+        ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, message);
 }
 
 public sealed record DepositDocumentBody(
