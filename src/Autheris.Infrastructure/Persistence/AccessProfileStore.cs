@@ -116,9 +116,9 @@ internal sealed class AccessProfileStore(
                     byId[profile.ProfileId] = existing;
                 }
 
-                if (!existing.AssignedSubjects.Contains(assignment.Subject, StringComparer.OrdinalIgnoreCase))
+                if (!existing.Assignments.Any(a => a.SubjectType == assignment.SubjectType &&
+                                                   string.Equals(a.Subject, assignment.Subject, StringComparison.OrdinalIgnoreCase)))
                 {
-                    existing.AssignedSubjects.Add(assignment.Subject);
                     existing.Assignments.Add(assignment);
                 }
             }
@@ -185,10 +185,6 @@ internal sealed class AccessProfileStore(
             {
                 var assignment = ReadAssignment(assignReader, 1);
                 profile.Assignments.Add(assignment);
-                if (!profile.AssignedSubjects.Contains(assignment.Subject, StringComparer.OrdinalIgnoreCase))
-                {
-                    profile.AssignedSubjects.Add(assignment.Subject);
-                }
             }
         }
 
@@ -219,7 +215,7 @@ internal sealed class AccessProfileStore(
             ("@rowFilterPredicate", profile.RowFilterPredicate), ("@justification", profile.Justification),
             ("@createdBy", profile.CreatedBy ?? "unknown"), ("@createdAt", Ts(profile.CreatedAt)), ("@validTo", Ts(profile.ValidTo))).ConfigureAwait(false);
 
-        // Desired assignments: explicit typed ones (validated, period restarted now) plus legacy plain subjects (users, expiry = profile validity).
+        // O-5d: the typed assignments are authoritative (validated, period restarted now); an empty list clears every stored assignment.
         var desired = new Dictionary<(AccessProfileSubjectType, string), AccessProfileAssignment>();
         foreach (var explicitAssignment in profile.Assignments)
         {
@@ -230,26 +226,7 @@ internal sealed class AccessProfileStore(
 
         var existing = (await LoadProfilesAsync(conn, profile.TenantId, profile.ProfileId, ct, tx).ConfigureAwait(false))
             .FirstOrDefault()?.Assignments ?? [];
-        foreach (var subject in profile.AssignedSubjects.Where(s => !string.IsNullOrWhiteSpace(s)))
-        {
-            var key = (AccessProfileSubjectType.User, ConsentSubjectFilter.Normalize(subject.Trim()));
-            if (!desired.ContainsKey(key))
-            {
-                var kept = existing.FirstOrDefault(e => e.SubjectType == AccessProfileSubjectType.User &&
-                                                        ConsentSubjectFilter.Normalize(e.Subject.Trim()) == key.Item2);
-                desired[key] = kept is null
-                    ? new AccessProfileAssignment
-                    {
-                        Subject = subject.Trim(), SubjectType = AccessProfileSubjectType.User, AssignedAt = profile.CreatedAt, ExpiresAt = profile.ValidTo, CreatedBy = profile.CreatedBy
-                    }
-                    : kept.ExpiresAt is null ? kept with { ExpiresAt = profile.ValidTo } : kept;
-            }
-        }
-
-        // Legacy mode (no typed assignments given): only the plain-subject list is reconciled, typed group/role mappings are left untouched.
-        var typedGiven = profile.Assignments.Count > 0;
-        foreach (var old in existing.Where(e => (typedGiven || e.SubjectType == AccessProfileSubjectType.User) &&
-                                                !desired.ContainsKey((e.SubjectType, ConsentSubjectFilter.Normalize(e.Subject.Trim())))))
+        foreach (var old in existing.Where(e => !desired.ContainsKey((e.SubjectType, ConsentSubjectFilter.Normalize(e.Subject.Trim())))))
         {
             await DeleteAssignmentAsync(conn, tx, profile.TenantId, profile.ProfileId, old.SubjectType, old.Subject, ct).ConfigureAwait(false);
         }
@@ -458,7 +435,6 @@ internal sealed class AccessProfileStore(
             CreatedBy = reader.IsDBNull(o + 7) ? null : reader.GetString(o + 7),
             CreatedAt = ReadTs(reader, o + 8) ?? DateTimeOffset.UtcNow,
             ValidTo = ReadTs(reader, o + 9),
-            AssignedSubjects = [],
             Assignments = []
         };
     }

@@ -12,8 +12,7 @@ public sealed class AccessProfile
     public MaskingPolicyMode MaskingMode { get; init; } = MaskingPolicyMode.Default;
     public List<string> TargetTables { get; init; } = []; // z. B. ["*.*"] oder ["tem.gps_position", "md.*"]
     public string? RowFilterPredicate { get; set; }      // z. B. "status != 'DELIVERED'"
-    public List<string> AssignedSubjects { get; init; } = []; // SIDs oder Benutzernamen (z. B. ["david"])
-    /// <summary>WP-SC-03: the typed assignments (users, groups, roles) with their approvals and expiry. <see cref="AssignedSubjects"/> lists the same subjects as plain strings.</summary>
+    /// <summary>WP-SC-03: the typed assignments (users, groups, roles) with their approvals and expiry. They are the only source of who holds a profile (O-5d: plain subject lists were removed).</summary>
     public List<AccessProfileAssignment> Assignments { get; init; } = [];
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ValidTo { get; init; }

@@ -72,24 +72,8 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         }
 
         var rights = await GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles, ct).ConfigureAwait(false);
-        var resultSet = new HashSet<FunctionalRight>(rights);
-
-        // Map legacy GatewayRole claims to equivalent FunctionalRights for backward compatibility
-        // GOV-13: only exact global role names (no "tenant:Role" prefix stripping) and never in a customer realm, where the customer ceiling applies.
-        var callerRealm = _realmRegistry.GetRealm(realmId);
-        var callerInCustomerRealm = callerRealm != null && (callerRealm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer);
-        if (!callerInCustomerRealm)
-        {
-            foreach (var role in principal.GetUserRoles())
-            {
-                if (GatewayRoleExtensions.TryParseGlobalRole(role, out var gatewayRole))
-                {
-                    resultSet.Add(new FunctionalRight(gatewayRole.ToString()));
-                }
-            }
-        }
-
-        return resultSet;
+        // NL-SC-01: a GatewayRole claim never implies a right; roles reach rights only through configured, approved assignments.
+        return new HashSet<FunctionalRight>(rights);
     }
 
     public async Task<IReadOnlySet<FunctionalRight>> GetRightsForGroupsAndRolesAsync(

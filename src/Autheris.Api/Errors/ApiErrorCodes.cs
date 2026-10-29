@@ -44,6 +44,7 @@ public static class ApiErrorCodes
     public const string CdcSnapshotTooLarge = "CDC_SNAPSHOT_TOO_LARGE";
     public const string CdcStoreBusy = "CDC_STORE_BUSY";
     public const string CdcSubscriptionQuotaExceeded = "CDC_SUBSCRIPTION_QUOTA_EXCEEDED";
+    public const string AccessProfilePlainSubjectsRemoved = "ACCESS_PROFILE_PLAIN_SUBJECTS_REMOVED";
     public const string RowFilterSyntaxInvalid = "ROW_FILTER_SYNTAX_INVALID";
     public const string DbtProposalConflict = "DBT_PROPOSAL_CONFLICT";
     public const string DbtManifestInvalid = "DBT_MANIFEST_INVALID";

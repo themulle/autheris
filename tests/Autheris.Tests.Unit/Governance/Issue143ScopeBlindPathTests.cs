@@ -399,7 +399,7 @@ public sealed class Issue143ScopeBlindPathTests
             TenantId = TenantA,
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["public.*"],
-            AssignedSubjects = [UserSid],
+            Assignments = TestAssign.Users(UserSid),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
         return repo;

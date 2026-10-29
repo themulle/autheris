@@ -4,6 +4,6 @@
   "private": true,
   "description": "Vendored Swagger UI static assets for offline gateway documentation",
   "dependencies": {
-    "swagger-ui-dist": "5.33.3"
+    "swagger-ui-dist": "5.34.0"
   }
 }

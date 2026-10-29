@@ -46,7 +46,7 @@ public sealed class AccessProfileRowPolicyTests
         MaskingMode = mode,
         TargetTables = ["tem.*"],
         RowFilterPredicate = predicate,
-        AssignedSubjects = ["S-1-5-21-DAVID"],
+        Assignments = TestAssign.Users("S-1-5-21-DAVID"),
         CreatedAt = DateTimeOffset.UtcNow,
         ValidTo = DateTimeOffset.UtcNow.AddDays(1),
         Justification = "test",

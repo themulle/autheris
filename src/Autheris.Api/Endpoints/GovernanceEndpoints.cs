@@ -62,4 +62,8 @@ public sealed class BulkConsentRequest
     public string? RowFilter { get; set; }
     public int ValidDays { get; set; }
     public string? Justification { get; set; }
+
+    /// <summary>O-5d: members the contract does not know. Only used to refuse the removed <c>assignedSubjects</c> member explicitly.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
 }
