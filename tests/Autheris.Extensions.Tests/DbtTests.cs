@@ -710,6 +710,59 @@ public sealed class DbtTests
         ex.Message.ShouldContain("SUPER_SECRET_ALGO");
     }
 
+    [Theory]
+    [InlineData("email_mask", "MASK_EMAIL")]
+    [InlineData("EMAIL_MASK", "MASK_EMAIL")]
+    [InlineData(" Phone_Mask ", "MASK_PHONE")]
+    [InlineData("iban_mask", "MASK_IBAN")]
+    [InlineData("mask_email", "MASK_EMAIL")]
+    [InlineData("mask_partial", "PARTIAL_MASK")]
+    [InlineData("partial_mask", "PARTIAL_MASK")]
+    public async Task DbtMetadataIngestionService_I393a_NormalisesMaskAliasesToExistingRules(string alias, string expected)
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var targetTableId = new TableIdentifier("postgres", "analytics", "customers");
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = targetTableId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "postgres", SchemaName = "analytics", TableName = "customers", Sensitivity = "NORMAL" },
+            Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
+        };
+        metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>()).Returns(existingMetadata);
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([existingMetadata]);
+        var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
+
+        var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"" + alias + "\" } } } ] }";
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.ColumnMaskingRules["col_a"].RuleType == expected), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("geo_mask")]
+    [InlineData("mask_geo_jitter")]
+    [InlineData("emal_mask")]
+    public async Task DbtMetadataIngestionService_I393a_UnknownMaskAliasesStillFailClosed(string alias)
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var targetTableId = new TableIdentifier("postgres", "analytics", "customers");
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = targetTableId,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "postgres", SchemaName = "analytics", TableName = "customers", Sensitivity = "NORMAL" },
+            Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
+        };
+        metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>()).Returns(existingMetadata);
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([existingMetadata]);
+        var service = new DbtMetadataIngestionService(Substitute.For<IDbtProposalRepository>(), metadataRepo, Substitute.For<ILineageGraphStore>(), NullLogger<DbtMetadataIngestionService>.Instance);
+        var json = "{ \"classifications\": [ { \"database\": \"postgres\", \"schema\": \"analytics\", \"table\": \"customers\", \"columns\": { \"col_a\": { \"masking_rule\": \"" + alias + "\" } } } ] }";
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var ex = await Should.ThrowAsync<ArgumentException>(() => service.IngestGovernanceStreamAsync(stream, Caller, dryRun: false));
+        ex.Message.ShouldContain("Unknown masking rule");
+    }
+
     [Fact]
     public async Task DbtMetadataIngestionService_B02_ReplaceMode_RejectsRemovalOfOmittedRules_AndWritesNothing()
     {

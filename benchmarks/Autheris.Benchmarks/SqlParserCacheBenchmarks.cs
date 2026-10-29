@@ -6,8 +6,7 @@ namespace Autheris.Benchmarks;
 
 /// <summary>
 /// ARCH-MNT-15-SC-11: cold versus warm ANTLR cache. <see cref="ParseWarm"/> parses on a generation that is never replaced; <see cref="ParseCold"/>
-/// forces the cap to 1 (a swap on every use), so every parse starts with empty DFA caches. Informational: no CI gate (extending
-/// <c>SqlGate.BenchCheck</c> with a cold/warm ratio is a follow-up). Run: <c>dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- --filter "*SqlParserCache*"</c>.
+/// forces the cap to 1 (a swap on every use), so every parse starts with empty DFA caches. Gated by <c>SqlGate.BenchCheck</c> (cold/warm P99 ratio, ARCH-MNT-15-FU-01). Run: <c>dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- --filter "*SqlParserCache*"</c>.
 /// </summary>
 [MemoryDiagnoser]
 public class SqlParserCacheBenchmarks

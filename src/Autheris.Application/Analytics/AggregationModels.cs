@@ -173,6 +173,21 @@ public sealed class AggregationFilterRejectedException : GatewaySecurityExceptio
 }
 
 /// <summary>
+/// #389: the differential-privacy policy refuses the aggregate (MIN/MAX under noise, a repeated function/column pair, missing or invalid
+/// measure bounds). One code and one fixed message for every cause; the exception carries no column, alias or bounds data (400).
+/// </summary>
+public sealed class AggregationPrivacyRestrictedException : GatewayInvalidQueryException
+{
+    public const string ErrorCodeConst = AggregationErrorCodes.PrivacyRestricted;
+    public const string FixedMessage = "The requested aggregate is not available under the privacy policy.";
+
+    public AggregationPrivacyRestrictedException()
+        : base(FixedMessage, ErrorCodeConst)
+    {
+    }
+}
+
+/// <summary>
 /// Thrown when an aggregation would have to read at least the in-memory row cap: the aggregate over a truncated prefix would be wrong,
 /// so the call fails closed (<c>AGGREGATION_ROW_CAP_EXCEEDED</c>) instead of returning a silently truncated result.
 /// </summary>

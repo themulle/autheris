@@ -1072,20 +1072,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         "GEO_JITTER", "PARTIAL_MASK", "TOKENIZE", "TOKENIZATION"
     };
 
-    private static string NormalizeMaskingRuleType(string raw)
-    {
-        var trimmed = raw.Trim().ToUpperInvariant();
-        return trimmed switch
-        {
-            "GEO_JITTER" or "GEOJITTER" => "GEO_JITTER",
-            "PARTIAL_MASK" or "PARTIAL" or "PARTIALMASK" => "PARTIAL_MASK",
-            "TOKENIZE" or "TOKENIZATION" => "TOKENIZE",
-            "NULLING" or "NULLIFY" => "NULLIFY",
-            "PSEUDONYMIZE" or "PSEUDONYMIZATION" or "HMAC" or "HMAC_SHA256" => "HMAC",
-            "REDACT_COMPLETE" or "REDACT" => "REDACT",
-            _ => trimmed
-        };
-    }
+    private static string NormalizeMaskingRuleType(string raw) => DbtMaskingRuleAliases.Normalize(raw);
 
     public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, DbtGovernanceImportCaller caller, bool dryRun = false, bool replace = false, CancellationToken ct = default)
     {

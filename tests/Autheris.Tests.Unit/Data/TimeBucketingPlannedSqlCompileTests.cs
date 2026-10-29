@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using System.Linq;
 using System.Threading;
 using Autheris.Application.Analytics;
 using Autheris.Application.Data.Interfaces;
@@ -11,6 +12,7 @@ using Autheris.Application.Data.Services;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
@@ -280,23 +282,59 @@ public sealed class TimeBucketingPlannedSqlCompileTests
 
         [Fact]
         [Trait("Category", "Security")]
-        [Trait("SecurityCondition", "SEC-PGP-03")]
-        public void AggregateFailureMapper_CompilerErrors_NoExceptionTextInResponse()
+        [Trait("SecurityCondition", "I389-T-03")]
+        public void AggregateFailureMapper_MapsByType_NotMessage()
+        {
+            // A message that looks like another code must not change the code; derived types win over the generic base arm.
+            AggregateFailureMapper.ForAggregate(new GatewayInvalidQueryException("AGGREGATION_PRIVACY_RESTRICTED " + Sentinel))!
+                .Errors[0].Code.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+            AggregateFailureMapper.ForAggregate(new Autheris.Application.Analytics.AggregationPrivacyRestrictedException())!
+                .Errors[0].Code.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
+            AggregateFailureMapper.ForAggregate(new TrinoSqlEngine.Ast.Builder.AstBuildException("AGGREGATION_ARGUMENT_INVALID"))!
+                .Errors[0].Code.ShouldBe("AGGREGATION_NOT_SUPPORTED");
+            AggregateFailureMapper.ForAggregate(new InvalidOperationException("AGGREGATION_NOT_SUPPORTED " + Sentinel)).ShouldBeNull();
+        }
+
+        [Fact]
+        [Trait("Category", "Security")]
+        [Trait("SecurityCondition", "I389-T-04")]
+        public void NotSupported_AstBuild_CompileNotSupported_DialectUnsupported_FixedMessage_NoDialectOrSecretEcho()
         {
             Exception[] errors =
             [
-                new TrinoSqlEngine.Ast.Builder.AstBuildException(Sentinel, new InvalidOperationException(Sentinel)),
-                new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid),
-                new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument),
-                new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, Sentinel)
+                new TrinoSqlEngine.Ast.Builder.AstBuildException(Sentinel),
+                new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Dialect, Sentinel),
+                new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, Sentinel),
+                new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, Sentinel),
+                new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect)
             ];
 
-            foreach (var error in errors)
+            var messages = errors.Select(e => AggregateFailureMapper.ForAggregate(e)!).ToList();
+
+            messages.ShouldAllBe(m => m.Errors[0].Code == "AGGREGATION_NOT_SUPPORTED");
+            messages.Select(m => m.Errors[0].Message).Distinct().Single().ShouldBe("The requested aggregation is not supported for this dataset.");
+            messages.ShouldAllBe(m => !m.Errors[0].Message.Contains(Sentinel) && m.InnerException == null);
+        }
+
+        [Fact]
+        [Trait("Category", "Security")]
+        [Trait("SecurityCondition", "SEC-PGP-03")]
+        public void AggregateFailureMapper_CompilerErrors_NoExceptionTextInResponse()
+        {
+            (Exception Error, string Code)[] errors =
+            [
+                (new TrinoSqlEngine.Ast.Builder.AstBuildException(Sentinel, new InvalidOperationException(Sentinel)), "AGGREGATION_NOT_SUPPORTED"),
+                (new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneInvalid), "AGGREGATION_ARGUMENT_INVALID"),
+                (new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument), "AGGREGATION_ARGUMENT_INVALID"),
+                (new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, Sentinel), "AGGREGATION_NOT_SUPPORTED")
+            ];
+
+            foreach (var (error, code) in errors)
             {
                 var mapped = AggregateFailureMapper.ForAggregate(error);
 
                 mapped.ShouldNotBeNull();
-                mapped.Errors[0].Code.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+                mapped.Errors[0].Code.ShouldBe(code);
                 mapped.Errors[0].Message.ShouldNotContain(Sentinel);
                 mapped.Errors[0].Message.ShouldNotContain("SQL_TIMEZONE");
                 mapped.Errors[0].Extensions!.Keys.ShouldBe(["code"]);
