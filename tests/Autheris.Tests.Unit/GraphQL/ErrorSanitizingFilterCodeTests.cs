@@ -88,6 +88,11 @@ public sealed class ErrorSanitizingFilterCodeTests
     [InlineData("Production", "AGGREGATION_INVALID_FUNCTION_FOR_TYPE")]
     [InlineData("Production", "AGGREGATION_ROW_CAP_EXCEEDED")]
     [InlineData("Production", "REQUIRED_FILTER_COLUMN_MISSING")]
+    [InlineData("Production", "AGGREGATION_PRIVACY_RESTRICTED")]
+    [InlineData("Production", "AGGREGATION_NOT_SUPPORTED")]
+    [InlineData("Production", "AGG_NEGATED_FILTER_REJECTED")]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I389-T-05")]
     public void TypedFixedMessageCodes_PassThroughInEveryEnvironment(string env, string code)
     {
         var error = ErrorBuilder.New().SetMessage("Thrower text.").SetCode(code).Build();
@@ -97,6 +102,37 @@ public sealed class ErrorSanitizingFilterCodeTests
         result.Code.ShouldBe(code);
         result.Message.ShouldNotBe("Thrower text.");
         result.Message.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I389-T-05")]
+    public void Sanitizer_NewCodes_NotExpectedOutcome_UnknownCode_StillSanitized()
+    {
+        var expected = typeof(ErrorSanitizingFilter).GetField("ExpectedOutcomeCodes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        expected.ShouldNotBeNull();
+        var codes = ((IEnumerable<string>)expected!.GetValue(null)!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        codes.ShouldNotContain("AGGREGATION_PRIVACY_RESTRICTED");
+        codes.ShouldNotContain("AGGREGATION_NOT_SUPPORTED");
+
+        var error = ErrorBuilder.New().SetMessage("secret column amount").SetCode("AGGREGATION_SOMETHING_ELSE").Build();
+        var result = CreateFilter("Production").OnError(error);
+        result.Code.ShouldNotBe("AGGREGATION_SOMETHING_ELSE");
+        result.Message.ShouldNotContain("secret");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I389-SC-01")]
+    public void NewAggregationCodes_FixedMessagesContainNoThrowerText()
+    {
+        foreach (var code in new[] { "AGGREGATION_PRIVACY_RESTRICTED", "AGGREGATION_NOT_SUPPORTED" })
+        {
+            var error = ErrorBuilder.New().SetMessage("Thrower text amount_column.").SetCode(code).Build();
+            var result = CreateFilter("Production").OnError(error);
+            result.Message.ShouldNotContain("Thrower");
+            result.Message.ShouldNotContain("amount");
+        }
     }
 
     [Theory]

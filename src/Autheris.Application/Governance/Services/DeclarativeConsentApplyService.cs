@@ -56,7 +56,9 @@ public sealed class DeclarativeConsentApplyService(
             throw new System.Security.SecurityException("Caller lacks required governance permissions to apply declarative consent manifests.");
         }
 
-        var actorSid = caller.GetUserSid() ?? new Sid("S-1-5-21-GITOPS-SYNC");
+        // NL-SC-10: the actor is always the supplied authenticated SID; a principal without one is inconsistent and never gets a stand-in.
+        var actorSid = caller.GetUserSid()
+            ?? throw new System.Security.SecurityException("Caller must carry a user SID to apply declarative consent manifests.");
         var tenantId = caller.GetTenantId();
         var now = DateTimeOffset.UtcNow;
 

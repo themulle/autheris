@@ -103,7 +103,11 @@ public sealed class TypedMetricQueryGraphQlTests
         { new AggregationRowCapExceededException(), "AGGREGATION_ROW_CAP_EXCEEDED" },
         { new PrivacyBudgetExhaustedException("alice", 1.0, 0.0), "PRIVACY_BUDGET_EXHAUSTED" },
         { new ArgumentException("Dimension 'secret_dim' is not declared"), "AGGREGATION_ARGUMENT_INVALID" },
-        { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" }
+        { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" },
+        { new AggregationPrivacyRestrictedException(), "AGGREGATION_PRIVACY_RESTRICTED" },
+        { new AggregationFilterRejectedException(), "AGG_NEGATED_FILTER_REJECTED" },
+        { new TrinoSqlEngine.Ast.Builder.AstBuildException("echo secret_value"), "AGGREGATION_NOT_SUPPORTED" },
+        { new TrinoSqlEngine.SqlCompileNotSupportedException(TrinoSqlEngine.SqlCompileNotSupportedReason.Construct, "secret"), "AGGREGATION_NOT_SUPPORTED" }
     };
 
     [Trait("Category", "Security")]

@@ -400,14 +400,12 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         {
             if (agg.Function is AggregateFunction.Min or AggregateFunction.Max)
             {
-                throw new GatewayInvalidQueryException(
-                    "MIN and MAX aggregates are not available while differential privacy noise is enabled.", "AGGREGATION_ARGUMENT_INVALID");
+                throw new AggregationPrivacyRestrictedException();
             }
 
             if (!seen.Add((agg.Function, agg.Column ?? string.Empty)))
             {
-                throw new GatewayInvalidQueryException(
-                    "Repeating an aggregate function over the same column is not available while differential privacy noise is enabled.", "AGGREGATION_ARGUMENT_INVALID");
+                throw new AggregationPrivacyRestrictedException();
             }
         }
     }
@@ -447,7 +445,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             }
         }
 
-        throw new GatewayInvalidQueryException($"Differential privacy noise requires configured MeasureBounds for column '{column}'.");
+        throw new AggregationPrivacyRestrictedException();
     }
 
     private async ValueTask<long?> TryGetAttributeGenerationAsync(CancellationToken ct)

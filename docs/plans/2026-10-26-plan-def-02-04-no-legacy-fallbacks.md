@@ -209,3 +209,13 @@ Facts verified: the loop is the only role-to-right path in `FunctionalRightMappe
 - Consider splitting O-5d from the FU PR if the touched REST contract is consumed by the UI/SDK: ship with the consumer change. Everything else may stay together.
 - O-5b step 2 groups with protocol-mandated bodies (NL-SC-22) should be reviewed first and may be excluded rather than migrated.
 - Default-tenant lane (not conditioned): O-2 must keep `LegacySwitchGuard` failing on key presence regardless of value (DEF-SC-11) and test rejection under Development; O-4 must deny a tenant header for any unauthenticated principal in all environments, never fall back to a header value, and use the configured tenant only; O-1 must fail startup (not warn) when an enabled provider has no explicit realm, with no implicit realm resurrected through defaults, and remove un-namespaced group mapping without widening (unmapped groups map to nothing).
+
+
+## 10. Changelog and delivery status
+
+- **2026-10-26, PR #375 (merged):** DEF-02/03/04, DEF-01 pinned, ext_authz hardening, sweep items L1-L14. Follow-up during CI: in insecure/getting-started mode an ITSM webhook needs an explicit `Gateway:Itsm:InstanceToTenantMap` entry, and an unmapped instance stays rejected (DEF-SC-12, confirmed by Phase 3).
+- **2026-10-29, owner decision on O-6:** there is no background-sync actor option. NL-SC-10/11 are amended: a missing caller SID always throws `SecurityException`. The only caller of the declarative apply service in this repository is the authenticated endpoint, so the audit actor is always the authenticated caller SID.
+- **2026-10-29, `fix/no-legacy-followups`:** O-3, O-5a, O-5b step 1 (ratchet baseline 272 bare error bodies after 5 reasoned exclusions), O-5c, O-5d, O-5f and O-6. Phase 5 approved.
+- **Open follow-ups:**
+  - **O-5b step 2:** branch `fix/no-legacy-error-bodies`. When its baseline reaches 0, delete `IsBareErrorShape` and the DevPortal `data.error` fallback.
+  - **O-1, O-2, O-4 and the root tenant fallbacks:** branch `refactor/default-tenant`.

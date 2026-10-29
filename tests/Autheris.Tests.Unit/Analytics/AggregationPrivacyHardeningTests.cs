@@ -508,7 +508,7 @@ public sealed class AggregationPrivacyHardeningTests
     {
         var (service, executor, _) = CreateService(DepartmentRows(("A", 6, 1m)), NoiseOptions());
 
-        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
+        var ex = await Should.ThrowAsync<AggregationPrivacyRestrictedException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId,
             GroupBy: ["department"],
             Aggregates:
@@ -518,7 +518,7 @@ public sealed class AggregationPrivacyHardeningTests
             ],
             PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
 
-        ex.ErrorCode.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+        ex.ErrorCode.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
         executor.Calls.ShouldBe(0);
     }
 
@@ -529,14 +529,58 @@ public sealed class AggregationPrivacyHardeningTests
     {
         var (service, executor, _) = CreateService(DepartmentRows(("A", 6, 1m)), NoiseOptions());
 
-        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
+        var ex = await Should.ThrowAsync<AggregationPrivacyRestrictedException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId,
             GroupBy: ["department"],
             Aggregates: [new AggregateSelection(function, "amount", "x")],
             PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
 
-        ex.ErrorCode.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+        ex.ErrorCode.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
         executor.Calls.ShouldBe(0);
+    }
+
+    private const string SentinelAlias = "sentinel_alias_zq";
+
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I389-T-01")]
+    [Trait("SecurityCondition", "I389-T-02")]
+    [Fact]
+    public async Task PrivacyRestricted_MinMaxRepeatedPairMissingBounds_SameCodeAndMessage_NoColumnOrAlias_ExecutorNotCalled()
+    {
+        var noBounds = NoiseOptions();
+        noBounds.Privacy.Noise.MeasureBounds = new Dictionary<string, MeasureBoundsOptions>(StringComparer.OrdinalIgnoreCase);
+        AggregateSelection[][] causes =
+        [
+            [new AggregateSelection(AggregateFunction.Min, "amount", SentinelAlias)],
+            [new AggregateSelection(AggregateFunction.Count, "amount", SentinelAlias), new AggregateSelection(AggregateFunction.Count, "amount", "other_alias")],
+            [new AggregateSelection(AggregateFunction.Sum, "amount", SentinelAlias)],
+            [new AggregateSelection(AggregateFunction.Avg, "amount", SentinelAlias)]
+        ];
+
+        var messages = new HashSet<string>();
+        foreach (var aggregates in causes)
+        {
+            var (service, executor, audit) = CreateService(DepartmentRows(("A", 6, 1m)), aggregates[0].Function == AggregateFunction.Sum || aggregates[0].Function == AggregateFunction.Avg ? noBounds : NoiseOptions());
+
+            var ex = await Should.ThrowAsync<AggregationPrivacyRestrictedException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
+                OrdersTableId,
+                GroupBy: ["department"],
+                Aggregates: aggregates,
+                PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
+
+            ex.ErrorCode.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
+            ex.Data.Count.ShouldBe(0);
+            ex.InnerException.ShouldBeNull();
+            ex.ToString().ShouldNotContain("amount");
+            ex.ToString().ShouldNotContain(SentinelAlias);
+            messages.Add(ex.Message);
+            audit.Entries.ShouldNotBeEmpty();
+            audit.Entries.ShouldAllBe(e => !e.ToString()!.Contains(SentinelAlias) && !System.Text.Json.JsonSerializer.Serialize(e).Contains(SentinelAlias));
+            executor.Calls.ShouldBe(0);
+        }
+
+        messages.Count.ShouldBe(1);
+        messages.Single().ShouldBe("The requested aggregate is not available under the privacy policy.");
     }
 
     [Fact]

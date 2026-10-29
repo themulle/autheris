@@ -22,7 +22,9 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
         var list = _profiles.Values
             .Where(p => p.TenantId == tenantId &&
                         p.IsActive(now) &&
-                        p.AssignedSubjects.Any(s => string.Equals(s, subject, StringComparison.OrdinalIgnoreCase)))
+                        p.Assignments.Any(a => a.SubjectType == AccessProfileSubjectType.User &&
+                                               string.Equals(a.Subject, subject, StringComparison.OrdinalIgnoreCase) &&
+                                               AccessProfileAssignmentRules.IsEffective(p, a, now)))
             .ToList();
 
         return Task.FromResult<IReadOnlyList<AccessProfile>>(list);
@@ -64,7 +66,7 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
     }
 
     // WP-SC-03: the typed assignment API of the in-memory test double. It applies the same rules as the persisted stores for the explicit
-    // API; the legacy list-based reads above stay permissive. Production registers the persisted repositories.
+    // API; the Production registers the persisted repositories.
 
     public Task<IReadOnlyList<AccessProfile>> GetProfilesForSubjectsAsync(
         TenantId tenantId, IReadOnlyCollection<string> users, IReadOnlyCollection<string> groups, IReadOnlyCollection<string> roles, CancellationToken ct = default)
@@ -77,9 +79,7 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
 
         var matches = _profiles.Values
             .Where(p => p.TenantId == tenantId &&
-                        (p.Assignments.Any(a => wanted.Contains((a.SubjectType, a.Subject.Trim().ToUpperInvariant())) && AccessProfileAssignmentRules.IsEffective(p, a, now)) ||
-                         // test-double only: a legacy profile without typed assignments keeps the permissive plain-subject match
-                         (p.Assignments.Count == 0 && p.IsActive(now) && p.AssignedSubjects.Any(x => wanted.Contains((AccessProfileSubjectType.User, x.Trim().ToUpperInvariant()))))))
+                        p.Assignments.Any(a => wanted.Contains((a.SubjectType, a.Subject.Trim().ToUpperInvariant())) && AccessProfileAssignmentRules.IsEffective(p, a, now)))
             .ToList();
         return Task.FromResult(AccessProfileAssignmentRules.Order(matches));
     }
@@ -125,7 +125,6 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
     {
         var profile = RequireProfile(tenantId, profileId);
         var removed = profile.Assignments.RemoveAll(a => a.SubjectType == subjectType && string.Equals(a.Subject, subject.Trim(), StringComparison.OrdinalIgnoreCase)) > 0;
-        profile.AssignedSubjects.RemoveAll(s => string.Equals(s, subject.Trim(), StringComparison.OrdinalIgnoreCase) && !profile.Assignments.Any(a => string.Equals(a.Subject, s, StringComparison.OrdinalIgnoreCase)));
         return Task.FromResult(removed);
     }
 
@@ -140,9 +139,5 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
     {
         profile.Assignments.RemoveAll(a => a.SubjectType == assignment.SubjectType && string.Equals(a.Subject, assignment.Subject, StringComparison.OrdinalIgnoreCase));
         profile.Assignments.Add(assignment);
-        if (!profile.AssignedSubjects.Contains(assignment.Subject, StringComparer.OrdinalIgnoreCase))
-        {
-            profile.AssignedSubjects.Add(assignment.Subject);
-        }
     }
 }

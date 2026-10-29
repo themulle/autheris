@@ -14,4 +14,10 @@ public static class AggregationErrorCodes
     public const string ResultTypeMismatch = "AGGREGATION_RESULT_TYPE_MISMATCH";
     public const string UnknownMetric = "UNKNOWN_METRIC";
     public const string MetricFilterInvalid = "METRIC_FILTER_INVALID";
+
+    /// <summary>The differential-privacy policy refuses the aggregate (MIN/MAX, repeated function/column pair, missing measure bounds).</summary>
+    public const string PrivacyRestricted = "AGGREGATION_PRIVACY_RESTRICTED";
+
+    /// <summary>The governed compiler does not support the aggregation for this dataset (translation limit, any dialect or construct).</summary>
+    public const string NotSupported = "AGGREGATION_NOT_SUPPORTED";
 }

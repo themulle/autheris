@@ -642,7 +642,7 @@ Automatische Synchronisation von Schema-Metadaten, Klassifikations-Tags (`PII.*`
 | `ServiceFilter` | `string` | Service-Name | `""` | Filtert Tabellen auf einen bestimmten Datenservice. |
 | `SyncIntervalMinutes` | `int` | `1 .. 1440` | `30` | Intervall des Hintergrund-Pollings. |
 | `TagToMaskingRuleMap` | `Map` | Tag -> MaskingType | *Siehe unten* | Zuordnung von OpenMetadata Klassifikations-Tags zu Maskierungsregeln. |
-| `TeamToGroupSidMap` | `Map` | Team -> SID | `{}` | Übersetzung von OpenMetadata Teams in Active Directory Gruppen-SIDs. |
+| `TeamToGroupSidMap` | `Map` | Team -> SID | `{}` | Übersetzung von OpenMetadata Teams in Active Directory Gruppen-SIDs. Schlüssel brauchen das Präfix `id:` (gültige GUID), `fqn:` oder `name:`; Werte müssen gültige SIDs sein (`S-1-...`). Ein Schlüssel ohne Präfix, eine ungültige GUID, ein leerer oder ungültiger Wert und zwei Schlüssel für dasselbe Team lassen den Start fehlschlagen (die Meldung nennt Optionspfad und Eintragsposition, nie einen SID-Wert). |
 | `UserToUserSidMap` | `Map` | User -> SID | `{}` | Übersetzung von OpenMetadata Usernames in Windows User-SIDs. |
 
 ```json
@@ -660,8 +660,8 @@ Automatische Synchronisation von Schema-Metadaten, Klassifikations-Tags (`PII.*`
     "PersonalData.Personal": "REDACT"
   },
   "TeamToGroupSidMap": {
-    "FinanceAnalytics": "S-1-5-21-5001",
-    "DataScienceTeam": "S-1-5-21-5002"
+    "name:FinanceAnalytics": "S-1-5-21-5001",
+    "fqn:Org.DataScienceTeam": "S-1-5-21-5002"
   },
   "UserToUserSidMap": {
     "john.doe": "S-1-5-21-1001"

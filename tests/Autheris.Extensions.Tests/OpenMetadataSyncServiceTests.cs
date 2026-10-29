@@ -43,7 +43,7 @@ public sealed class OpenMetadataSyncServiceTests
                 },
                 TeamToGroupSidMap = new Dictionary<string, string>
                 {
-                    ["FinanceTeam"] = "S-1-5-21-FINANCE-GROUP"
+                    ["name:FinanceTeam"] = "S-1-5-21-FINANCE-GROUP"
                 },
                 UserToUserSidMap = new Dictionary<string, string>
                 {

@@ -506,7 +506,7 @@ public sealed class Round4OpenMetadataTests
     {
         var mappedTeamId = Guid.NewGuid();
         var f = CreateOm(
-            Om(teamMap: new Dictionary<string, string> { [mappedTeamId.ToString()] = "S-1-5-21-TEAM-A" }),
+            Om(teamMap: new Dictionary<string, string> { ["id:" + mappedTeamId] = "S-1-5-21-TEAM-A" }),
             [Orders()],
             roles: [],
             teams:
@@ -530,7 +530,7 @@ public sealed class Round4OpenMetadataTests
     {
         var mappedTeamId = Guid.NewGuid();
         var f = CreateOm(
-            Om(teamMap: new Dictionary<string, string> { [mappedTeamId.ToString()] = "S-1-5-21-TEAM-A" }),
+            Om(teamMap: new Dictionary<string, string> { ["id:" + mappedTeamId] = "S-1-5-21-TEAM-A" }),
             [Orders()],
             roles: [],
             teams: [new OpenMetadataTeam { Id = mappedTeamId, Name = "renamed-team", Policies = [PolicyRef()] }]);

@@ -184,7 +184,7 @@ public sealed class TypedPolicySourcesWiringTests
             TenantId = Tenant,
             MaskingMode = MaskingPolicyMode.Strict,
             TargetTables = ["main.orders"],
-            AssignedSubjects = [UserSid.Value],
+            Assignments = TestAssign.Users(UserSid.Value),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
         return repo;

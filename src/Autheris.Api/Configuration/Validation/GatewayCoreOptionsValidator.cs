@@ -130,6 +130,8 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             failures.Add("Gateway:Casbin is enabled, but the configured PolicyPath file was not found.");
         }
 
+        failures.AddRange(TeamToGroupSidMapRules.Validate(opts.OpenMetadata.TeamToGroupSidMap, "Gateway:OpenMetadata:TeamToGroupSidMap"));
+
         if (!_environment.IsDevelopment() &&
             opts.OpenMetadata.Enabled &&
             !(Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) &&

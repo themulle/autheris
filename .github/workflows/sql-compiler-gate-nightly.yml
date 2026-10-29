@@ -18,11 +18,18 @@ on:
 
 permissions: {}
 
+env:
+  # Number of G7 shards; must equal the length of the shard matrix below (the aggregate fails on a missing shard result).
+  G7_SHARDS: '16'
+  # Floor for the summed valid in-scope mutants (vacuous-scope guard). Calibrated from CI run 40870422455 (2026-10-29): 3,847 valid
+  # mutants (Killed+Timeout+Survived+NoCoverage); the floor is below 85% of that. Re-check when the scope or the mutators change.
+  G7_MUTANT_FLOOR: '3200'
+
 jobs:
   sql-compiler-gate-nightly:
     name: SQL Compiler Gate (${{ inputs.profile || 'nightly' }})
     runs-on: ubuntu-latest # Docker is available for Testcontainers
-    timeout-minutes: 180
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -55,20 +62,10 @@ jobs:
         run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore -p:AutherisIncludeTestAuth=true --verbosity normal
 
       - name: G8 performance benchmark
-        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
+        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" "*SqlParserCache*" --job short --inProcess --exporters json --artifacts benchmarks/results
 
       - name: G8 thresholds
         run: dotnet run -c Release --no-restore --project tools/SqlGate.BenchCheck -- benchmarks/results benchmarks/baselines
-
-      # G7 mutation score (plan 9.3, M-12): the scope, the Debug configuration (the security mutant hooks exist only there) and the break
-      # threshold (85%) live in stryker-config.json. Run on the nightly head and, with the cutover profile, on the cutover PR head.
-      - name: Restore pinned tools
-        run: dotnet tool restore
-
-      # Stryker.NET 4.x runs from the test project directory; mutants outside the configured scope are reported as ignored.
-      - name: G7 mutation testing (Stryker.NET)
-        working-directory: tests/TrinoSqlEngine.Tests
-        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json
 
       - name: Upload gate report
         if: always()
@@ -78,8 +75,121 @@ jobs:
           path: |
             sqlgate-report
             benchmarks/results
-            tests/TrinoSqlEngine.Tests/StrykerOutput
           if-no-files-found: ignore
+
+  # G7 mutation score (plan 9.3, M-12, SC-06), sharded: the in-scope files are split over G7_SHARDS parallel jobs, because one job did not
+  # finish within its budget on the CI runners (about 3.6x slower than the dev machine). Each shard marks every file outside its own subset
+  # with `// Stryker disable all` (g7-scope.sh --apply --shard I/N, assignment by g7-shard.py, balanced by the measured per-file mutant counts in g7-weights.json), so Stryker mutates
+  # only that subset. The scope, the Debug configuration (the security mutant hooks exist only there) and the break threshold (85%, kept
+  # in the config; the shard step passes --break-at 0 because only the aggregate enforces 85 on the summed raw counts) live in
+  # stryker-config.json. Each shard reduces its report to raw status counts and uploads it with the
+  # full Stryker output. The aggregate job below decides the gate. Run on the nightly head and, with the cutover profile, on the cutover PR head.
+  # A timeout fails the step (step timeout below the job timeout), so a shard ends as failure, never as cancelled. No continue-on-error.
+  # The matrix list must contain exactly the indexes 0..G7_SHARDS-1; the aggregate fails when a shard result is missing.
+  sql-compiler-gate-g7:
+    name: SQL Compiler Gate G7 shard ${{ matrix.shard }} (${{ inputs.profile || 'nightly' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false # every shard reports, the aggregate decides
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Restore pinned tools
+        run: dotnet tool restore
+
+      - name: G7 scope (mark files outside this shard)
+        run: bash tools/sqlgate/g7-scope.sh --apply --shard "${{ matrix.shard }}/${G7_SHARDS}"
+
+      # Stryker.NET 5.x runs from the test project directory; mutants outside the configured scope are created as ignored.
+      - name: G7 mutation testing (Stryker.NET)
+        working-directory: tests/TrinoSqlEngine.Tests
+        timeout-minutes: 100
+        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json --break-at 0 --log-to-file
+
+      # Fails closed on a missing or unparseable report (timeout or cancel). Writes the raw counts the aggregate sums.
+      - name: G7 shard result
+        if: always()
+        run: |
+          git checkout -- src/TrinoSqlEngine
+          bash tools/sqlgate/g7-scope.sh --list --shard "${{ matrix.shard }}/${G7_SHARDS}" > "$RUNNER_TEMP/g7-shard-inscope.txt"
+          python3 -I tools/sqlgate/g7-aggregate.py reduce \
+            --report-glob 'tests/TrinoSqlEngine.Tests/StrykerOutput/*/reports/mutation-report.json' \
+            --in-scope-list "$RUNNER_TEMP/g7-shard-inscope.txt" \
+            --shard "${{ matrix.shard }}" --shards "${G7_SHARDS}" \
+            --out "g7-shard-result/g7-shard-${{ matrix.shard }}.json"
+
+      - name: Upload G7 shard report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sqlgate-g7-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: tests/TrinoSqlEngine.Tests/StrykerOutput
+          if-no-files-found: warn
+          overwrite: true
+
+      - name: Upload G7 shard result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sqlgate-g7-result-${{ matrix.shard }}-${{ github.run_id }}
+          path: g7-shard-result
+          if-no-files-found: warn
+          overwrite: true
+
+  # G7 aggregate: the gate verdict. Runs on always() so that a failed, timed-out or cancelled shard is reported here and never silent.
+  # Sums the raw status counts of all shards, checks that the union of the shard file sets is the full glob set, and enforces the break (85)
+  # and the mutant floor on the summed counts. A missing shard result, or a shard job that did not succeed, fails this job.
+  sql-compiler-gate-g7-aggregate:
+    name: SQL Compiler Gate G7 aggregate (${{ inputs.profile || 'nightly' }})
+    needs: sql-compiler-gate-g7
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download shard results
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: sqlgate-g7-result-*-${{ github.run_id }}
+          path: g7-results
+
+      - name: G7 aggregate verdict
+        if: always()
+        env:
+          SHARDS_RESULT: ${{ needs.sql-compiler-gate-g7.result }}
+        run: |
+          bash tools/sqlgate/g7-scope.sh --list > "$RUNNER_TEMP/g7-inscope.txt"
+          python3 -I tools/sqlgate/g7-aggregate.py merge \
+            --results-glob 'g7-results/**/g7-shard-*.json' \
+            --in-scope-list "$RUNNER_TEMP/g7-inscope.txt" \
+            --shards "${G7_SHARDS}" \
+            --floor "${G7_MUTANT_FLOOR}" \
+            --break-at 85 \
+            --allow-zero tools/sqlgate/g7-zero-mutant-allowlist.txt \
+            --needs-result "$SHARDS_RESULT"
 
   # G9: the execution suites against a live Databricks SQL warehouse. Bound to the protected environment
   # `databricks-g9` (required reviewers, deployment branches limited to main) so the secrets are only released after approval.
