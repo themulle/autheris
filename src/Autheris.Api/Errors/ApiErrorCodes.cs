@@ -81,6 +81,21 @@ public static class ApiErrorCodes
     public const string ApiVersionUpgradeRequired = "API_VERSION_UPGRADE_REQUIRED";
     public const string InvalidRebacSubject = "INVALID_REBAC_SUBJECT";
     public const string IndividualGrantExceedsMaximum = "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM";
+    public const string DbtManifestPartial = "DBT_MANIFEST_PARTIAL";
+    public const string InvalidAggregateFunction = "INVALID_AGGREGATE_FUNCTION";
+    public const string InvalidAggregationQuery = "INVALID_AGGREGATION_QUERY";
+    public const string InvalidAnalysisRequest = "INVALID_ANALYSIS_REQUEST";
+    public const string InvalidConsentBundle = "INVALID_CONSENT_BUNDLE";
+    public const string InvalidDataset = "INVALID_DATASET";
+    public const string InvalidMetricsRequest = "INVALID_METRICS_REQUEST";
+    public const string InvalidMetricQuery = "INVALID_METRIC_QUERY";
+    public const string MetricNotFound = "METRIC_NOT_FOUND";
+    public const string CallerAttributeInvalidRequest = "CALLER_ATTRIBUTE_INVALID_REQUEST";
+    public const string OlapTimeout = "OLAP_TIMEOUT";
+    public const string OlapAccessDenied = "OLAP_ACCESS_DENIED";
+    public const string OlapStagingTooLarge = "OLAP_STAGING_TOO_LARGE";
+    public const string OlapFailed = "OLAP_FAILED";
+    public const string OlapCapacity = "OLAP_CAPACITY";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 
@@ -90,7 +105,11 @@ public static class ApiErrorCodes
 
     /// <summary>True when the code matches the governed format and is a registered code.</summary>
     public static bool IsGoverned(string? code) =>
-        !string.IsNullOrEmpty(code) && code.Length <= 64 && CodeFormat.IsMatch(code) && Registered.Contains(code);
+        !string.IsNullOrEmpty(code) && code.Length <= 64 && CodeFormat.IsMatch(code) &&
+        (Registered.Contains(code) || code.StartsWith(CallerAttributePrefix, StringComparison.Ordinal));
+
+    // Governed code family: the caller-attribute administration derives its codes from fixed exception codes (never from input).
+    private const string CallerAttributePrefix = "CALLER_ATTRIBUTE_";
 
     /// <summary>The code used when a caller supplies an ungoverned code: the status default.</summary>
     public static string StatusDefault(int statusCode) => statusCode switch
