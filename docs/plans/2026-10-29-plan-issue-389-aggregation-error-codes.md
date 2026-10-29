@@ -62,3 +62,16 @@ Mandatory tests (all `[Trait("Category","Security")]`)
 - I389-T-06 `Rest_Graphql_Parity_PerCause` (code, status class, message equality, for aggregate and metrics) including `AGG_NEGATED_FILTER_REJECTED` on GraphQL (no `INTERNAL_SERVER_ERROR`).
 - I389-T-07 `Rest_TimeZoneInvalidAndUnavailable_NotCaughtByNotSupportedFilter` (regression guard for SC-06).
 - I389-T-08 `RefusalLogsAndAudit_ContainNoColumnAliasEpsilonOrInnerMessage` (log capture with sentinels).
+
+## Changelog
+
+**2026-10-29: implemented** on branch `fix/issue-389-aggregation-error-codes`. Phase 5 review approved.
+
+Client-visible changes:
+
+- **REST aggregate and metrics:** compile errors, AST-build errors and time-zone errors that are not about the zone itself now return 422 `AGGREGATION_NOT_SUPPORTED`. Before, they surfaced as `SQL_*` codes through the global handler.
+- **REST missing measure bounds:** now returns 400 `AGGREGATION_PRIVACY_RESTRICTED` with a fixed message. Before, it returned `INVALID_QUERY_OPTION` and the message included the column name.
+- **MIN/MAX under differential-privacy noise, and repeated aggregate pairs:** the code changes from `AGGREGATION_ARGUMENT_INVALID` to `AGGREGATION_PRIVACY_RESTRICTED`, on REST and GraphQL.
+- **GraphQL `AGG_NEGATED_FILTER_REJECTED`:** now returned as its own code. Before, it came back as `INTERNAL_SERVER_ERROR`.
+- **GraphQL translation limits** (`AstBuildException`, `SqlCompileNotSupportedException`, time-zone errors not about the zone itself): the code changes from `AGGREGATION_ARGUMENT_INVALID` to `AGGREGATION_NOT_SUPPORTED`.
+- **Unchanged:** the time-zone codes (invalid, argument, unavailable) keep their previous handling.
