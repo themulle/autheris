@@ -25,6 +25,7 @@ internal static class AggregateErrors
     public const string DisabledMessage = "Governed aggregation queries are disabled by configuration.";
     public const string TooComplexMessage = "The aggregation is too complex.";
     public const string ThrottledMessage = "Too many requests.";
+    public const string NotSupportedMessage = "The requested aggregation is not supported for this dataset.";
     public const string MaskedMessage = "A requested column is masked for the current caller and cannot be used in an aggregation.";
 
     public static GraphQLException Create(string code, string message) =>
@@ -58,10 +59,16 @@ internal static class AggregateFailureMapper
         CostLimitExceededException => AggregateErrors.Create("QUERY_TOO_COMPLEX", AggregateErrors.TooComplexMessage),
         TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException or Autheris.Domain.Model.RequiredFilterColumnMissingException => AggregateErrors.Create("REQUIRED_FILTER_COLUMN_MISSING", "A required filter column is missing."),
         GatewayThrottledException => AggregateErrors.Create("TOO_MANY_REQUESTS", AggregateErrors.ThrottledMessage),
+        // #389 (I389-SC-03): by type only, never by message; the derived type must precede the GatewayInvalidQueryException arm.
+        AggregationPrivacyRestrictedException => AggregateErrors.Create(AggregationErrorCodes.PrivacyRestricted, AggregationPrivacyRestrictedException.FixedMessage),
+        AggregationFilterRejectedException => AggregateErrors.Create(AggregationFilterRejectedException.ErrorCodeConst, AggregationFilterRejectedException.FixedMessage),
         GatewayInvalidQueryException or ArgumentException => AggregateErrors.ArgumentInvalid(),
         // #333 (SEC-PGP-03): compiler refusals of planner output are fixed 4xx/UNAVAILABLE answers; no exception text, inner exception or SQL is passed on.
         TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneUnavailable } => AggregateErrors.Create("UNAVAILABLE", "The database is currently unavailable."),
-        TrinoSqlEngine.SqlTimeZoneException or TrinoSqlEngine.Ast.Builder.AstBuildException or TrinoSqlEngine.SqlCompileNotSupportedException => AggregateErrors.ArgumentInvalid(),
+        // The caller supplied the zone: an invalid or malformed zone is an argument error.
+        TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneInvalid or TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneArgument } => AggregateErrors.ArgumentInvalid(),
+        // #389: every other translation limit (dialect or construct) is one indistinguishable code (I389-T-04).
+        TrinoSqlEngine.SqlTimeZoneException or TrinoSqlEngine.Ast.Builder.AstBuildException or TrinoSqlEngine.SqlCompileNotSupportedException => AggregateErrors.Create(AggregationErrorCodes.NotSupported, AggregateErrors.NotSupportedMessage),
         _ => ForDataAccess(ex)
     };
 
