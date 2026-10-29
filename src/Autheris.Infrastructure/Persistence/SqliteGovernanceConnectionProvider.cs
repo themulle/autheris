@@ -179,6 +179,13 @@ internal sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDi
         try
         {
             await connection.OpenAsync(ct).ConfigureAwait(false);
+            if (IsMemory)
+            {
+                // Nothing to tune (no file, no fsync, no cross-process busy wait). Preparing a pragma on a shared-cache connection while
+                // another connection holds an uncommitted schema write (a migrator running DDL) fails inside sqlite3_prepare_v2.
+                return connection;
+            }
+
             var synchronous = _effectiveJournalMode == "WAL" ? "NORMAL" : "FULL";
             await ExecuteAsync(
                 connection,
