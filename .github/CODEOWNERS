@@ -15,3 +15,8 @@ src/TrinoSqlEngine/Ast/Capabilities/DialectCapabilityTable.cs  @themulle
 src/TrinoSqlEngine/TimeZones/**  @themulle
 tests/TrinoSqlEngine.Tests/TimeZones/Cldr/**  @themulle
 tests/TrinoSqlEngine.Tests/TimeZones/IanaWindowsZonesGenerator.cs  @themulle
+
+# Issue #388 (I388-SC-02): released governance schema artefacts are append-only and need the security owner
+src/Autheris.Infrastructure/Persistence/Migrations/**                        @themulle
+tests/Autheris.Tests.Architecture/Golden/GovernanceBaseline/**               @themulle
+tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/**                  @themulle
