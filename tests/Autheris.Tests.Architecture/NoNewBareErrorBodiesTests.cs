@@ -34,6 +34,24 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
             "OpenAPI schema property declaration, not a response body"
     };
 
+    /// <summary>
+    /// NL-SC-29: protocol-mandated bodies whose shape is dictated by an external spec and therefore stay as they are. Key: path;
+    /// each entry is a site-text prefix (line independent), the exact number of live sites it covers and the spec. An addition needs a
+    /// new Phase 3 note. Messages of these sites are fixed texts (no input echo), except the OData entity-set not-found message.
+    /// </summary>
+    internal static readonly IReadOnlyList<(string Path, string SitePrefix, int Count, string Spec)> ProtocolAllowlist =
+    [
+        ("src/Autheris.Api/Endpoints/McpEndpoints.cs", "new { jsonrpc = \"2.0\"", 1, "JSON-RPC 2.0 section 5.1 error object"),
+        ("src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs", "new { error = new { code", 6, "OData v4 JSON section 21 error object"),
+        ("src/Autheris.Extensions/OData/ODataResponseFormatter.cs", "new { error = new { code, message }", 1, "OData v4 JSON section 21 error object"),
+        ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", "new { error = new { code = \"UNAUTHORIZED\"", 1, "OData v4 JSON error object for the OData basic-auth challenge"),
+        ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", "new { error = new { code = \"NotFound\"", 1, "OData v4 JSON error object (reshaped, fixed message)"),
+        ("src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs", "new { error = new { message, type = code", 1, "Iceberg REST catalog ErrorModel {message,type,code}"),
+        ("src/Autheris.Api/Endpoints/BackstageEndpoints.cs", "new { error = new { name = \"NotFoundError\"", 1, "Backstage ErrorResponseBody {error{name,message},response{statusCode}} (reshaped, fixed message)"),
+        ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", "new { error = body, status = statusCode }", 1, "Envoy ext_authz denied-response pass-through"),
+        ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", "[\"error\"] = trinoError", 1, "Trino in-protocol QueryResults.error (a spec member of a 200 result, not an HTTP-level error body)")
+    ];
+
     [GeneratedRegex(@"\bnew\s*\{")]
     private static partial Regex AnonymousObjectStart();
 
@@ -139,6 +157,22 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Protocol_Mandated_Error_Bodies_Keep_Spec_Shape()
+    {
+        // NL-T-23 / NL-SC-29: every allowlisted site is live, the count is exact, and the spec shape is kept (no top-level bare string error).
+        foreach (var (path, prefix, count, spec) in ProtocolAllowlist)
+        {
+            spec.ShouldNotBeNullOrWhiteSpace();
+            var file = RepositoryScan.ProductionFiles.Single(f => f.RelativePath == path);
+            var live = FindAllSites(file.Text).Where(s => s.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            live.Count.ShouldBe(count, $"Allowlist entry {path} '{prefix}' does not match the live sites; update it (a new entry needs a Phase 3 note).");
+            live.ShouldAllBe(s => !Regex.IsMatch(s, "^new \\{ error = \"") , $"{path}: a protocol body must keep its spec shape, not a bare string error.");
+        }
+
+        ProtocolAllowlist.Select(a => a.Path + "|" + a.SitePrefix).Distinct().Count().ShouldBe(ProtocolAllowlist.Count);
+    }
+
+    [Fact]
     public void Scanner_Is_Fail_Closed_When_Nothing_Is_Scanned()
     {
         Should.Throw<InvalidOperationException>(() => Measure([])).Message.ShouldContain("nothing");
@@ -168,7 +202,10 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
 
     /// <summary>The normalized site texts of a file (excluded sites removed).</summary>
     internal static List<string> FindSites(string path, string text) =>
-        FindAllSites(text).Where(s => !Exclusions.ContainsKey(path + "|" + s)).ToList();
+        FindAllSites(text).Where(s => !Exclusions.ContainsKey(path + "|" + s) && !IsProtocolSite(path, s)).ToList();
+
+    private static bool IsProtocolSite(string path, string site) =>
+        ProtocolAllowlist.Any(a => a.Path == path && site.StartsWith(a.SitePrefix, StringComparison.Ordinal));
 
     private static List<string> FindAllSites(string text)
     {

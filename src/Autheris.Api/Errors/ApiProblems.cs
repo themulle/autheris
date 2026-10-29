@@ -63,8 +63,8 @@ public static class ApiProblems
         string? title = null,
         IDictionary<string, object?>? extraExtensions = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentNullException.ThrowIfNull(detail);
+        code = ApiErrorCodes.Resolve(statusCode, code);
 
         var traceId = ResolveTraceId(httpContext);
         var correlationId = ResolveCorrelationId(httpContext, traceId);
@@ -76,13 +76,7 @@ public static class ApiProblems
             ["traceId"] = traceId
         };
 
-        if (extraExtensions != null)
-        {
-            foreach (var (k, v) in extraExtensions)
-            {
-                extensions[k] = v;
-            }
-        }
+        AddAllowedExtensions(extensions, extraExtensions);
 
         return Results.Problem(
             detail: detail,
@@ -98,8 +92,10 @@ public static class ApiProblems
         string code,
         string detail,
         HttpContext? httpContext = null,
-        string? title = null)
+        string? title = null,
+        IReadOnlyDictionary<string, object?>? ext = null)
     {
+        code = ApiErrorCodes.Resolve(statusCode, code);
         var traceId = ResolveTraceId(httpContext);
         var correlationId = ResolveCorrelationId(httpContext, traceId);
 
@@ -115,8 +111,92 @@ public static class ApiProblems
         problem.Extensions["code"] = code;
         problem.Extensions["correlationId"] = correlationId;
         problem.Extensions["traceId"] = traceId;
+        AddAllowedExtensions(problem.Extensions, ext);
         return problem;
     }
+
+    /// <summary>Upper bound of operator-declared text that may reach <c>detail</c> (NL-SC-30).</summary>
+    public const int MaxOperatorTextLength = 256;
+
+    /// <summary>Strips control characters, trims and caps operator-declared text before it reaches a body (NL-SC-30).</summary>
+    public static string SanitizeOperatorText(string? text, string fallback) =>
+        Autheris.Application.Common.ErrorText.Sanitize(text, fallback, MaxOperatorTextLength);
+
+    /// <summary>
+    /// The only raw-stream writer of a governed problem body (NL-SC-27): the code is checked against the governed set (status default
+    /// otherwise) and extension members are limited to the allowlist.
+    /// </summary>
+    public static Task WriteAsync(
+        HttpContext httpContext,
+        int status,
+        string code,
+        string detail,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, object?>? ext = null)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        httpContext.Response.StatusCode = status;
+        return httpContext.Response.WriteAsJsonAsync(
+            CreateProblemDetails(status, code, detail, httpContext, ext: ext),
+            (System.Text.Json.JsonSerializerOptions?)null,
+            "application/problem+json",
+            ct);
+    }
+
+    /// <summary>
+    /// A problem body for an anti-enumeration pair (NL-SC-28): the bytes are fixed per (status, code, detail), carry no traceId,
+    /// instance or correlationId, and no header is added, so members of the pair cannot be told apart.
+    /// </summary>
+    public static IResult Indistinguishable(int status, string code, string detail)
+    {
+        ArgumentNullException.ThrowIfNull(detail);
+        var resolved = ApiErrorCodes.Resolve(status, code);
+        var body = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
+        {
+            ["type"] = $"urn:autheris:error:{resolved}",
+            ["title"] = ResolveDefaultTitle(status),
+            ["status"] = status,
+            ["detail"] = detail,
+            ["code"] = resolved
+        });
+        return new FixedProblemResult(status, body);
+    }
+
+    private sealed class FixedProblemResult(int status, byte[] body) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.StatusCode = status;
+            httpContext.Response.ContentType = "application/problem+json";
+            httpContext.Response.ContentLength = body.Length;
+            return httpContext.Response.Body.WriteAsync(body, httpContext.RequestAborted).AsTask();
+        }
+    }
+
+    // NL-SC-27: the only extension members a problem body may carry, scalar values only.
+    private static readonly HashSet<string> AllowedExtensionKeys = new(StringComparer.Ordinal)
+    {
+        "retryAfterSeconds", "maxValidTo", "phase", "sunsetDate", "replacement", "limit", "discardedEvents"
+    };
+
+    private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in source)
+        {
+            if (AllowedExtensionKeys.Contains(key) && IsScalar(value))
+            {
+                target[key] = value;
+            }
+        }
+    }
+
+    private static bool IsScalar(object? value) => value is null or string or bool or sbyte or byte or short or ushort or int or uint
+        or long or ulong or float or double or decimal or DateTime or DateTimeOffset or DateOnly or TimeSpan;
 
     /// <summary>Logs the original exception server-side (never returned to the client).</summary>
     public static void LogFailure(HttpContext? context, Exception exception, string code)

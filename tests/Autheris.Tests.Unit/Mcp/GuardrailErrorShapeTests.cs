@@ -48,4 +48,30 @@ public sealed class GuardrailErrorShapeTests
     {
         AiDataGuardrailService.TryGetExecutorError(json, out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Guardrail_Denies_ProblemDetails_Tool_Result()
+    {
+        // NL-T-24 / NL-SC-26: a problem body that only carries a type URI is an error result too.
+        AiDataGuardrailService.TryGetExecutorError("""{"type":"urn:autheris:error:ACCESS_DENIED","status":403}""", out var code).ShouldBeTrue();
+        code.ShouldBe("ERROR");
+    }
+
+    [Fact]
+    public void Guardrail_Denies_All_Mcp_Reachable_Error_Shapes()
+    {
+        // NL-T-24: every shape an MCP-reachable tool can return as an error is audited DENY.
+        var shapes = new[]
+        {
+            McpToolError.Serialize("INVALID_PARAMS", "m"),
+            McpToolError.Serialize("FORBIDDEN", "m", "tenant", "tool"),
+            """{"isError":true,"error":{"code":"X","message":"m"}}""",
+            """{"error":"Forbidden","message":"m"}""",
+            """{"type":"urn:autheris:error:BAD_REQUEST","title":"Bad Request","status":400,"detail":"d","code":"BAD_REQUEST"}"""
+        };
+        foreach (var json in shapes)
+        {
+            AiDataGuardrailService.TryGetExecutorError(json, out _).ShouldBeTrue(json);
+        }
+    }
 }

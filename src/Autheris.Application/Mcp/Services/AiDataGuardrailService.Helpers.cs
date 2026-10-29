@@ -87,7 +87,7 @@ public sealed partial class AiDataGuardrailService
     /// <summary>
     /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), the bare
     /// shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
-    /// nothing else) or a governed ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c>). All are audited as
+    /// nothing else) or a governed ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c> or <c>type</c>). All are audited as
     /// DENY and returned with <c>isError: true</c>.
     /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
@@ -130,12 +130,22 @@ public sealed partial class AiDataGuardrailService
     private static bool IsProblemDetailsShape(JsonElement root, out string? errorCode)
     {
         errorCode = null;
-        if (root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Number &&
-            status.TryGetInt32(out var statusCode) && statusCode >= 400 &&
-            root.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String &&
-            !string.IsNullOrWhiteSpace(code.GetString()))
+        if (!root.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.Number ||
+            !status.TryGetInt32(out var statusCode) || statusCode < 400)
+        {
+            return false;
+        }
+
+        // A governed problem body carries a string code; RFC 7807 bodies without one are recognised by their type URI (NL-SC-26).
+        if (root.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(code.GetString()))
         {
             errorCode = code.GetString();
+            return true;
+        }
+
+        if (root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(type.GetString()))
+        {
+            errorCode = "ERROR";
             return true;
         }
 

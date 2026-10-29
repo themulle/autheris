@@ -175,7 +175,10 @@ public static partial class ODataEndpoints
             var json = await generator.GenerateEntitySchemaJsonAsync(tableId, context.RequestAborted);
             if (json == null)
             {
-                return Results.NotFound(new { error = $"Table '{domain}.{schema}.{tableName}' not found in metadata repository." });
+                // OData v4 error object (protocol allowlist, NL-SC-29): fixed message, no table-name echo.
+                return Results.Json(
+                    new { error = new { code = "NotFound", message = "The requested entity set was not found." } },
+                    statusCode: StatusCodes.Status404NotFound);
             }
 
             return Results.Content(json, "application/json;charset=utf-8");
