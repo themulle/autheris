@@ -37,3 +37,28 @@ Phase 2 (csharp-architect), 2026-10-29. Branch `fix/issue-389-aggregation-error-
 2. 400 for `AGGREGATION_PRIVACY_RESTRICTED` (client can change the request) vs 403 (policy denial)?
 3. Is `AGGREGATION_NOT_SUPPORTED` (one code for all translation limits, no dialect hint) sufficient, or must dialect-level refusals stay indistinguishable from construct refusals (current proposal: yes, indistinguishable)?
 4. Fixing the GraphQL `AGG_NEGATED_FILTER_REJECTED` gap in this issue: in scope (default taken: yes)?
+
+## Phase 3 binding conditions (csharp-security-expert, 2026-10-29)
+
+Verdict: APPROVED WITH CONDITIONS.
+
+Rulings: (1) Accepted: noise is deployment-wide and `noiseApplied` is already public, so one distinct code for all three DP causes leaks nothing new; the same code and message must apply to all three (no per-cause variant). (2) 400 on REST (client can change the request; the policy is not an authorization decision; consistent with `AGG_NEGATED_FILTER_REJECTED`); GraphQL carries the code only. (3) Single `AGGREGATION_NOT_SUPPORTED`, dialect-level and construct-level refusals indistinguishable, no dialect hint. (4) The `AGG_NEGATED_FILTER_REJECTED` GraphQL mapping is in scope. (5) The fixed message is required and the column name must leave the message.
+
+Binding conditions
+- I389-SC-01: Messages for `AGGREGATION_PRIVACY_RESTRICTED`, `AGGREGATION_NOT_SUPPORTED` and `AGG_NEGATED_FILTER_REJECTED` are compile-time constants; no column, alias, function, epsilon, bounds, dialect, SQL or exception text in any channel (REST body, GraphQL error and extensions, logs, audit, metrics tags).
+- I389-SC-02: Decision 3 Debug-log option is withdrawn: no log or audit entry for these refusals contains the column, alias or inner exception message. Logs carry the code and exception type name only; operator diagnosis of missing bounds belongs to startup/config validation, not the request path.
+- I389-SC-03: Mapping is by exception type or typed `Code`/`Reason` property only; never by message text. The arm order (specific types before `GatewayInvalidQueryException`) is asserted by tests. Unknown exceptions keep falling to the existing sanitized generic path (fail closed, no new pass-through).
+- I389-SC-04: Both new codes are added to the sanitizer allow-list and `FixedClientMessages`, never to `ExpectedOutcomeCodes`; any code not on the list stays sanitized.
+- I389-SC-05: All DP refusals (MIN/MAX, repeated pair, missing/invalid bounds, including the run-time `ResolveMeasureBounds` sites) occur before executor invocation and budget charge; Phase 4 must prove the run-time sites are pre-covered or move the check earlier.
+- I389-SC-06: REST and GraphQL parity: for each cause the same code, a status mapping of 400 (privacy restricted, argument invalid) or 422 (not supported), and the same fixed message; metrics paths included. The REST catch filters must not widen to catch time-zone invalid/argument/unavailable (those keep their current handling).
+- I389-SC-07: No new behavior for MCP/OData; the typed exception must not carry data properties (no column/alias fields).
+
+Mandatory tests (all `[Trait("Category","Security")]`)
+- I389-T-01 `PrivacyRestricted_MinMaxRepeatedPairMissingBounds_SameCodeAndMessage_NoColumnOrAlias` (sentinel column and alias absent from message, ToString of response, log output).
+- I389-T-02 `PrivacyRestricted_ExecutorAndBudgetNotCalled` (covers pre-check and run-time bounds sites; `executor.Calls == 0`).
+- I389-T-03 `AggregateFailureMapper_MapsByType_NotMessage` (message containing another code's text or a sentinel does not change the code; arm order).
+- I389-T-04 `NotSupported_AstBuild_CompileNotSupported_DialectUnsupported_FixedMessage_NoDialectOrSecretEcho` (all `Reason` values and `FunctionUnsupportedDialect` yield identical code and message).
+- I389-T-05 `Sanitizer_NewCodes_AllowListed_FixedMessage_InProduction` and `Sanitizer_UnknownCode_StillSanitized`.
+- I389-T-06 `Rest_Graphql_Parity_PerCause` (code, status class, message equality, for aggregate and metrics) including `AGG_NEGATED_FILTER_REJECTED` on GraphQL (no `INTERNAL_SERVER_ERROR`).
+- I389-T-07 `Rest_TimeZoneInvalidAndUnavailable_NotCaughtByNotSupportedFilter` (regression guard for SC-06).
+- I389-T-08 `RefusalLogsAndAudit_ContainNoColumnAliasEpsilonOrInnerMessage` (log capture with sentinels).
