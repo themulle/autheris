@@ -156,6 +156,61 @@ public sealed class McpDatasetCatalogTests
         result.GraphQl!.Relations.ShouldHaveSingleItem().ShouldBe(new McpGraphQlRelation("payroll_by_order", "hr.public.payroll", false));
     }
 
+    private void MapOrdersRelation(string[] own, string[] target) =>
+        _graphQl.GetTableAsync(Orders, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
+            Orders, "sales_public_orders", "sales_public_orders", "sales_public_orders_filter", "sales_public_orders_order_by",
+            [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("amount", "amount", "Decimal")],
+            [new GraphQlRelationMapping("payroll_by_order", Payroll, IsList: false, own, target)]));
+
+    [Fact]
+    public async Task Describe_RelationColumns_AllVisible_ListsPairsInOrder()
+    {
+        MapOrdersRelation(["id", "amount"], ["id", "amount"]);
+
+        var result = await Catalog(AdminView()).DescribeDatasetAsync(User("GovernanceAdmin"), "sales.public.orders");
+
+        result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBe([new McpRelationColumnPair("id", "id"), new McpRelationColumnPair("amount", "amount")]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationColumns_OwnColumnHidden_AllPairsNull()
+    {
+        MapOrdersRelation(["id", "ghost"], ["id", "amount"]);
+
+        var result = await Catalog(AdminView()).DescribeDatasetAsync(User("GovernanceAdmin"), "sales.public.orders");
+
+        var relation = result.GraphQl!.Relations.ShouldHaveSingleItem();
+        relation.Dataset.ShouldBe("hr.public.payroll");
+        relation.Columns.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationColumns_TargetColumnHidden_AllPairsNull()
+    {
+        MapOrdersRelation(["id", "amount"], ["id", "salary"]);
+
+        var result = await Catalog(AdminView()).DescribeDatasetAsync(User("GovernanceAdmin"), "sales.public.orders");
+
+        result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationToHiddenTarget_StillOmitted_NoColumnsLeak()
+    {
+        // I392-T-08: the caller cannot see payroll; neither the relation nor any column name of it is serialized.
+        MapOrdersRelation(["id"], ["salary_secret"]);
+
+        var result = await Catalog().DescribeDatasetAsync(User(), "sales.public.orders");
+
+        result.GraphQl!.Relations.ShouldBeEmpty();
+        var json = System.Text.Json.JsonSerializer.Serialize(result);
+        json.ShouldNotContain("salary_secret");
+        json.ShouldNotContain("payroll");
+    }
+
     [Fact]
     public async Task DescribeDataset_OutsideTheGraphQlSchema_OffersTheOtherPaths()
     {

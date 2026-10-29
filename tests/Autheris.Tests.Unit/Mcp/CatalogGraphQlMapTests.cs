@@ -73,6 +73,19 @@ public sealed class CatalogGraphQlMapTests
     }
 
     [Fact]
+    public async Task CatalogGraphQlMap_RelationColumns_OwnSideFirst_BothDirections()
+    {
+        // Issue #392: the join keys are exposed with the owning table's columns first in both directions.
+        var forward = (await _map.GetTableAsync(Customers))!.Relations.ShouldHaveSingleItem();
+        forward.Columns.ShouldBe(["id"]);
+        forward.TargetColumns.ShouldBe(["customer_id"]);
+
+        var reverse = (await _map.GetTableAsync(Orders))!.Relations.ShouldHaveSingleItem();
+        reverse.Columns.ShouldBe(["customer_id"]);
+        reverse.TargetColumns.ShouldBe(["id"]);
+    }
+
+    [Fact]
     public async Task GetTable_CrossSourceRelation_IsNotListedAndNamesNoOmittedTarget()
     {
         // BUG #75 (S-9): the MCP view is derived from the same model, so an omitted relation never shows up.
