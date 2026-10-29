@@ -196,6 +196,36 @@ public sealed class McpDatasetCatalogTests
         result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBeNull();
     }
 
+    private static GatewayOptions Bypass() => new() { Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } };
+
+    [Fact]
+    public async Task Describe_RelationColumns_Bypass_ListsPairs()
+    {
+        MapOrdersRelation(["id", "amount"], ["id", "amount"]);
+
+        var result = await Catalog(Bypass()).DescribeDatasetAsync(User(), "sales.public.orders");
+
+        result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBe([new McpRelationColumnPair("id", "id"), new McpRelationColumnPair("amount", "amount")]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationColumns_Bypass_InactiveTarget_Null()
+    {
+        MapOrdersRelation(["id"], ["id"]);
+        var inactive = new TableMetadata
+        {
+            Identifier = Payroll,
+            Table = new Table { TableName = "payroll", SchemaName = "public", Description = "Salaries", Sensitivity = "INTERNAL", IsActive = false },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+        _metadata.GetTableMetadataAsync(Payroll, Arg.Any<CancellationToken>()).Returns(inactive);
+
+        var result = await Catalog(Bypass()).DescribeDatasetAsync(User(), "sales.public.orders");
+
+        result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBeNull();
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Describe_RelationToHiddenTarget_StillOmitted_NoColumnsLeak()

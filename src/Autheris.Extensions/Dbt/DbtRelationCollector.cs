@@ -11,6 +11,10 @@ internal sealed class RelationCollector
 
     private readonly List<DbtRelationshipDefinition> _relationships = [];
     private readonly List<string> _warnings = [];
+    /// <summary>Total <c>depends_on</c> ids held by pending relations per manifest (bounds memory: 10 000 relations x 1 024 ids at worst).</summary>
+    public const int MaxPendingDependsOn = 500_000;
+
+    private int _dependsOnBudget = MaxPendingDependsOn;
     private int _attempts;
     private bool _overflow;
 
@@ -28,6 +32,19 @@ internal sealed class RelationCollector
 
     /// <summary>Counts one relation attempt (SEC-REL151-02, I392-SC-08); false when the per-manifest limit is reached.</summary>
     public bool Reserve() => Count();
+
+    /// <summary>Reserves <paramref name="count"/> held <c>depends_on</c> ids; false (and overflow) when the budget is exhausted.</summary>
+    public bool ReserveDependsOn(int count)
+    {
+        if (count > _dependsOnBudget)
+        {
+            _overflow = true;
+            return false;
+        }
+
+        _dependsOnBudget -= count;
+        return true;
+    }
 
     /// <summary>Adds a reason-coded warning that is not tied to a relation (counted like a relation attempt).</summary>
     public void Warn(string message)

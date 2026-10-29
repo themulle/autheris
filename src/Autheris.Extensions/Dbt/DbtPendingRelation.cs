@@ -73,7 +73,8 @@ internal static class DbtRelationReferenceResolution
 
         foreach (var item in nodes.EnumerateArray())
         {
-            if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } id)
+            // Only eligible ids are kept (the resolver and the attached-node check never need others).
+            if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } id && IsEligible(id))
             {
                 result.Add(id);
                 if (result.Count >= MaxDependsOn)

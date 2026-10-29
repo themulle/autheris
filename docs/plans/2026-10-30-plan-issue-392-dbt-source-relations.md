@@ -76,3 +76,7 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - I392-T-08 `Describe_RelationToHiddenTarget_StillOmitted_NoColumnsLeak` (serialized output contains no hidden column name).
 - I392-T-09 `Parse_RelationshipsCombination_ForeignNamespace_UnsupportedForm` and `..._TooWide_Skips`.
 - I392-T-10 `Parse_PendingRelations_CountedAtCollection_LimitHolds` (memory bound with many unresolved relations).
+
+## Changelog
+
+- 2026-10-30: Implemented (WP-392a/b/c). Deviations: the fixture lives in `tests/Autheris.Extensions.Tests/Fixtures/`; a bare `to` (no `ref`/`source`) is treated as `ref(<name>)` (single candidate only) and an exact unique id also resolves; the tenant-drop warning is generic and names no relation or node; target column visibility uses the visibility engine's Full-shape row columns (Deny already dropped) instead of `ResolveColumnLevels` (equivalent per review). Pending relations keep only eligible `depends_on` ids (cap 1 024 per test, 500 000 in total per manifest; beyond that the relation is skipped with `TOO_MANY_RELATIONS`). Breaking: new reason codes `AMBIGUOUS_REFERENCE`, `AMBIGUOUS_MODEL`, `AMBIGUOUS_ATTACHMENT`; a name-only relation lookup is no longer last-wins.

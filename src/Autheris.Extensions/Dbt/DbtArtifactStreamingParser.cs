@@ -187,7 +187,7 @@ public static class DbtArtifactStreamingParser
                             {
                                 relations.Skip(relName, name, toModel, "MISSING_TARGET");
                             }
-                            else if (relations.Reserve())
+                            else if (relations.Reserve() && relations.ReserveDependsOn(ownDependsOn.Count))
                             {
                                 pending.Add(new DbtPendingRelation(toRaw, null, ownDependsOn, parentCols, childCols, null, uniqueId, name));
                             }
@@ -259,7 +259,7 @@ public static class DbtArtifactStreamingParser
                                     {
                                         relations.Skip(relName, name, toModel, "UNSUPPORTED_FORM");
                                     }
-                                    else if (relations.Reserve())
+                                    else if (relations.Reserve() && relations.ReserveDependsOn(ownDependsOn.Count))
                                     {
                                         pending.Add(new DbtPendingRelation(toRaw, null, ownDependsOn, parentCols, [colName], null, uniqueId, name));
                                     }

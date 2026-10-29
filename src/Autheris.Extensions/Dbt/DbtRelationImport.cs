@@ -36,9 +36,13 @@ internal static class DbtRelationImport
                 return;
             }
 
-            pending.Add(new DbtPendingRelation(
-                to, attached, DbtRelationReferenceResolution.ReadDependsOn(node),
-                string.IsNullOrWhiteSpace(parentColumn) ? [] : [parentColumn], [childColumn], null, null, Unresolved));
+            var deps = DbtRelationReferenceResolution.ReadDependsOn(node);
+            if (relations.ReserveDependsOn(deps.Count))
+            {
+                pending.Add(new DbtPendingRelation(
+                    to, attached, deps, string.IsNullOrWhiteSpace(parentColumn) ? [] : [parentColumn], [childColumn], null, null, Unresolved));
+            }
+
             return;
         }
 
@@ -67,10 +71,14 @@ internal static class DbtRelationImport
             return;
         }
 
-        pending.Add(new DbtPendingRelation(
-            to2, attached, DbtRelationReferenceResolution.ReadDependsOn(node),
-            DbtArtifactStreamingParser.ReadKeyArray(kwargs, "fields"), DbtArtifactStreamingParser.ReadKeyArray(kwargs, "columns"),
-            relationName.ValueKind == JsonValueKind.String ? relationName.GetString() : null, null, Unresolved));
+        var comboDeps = DbtRelationReferenceResolution.ReadDependsOn(node);
+        if (relations.ReserveDependsOn(comboDeps.Count))
+        {
+            pending.Add(new DbtPendingRelation(
+                to2, attached, comboDeps,
+                DbtArtifactStreamingParser.ReadKeyArray(kwargs, "fields"), DbtArtifactStreamingParser.ReadKeyArray(kwargs, "columns"),
+                relationName.ValueKind == JsonValueKind.String ? relationName.GetString() : null, null, Unresolved));
+        }
     }
 
     /// <summary>Resolves every pending relation in manifest order; unresolved or ambiguous ones are skipped with a reason code.</summary>

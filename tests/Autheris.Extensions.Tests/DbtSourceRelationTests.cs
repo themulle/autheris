@@ -270,6 +270,21 @@ public sealed class DbtSourceRelationTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Parse_AttachedNodeIndexedButMissingFromDependsOn_SkipsUnknownModel()
+    {
+        // I392-SC-03: orders is indexed, but the test does not list it in depends_on.
+        using var stream = Manifest(
+            new() { ["test.shop.r"] = Test("relationships", Rel("source('crm', 'customers')"), [Crm], attached: Orders) },
+            TwoSources());
+
+        var result = await Parse(stream);
+
+        result.Relationships.ShouldBeEmpty();
+        result.Warnings.ShouldHaveSingleItem().ShouldEndWith("skipped: UNKNOWN_MODEL");
+    }
+
+    [Fact]
     public async Task Parse_ModelForeignKeyToSource_Resolves()
     {
         using var stream = Manifest(
