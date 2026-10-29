@@ -108,7 +108,6 @@ public sealed class AccessProfileRuntimeResolutionTests
     {
         var p = new AccessProfile { ProfileId = id, Name = id, TenantId = TenantLiebherr, MaskingMode = mode, TargetTables = ["tem.*"], CreatedAt = DateTimeOffset.UtcNow };
         p.Assignments.AddRange(assignments);
-        p.AssignedSubjects.AddRange(assignments.Select(a => a.Subject));
         return p;
     }
 

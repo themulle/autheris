@@ -114,7 +114,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status != 'DELIVERED'",
-            AssignedSubjects = ["david", "S-1-5-21-DAVID"],
+            Assignments = TestAssign.Users("david", "S-1-5-21-DAVID"),
             CreatedAt = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(90),
             Justification = "Fachbereichsleitung Telemetrie (PoC-Ausnahmegenehmigung)",
@@ -160,7 +160,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status != 'DELIVERED'",
-            AssignedSubjects = ["philipp", "S-1-5-21-PHILIPP"],
+            Assignments = TestAssign.Users("philipp", "S-1-5-21-PHILIPP"),
             CreatedAt = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(90),
             Justification = "Analyst Telemetry (PoC Default Masking)",
@@ -205,7 +205,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
             RowFilterPredicate = rowFilter,
-            AssignedSubjects = ["david"],
+            Assignments = TestAssign.Users("david"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         };
         var philippProfile = new AccessProfile
@@ -216,7 +216,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
             RowFilterPredicate = rowFilter,
-            AssignedSubjects = ["philipp"],
+            Assignments = TestAssign.Users("philipp"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         };
         await repo.UpsertProfileAsync(davidProfile);
@@ -248,7 +248,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Strict,
             TargetTables = ["tem.*"],
             RowFilterPredicate = null,
-            AssignedSubjects = ["restricted-user"],
+            Assignments = TestAssign.Users("restricted-user"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         };
         await repo.UpsertProfileAsync(strictProfile);
@@ -277,7 +277,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status != 'DELIVERED'",
-            AssignedSubjects = ["david-expired"],
+            Assignments = TestAssign.Users("david-expired"),
             ValidTo = DateTimeOffset.UtcNow.AddMinutes(-5) // Expired 5 minutes ago
         };
         await repo.UpsertProfileAsync(expiredProfile);
@@ -322,7 +322,7 @@ public sealed class AccessProfileTests
             MaskingMode = mode,
             TargetTables = ["tem.*"],
             RowFilterPredicate = rowFilter,
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
         return repo;
@@ -409,7 +409,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status = 'ORIGINAL'",
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
         await repo.UpsertProfileAsync(profile);
@@ -433,7 +433,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
             RowFilterPredicate = "status = 'UPDATED'",
-            AssignedSubjects = [subject],
+            Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
         await repo.UpsertProfileAsync(updatedProfile);
@@ -475,7 +475,7 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
-            AssignedSubjects = ["alice", "bob"],
+            Assignments = TestAssign.Users("alice", "bob"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(10)
         };
 
@@ -484,8 +484,8 @@ public sealed class AccessProfileTests
         var retrieved = await repo.GetProfileAsync(TenantLiebherr, "test-prof-1");
         retrieved.ShouldNotBeNull();
         retrieved.Name.ShouldBe("Test Profile");
-        retrieved.AssignedSubjects.ShouldContain("alice");
-        retrieved.AssignedSubjects.ShouldContain("bob");
+        retrieved.Assignments.Select(a => a.Subject).ShouldContain("alice");
+        retrieved.Assignments.Select(a => a.Subject).ShouldContain("bob");
 
         var aliceProfiles = await repo.GetProfilesForSubjectAsync(TenantLiebherr, "alice");
         aliceProfiles.Count.ShouldBe(1);
@@ -530,7 +530,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*", "conf.*"],
             RowFilterPredicate = "delivery_status != 'DELIVERED'",
-            AssignedSubjects = ["david", "S-1-5-21-DAVID-SQLITE"],
+            Assignments = TestAssign.Users("S-1-5-21-DAVID-SQLITE"),
             CreatedAt = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(90),
             Justification = "Valid Justification for Enterprise PoC Telemetry",
@@ -548,10 +548,9 @@ public sealed class AccessProfileTests
         fetched.TargetTables.ShouldContain("tem.*");
         fetched.TargetTables.ShouldContain("conf.*");
         fetched.RowFilterPredicate.ShouldBe("delivery_status != 'DELIVERED'");
-        fetched.AssignedSubjects.ShouldContain("david");
-        fetched.AssignedSubjects.ShouldContain("S-1-5-21-DAVID-SQLITE");
+        fetched.Assignments.Select(a => a.Subject).ShouldContain("S-1-5-21-DAVID-SQLITE");
 
-        // SEC-SC-04: an Unmasked assignment of a user without four-eyes approval is inactive, whatever the legacy list says.
+        // SEC-SC-04: a user that was never assigned does not hold the Unmasked profile until a four-eyes approved assignment exists.
         (await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).ShouldBeEmpty();
         await sqliteRepo.AssignProfileAsync(TenantLiebherr, "prof-david-sqlite", new AccessProfileAssignment
         {
@@ -663,6 +662,27 @@ public sealed class AccessProfileTests
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
         body.ShouldContain("Segregation of Duties (SoD) violation");
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions WebJson = new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task AccessProfile_Plain_Subjects_Are_Rejected()
+    {
+        var repo = Substitute.For<IAccessProfileRepository>();
+        var context = CreateEndpointContext(callerSid: "admin", callerName: "admin");
+        var req = System.Text.Json.JsonSerializer.Deserialize<BulkConsentRequest>(
+            """{"subject":"david","maskingMode":"Strict","tables":["tem.*"],"justification":"Plain subjects must be refused","validDays":30,"assignedSubjects":["mallory"]}""",
+            WebJson)!;
+
+        var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
+        var (status, body) = await ExecuteResultAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain("ACCESS_PROFILE_PLAIN_SUBJECTS_REMOVED");
+        body.ShouldNotContain("mallory");
+        repo.ReceivedCalls().ShouldBeEmpty();
     }
 
     [Fact]
@@ -1032,7 +1052,7 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
-            AssignedSubjects = ["user1"],
+            Assignments = TestAssign.Users("user1"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(10)
         };
         await repo.UpsertProfileAsync(profile);
@@ -1070,7 +1090,7 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
-            AssignedSubjects = ["david-revoke"],
+            Assignments = TestAssign.Users("david-revoke"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         };
         await repo.UpsertProfileAsync(profile);
@@ -1330,7 +1350,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
             RowFilterPredicate = "crane_id = 'C1'",
-            AssignedSubjects = ["multi-profile-user"],
+            Assignments = TestAssign.Users("multi-profile-user"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
         await repo.UpsertProfileAsync(new AccessProfile
@@ -1341,7 +1361,7 @@ public sealed class AccessProfileTests
             MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.gps_position"],
             RowFilterPredicate = "status != 'DELIVERED'",
-            AssignedSubjects = ["multi-profile-user"],
+            Assignments = TestAssign.Users("multi-profile-user"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
 

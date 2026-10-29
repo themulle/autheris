@@ -107,6 +107,16 @@ public static partial class GovernanceEndpoints
             return Results.BadRequest(new { error = "Request body is required." });
         }
 
+        // NL-SC-07 (O-5d): the plain subject list was removed. A body that still carries it is refused before any lookup or store call;
+        // the member is never bound silently.
+        if (req.ExtensionData is { } extra && extra.Keys.Any(k => string.Equals(k, "assignedSubjects", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.AccessProfilePlainSubjectsRemoved,
+                "assignedSubjects was removed; use typed assignments.",
+                context);
+        }
+
         if (string.IsNullOrWhiteSpace(req.Subject))
         {
             return Results.BadRequest(new { error = "Subject is required." });
@@ -252,7 +262,6 @@ public static partial class GovernanceEndpoints
             MaskingMode = mode,
             TargetTables = targetTables,
             RowFilterPredicate = string.IsNullOrWhiteSpace(req.RowFilter) ? null : req.RowFilter.Trim(),
-            AssignedSubjects = [],
             CreatedAt = now,
             ValidTo = validTo,
             Justification = req.Justification.Trim(),
@@ -589,7 +598,7 @@ public static partial class GovernanceEndpoints
                 profile.Name,
                 profile.MaskingMode,
                 profile.TargetTables,
-                profile.AssignedSubjects,
+                assignments = profile.Assignments.Select(a => new { a.SubjectType, a.Subject }),
                 revokedBy = callerSid
             })
         };

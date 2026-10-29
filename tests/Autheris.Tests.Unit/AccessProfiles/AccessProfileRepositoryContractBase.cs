@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Autheris.Tests.AccessProfiles;
 
+
 /// <summary>
 /// WP-SC-03 / SEC-SC-04 / SEC-SC-20 contract of the persisted access profiles; run on SQLite (unit) and on PostgreSQL and SQL Server (integration).
 /// Every test uses its own profile ids, so tests share one database.
@@ -44,7 +45,7 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
         var profile = new AccessProfile
         {
             ProfileId = Id("p"), Name = Id("name"), TenantId = tenant ?? TenantA, MaskingMode = mode, TargetTables = ["*.*"],
-            CreatedAt = createdAt ?? DateTimeOffset.UtcNow, CreatedBy = "admin1", AssignedSubjects = [.. legacyUsers]
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow, CreatedBy = "admin1", Assignments = TestAssign.Users(legacyUsers)
         };
         await Repo.UpsertProfileAsync(profile);
         return profile;
@@ -67,6 +68,39 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
         Should.ThrowAsync<AccessProfileAssignmentRejectedException>(act).GetAwaiter().GetResult().Code.ShouldBe(code);
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task AccessProfile_Typed_Assignments_Are_Authoritative()
+    {
+        if (!Available) return;
+        var p = await NewProfileAsync(MaskingPolicyMode.Default, legacyUsers: ["alice", "bob"]);
+        AccessProfile Edit(params string[] users) => new()
+        {
+            ProfileId = p.ProfileId, Name = p.Name, TenantId = TenantA, MaskingMode = MaskingPolicyMode.Default, TargetTables = ["*.*"],
+            CreatedBy = "admin1", Assignments = TestAssign.Users(users)
+        };
+
+        await Repo.UpsertProfileAsync(Edit("alice"));
+        (await Repo.GetProfileAsync(TenantA, p.ProfileId))!.Assignments.Select(a => a.Subject).ShouldBe(["alice"]);
+
+        await Repo.UpsertProfileAsync(Edit());
+        (await Repo.GetProfileAsync(TenantA, p.ProfileId))!.Assignments.ShouldBeEmpty();
+        (await Repo.GetProfilesForSubjectAsync(TenantA, "alice")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task AccessProfile_Legacy_Stored_Plain_Subjects_Grant_Nothing()
+    {
+        if (!Available) return;
+        // A profile that carries no typed assignment has no holder: there is no plain-subject fallback that could match a caller.
+        var p = await NewProfileAsync(MaskingPolicyMode.Default);
+
+        (await Repo.GetProfilesForSubjectAsync(TenantA, "alice")).ShouldBeEmpty();
+        (await Repo.GetProfilesForSubjectsAsync(TenantA, ["alice"], ["grp"], ["role"])).ShouldBeEmpty();
+        (await Repo.GetProfileAsync(TenantA, p.ProfileId))!.Assignments.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task LegacyUpsert_RoundTripsProfileAndSubjects()
     {
         if (!Available) return;
@@ -76,7 +110,7 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
 
         read.ShouldNotBeNull();
         read.Name.ShouldBe(p.Name);
-        read.AssignedSubjects.ShouldBe(["alice", "bob"], ignoreOrder: true);
+        read.Assignments.Select(a => a.Subject).ShouldBe(["alice", "bob"], ignoreOrder: true);
         (await Repo.GetProfileAsync(TenantB, p.ProfileId)).ShouldBeNull();
         (await Repo.GetAllProfilesAsync(TenantA)).Select(x => x.ProfileId).ShouldContain(p.ProfileId);
         (await Repo.GetAllProfilesAsync(TenantB)).Select(x => x.ProfileId).ShouldNotContain(p.ProfileId);
@@ -132,11 +166,11 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
         await Repo.UpsertProfileAsync(new AccessProfile
         {
             ProfileId = p.ProfileId, Name = p.Name, TenantId = TenantA, MaskingMode = p.MaskingMode, TargetTables = ["*.*"],
-            CreatedAt = p.CreatedAt, CreatedBy = "admin1", AssignedSubjects = ["ALICE-CASE"]
+            CreatedAt = p.CreatedAt, CreatedBy = "admin1", Assignments = TestAssign.Users("ALICE-CASE")
         });
 
         var read = await Repo.GetProfileAsync(TenantA, p.ProfileId);
-        read!.AssignedSubjects.Count.ShouldBe(1);
+        read!.Assignments.Count.ShouldBe(1);
     }
 
     [Fact]
@@ -250,29 +284,36 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LegacyPermanentUserAssignment_IsClampedAndInactiveAfterTheClamp_NeverRewritten()
+    public async Task PermanentUserAssignment_IsRejected_NoImplicitClampOrFallback()
     {
         if (!Available) return;
-        var user = Id("legacy");
-        var old = await NewProfileAsync(MaskingPolicyMode.Default, createdAt: DateTimeOffset.UtcNow.AddDays(-400), legacyUsers: user);
-        var fresh = await NewProfileAsync(MaskingPolicyMode.Default, createdAt: DateTimeOffset.UtcNow.AddDays(-10), legacyUsers: user);
+        var profile = new AccessProfile
+        {
+            ProfileId = Id("p"), Name = Id("name"), TenantId = TenantA, MaskingMode = MaskingPolicyMode.Default, TargetTables = ["*.*"],
+            CreatedAt = DateTimeOffset.UtcNow, CreatedBy = "admin1",
+            Assignments = [new AccessProfileAssignment { Subject = Id("perm"), SubjectType = AccessProfileSubjectType.User, CreatedBy = "admin1" }]
+        };
 
-        var ids = Ids(await Repo.GetProfilesForSubjectAsync(TenantA, user));
+        var ex = await Should.ThrowAsync<AccessProfileAssignmentRejectedException>(() => Repo.UpsertProfileAsync(profile));
 
-        ids.ShouldContain(fresh.ProfileId);
-        ids.ShouldNotContain(old.ProfileId);
-        (await Repo.GetProfileAsync(TenantA, old.ProfileId))!.Assignments.Single().ExpiresAt.ShouldBeNull();
+        ex.Code.ShouldBe(AccessProfileAssignmentRules.RequiresExpiry);
+        (await Repo.GetProfileAsync(TenantA, profile.ProfileId)).ShouldBeNull();
     }
 
     [Fact]
-    public async Task LegacyUnmaskedUserAssignment_WithoutApproval_IsNeverEffective()
+    public async Task UnmaskedUserAssignment_WithoutApproval_IsRejected()
     {
         if (!Available) return;
-        var user = Id("legacy");
-        var p = await NewProfileAsync(MaskingPolicyMode.Unmasked, legacyUsers: user);
+        var profile = new AccessProfile
+        {
+            ProfileId = Id("p"), Name = Id("name"), TenantId = TenantA, MaskingMode = MaskingPolicyMode.Unmasked, TargetTables = ["*.*"],
+            CreatedAt = DateTimeOffset.UtcNow, CreatedBy = "admin1",
+            Assignments = [new AccessProfileAssignment { Subject = Id("u"), SubjectType = AccessProfileSubjectType.User, CreatedBy = "admin1", ExpiresAt = DateTimeOffset.UtcNow.AddDays(5) }]
+        };
 
-        Ids(await Repo.GetProfilesForSubjectAsync(TenantA, user)).ShouldNotContain(p.ProfileId);
-        (await Repo.GetProfileAsync(TenantA, p.ProfileId))!.AssignedSubjects.ShouldContain(user);
+        var ex = await Should.ThrowAsync<AccessProfileAssignmentRejectedException>(() => Repo.UpsertProfileAsync(profile));
+
+        ex.Code.ShouldBe(AccessProfileAssignmentRules.FourEyesRequired);
     }
 
     [Fact]
@@ -283,7 +324,7 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
         var p = new AccessProfile
         {
             ProfileId = Id("p"), Name = Id("n"), TenantId = TenantA, MaskingMode = MaskingPolicyMode.Default, TargetTables = ["*.*"],
-            CreatedBy = "admin1", AssignedSubjects = [user], ValidTo = DateTimeOffset.UtcNow.AddMinutes(-5)
+            CreatedBy = "admin1", Assignments = TestAssign.Users(user), ValidTo = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
         await Repo.UpsertProfileAsync(p);
 
@@ -291,7 +332,7 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReUpsertingTheProfile_KeepsApprovalsAndRenewals_AndDropsRemovedSubjects()
+    public async Task ReUpsertingTheProfile_KeepsApprovalsAndRenewals_AndDropsOmittedAssignments()
     {
         if (!Available) return;
         var p = await NewProfileAsync(MaskingPolicyMode.Unmasked, legacyUsers: ["keep", "drop"]);
@@ -301,14 +342,14 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
         var edited = new AccessProfile
         {
             ProfileId = p.ProfileId, Name = "renamed-" + p.ProfileId, TenantId = TenantA, MaskingMode = MaskingPolicyMode.Unmasked, TargetTables = ["*.*"],
-            CreatedBy = "admin1", AssignedSubjects = ["keep", "dave"]
+            CreatedBy = "admin1", Assignments = [.. TestAssign.Users("keep"), Group(group, "admin1", "admin2"), UserGrant("dave", 10)]
         };
 
         await Repo.UpsertProfileAsync(edited);
 
         var read = (await Repo.GetProfileAsync(TenantA, p.ProfileId))!;
         read.Name.ShouldBe("renamed-" + p.ProfileId);
-        read.Assignments.Select(a => a.Subject).ShouldBe(["keep", "dave", group], ignoreOrder: true); // typed group mapping is kept
+        read.Assignments.Select(a => a.Subject).ShouldBe(["keep", "dave", group], ignoreOrder: true); // the typed list is authoritative: "drop" is omitted and gone
         read.Assignments.Single(a => a.Subject == "dave").ApprovedBy.ShouldBe("owner1");
         read.Assignments.Single(a => a.Subject == group).ApprovedBy.ShouldBe("admin2");
         Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, ["dave"], [group], [])).ShouldContain(p.ProfileId);
