@@ -37,9 +37,9 @@ public static partial class GovernanceEndpoints
             .WithAudit(AuditLevel.Full, AuditEventTypes.RowFilterEvaluationChanged);
     }
 
-    private static IResult RowFilterNotFound() => ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "Row filter was not found.");
+    private static IResult RowFilterNotFound() => ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Row filter was not found.");
 
-    internal static IResult DatasetNotFound() => ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "Dataset was not found.");
+    internal static IResult DatasetNotFound() => ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Dataset was not found.");
 
     private static IResult Rejected(string reason) => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, reason);
 
