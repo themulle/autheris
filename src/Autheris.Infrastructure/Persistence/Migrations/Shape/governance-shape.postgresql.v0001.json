@@ -7,57 +7,68 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "policy_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "name",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "description",
           "type": "CHARACTER VARYING(512)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "is_active",
           "type": "BOOLEAN",
-          "family": "boolean"
+          "family": "boolean",
+          "nullable": false
         },
         {
           "name": "priority",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "decision",
           "type": "CHARACTER VARYING(16)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_by",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "approved_by",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "approved_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -72,27 +83,32 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "policy_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "realm_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "grantee_type",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "grantee_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -110,22 +126,26 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "policy_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "selector_type",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "selector_value",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -142,67 +162,80 @@
         {
           "name": "profile_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "subject",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "subject_type",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "assigned_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "expires_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": true
         },
         {
           "name": "subject_norm",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_by",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "approved_by",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "approved_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": true
         },
         {
           "name": "justification",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "kind",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "renewal_count",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -229,52 +262,62 @@
         {
           "name": "profile_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "name",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "masking_mode",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "target_tables",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "row_filter_predicate",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "justification",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_by",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "valid_to",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -289,37 +332,44 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "consent_request_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "step_number",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "approver_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "decision",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "rejection_reason",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "decided_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -342,27 +392,32 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "batch_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "error_message",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "failed_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -376,72 +431,86 @@
         {
           "name": "rowid",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "occurred_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "event_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "actor_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "target_table",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "target_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "decision",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "trace_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "details_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "prev_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "entry_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "seq",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -479,42 +548,50 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "first_surviving_seq",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "surviving_prev_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "purged_count",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "purged_through_utc",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "signature",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "external_signature",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -528,42 +605,50 @@
         {
           "name": "stream_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "key_fingerprint",
           "type": "BYTEA",
-          "family": "binary"
+          "family": "binary",
+          "nullable": false
         },
         {
           "name": "tenant_scope",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "dek_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "image",
           "type": "BYTEA",
-          "family": "binary"
+          "family": "binary",
+          "nullable": false
         },
         {
           "name": "event_offset",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -578,57 +663,68 @@
         {
           "name": "stream_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "event_offset",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "change_version",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "kind",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "operation",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "tenant_scope",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "prior_tenant_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "dek_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "payload",
           "type": "BYTEA",
-          "family": "binary"
+          "family": "binary",
+          "nullable": false
         },
         {
           "name": "produced_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -660,37 +756,44 @@
         {
           "name": "stream_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "dek_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "purpose",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "kek_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "wrapped_key",
           "type": "BYTEA",
-          "family": "binary"
+          "family": "binary",
+          "nullable": false
         },
         {
           "name": "created_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "retired_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -713,72 +816,86 @@
         {
           "name": "stream_id",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "domain_name",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "schema_name",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_name",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "activation_code",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "head_offset",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "tail_offset",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "producer_fencing_token",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "retention_fencing_token",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "last_polled_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "created_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -803,47 +920,56 @@
         {
           "name": "source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "domain_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "schema_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "watermark",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "fencing_token",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "updated_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "watermark_state",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -860,12 +986,14 @@
         {
           "name": "id",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "generation",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -879,67 +1007,80 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "application_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "attribute_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "values_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "values_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "created_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "approved_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "approved_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "draft_values_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "draft_created_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -953,82 +1094,98 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "definition_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "definition_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "created_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "approved_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "approved_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "draft_definition_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "draft_definition_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "draft_created_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "pending_deletion",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "deletion_requested_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1042,22 +1199,26 @@
         {
           "name": "id",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "structure_version",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "content_version",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1071,62 +1232,74 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "target_url",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "filter_table",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "filter_operations",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "hmac_secret_protected",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "is_enabled",
           "type": "BOOLEAN",
-          "family": "boolean"
+          "family": "boolean",
+          "nullable": false
         },
         {
           "name": "custom_headers_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_by_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_by_groups_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_by_roles_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1149,32 +1322,38 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_column_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "rule_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "pattern_or_format",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "replacement",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "hmac_key_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -1196,32 +1375,38 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "consent_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_column_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "column_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "access_level",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "applicable_scopes",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1243,67 +1428,80 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "requester_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "requested_grantee_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "requested_grantee_ref",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "business_justification",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "requested_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "requested_valid_to",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "itsm_ticket_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "requester_identifiers_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "context_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -1326,122 +1524,146 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "consent_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "filter_group",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "table_column_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "column_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "operator",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "value_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "value_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "value_source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "user_attribute",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "filter_type",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "dependent_table",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "dependent_table_alias",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "foreign_key_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "primary_key_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "subquery_predicate_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "target_temporal_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "dependent_valid_from_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "dependent_valid_to_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "target_table_alias",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "additional_hops_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "key_set_strategy",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "key_set_duration_seconds",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "key_set_max_keys",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -1463,92 +1685,110 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "consent_request_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "effect",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "grantee_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "grantee_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "grantee_sid_norm",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "role_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "role_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "valid_from",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "valid_to",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "is_revoked",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "revoked_by_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "revoked_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "revoke_reason",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "renewal_count",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "description",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -1596,27 +1836,32 @@
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "day",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "application",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "actor_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1634,67 +1879,80 @@
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "day",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "application",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "client_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "version",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "calls",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "rows_returned",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "rows_measured_calls",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "rej_access",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "rej_rate_limit",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "rej_cost",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "rej_other",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1713,32 +1971,38 @@
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "day",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "application",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "query_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "calls",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1756,32 +2020,38 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "data_owner_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "delegate_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "valid_from",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "valid_to",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "reason",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1795,32 +2065,38 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "ad_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "ad_account",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "display_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "email",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "is_active",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1842,47 +2118,56 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "realm_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "group_or_role",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "functional_right",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "approved_by",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "approved_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "recert_class",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_by",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1899,27 +2184,32 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "realm_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "group_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "user_key",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -1946,37 +2236,44 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "realm_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "group_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "external_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "display_name",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2002,32 +2299,38 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "realm_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "user_key",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "reason",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "locked_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2043,57 +2346,68 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "realm_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "user_key",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "external_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "user_name",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "email",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "display_name",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "active",
           "type": "BOOLEAN",
-          "family": "boolean"
+          "family": "boolean",
+          "nullable": false
         },
         {
           "name": "deactivated_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": true
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2119,62 +2433,74 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "request_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "event_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "payload_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "preferred_system",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "retry_count",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "max_retries",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "next_retry_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "last_error",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -2197,32 +2523,38 @@
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "domain",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "schema_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "epoch",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2246,37 +2578,44 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "campaign_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "name",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "recert_class",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "deadline",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2291,57 +2630,68 @@
         {
           "name": "tenant_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "campaign_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "item_id",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "asset_type",
           "type": "CHARACTER VARYING(64)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "asset_key",
           "type": "CHARACTER VARYING(256)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "assigned_to",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "reviewer_id",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "decision",
           "type": "CHARACTER VARYING(32)",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "decision_at",
           "type": "TIMESTAMP WITH TIME ZONE",
-          "family": "datetime"
+          "family": "datetime",
+          "nullable": true
         },
         {
           "name": "decision_by",
           "type": "CHARACTER VARYING(128)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "comments",
           "type": "CHARACTER VARYING(512)",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -2357,22 +2707,26 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "role_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "member_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "member_sid",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2394,17 +2748,20 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "role_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "description",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2418,47 +2775,56 @@
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "manifest_version",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "content_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "format_version",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "models_count",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "metrics_count",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "manifest_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "imported_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "imported_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2472,22 +2838,26 @@
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "visibility",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2501,57 +2871,68 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "column_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "data_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "is_sensitive",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "description",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "long_description",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "doc_source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "meta_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "display_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "texts_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -2574,17 +2955,20 @@
         {
           "name": "index_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "column_ordinal",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "table_column_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2608,22 +2992,26 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "index_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "is_unique",
           "type": "BOOLEAN",
-          "family": "boolean"
+          "family": "boolean",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2646,22 +3034,26 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "data_owner_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "owner_role",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2692,17 +3084,20 @@
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "key_ordinal",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "table_column_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2726,22 +3121,26 @@
         {
           "name": "relation_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "key_ordinal",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "parent_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "child_column",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2773,32 +3172,38 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "parent_table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "child_table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "relation_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "cardinality",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "allow_cross_data_source",
           "type": "BOOLEAN",
-          "family": "boolean"
+          "family": "boolean",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2836,32 +3241,38 @@
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "strategy",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "duration_seconds",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "max_keys",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "updated_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2875,27 +3286,32 @@
         {
           "name": "table_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tag",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -2910,87 +3326,104 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "schema_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "table_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "display_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "description",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "long_description",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "doc_source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "sensitivity",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "requires_four_eyes",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "is_active",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "data_source_type",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "http_endpoint_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "plugin_name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "required_filter_columns_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "texts_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -3023,22 +3456,26 @@
         {
           "name": "normalized_key",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "collided",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "first_seen_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3052,12 +3489,14 @@
         {
           "name": "app_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "origin",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3072,32 +3511,38 @@
         {
           "name": "app_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "version",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "status",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "retired_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         }
       ],
       "primaryKey": [
@@ -3112,17 +3557,20 @@
         {
           "name": "app_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "created_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3136,12 +3584,14 @@
         {
           "name": "id",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "generation",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3155,17 +3605,20 @@
         {
           "name": "app_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "version",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3181,47 +3634,56 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "definition_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "definition_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "managed_path",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "managed_commit",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3235,12 +3697,14 @@
         {
           "name": "id",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "generation",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3254,52 +3718,62 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "name",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "definition_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "definition_hash",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "managed_path",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "managed_commit",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_by",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "updated_at",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         }
       ],
       "primaryKey": [
@@ -3313,102 +3787,122 @@
         {
           "name": "id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "source",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "subscription_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "owner_tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "event_tenant_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "event_id",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "event_type",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "event_source",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "event_time_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "payload_json",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": false
         },
         {
           "name": "attempt",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "max_attempts",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "state",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "next_attempt_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "lease_until_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "lease_owner",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "last_status_code",
           "type": "INTEGER",
-          "family": "integer"
+          "family": "integer",
+          "nullable": true
         },
         {
           "name": "last_error_code",
           "type": "TEXT",
-          "family": "string"
+          "family": "string",
+          "nullable": true
         },
         {
           "name": "created_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         },
         {
           "name": "updated_ms",
           "type": "BIGINT",
-          "family": "integer"
+          "family": "integer",
+          "nullable": false
         }
       ],
       "primaryKey": [

@@ -1,7 +1,10 @@
 namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 
-/// <summary>A column of the expected or the actual governance schema. <see cref="Family"/> is the engine-neutral type family.</summary>
-internal sealed record SchemaColumn(string Name, string Type, string Family);
+/// <summary>
+/// A column of the expected or the actual governance schema. <see cref="Family"/> is the engine-neutral type family.
+/// <see cref="Nullable"/> is normalised (I388-SC-11): primary key columns are never nullable, whatever the catalog reports.
+/// </summary>
+internal sealed record SchemaColumn(string Name, string Type, string Family, bool Nullable = false);
 
 /// <summary>An explicitly named index (auto-named constraint indexes are not part of the shape).</summary>
 internal sealed record SchemaIndex(string Name, bool Unique, IReadOnlyList<string> Columns);
@@ -37,7 +40,8 @@ public enum SchemaDeviationKind
     WrongType,
     WrongPrimaryKey,
     MissingIndex,
-    WrongIndex
+    WrongIndex,
+    WrongNullability
 }
 
 /// <summary>One difference between the expected and the actual governance schema. Carries identifiers only, never data.</summary>

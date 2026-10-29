@@ -98,7 +98,8 @@ public sealed class SqlServerGovernanceSchemaShapeTests : IClassFixture<SqlServe
 
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.MissingColumn && d.Table == "CONSENT_COLUMN_RULES" && d.Name == "applicable_scopes");
         ex.Message.ShouldContain("SQL Server database");
-        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(0);
+        // I388-SC-04: no DDL before the adoption pre-check accepted the schema, so not even the history table exists.
+        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM sys.tables WHERE name = 'autheris_schema_migrations'")).ShouldBe(0);
         await Should.ThrowAsync<GovernanceSchemaDriftException>(
             () => GovernanceSchemaTestSupport.RunSqlServerAsync(db.ConnectionString, GovernanceMigrationMode.Apply));
     }

@@ -54,4 +54,29 @@ public sealed class GovernanceMigrationOptions
     /// When false (default) startup fails if the database contains migrations newer than this binary (database newer than code).
     /// </summary>
     public bool AllowNewerSchema { get; init; }
+
+    /// <summary>
+    /// When true (default false), <c>Mode = Verify</c> fails with <c>GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED</c> if the runtime login can write the
+    /// migration history or run DDL; when false that is only a warning. PostgreSQL and SQL Server; SQLite is skipped.
+    /// </summary>
+    public bool RequireLeastPrivilege { get; init; }
+
+    /// <summary>
+    /// Upper bound in seconds for opening the migration connection and acquiring the cross-process schema lock (default 300, range 10-3600).
+    /// Exceeding it fails closed with <c>GOVERNANCE_MIGRATION_LOCK_TIMEOUT</c>; the orchestrator restarts the process.
+    /// </summary>
+    [Range(10, 3600)]
+    public int LockTimeoutSeconds { get; init; } = DefaultLockTimeoutSeconds;
+
+    /// <summary>PostgreSQL <c>lock_timeout</c> and SQL Server <c>LOCK_TIMEOUT</c> of one migration step in seconds (default 30, range 1-3600).</summary>
+    [Range(1, 3600)]
+    public int StepLockTimeoutSeconds { get; init; } = DefaultStepLockTimeoutSeconds;
+
+    /// <summary>PostgreSQL <c>statement_timeout</c> of one migration step in seconds (default 900, range 10-86400).</summary>
+    [Range(10, 86400)]
+    public int StepStatementTimeoutSeconds { get; init; } = DefaultStepStatementTimeoutSeconds;
+
+    public const int DefaultLockTimeoutSeconds = 300;
+    public const int DefaultStepLockTimeoutSeconds = 30;
+    public const int DefaultStepStatementTimeoutSeconds = 900;
 }

@@ -20,7 +20,8 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
             {
                 new SqliteBaselineSchema((SqliteConnection)ctx.Connection, ctx.Logger).Apply();
                 return Task.CompletedTask;
-            })
+            }),
+        .. SqlMigrationStep.LoadEmbedded("sqlite").Select(step => step.ToMigrationStep())
     ];
 
     private static readonly GovernanceSchemaShapeVerifier Verifier = new("sqlite", new SqliteSchemaCatalogReader());
@@ -48,7 +49,10 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
     protected override string CreateVersionTableSql =>
         "CREATE TABLE IF NOT EXISTS autheris_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL, applied_by TEXT NOT NULL);";
 
-    protected override string SelectVersionsSql => "SELECT version, checksum FROM autheris_schema_migrations ORDER BY version;";
+    protected override string SelectVersionsSql => "SELECT version, checksum, name FROM autheris_schema_migrations ORDER BY version;";
+
+    protected override string HistoryTableExistsSql =>
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'autheris_schema_migrations';";
 
     protected override string InsertVersionSql =>
         "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (@version, @name, @checksum, @applied_at, @applied_by);";
@@ -58,20 +62,44 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
 
     protected override bool UseStepTransactions => false;
 
-    protected override async Task<DbConnection> OpenConnectionAsync(CancellationToken ct) =>
+    protected override async Task<DbConnection> OpenConnectionAsync(bool verifyOnly, CancellationToken ct) =>
         await _repository.Connections.OpenAsync(ct).ConfigureAwait(false);
 
-    protected override async Task AcquireLockAsync(DbConnection connection, CancellationToken ct)
+    // Verify mode never reaches this method: it takes no lock and writes nothing (I388-SC-09).
+    protected override async Task AcquireLockAsync(DbConnection connection, TimeSpan timeout, CancellationToken ct)
     {
         await _repository.LockUnguardedAsync(ct).ConfigureAwait(false);
         try
         {
-            await ExecuteAsync(connection, null, "BEGIN IMMEDIATE;", ct).ConfigureAwait(false);
+            // The command timeout is the SQLite busy timeout: another process holding the write lock ends in a bounded wait.
+            await ExecuteAsync(connection, null, "BEGIN IMMEDIATE;", ct, (int)Math.Max(1, Math.Ceiling(timeout.TotalSeconds))).ConfigureAwait(false);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode is 5 or 6)
+        {
+            _repository.ReleaseLock();
+            throw LockTimeoutError();
         }
         catch
         {
             _repository.ReleaseLock();
             throw;
+        }
+    }
+
+    /// <summary>I388-SC-08: a rebuild-style step must leave no orphaned foreign key row.</summary>
+    protected override async Task AfterStepAsync(DbConnection connection, DbTransaction? transaction, MigrationStep step, CancellationToken ct)
+    {
+        if (step.Version < 2)
+        {
+            return;
+        }
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "PRAGMA foreign_key_check;";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("PRAGMA foreign_key_check reported violations after the step.");
         }
     }
 
