@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Analytics;
 using Autheris.Application.Dbt.Interfaces;
@@ -66,6 +67,18 @@ public static class AnalyticsEndpoints
 
         return app;
     }
+
+    private const string NotSupportedMessage = "The requested aggregation is not supported for this dataset.";
+
+    /// <summary>
+    /// #389: translation limits of the governed compiler. Time-zone invalid/argument/unavailable are deliberately excluded and keep reaching
+    /// the global exception handler (I389-SC-06).
+    /// </summary>
+    private static bool IsNotSupportedRefusal(Exception ex) => ex is TrinoSqlEngine.Ast.Builder.AstBuildException or TrinoSqlEngine.SqlCompileNotSupportedException
+        or TrinoSqlEngine.SqlTimeZoneException
+        {
+            Code: not (TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneUnavailable or TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneInvalid or TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneArgument)
+        };
 
     internal static async Task<IResult> HandleAggregateAsync(
         AggregateRequestDto request,
@@ -147,6 +160,16 @@ public static class AnalyticsEndpoints
         {
             SafeErrorResults.LogFailure(httpContext, ex, AggregationRowCapExceededException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationRowCapExceededException.ErrorCodeConst, AggregationRowCapExceededException.FixedMessage, httpContext);
+        }
+        catch (AggregationPrivacyRestrictedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationPrivacyRestrictedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationPrivacyRestrictedException.ErrorCodeConst, AggregationPrivacyRestrictedException.FixedMessage, httpContext);
+        }
+        catch (Exception ex) when (IsNotSupportedRefusal(ex))
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationErrorCodes.NotSupported);
+            return SafeErrorResults.Problem(StatusCodes.Status422UnprocessableEntity, AggregationErrorCodes.NotSupported, NotSupportedMessage, httpContext);
         }
         catch (GatewayInvalidQueryException ex)
         {
@@ -235,6 +258,16 @@ public static class AnalyticsEndpoints
         {
             SafeErrorResults.LogFailure(httpContext, ex, AggregationRowCapExceededException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationRowCapExceededException.ErrorCodeConst, AggregationRowCapExceededException.FixedMessage, httpContext);
+        }
+        catch (AggregationPrivacyRestrictedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationPrivacyRestrictedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationPrivacyRestrictedException.ErrorCodeConst, AggregationPrivacyRestrictedException.FixedMessage, httpContext);
+        }
+        catch (Exception ex) when (IsNotSupportedRefusal(ex))
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationErrorCodes.NotSupported);
+            return SafeErrorResults.Problem(StatusCodes.Status422UnprocessableEntity, AggregationErrorCodes.NotSupported, NotSupportedMessage, httpContext);
         }
         catch (GatewayInvalidQueryException ex)
         {

@@ -127,6 +127,18 @@ public static class ApiProblems
         logger?.LogWarning(exception, "Request failed with code {ErrorCode} (correlation {CorrelationId}, trace {TraceId}).", code, ResolveCorrelationId(context, traceId), traceId);
     }
 
+    /// <summary>
+    /// Logs a refusal with its code and exception type name only (no exception object, message or inner exception), for refusals whose
+    /// internals must stay out of every channel (#389 I389-SC-02).
+    /// </summary>
+    public static void LogRefusal(HttpContext? context, Type exceptionType, string code)
+    {
+        ArgumentNullException.ThrowIfNull(exceptionType);
+        var logger = context?.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger(LogCategory);
+        var traceId = ResolveTraceId(context);
+        logger?.LogWarning("Request refused with code {ErrorCode} ({ExceptionType}) (correlation {CorrelationId}, trace {TraceId}).", code, exceptionType.Name, ResolveCorrelationId(context, traceId), traceId);
+    }
+
     public static string ResolveTraceId(HttpContext? context) =>
         Activity.Current?.TraceId.ToString() ?? context?.TraceIdentifier ?? string.Empty;
 
