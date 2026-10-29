@@ -86,7 +86,8 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
         int lockTimeoutSeconds = 300,
         bool requireLeastPrivilege = false,
         List<string>? log = null,
-        List<string>? trace = null)
+        List<string>? trace = null,
+        bool fullCatalogue = false)
     {
         var options = Opts(connectionString, mode, allowNewer, lockTimeoutSeconds, requireLeastPrivilege);
         using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
@@ -94,6 +95,7 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
             repository, options, log is null ? null : new CaptureLogger<PostgreSqlGovernanceMigrationRunner>(log))
         {
             AdditionalSteps = extra ?? [],
+            StepVersionCapOverride = fullCatalogue ? null : 1,
             Trace = trace is null ? null : s => { lock (trace) { trace.Add(s); } }
         };
         await runner.RunAsync();
@@ -101,16 +103,18 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
 
     protected override async Task SeedV150Async(string connectionString)
     {
-        await using var repository = GovernanceStoreFactory.CreatePostgreSql(
-            Substitute.For<IEpochValidationService>(), Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false));
+        var options = Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
+        await new PostgreSqlGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 1 }.RunAsync();
+        await repository.InitializeAsync();
         await SeedCoreAsync(repository, () => repository.FlushAuditChannelAsync());
     }
 
-    protected override async Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra)
+    protected override async Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra, bool fullCatalogue = false)
     {
         var options = Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false);
         using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
-        await new PostgreSqlGovernanceMigrationRunner(repository, options) { AdditionalSteps = extra }.RunAsync();
+        await new PostgreSqlGovernanceMigrationRunner(repository, options) { AdditionalSteps = extra, StepVersionCapOverride = fullCatalogue ? null : 1 }.RunAsync();
         await repository.InitializeAsync();
         return await repository.VerifyAuditHashChainAsync();
     }

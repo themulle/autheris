@@ -45,7 +45,7 @@ public abstract class GovernanceUpgradeTestsBase
     protected abstract Task ExecAsync(string connectionString, string sql);
     protected abstract Task<string> QueryAsync(string connectionString, string sql);
 
-    /// <summary>Runs the engine runner with the given options; the step set is the real catalogue plus <paramref name="extra"/>.</summary>
+    /// <summary>Runs the engine runner with the given options; the step set is the frozen baseline (step 1) plus <paramref name="extra"/>, or the whole shipped catalogue with <paramref name="fullCatalogue"/>.</summary>
     protected abstract Task RunAsync(
         string connectionString,
         GovernanceMigrationMode mode,
@@ -54,13 +54,14 @@ public abstract class GovernanceUpgradeTestsBase
         int lockTimeoutSeconds = 300,
         bool requireLeastPrivilege = false,
         List<string>? log = null,
-        List<string>? trace = null);
+        List<string>? trace = null,
+        bool fullCatalogue = false);
 
-    /// <summary>Creates the v1.5.0 database through the real catalogue and seeds consents, catalog metadata and a verified audit chain.</summary>
+    /// <summary>Creates the v1.5.0 database (baseline step only) and seeds consents, catalog metadata and a verified audit chain.</summary>
     protected abstract Task SeedV150Async(string connectionString);
 
     /// <summary>Opens the store on the upgraded database (catalogue plus <paramref name="extra"/>) and verifies the audit chain and anchor.</summary>
-    protected abstract Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra);
+    protected abstract Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra, bool fullCatalogue = false);
 
     protected abstract Task<IAsyncDisposable> HoldSchemaLockAsync(string connectionString);
 
@@ -102,8 +103,7 @@ public abstract class GovernanceUpgradeTestsBase
         {
             Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "Sqlite", SourceName = "src388" },
             Identifier = identifier,
-            Columns = [new TableColumn { TableId = tableId, ColumnName = "client_id", DataType = "varchar" }],
-            PrimaryKeyColumns = ["client_id"]
+            Columns = [new TableColumn { TableId = tableId, ColumnName = "client_id", DataType = "varchar" }]
         });
         await repository.CreateConsentAsync(new Consent
         {
@@ -181,6 +181,47 @@ public abstract class GovernanceUpgradeTestsBase
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
         await RunAsync(cs, GovernanceMigrationMode.Verify, [step]);
         (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(2);
+    });
+
+    private const string SeedV1KeyRowsSql =
+        "INSERT INTO table_primary_key_columns (table_id, key_ordinal, table_column_id) VALUES ('t390', 1, 'c1'), ('t390', 2, 'c2')";
+
+    private const string SeedV1IndexRowsSql =
+        "INSERT INTO table_index_columns (index_id, column_ordinal, table_column_id) VALUES ('i390', 1, 'c1'), ('i390', 2, 'c2')";
+
+    [Fact]
+    public Task I390_T_01_Step0002_UpgradeFromV150_WithData_PreservesRowsAndAuditChain_DefaultsToAscending() => WithDbAsync(async db =>
+    {
+        var cs = db.ConnectionString;
+        await SeedV150Async(cs);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(1, "the seeded database holds exactly the v1.5.0 baseline");
+        await ExecAsync(cs, SeedV1KeyRowsSql);
+        await ExecAsync(cs, SeedV1IndexRowsSql);
+        var auditCount = await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries");
+        var auditHashes = await QueryAsync(cs, AuditHashesSql);
+        var checksum = SqlMigrationStep.LoadEmbedded(Engine).Single(s => s.Version == 2).Checksum;
+
+        await RunAsync(cs, GovernanceMigrationMode.Apply, fullCatalogue: true);
+
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2 AND name = 'key_and_index_column_direction' AND checksum = '" + checksum + "'")).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_primary_key_columns")).ShouldBe(2);
+        (await CountAsync(cs, "SELECT SUM(CAST(is_descending AS INTEGER)) FROM table_primary_key_columns")).ShouldBe(0, "existing key rows read as ascending");
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_index_columns")).ShouldBe(2);
+        (await CountAsync(cs, "SELECT SUM(CAST(is_descending AS INTEGER)) FROM table_index_columns")).ShouldBe(0);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
+        (await QueryAsync(cs, AuditHashesSql)).ShouldBe(auditHashes, "step 0002 does not read or rewrite audit rows");
+        (await CountAsync(cs, TriggerCountSql)).ShouldBeGreaterThan(0, "the append-only audit triggers stay enabled");
+        (await AuditChainVerifiesAsync(cs, [], fullCatalogue: true)).ShouldBeTrue("the audit hash chain and anchor verify after step 0002");
+
+        // A v1.5.0 binary (AllowNewerSchema rollback) inserts without the column and reads ascending.
+        await ExecAsync(cs, "INSERT INTO table_primary_key_columns (table_id, key_ordinal, table_column_id) VALUES ('t390b', 1, 'c9')");
+        (await CountAsync(cs, "SELECT SUM(CAST(is_descending AS INTEGER)) FROM table_primary_key_columns WHERE table_id = 't390b'")).ShouldBe(0);
+
+        // Rerun after the history row is lost: the guarded statements are idempotent and the shape still verifies.
+        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 2");
+        await RunAsync(cs, GovernanceMigrationMode.Apply, fullCatalogue: true);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2")).ShouldBe(1);
+        await RunAsync(cs, GovernanceMigrationMode.Verify, fullCatalogue: true);
     });
 
     [Fact]

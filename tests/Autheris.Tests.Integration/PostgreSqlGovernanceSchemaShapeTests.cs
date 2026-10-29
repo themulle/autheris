@@ -52,7 +52,8 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
     [Fact]
     public async Task EmbeddedSnapshot_EqualsShapeOfTheBaseline()
     {
-        await using (var conn = new NpgsqlConnection(_shared.Db.ConnectionString))
+        await using var db = await PostgreSqlTestDatabase.CreateAsync(); // a fresh database: the shared one may already hold migrated steps
+        await using (var conn = new NpgsqlConnection(db.ConnectionString))
         {
             await conn.OpenAsync();
             // The baseline DDL is applied directly: the runner itself depends on the snapshot that this test generates.
