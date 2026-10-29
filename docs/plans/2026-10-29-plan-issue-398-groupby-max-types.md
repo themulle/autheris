@@ -72,3 +72,19 @@ Mandatory tests (all [Trait("Category","Security")])
 - I398_T_08_PlannerSql_SqlServer_MaxKey_NoCast_GroupByColumnOnly
 - I398_T_09_AuditAndLogs_DoNotContainGroupKeyValues
 - I398_T_10 (integration, SQL Server Testcontainers): nvarchar(max) group result equals nvarchar(200) equivalent.
+
+## Changelog
+
+**2026-10-29: implemented** on branch `fix/issue-398-groupby-max-types`; Phase 5 review approved.
+
+- **Groupable types:** `DefaultReadOrdering.IsGroupableType` is a dialect-aware allow-list, separate from `IsOrderableType`, which is unchanged.
+  - SQL Server additionally allows `varchar(max)` and `nvarchar(max)`.
+  - PostgreSQL and Databricks additionally allow `text`.
+  - On SQLite every type is groupable.
+  - On every other dialect, unknown or blank types are refused (fail-closed).
+- **Refused types:** they return `AGGREGATION_NOT_SUPPORTED` with one fixed message.
+- **Byte budget:** `ResultByteBudget.GroupKeys` caps each value at 16 KiB and each result at 32 MiB. Exceeding it raises the existing `AggregationRowCapExceeded`.
+- **Breaking changes:**
+  - A column with an unknown or blank type on a non-SQLite dialect can no longer be used in groupBy.
+  - A refused type now answers `AGGREGATION_NOT_SUPPORTED` (REST 422) instead of `AGGREGATION_ARGUMENT_INVALID`.
+- **Deviation from I398-SC-02:** the audit entry does not record the refused type name, because the planner has no audit hook. A follow-up issue is needed if the owner wants it.
