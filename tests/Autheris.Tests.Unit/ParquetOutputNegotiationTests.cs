@@ -821,7 +821,7 @@ public sealed class ParquetOutputNegotiationTests
             NullLoggerFactory.Instance);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
-        context.Response.ContentType!.ShouldStartWith("application/json");
+        context.Response.ContentType!.ShouldStartWith("application/problem+json");
         ResponseText(context).ShouldNotContain("DDL statements");
         ResponseText(context).ShouldContain("SQL_POLICY_VIOLATION");
     }

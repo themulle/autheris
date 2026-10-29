@@ -1126,8 +1126,10 @@ public class ProcedureLimitsInc2Tests
 
         http.Response.StatusCode.ShouldBe(422);
         http.Response.Body.Position = 0;
-        new StreamReader(http.Response.Body).ReadToEnd()
-            .ShouldBe("{\"error\":\"The crane is locked.\",\"code\":\"CRANE_LOCKED\",\"traceId\":\"abc123\"}");
+        using var doc = System.Text.Json.JsonDocument.Parse(new StreamReader(http.Response.Body).ReadToEnd());
+        // The operator text is kept (sanitized); an operator code outside the governed set falls back to PROCEDURE_REJECTED (NL-SC-27).
+        doc.RootElement.GetProperty("detail").GetString().ShouldBe("The crane is locked.");
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("PROCEDURE_REJECTED");
     }
 
     // ---------- WP-E: ddl_hash requirement for declared mode ----------

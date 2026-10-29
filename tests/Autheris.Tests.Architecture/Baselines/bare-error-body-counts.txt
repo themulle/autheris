@@ -4,7 +4,6 @@ src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|4
 src/Autheris.Api/Endpoints/DataContractEndpoints.cs|2
 src/Autheris.Api/Endpoints/DbtEndpoints.cs|2
 src/Autheris.Api/Endpoints/DevPortalEndpoints.cs|8
-src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs|6
 src/Autheris.Api/Endpoints/EndpointSecurity.cs|3
 src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs|2
 src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|9
@@ -15,11 +14,8 @@ src/Autheris.Api/Endpoints/GovernanceEndpoints.RowFilterEvaluation.cs|3
 src/Autheris.Api/Endpoints/GovernanceEndpoints.SimulationSunsetting.cs|2
 src/Autheris.Api/Endpoints/GovernancePlanEndpoints.cs|4
 src/Autheris.Api/Endpoints/HitLEndpoints.cs|4
-src/Autheris.Api/Endpoints/ProcedureEndpointRoutes.cs|6
 src/Autheris.Api/Endpoints/RebacEndpoints.cs|10
 src/Autheris.Api/Endpoints/SchemaRegistryEndpoints.cs|8
-src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs|13
-src/Autheris.Api/Endpoints/SqlErrorResponse.cs|1
 src/Autheris.Api/Endpoints/StreamingCdcEndpoints.cs|6
 src/Autheris.Api/Endpoints/SubjectLifecycleEndpoints.cs|1
 src/Autheris.Api/Endpoints/SystemEndpoints.cs|3
@@ -31,9 +27,6 @@ src/Autheris.Api/Endpoints/TrustedDocumentAdminEndpoints.cs|2
 src/Autheris.Api/Endpoints/VirtualFilterEndpoints.Crud.cs|2
 src/Autheris.Api/Endpoints/VirtualFilterEndpoints.Seeding.cs|1
 src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs|2
-src/Autheris.Api/Endpoints/WebSqlEndpoints.Execution.cs|10
-src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs|5
 src/Autheris.Api/Endpoints/WebhookEndpoints.cs|9
 src/Autheris.Api/Middleware/GatewayCorsCsrfMiddleware.cs|3
-src/Autheris.Api/Middleware/GatewayDenialStatusMapper.cs|1
 src/Autheris.Application/Governance/Services/DifferentialPrivacyEngine.cs|1

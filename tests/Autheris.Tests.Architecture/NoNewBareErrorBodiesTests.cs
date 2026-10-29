@@ -68,7 +68,6 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         // Non-vacuity: the scan must really see the known multi-line and dictionary sites.
         RepositoryScan.ProductionFiles.Count.ShouldBeGreaterThan(500);
         measured.Keys.ShouldContain("src/Autheris.Api/Endpoints/DbtEndpoints.cs");
-        measured.Keys.ShouldContain("src/Autheris.Api/Endpoints/SqlErrorResponse.cs");
 
         if (Environment.GetEnvironmentVariable("AUTHERIS_UPDATE_BASELINES") == "1")
         {

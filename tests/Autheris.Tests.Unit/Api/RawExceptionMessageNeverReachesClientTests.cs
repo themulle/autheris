@@ -230,9 +230,10 @@ public sealed class RawExceptionMessageNeverReachesClientTests
 
         AssertGoverned(c, 429, ApiErrorCodes.PrivacyBudgetExhausted);
         c.Headers["X-Privacy-Budget-Exhausted"].ToString().ShouldBe("true");
-        c.Json.GetProperty("clientId").GetString().ShouldBe("client-1");
-        c.Json.GetProperty("consumed").GetDouble().ShouldBe(4.5);
-        c.Json.GetProperty("totalBudget").GetDouble().ShouldBe(5.0);
+        // NL-SC-27: only allowlisted scalar extensions survive; the budget figures are no longer part of the body (decision pending for WP-4).
+        c.Json.TryGetProperty("clientId", out _).ShouldBeFalse();
+        c.Json.TryGetProperty("consumed", out _).ShouldBeFalse();
+        c.Json.TryGetProperty("totalBudget", out _).ShouldBeFalse();
         c.Body.ShouldNotContain("Epsilon privacy budget exhausted");
     }
 
@@ -523,6 +524,9 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         var c = Read(ctx);
         c.Status.ShouldBe(400);
         // The code is an engine constant (never caller data); the human-readable text must be fixed and free of the marker.
-        c.Json.GetProperty("error").GetString()!.ShouldNotContain(Sentinel);
+        c.Json.GetProperty("detail").GetString()!.ShouldNotContain(Sentinel);
+        // NL-SC-27: an ungoverned code is never echoed; the status default is used.
+        c.Json.GetProperty("code").GetString().ShouldBe("BAD_REQUEST");
+        c.Body.ShouldNotContain(Sentinel);
     }
 }

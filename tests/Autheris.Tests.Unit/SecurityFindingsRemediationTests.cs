@@ -1371,7 +1371,7 @@ public class SecurityFindingsRemediationTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         using var doc = System.Text.Json.JsonDocument.Parse(context.Response.Body);
-        doc.RootElement.GetProperty("error").GetString().ShouldBe("Statement not found or expired.");
+        doc.RootElement.GetProperty("detail").GetString().ShouldBe("Statement not found or expired.");
     }
 
     [Fact]

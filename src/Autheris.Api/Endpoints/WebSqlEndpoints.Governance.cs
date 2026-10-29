@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
@@ -46,45 +47,23 @@ public static partial class WebSqlEndpoints
         {
             case GatewayThrottledException throttledEx:
                 logger.Warning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "TooManyRequests",
-                    code = "TOO_MANY_REQUESTS",
-                    message = "Too many concurrent requests. Retry later.",
-                    retryAfterSeconds = throttledEx.RetryAfterSeconds,
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status429TooManyRequests, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ct,
+                    new Dictionary<string, object?> { ["retryAfterSeconds"] = throttledEx.RetryAfterSeconds });
                 break;
 
             case GatewayNotImplementedException notImplEx:
                 logger.Warning(notImplEx, "WebSQL Not Implemented. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "NotImplemented",
-                    message = "The requested feature or data source capability is not implemented.",
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "The requested feature or data source capability is not implemented.", ct);
                 break;
 
             case NotSupportedException notSuppEx:
                 logger.Warning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "NotImplemented",
-                    message = "The requested operation is not supported.",
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "The requested operation is not supported.", ct);
                 break;
 
             case GatewaySecurityException gatewayDenied:
-                await Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(httpContext, gatewayDenied, logger, GenericForbiddenMessage, ct);
+                await Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(httpContext, gatewayDenied, logger, ct);
                 break;
 
             case Exception timeoutEx when IsExecutionTimeout(timeoutEx):
@@ -94,28 +73,14 @@ public static partial class WebSqlEndpoints
 
             case ArgumentException argEx:
                 logger.Warning(argEx, "WebSQL Bad Request. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "BadRequest",
-                    message = GenericBadRequestMessage,
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, GenericBadRequestMessage, ct);
                 break;
 
             default:
                 // SEC M-10: Never echo exception/database messages to the client
                 // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote staged data values.
                 logger.Error(ex, "WebSQL Execution Failed. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "InternalServerError",
-                    message = GenericServerErrorMessage,
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, GenericServerErrorMessage, ct);
                 break;
         }
     }

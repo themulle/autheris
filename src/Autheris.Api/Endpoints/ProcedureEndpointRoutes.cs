@@ -304,8 +304,7 @@ public static class ProcedureEndpointRoutes
         var ct = http.RequestAborted;
         if (http.Request.ContentLength > MaxBodyBytes)
         {
-            http.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            await http.Response.WriteAsJsonAsync(new { error = "Request body too large." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status413PayloadTooLarge, ApiErrorCodes.PayloadTooLarge, "Request body too large.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -321,14 +320,12 @@ public static class ProcedureEndpointRoutes
         }
         catch (JsonException)
         {
-            http.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await http.Response.WriteAsJsonAsync(new { error = "Invalid JSON body." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidJson, "Invalid JSON body.", ct).ConfigureAwait(false);
             return;
         }
         catch (InvalidDataException)
         {
-            http.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            await http.Response.WriteAsJsonAsync(new { error = "Request body too large." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status413PayloadTooLarge, ApiErrorCodes.PayloadTooLarge, "Request body too large.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -379,29 +376,32 @@ public static class ProcedureEndpointRoutes
         }
         catch (KeyNotFoundException)
         {
-            await WriteErrorAsync(http, StatusCodes.Status404NotFound, "Procedure endpoint not found.", ct).ConfigureAwait(false);
+            // SEC-PROC152-01: unknown and not-permitted procedures answer the same fixed bytes (NL-SC-22/28).
+            await ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Procedure endpoint not found.").ExecuteAsync(http).ConfigureAwait(false);
         }
         catch (ProcedureUnavailableException)
         {
-            await WriteErrorAsync(http, StatusCodes.Status503ServiceUnavailable, "Procedure endpoint is currently unavailable.", ct).ConfigureAwait(false);
+            await ApiProblems.Indistinguishable(StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "Procedure endpoint is currently unavailable.").ExecuteAsync(http).ConfigureAwait(false);
         }
         catch (GatewayThrottledException ex)
         {
             http.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            await http.Response.WriteAsJsonAsync(new { error = "Too many concurrent requests. Retry later.", code = "TOO_MANY_REQUESTS" }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status429TooManyRequests, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ct,
+                new Dictionary<string, object?> { ["retryAfterSeconds"] = ex.RetryAfterSeconds }).ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
             // The text may echo caller-supplied input names or values: log it, return a fixed problem body.
             logger.LogWarning("Invalid procedure arguments ({ExceptionType}).", ex.GetType().Name);
-            await WriteProblemAsync(http, StatusCodes.Status400BadRequest, ApiErrorCodes.ProcedureArgumentInvalid, "The procedure arguments are invalid.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status400BadRequest, ApiErrorCodes.ProcedureArgumentInvalid, "The procedure arguments are invalid.", ct).ConfigureAwait(false);
         }
         catch (ProcedureBusinessException ex)
         {
             // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
-            http.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
-            await http.Response.WriteAsJsonAsync(new { error = ex.MappedMessage ?? ProcedureBusinessException.FixedMessage, code = ex.MappedCode ?? "PROCEDURE_REJECTED", traceId = ex.TraceId }, ct).ConfigureAwait(false);
+            // NL-SC-30: the operator text is control-stripped and length-capped; an operator code outside the governed set falls back to PROCEDURE_REJECTED.
+            var rejectedCode = ApiErrorCodes.IsGoverned(ex.MappedCode) ? ex.MappedCode! : ApiErrorCodes.ProcedureRejected;
+            await ApiProblems.WriteAsync(http, StatusCodes.Status422UnprocessableEntity, rejectedCode,
+                ApiProblems.SanitizeOperatorText(ex.MappedMessage, ProcedureBusinessException.FixedMessage), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -411,28 +411,14 @@ public static class ProcedureEndpointRoutes
         {
             // Driver text may contain data values: log the type only (SEC-PROC152-08).
             logger.LogError("Database failure executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
-            await WriteErrorAsync(http, StatusCodes.Status500InternalServerError, "An internal error occurred.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred.", ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             // Neither the (caller supplied) name nor any parameter value is logged (SEC-PROC152-11).
             // SEC-PROC152-08: exception type only; the message and inner exceptions may carry values.
             logger.LogError("Unexpected error executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
-            await WriteErrorAsync(http, StatusCodes.Status500InternalServerError, "An internal error occurred.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(http, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred.", ct).ConfigureAwait(false);
         }
-    }
-
-    private static Task WriteErrorAsync(HttpContext http, int status, string message, CancellationToken ct)
-    {
-        http.Response.StatusCode = status;
-        return http.Response.WriteAsJsonAsync(new { error = message }, ct);
-    }
-
-    /// <summary>Governed problem body for caller faults; the anti-enumeration branches above keep their byte-identical bodies (SEC-PROC152-01).</summary>
-    private static Task WriteProblemAsync(HttpContext http, int status, string code, string detail, CancellationToken ct)
-    {
-        http.Response.StatusCode = status;
-        var problem = ApiProblems.CreateProblemDetails(status, code, detail, http);
-        return http.Response.WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json", ct);
     }
 }

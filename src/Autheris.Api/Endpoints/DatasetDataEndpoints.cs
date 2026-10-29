@@ -66,7 +66,7 @@ public static class DatasetDataEndpoints
     {
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table))
         {
-            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Domain, schema, and table must be specified.").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Domain, schema, and table must be specified.", httpContext.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -94,7 +94,7 @@ public static class DatasetDataEndpoints
     {
         if (!TableIdentifier.TryParse(datasetId, out var tableId))
         {
-            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Invalid dataset identifier format. Expected domain.schema.table or schema.table.").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Invalid dataset identifier format. Expected domain.schema.table or schema.table.", httpContext.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -121,7 +121,7 @@ public static class DatasetDataEndpoints
     {
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table) || string.IsNullOrWhiteSpace(id))
         {
-            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Domain, schema, table, and id must be specified.").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Domain, schema, table, and id must be specified.", httpContext.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -158,7 +158,7 @@ public static class DatasetDataEndpoints
         {
             if (!TryParsePaging(httpContext.Request, out var parsedLimit, out var parsedOffset))
             {
-                await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage, httpContext.RequestAborted).ConfigureAwait(false);
                 return;
             }
 
@@ -198,7 +198,7 @@ public static class DatasetDataEndpoints
                 // #329 (SEC-RG-14): REST builds the SQL from quoted select and orderBy parts, so the filter is the only free text that reaches the
                 // parser: a parser failure is a malformed request, answered like every other bad parameter. Only the code is logged (no filter text).
                 logger.LogWarning("Malformed filter for {Table}: governed SQL error {Code}", tableId, mapped.Code);
-                await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage, httpContext.RequestAborted).ConfigureAwait(false);
             }
             else
             {
@@ -210,35 +210,35 @@ public static class DatasetDataEndpoints
         catch (TableNotFoundException ex)
         {
             logger.LogInformation("Table not found: {Table}", ex.Table);
-            await WriteProblemAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The requested table was not found.").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The requested table was not found.", httpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (UnauthorizedAccessException ex)
         {
             logger.LogWarning("Access forbidden to {Table}: {Message}", tableId, ex.Message);
-            await WriteProblemAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage, httpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (RequiredFilterColumnMissingException ex)
         {
             logger.LogWarning("Required filter column missing for {Table}: {Message}", tableId, ex.Message);
-            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.RequiredFilterColumnMissing, "A required filter column was not constrained by the query.").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.RequiredFilterColumnMissing, "A required filter column was not constrained by the query.", httpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
             // SEC-PG-14: ArgumentException messages name internal parameters; they stay in the log.
             logger.LogWarning("Invalid query parameters for {Table}: {Message}", tableId, ex.Message);
-            await WriteProblemAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage, httpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is GatewaySecurityException or System.Security.SecurityException)
         {
             // Policy denials from the SQL/federation layer (e.g. cross-source disabled, incomplete HTTP response,
             // WebSQL policy) are fail-closed 403s, never 500s. Details stay in the log, not in the response.
             logger.LogWarning("Governed data query denied for {Table}: {Message}", tableId, ex.Message);
-            await WriteProblemAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage, httpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unexpected error executing governed data query for {Table}", tableId);
-            await WriteProblemAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred executing the governed query.").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred executing the governed query.", httpContext.RequestAborted).ConfigureAwait(false);
         }
     }
 
@@ -286,15 +286,6 @@ public static class DatasetDataEndpoints
         }
 
         return int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out result);
-    }
-
-    private static Task WriteProblemAsync(HttpContext httpContext, int status, string code, string detail)
-    {
-        httpContext.Response.StatusCode = status;
-        return httpContext.Response.WriteAsJsonAsync(
-            ApiProblems.CreateProblemDetails(status, code, detail, httpContext),
-            (JsonSerializerOptions?)null,
-            "application/problem+json");
     }
 
     private static async Task StreamDatasetEnvelopeAsync(

@@ -364,6 +364,6 @@ public sealed class WebSqlTrinoProtocolTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         using var doc = await JsonDocument.ParseAsync(context.Response.Body);
-        doc.RootElement.GetProperty("error").GetString()!.ShouldContain("X-Trino-User");
+        doc.RootElement.GetProperty("detail").GetString()!.ShouldContain("X-Trino-User");
     }
 }

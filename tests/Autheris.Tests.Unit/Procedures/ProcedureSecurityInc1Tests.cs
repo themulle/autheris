@@ -909,7 +909,8 @@ public class ProcedureSecurityInc1Tests
                 var service = new UserOverridingService(env.Create(), user);
                 var response = await CallRoute(service, variants[v].Post, name, variants[v].Query, variants[v].Body);
                 response.Status.ShouldBe(404, label);
-                response.Body.ShouldBe("{\"error\":\"Procedure endpoint not found.\"}", label);
+                // NL-T-22: golden bytes of the Indistinguishable body (no traceId, instance or correlationId).
+                response.Body.ShouldBe("{\"type\":\"urn:autheris:error:RESOURCE_NOT_FOUND\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"Procedure endpoint not found.\",\"code\":\"RESOURCE_NOT_FOUND\"}", label);
                 reference ??= response;
                 response.ShouldBe(reference, label + " variant " + v);
             }
@@ -934,12 +935,21 @@ public class ProcedureSecurityInc1Tests
         var throttled = await CallRoute(service, false, "x", null, null);
         throttled.Status.ShouldBe(429);
         throttled.RetryAfter.ShouldBe("2");
-        throttled.Body.ShouldBe("{\"error\":\"Too many concurrent requests. Retry later.\",\"code\":\"TOO_MANY_REQUESTS\"}");
+        using (var t = System.Text.Json.JsonDocument.Parse(throttled.Body))
+        {
+            t.RootElement.GetProperty("code").GetString().ShouldBe("TOO_MANY_REQUESTS");
+            t.RootElement.GetProperty("detail").GetString().ShouldBe("Too many concurrent requests. Retry later.");
+            t.RootElement.GetProperty("retryAfterSeconds").GetInt32().ShouldBe(2);
+        }
 
         service.ExecuteAsync(default!, default, default!, default, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null, "abc123"));
         var business = await CallRoute(service, true, "x", null, "{}");
         business.Status.ShouldBe(422);
-        business.Body.ShouldBe("{\"error\":\"The procedure rejected the request.\",\"code\":\"PROCEDURE_REJECTED\",\"traceId\":\"abc123\"}");
+        using (var b = System.Text.Json.JsonDocument.Parse(business.Body))
+        {
+            b.RootElement.GetProperty("code").GetString().ShouldBe("PROCEDURE_REJECTED");
+            b.RootElement.GetProperty("detail").GetString().ShouldBe("The procedure rejected the request.");
+        }
         business.CacheControl.ShouldBe("no-store");
     }
 
@@ -956,7 +966,11 @@ public class ProcedureSecurityInc1Tests
         var response = await CallRoute(service, false, "probe-name", "customer_id=value-zq4711qz", null, factory);
 
         response.Status.ShouldBe(500); // no 403 branch any more
-        response.Body.ShouldBe("{\"error\":\"An internal error occurred.\"}");
+        using (var b = System.Text.Json.JsonDocument.Parse(response.Body))
+        {
+            b.RootElement.GetProperty("code").GetString().ShouldBe("INTERNAL_ERROR");
+            b.RootElement.GetProperty("detail").GetString().ShouldBe("An internal error occurred.");
+        }
         logger.AllText.ShouldNotContain("value-zq4711qz");
         logger.AllText.ShouldNotContain("probe-name");
     }
