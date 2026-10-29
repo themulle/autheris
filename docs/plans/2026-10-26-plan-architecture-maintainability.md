@@ -272,25 +272,34 @@ Both branches below merged on 2026-10-26 (#360 and #361), so these areas are ope
 | #367 | `refactor/architecture-maintainability-4` | ARCH-MNT-09, 10, 11, 12, 14; wave 2 addendum and Phase 3 conditions | 14-SC-01..06 | APPROVED after 1 round (TestAuth-independent DI snapshot); CI startup stack overflow from the WP4.3 rename fixed (self-recursive `MapAsyncJobEndpoints` wrapper removed, `ExtensionSelfRecursionArchitectureTests`, local host start to `/health/ready` 200) | merged |
 | #369 | `refactor/architecture-maintainability-7` | ARCH-MNT-06 | 06-SC-01..09 | APPROVED; findings fixed | merged |
 | #370 | `refactor/architecture-maintainability-9` | ARCH-MNT-15-FU-02 (cap calibration; default 50,000 kept) | not needed (no default change) | APPROVED after 1 round | merged |
-| PR 10 | `refactor/architecture-maintainability-10` | ARCH-MNT-22 step 1 (ITSM Outbox, WebhookOutbox, ConsentGrants cores; child plan [`2026-10-26-plan-arch-mnt-22-dialect-dedup.md`](2026-10-26-plan-arch-mnt-22-dialect-dedup.md)) | 22-SC-01..08 | APPROVED | open; merge only after green PG/MSSQL Integration CI |
+| #371 | `refactor/architecture-maintainability-10` | ARCH-MNT-22 step 1 (ITSM Outbox, WebhookOutbox, ConsentGrants cores; child plan [`2026-10-26-plan-arch-mnt-22-dialect-dedup.md`](2026-10-26-plan-arch-mnt-22-dialect-dedup.md)) | 22-SC-01..08 | APPROVED | merged |
 | #368 | `refactor/architecture-maintainability-8` | ARCH-MNT-08 | 08-SC-01..09 | APPROVED after 1 round (SC-01 guard widened) | merged |
+| #372 | `refactor/architecture-maintainability-11` | ARCH-MNT-06-FU-01 reference docs (removed keys) | not needed (docs) | APPROVED after 1 round | merged |
+| #373 | `refactor/architecture-maintainability-17` | ARCH-MNT-08-FU-01 (closed OLAP rejection reasons) | wave 3 PR-OLAP SC-01..03 | APPROVED | merged |
+| #374 | `refactor/architecture-maintainability-16` | ARCH-MNT-23-FU-01 (TimeProvider seams, warm-up metrics flake) | wave 3 PR-TIME SC-01..03 | APPROVED after 1 round | merged |
+| #375 | `fix/def-02-04-no-legacy-fallbacks` | DEF-01..04, ext_authz hardening, legacy sweep L1-L14 ([plan](2026-10-26-plan-def-02-04-no-legacy-fallbacks.md)) | DEF-SC-01..16 | APPROVED | merged |
+| #376 | `refactor/architecture-maintainability-14` | ARCH-MNT-06-FU-03, 06-FU-04 (insecure OTLP report, Helm HA wiring) | wave 3 PR-STARTUP SC-01..04 | APPROVED after 1 round | merged |
+| #377 | `refactor/architecture-maintainability-15` | ARCH-MNT-06-FU-02 (SCIM mass-deprovisioning guard) | wave 3 PR-SCIM SC-01..06 | APPROVED after 1 round; CodeQL log-forging fix | merged |
+| open | `fix/no-legacy-followups` | O-3, O-5a, O-5b step 1, O-5c, O-5d, O-5f, O-6 | NL-SC-01..12 | APPROVED | PR open |
+| open | `refactor/architecture-maintainability-12` | ARCH-MNT wave 3 PR-SQLGATE: G7 in 12 parallel shards with a fail-closed aggregate; ARCH-MNT-15-FU-01 cold-cache gate ([wave 3 plan](2026-10-26-plan-arch-mnt-wave3.md) on that branch) | wave 3 PR-SQLGATE SC-01..07 | in review | in progress |
+| planned | `fix/no-legacy-error-bodies` | O-5b step 2 (about 255 bare error bodies to ProblemDetails, 8 WPs) | NL-SC-20..31 | - | starts after `fix/no-legacy-followups` merges |
 
 Merge order: any. After #362 merges, #363 and #364 must pass its ratchets. #364 adds no `DateTime.UtcNow`, no `new HttpClient(`, no src file over 1,000 lines, and its new options are consumed.
 
 New follow-ups found during delivery:
 
-- **ARCH-MNT-15-FU-01:** extend `SqlGate.BenchCheck` with a cold-cache P99 threshold (Phase 3 ruling D1).
+- **ARCH-MNT-15-FU-01 (in PR-SQLGATE, branch `refactor/architecture-maintainability-12`):** extend `SqlGate.BenchCheck` with a cold-cache P99 threshold (Phase 3 ruling D1).
 - **ARCH-MNT-15-FU-02 (done in PR 9, `refactor/architecture-maintainability-9`):** calibrated on 2,794 distinct statements (308 fuzz seeds plus the engine corpora): 9,080 states at steady state (4,445 for the seeds alone), at most 411 new states per statement, about 1.25 KB per state, 0 swaps. The default of 50,000 stays: that is 5.5x the steady state, and the worst case of 50,000 x `HardCapFactor` 4 is about 239 MB per generation. `AntlrCacheCalibrationTests` pins the invariant: the seed corpus fits in one generation with 2x headroom, measured by state counts and not by time.
 - **ARCH-MNT-27:** `SecurityReviewG3EndpointAuthzTests.Envoy_ExportEmitsPathPrefixAndValidatesParameters` failed once with a `RegexMatchTimeoutException` under parallel build load. Check whether the regex timeout belongs to production code, which would mean timeouts under real load too, and fix it with a deterministic assertion or a `NonBacktracking` regex.
 - **Resolved:** ARCH-MNT-27 (#366: production Envoy regexes replaced by non-regex checks); DI decomposition is PR 4.
 - **DI snapshot maintenance:** every PR that adds or removes a DI registration must update `tests/Autheris.Tests.Unit/DependencyInjection/Snapshots/*.txt` with `AUTHERIS_UPDATE_SNAPSHOTS=1` locally (rejected in CI) and explain the diff in the PR.
 - **Lesson from #367:** a pure rename let a wrapper extension bind to itself; only a host start shows it. `ExtensionSelfRecursionArchitectureTests` now guards it, and refactors that touch the composition root must prove a local host start (`dotnet run` with `ASPNETCORE_ENVIRONMENT=Development`, `/health/ready`).
-- **ARCH-MNT-06-FU-01 (owner decision pending):** `docs/features/f-perf-13` (line 172, `MaxCostPerMinute`), `f-gov-13` (line 90, `MaskingRules`) and `f-ops-02` (`Gateway__DrainDelaySeconds`) still mention removed keys. Feature docs change only on owner request.
-- **ARCH-MNT-06-FU-02 (SC-09):** SCIM mass-change protection (`EnableMassChangeProtection`) was never implemented and its flag is deleted, so it is a known absent control.
-- **ARCH-MNT-06-FU-03:** report `Otlp:AllowInsecureTransport` in the startup danger list (`StartupChecks`); today it only logs a warning.
-- **ARCH-MNT-06-FU-04:** wire the Helm `drainDelaySeconds`/`shutdownTimeoutSeconds` to `Gateway:HighAvailability:*`, together with the `QueryTimeoutSeconds` alignment that NF-HA-01 requires.
-- **ARCH-MNT-08-FU-01:** let `OlapSqlRejectedException` accept only fixed reason codes, so no caller data can reach a response.
-- **ARCH-MNT-23-FU-01:** add `TimeProvider` seams to ReBAC tuple expiry and the `ConsentCacheService` expiry to remove the last real-time waits. `StartupWarmupTests.WarmupMetrics_RecordDurationAndOutcome_NoRequestCounters` failed once in a full run (it uses a global metrics listener) and needs isolation.
+- **ARCH-MNT-06-FU-01 (done in #372):** `docs/features/f-perf-13` (line 172, `MaxCostPerMinute`), `f-gov-13` (line 90, `MaskingRules`) and `f-ops-02` (`Gateway__DrainDelaySeconds`) still mention removed keys. Feature docs change only on owner request.
+- **ARCH-MNT-06-FU-02 (minimal guard done in #377; hard stop/admin reset 06-FU-02b and group deletes 06-FU-02c remain in the backlog):** SCIM mass-change protection (`EnableMassChangeProtection`) was never implemented and its flag is deleted, so it is a known absent control.
+- **ARCH-MNT-06-FU-03 (done in #376):** report `Otlp:AllowInsecureTransport` in the startup danger list (`StartupChecks`); today it only logs a warning.
+- **ARCH-MNT-06-FU-04 (done in #376):** wire the Helm `drainDelaySeconds`/`shutdownTimeoutSeconds` to `Gateway:HighAvailability:*`, together with the `QueryTimeoutSeconds` alignment that NF-HA-01 requires.
+- **ARCH-MNT-08-FU-01 (done in #373):** let `OlapSqlRejectedException` accept only fixed reason codes, so no caller data can reach a response.
+- **ARCH-MNT-23-FU-01 (done in #374):** add `TimeProvider` seams to ReBAC tuple expiry and the `ConsentCacheService` expiry to remove the last real-time waits. `StartupWarmupTests.WarmupMetrics_RecordDurationAndOutcome_NoRequestCounters` failed once in a full run (it uses a global metrics listener) and needs isolation.
 - **ARCH-MNT-22 step 1 result:** production lines went from 1,904 to 1,587 (-317; the plan estimated -610), because the verbatim SQL literals stay in the dialect files. By area: ITSM Outbox -119, ConsentGrants -92, WebhookOutbox -5 (kept for the shared binding and the golden coverage). The dialect divergences D1-D5 are preserved and pinned. Follow-ups DEF-01..DEF-04 are in the child plan; the most important is DEF-02, the PostgreSQL/SQL Server tenant-parse fallback, which must fail closed. Next steps for ARCH-MNT-22: Audit, Catalog and Consent (L).
 
 ## 9. Wave 2 addendum (2026-10-26)
