@@ -10,9 +10,9 @@
       "**/Ast/Emit/*.cs"
     ],
     "thresholds": {
-      "high": 90,
-      "low": 85,
-      "break": 85
+      "high": 85,
+      "low": 72,
+      "break": 72
     },
     "coverage-analysis": "perTest",
     "concurrency": 4,

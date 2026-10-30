@@ -223,4 +223,32 @@ public sealed class SqliteGovernanceConnectionProviderTests : IDisposable
 
         Should.NotThrow(() => new SqliteGovernanceConnectionProvider($"Data Source={DatabaseFile}", mode, null, allowUnsafeJournalModes: true).Dispose());
     }
+
+    // I388-SC-09 regression: opening connections while another connection holds an uncommitted schema write (a migrator running DDL)
+    // must not fail. The shared-cache in-memory database used to throw ArgumentOutOfRangeException from sqlite3_prepare_v2 in the pragma batch.
+    [Fact]
+    public async Task MemoryDatabase_OpenWhileAnotherConnectionHoldsUncommittedDdl_DoesNotFail()
+    {
+        await using var provider = new SqliteGovernanceConnectionProvider("Data Source=prov_ddl_" + Guid.NewGuid().ToString("N") + ";Mode=Memory;Cache=Shared", null, null);
+        await using var writer = await provider.OpenAsync(CancellationToken.None);
+        await ExecAsync(writer, "BEGIN IMMEDIATE; CREATE TABLE ddl_probe (id TEXT NOT NULL PRIMARY KEY);");
+        try
+        {
+            for (var round = 0; round < 20; round++)
+            {
+                var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var opens = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+                {
+                    await start.Task;
+                    await using var connection = await provider.OpenAsync(CancellationToken.None);
+                })).ToArray();
+                start.SetResult();
+                await Task.WhenAll(opens);
+            }
+        }
+        finally
+        {
+            await ExecAsync(writer, "ROLLBACK;");
+        }
+    }
 }

@@ -13,6 +13,11 @@ public sealed partial class StrykerConfigGuardTests
 {
     private const string G7Job = "sql-compiler-gate-g7";
 
+    // G7 break ratchet (owner decision 2026-10-29, option b): the break threshold starts at the measured score and is raised stepwise to the
+    // target. It may only go up: raise MinimumRatchet together with tools/sqlgate/g7-break-ratchet.txt, the config and the aggregate --break-at.
+    private const int MinimumRatchet = 72;
+    private const int TargetBreak = 85;
+
     private static readonly string[] SecurityGlobs =
     [
         "**/Ast/Visitors/AstSecurityVisitor*.cs",
@@ -39,6 +44,9 @@ public sealed partial class StrykerConfigGuardTests
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root(), "stryker-config.json")));
         return doc.RootElement.GetProperty("stryker-config").Clone();
     }
+
+    private static int Ratchet() =>
+        int.Parse(File.ReadAllText(Path.Combine(Root(), "tools", "sqlgate", "g7-break-ratchet.txt")).Trim(), System.Globalization.CultureInfo.InvariantCulture);
 
     private static string[] Workflow() => File.ReadAllLines(Path.Combine(Root(), ".github", "workflows", "sql-compiler-gate-nightly.yml"));
 
@@ -67,7 +75,10 @@ public sealed partial class StrykerConfigGuardTests
     {
         var config = Config();
 
-        config.GetProperty("thresholds").GetProperty("break").GetInt32().ShouldBe(85);
+        int ratchet = Ratchet();
+        ratchet.ShouldBeGreaterThanOrEqualTo(MinimumRatchet, "the G7 break ratchet may only be raised");
+        ratchet.ShouldBeLessThanOrEqualTo(TargetBreak);
+        config.GetProperty("thresholds").GetProperty("break").GetInt32().ShouldBe(ratchet);
         var mutate = config.GetProperty("mutate").EnumerateArray().Select(e => e.GetString()!).ToArray();
         foreach (string glob in SecurityGlobs)
         {
@@ -103,7 +114,7 @@ public sealed partial class StrykerConfigGuardTests
         int stepTimeout = int.Parse(match.Groups[1].Value);
         stepTimeout.ShouldBeLessThan(jobTimeout);
         string.Join('\n', stryker).ShouldContain("--log-to-file");
-        string.Join('\n', stryker).ShouldContain("--break-at 0");   // shards never gate; the aggregate enforces 85 on the summed counts
+        string.Join('\n', stryker).ShouldContain("--break-at 0");   // shards never gate; the aggregate enforces the ratchet break on the summed counts
 
         Step(job, "G7 shard result").ShouldContain(l => Regex.IsMatch(l, @"^        if:\s*always\(\)\s*$"));
         var upload = Step(job, "Upload");
@@ -122,13 +133,13 @@ public sealed partial class StrykerConfigGuardTests
         stryker.ShouldBeGreaterThan(scope);
         job[scope].ShouldContain("--shard");
 
-        // SC-06: the aggregate runs on always(), needs every shard, takes the floor from an explicit env input and enforces break 85.
+        // SC-06: the aggregate runs on always(), needs every shard, takes the floor from an explicit env input and enforces the ratchet break.
         var aggregate = Job(G7Job + "-aggregate");
         aggregate.ShouldContain(l => l.Trim() == "needs: " + G7Job);
         aggregate.ShouldContain(l => Regex.IsMatch(l, @"^    if:\s*always\(\)\s*$"));
         aggregate.ShouldNotContain(l => l.Contains("continue-on-error", StringComparison.Ordinal));
         string verdict = string.Join('\n', Step(aggregate, "G7 aggregate verdict"));
-        verdict.ShouldContain("--break-at 85");
+        verdict.ShouldContain("--break-at " + Ratchet());
         verdict.ShouldContain("--needs-result");
         verdict.ShouldContain("--floor \"${G7_MUTANT_FLOOR}\"");
         Regex.IsMatch(string.Join('\n', Workflow()), @"^  G7_MUTANT_FLOOR:\s*'[1-9]\d*'", RegexOptions.Multiline).ShouldBeTrue();
