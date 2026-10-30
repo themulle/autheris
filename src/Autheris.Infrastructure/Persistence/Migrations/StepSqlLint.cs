@@ -47,7 +47,10 @@ internal static class StepSqlLint
     // EXEC(N'ALTER TABLE <t> DROP CONSTRAINT ' + QUOTENAME(@name)). The form is rewritten to the equivalent static statement before linting, so the audit
     // table rules (phase3 marker, DROP CONSTRAINT df_* only) still apply to it. Any other EXEC stays forbidden.
     private static readonly Regex DynamicDropConstraint = Re(
-        @"(?:\bif\s+@\w+\s+is\s+not\s+null\s+)?\bexec\s*\(\s*N'alter\s+table\s+(?:dbo\.)?([A-Za-z_][A-Za-z0-9_]*)\s+drop\s+constraint\s+'\s*\+\s*quotename\s*\(\s*@\w+\s*\)\s*\)");
+        @"(?:\bif\s+@\w+\s+is\s+not\s+null\s+)?\bexec\s*\(\s*N'alter\s+table\s+(?:dbo\.)?([A-Za-z_][A-Za-z0-9_]*)\s+drop\s+constraint\s+'\s*\+\s*quotename\s*\(\s*(@\w+)\s*\)\s*\)");
+    // The variable of the dynamic form must be declared from a sys.default_constraints lookup in the same step; any other variable is refused.
+    private static readonly Regex DeclaredFromDefaultConstraintLookup = Re(
+        @"\bdeclare\s+(@\w+)\s+\w+(?:\s*\(\s*\w+\s*\))?\s*=\s*\(\s*select\s+(?:\w+\.)?name\s+from\s+(?:sys\.)?default_constraints\b");
     private static readonly Regex Qualifier = new(@"\b[a-z_][a-z0-9_$]*\.(?=[a-z_])", RegexOptions.CultureInvariant);
     private static readonly Regex Blanks = new(@"\s+", RegexOptions.CultureInvariant);
     private static readonly Regex MarkerId = new(@"^[A-Z0-9][A-Z0-9-]{2,40}$", RegexOptions.CultureInvariant);
@@ -63,7 +66,18 @@ internal static class StepSqlLint
             violations.Add("the phase3 marker id is malformed");
         }
 
-        var statements = Normalize(DynamicDropConstraint.Replace(normalizedSql, "ALTER TABLE $1 DROP CONSTRAINT df_dynamic"));
+        var lookupVariables = DeclaredFromDefaultConstraintLookup.Matches(string.Join(";", Normalize(normalizedSql)))
+            .Select(m => m.Groups[1].Value.ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        var statements = Normalize(DynamicDropConstraint.Replace(normalizedSql, m =>
+        {
+            if (!lookupVariables.Contains(m.Groups[2].Value.ToLowerInvariant()))
+            {
+                violations.Add("the dynamic DROP CONSTRAINT variable is not declared from a sys.default_constraints lookup in the same step");
+            }
+
+            return "ALTER TABLE " + m.Groups[1].Value + " DROP CONSTRAINT df_dynamic";
+        }));
         if (statements.Count == 0)
         {
             violations.Add("the step contains no statement");

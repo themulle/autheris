@@ -274,7 +274,8 @@ public abstract class GovernanceUpgradeTestsBase
     });
 
     [Fact]
-    public Task WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002() => WithDbAsync(async db =>
+    [Trait("Category", "Security")]
+    public Task I388_SC_06_DT_SC_16_WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002() => WithDbAsync(async db =>
     {
         var cs = db.ConnectionString;
         await SeedBaselineAsync(cs);

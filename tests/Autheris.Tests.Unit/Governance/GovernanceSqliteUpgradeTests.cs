@@ -266,7 +266,8 @@ public sealed class GovernanceSqliteUpgradeTests
     }
 
     [Fact]
-    public async Task WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002()
+    [Trait("Category", "Security")]
+    public async Task I388_SC_06_DT_SC_16_WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002()
     {
         var cs = $"Data Source=up0003n_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         var options = Opts(cs);
