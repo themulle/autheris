@@ -106,3 +106,55 @@ Phase 2 (csharp-architect), 2026-10-30. Branch `feat/issue-404-nonunique-indexes
 - O-6 Step numbering: 0004 waits for 0003 (gap-free catalogue). Default: wait. If the owner wants #404 first, renumber to 0003 before either lane merges; no golden line has been released for 0003 or 0004.
 - O-7 Filtered/partial indexes, expression indexes and INCLUDE columns? Default: filtered/partial and expression indexes are excluded; INCLUDE columns are ignored.
 - O-8 The OpenAPI generator emits declared index names (`DynamicOpenApiGenerator.cs:353`). Default: unchanged (operator-chosen names, steward document).
+
+## Phase 3 rulings (csharp-security-expert, 2026-10-30)
+
+**Verdict: APPROVED WITH CONDITIONS.** The conditions are binding. Rulings are consistent with I403-SC-01..13 (fail closed, bound parameters, governed codes only, caps, admission, dry run).
+
+**Verified fact.** `McpDatasetCatalog.cs:431` and `CatalogDiscoveryService.cs:168` call `TableKeyVisibility.Restrict(table, table.Columns)`. The filter is the listed-column set, not the clear-text set. `Indexes` (`:541`, `:206`) and `PrimaryKeyOrder` (`:545`) are therefore emitted for keys and indexes that span Masked columns, together with operator-chosen index names (which can embed names of columns the caller must not see).
+
+**Leak ruling.** Severity MEDIUM (metadata disclosure, no row values). Disclosed: that a masked or hidden column is indexed or unique, its sort direction, its composite shape, and index names (free text). It weakens an existing control (masking and column visibility) on main. Decision: split out and ship first, independent of 0003/0004. The split PR contains only the visibility fix (`DatasetIndexProjection` over declared indexes, no names, `PrimaryKeyOrder` rule below) and needs no governance DDL. #404 then adds physical indexes on top and must not reintroduce either.
+
+### Split leak fix (ships alone, ids I404-SC-L*)
+- I404-SC-L1 (whole-index omit): `DatasetIndexProjection.Project(table, clearColumns)` emits a declared index only if every column is readable in clear text for the caller. A Masked, Denied, Hidden or unresolved column omits the whole index. No partial index, no column subset, no direction for an omitted index.
+- I404-SC-L2 (clear set source): The clear set is derived from the same per-caller access levels that govern value reads (`Clear` only). It is never derived from `table.Columns`. A missing or failed access-level lookup gives an empty clear set (all indexes omitted).
+- I404-SC-L3 (no names): Declared index names are removed from MCP `describe_dataset` and REST catalog detail (`DatasetIndexInfo(Columns, Unique)`). The brief and other MCP paths keep `Indexes: null`.
+- I404-SC-L4 (PrimaryKeyOrder, O-4 ruling): `PrimaryKeyOrder`, `PrimaryKeys` and key columns are emitted only if every PK column is clear-text readable; otherwise the PK is omitted whole (same as indexes). This overrules the plan default. I390-SC-11 ("visible", not "clear") is tightened to "clear" in the same PR. Applies to MCP, REST and GraphQL MCP.
+- I404-SC-L5 (parity): MCP, REST and GraphQL MCP use the one shared projection; no surface re-implements the filter. Counts and orderings are identical for the same caller.
+- I404-SC-L6 (cap): Output is capped at `MaxIndexesPerTable` (32) indexes and `MaxColumnsPerKey` (32) columns per index, enforced in the projection.
+- I404-T-SL1 `MaskedColumn_WholeIndexOmitted_Mcp_Rest_GraphQl` (S)
+- I404-T-SL2 `DeniedOrMissingAccessLevel_WholeIndexOmitted_FailClosed` (S)
+- I404-T-SL3 `DescribeDataset_And_RestDetail_EmitNoIndexNames` (S)
+- I404-T-SL4 `PrimaryKeyOrder_OmittedWhenAnyPkColumnMasked_AllSurfaces` (S)
+- I404-T-SL5 `AllClear_EmitsColumnsDirectionsUnique_Capped32x32` (S)
+All tests carry `[Trait("Category","Security")]`; T-25..T-27 in WP-404-3 are satisfied by L-tests and need not be duplicated.
+
+### #404 conditions
+- I404-SC-01 (O-1, names): No index name is read into the model, stored, logged, audited, warned or returned. The physical readers do not select names beyond what the query needs to group rows, and discard them immediately.
+- I404-SC-02 (O-8 ruling): Overruled. `DynamicOpenApiGenerator.cs:353` must stop emitting declared index names and must apply the same clear-only projection (or omit indexes). A published OpenAPI document is a public-ish surface and must not be more permissive than describe. Delivered in the L-PR; if the generator has no caller context, emit no indexes there.
+- I404-SC-03 (O-3 ruling): Audit required, minimal. Replacing physical indexes is not a governance decision, but it changes exposed metadata and is performed by `system:catalog-sync`. Emit one `CATALOG_PHYSICAL_INDEXES_CHANGED` entry per table per actual change (only when the list differs), payload: table id, before and after counts, no columns, no names, written before `ReplacePhysicalIndexesAsync`. An audit failure aborts the replace, keeps the stored list and warns `PHYSICAL_INDEX_AUDIT_FAILED` (code only). No-op syncs write no audit, so there is no audit flood.
+- I404-SC-04 (fail closed, `Unavailable`): Keeping the stored list is acceptable because it cannot widen exposure: the projection (L1) re-checks visibility at read time, and the stored list only ever shrinks relative to what a successful sync would show or stays equal. Stored column ids that no longer resolve drop the whole index (D-3). `Unsupported` clears the list. The warning is `PHYSICAL_INDEX_UNAVAILABLE` plus table id only, no exception text or provider text, exceptions logged by type only.
+- I404-SC-05 (no key-path coupling): A non-unique read failure (`NonUnique = Unavailable`) never downgrades a `Known` key snapshot. Conversely, a key `Unavailable` implies `NonUnique` Unavailable.
+- I404-SC-06 (caps): `MaxPhysicalIndexesPerTable = 32`, columns per index at most 32, enforced while streaming at cap + 1 without buffering. The store `ReplaceAsync` re-validates both caps and the ordinal contract (gap-free, no duplicate column) before writing, regardless of the caller. Violation throws and nothing is written.
+- I404-SC-07 (write isolation): `ReplaceAsync` runs DELETE and INSERT in one transaction, bound parameters only, keyed by table id from the verified `TableIdentifier`. It never touches `TABLE_INDEXES`. Tenant scope is inherited from the table id (no cross-tenant write); `restrictToTenant` and admission follow I403-SC-11.
+- I404-SC-08 (dry run): Dry run performs the read and the finding only. No store write, no audit, no epoch invalidation.
+- I404-SC-09 (no semantic effect): Physical indexes never feed read ordering, keyset, bulk-stream, aggregation, pushdown, policy or masking decisions. Guard test below.
+- I404-SC-10 (step 0004): Purely additive (two new tables, check constraints, unique indexes), idempotent guards on all three dialects, no change to 0001..0003 files or their checksum lines; 0003 must be on main first (O-6 default accepted). No name column, no timestamp. Foreign keys to the existing table and column tables must cascade-safe with the delete path (table deletion removes rows).
+- I404-SC-11 (no new credential path): Reader extension reuses the #403 port only (I403-SC-02/03). SQL Server `type IN (1,2)`, `has_filter = 0`, not disabled, not hypothetical, key columns only; PostgreSQL btree, valid, ready, no predicate, no expression, key columns only. System catalog queries use bound `@schema`/`@table`.
+- I404-SC-12 (O-2, O-5, O-7 accepted): SQLite and other dialects are `Unsupported`; physical unique indexes never become keys; filtered, partial, expression and INCLUDE columns are excluded.
+- I404-SC-13 (de-duplication and output order): Dedup is by exact columns and directions after projection, so an omitted index cannot influence the visible list (no side-channel through counts or dedup). The cap is applied after visibility filtering.
+- I404-SC-14 (epoch): The replace happens before per-table epoch invalidation so no cached describe result serves the old list after a change. The cache key must include the caller's access context (as today); no cross-caller sharing of projected output.
+
+### Mandatory tests (all `[Trait("Category","Security")]`, in addition to L-tests and plan tests T-07, T-09, T-12, T-19, T-21, T-22)
+- I404-T-S01 `PhysicalIndex_OverMaskedColumn_NotDescribed_Mcp_Rest_GraphQl`
+- I404-T-S02 `Sync_Unavailable_KeepsStored_WarningHasCodeAndTableIdOnly_NoIndexNameNoErrorText`
+- I404-T-S03 `Sync_Replace_WritesAudit_BeforeStore_NoNamesNoColumns` and `Sync_AuditFailure_KeepsStoredList`
+- I404-T-S04 `Sync_NoChange_WritesNoAudit`
+- I404-T-S05 `Reader_Caps_33rdIndex_NonUniqueUnavailable_KeysStayKnown`
+- I404-T-S06 `Store_Replace_RejectsOverCapOrdinalGapOrDuplicateColumn_WritesNothing`
+- I404-T-S07 `Store_Replace_CrossTenantTable_Isolated`
+- I404-T-S08 `Step0004_Additive_PriorChecksumLinesByteIdentical_NoDataLoss`
+- I404-T-S09 `PhysicalIndexes_NeverAffectReadOrderingKeysetPolicyMasking` (extends T-23)
+- I404-T-S10 `OpenApi_EmitsNoIndexNames_AndNoIndexOverMaskedColumn`
+- I404-T-S11 `Describe_DedupAndCap_AppliedAfterVisibilityFilter_NoCountSideChannel`
+- I404-T-S12 `Describe_CacheNotSharedAcrossCallersWithDifferentClearSets`
