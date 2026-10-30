@@ -301,6 +301,7 @@ public sealed class GovernanceSqliteUpgradeTests
     private const string PhysicalIndexStepName = "physical_nonunique_indexes";
 
     [Fact]
+    [Trait("SecurityCondition", "I404-SC-10")]
     public async Task I404_Step0004_UpgradeFromV150_WithData_PreservesRowsAndAuditChain()
     {
         var cs = $"Data Source=up0004_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
@@ -326,12 +327,14 @@ public sealed class GovernanceSqliteUpgradeTests
     }
 
     [Fact]
+    [Trait("SecurityCondition", "I404-SC-10")]
     public async Task Step0004_Rerun_IsIdempotent_GuardSkips()
     {
         var cs = $"Data Source=up0004i_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         var options = Opts(cs);
         using var repository = NewUnmigrated(options);
         await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+        Exec(repository, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)");
         Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i1', 't', 1)");
         Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version = 4");
 
@@ -342,6 +345,7 @@ public sealed class GovernanceSqliteUpgradeTests
     }
 
     [Fact]
+    [Trait("SecurityCondition", "I404-SC-10")]
     public async Task Step0004_CheckConstraints_RejectInvalidOrdinalAndDirection()
     {
         var cs = $"Data Source=up0004c_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
@@ -349,11 +353,18 @@ public sealed class GovernanceSqliteUpgradeTests
         using var repository = NewUnmigrated(options);
         await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
 
+        Exec(repository, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)");
+        Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i', 't', 1)");
         Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i0', 't', 0)"));
+        Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('ix', 'no-such-table', 2)"), "the foreign key refuses an unknown table");
         Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i', 0, 'c')"));
         Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id, is_descending) VALUES ('i', 1, 'c', 2)"));
         Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i', 1, 'c')");
         Scalar(repository, "SELECT is_descending FROM TABLE_PHYSICAL_INDEX_COLUMNS WHERE index_id = 'i'").ShouldBe(0);
         Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i', 2, 'c')"), "a column is listed once per index");
+
+        Exec(repository, "DELETE FROM TABLES WHERE id = 't'");
+        Scalar(repository, "SELECT COUNT(*) FROM TABLE_PHYSICAL_INDEXES").ShouldBe(0, "the cascade removes the physical rows with the table");
+        Scalar(repository, "SELECT COUNT(*) FROM TABLE_PHYSICAL_INDEX_COLUMNS").ShouldBe(0);
     }
 }

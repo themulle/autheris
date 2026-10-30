@@ -23,6 +23,7 @@ using Xunit;
 using TargetSqlDialect = TrinoSqlEngine.TargetSqlDialect;
 
 /// <summary>Issue #404 WP-404-2: the catalog sync persists the physical non-unique indexes (D-5) with a minimal audit, fail closed.</summary>
+[Trait("Category", "Security")]
 public sealed class Issue404DataCatalogSyncPhysicalIndexTests
 {
     private const KeyColumnDirection A = KeyColumnDirection.Ascending;

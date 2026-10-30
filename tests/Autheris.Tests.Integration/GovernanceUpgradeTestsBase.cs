@@ -238,6 +238,8 @@ public abstract class GovernanceUpgradeTestsBase
     });
 
     [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-10")]
     public Task I404_T_04_Step0004_UpgradeFromV150_AppliesAndShapeVerifies() => WithDbAsync(async db =>
     {
         var cs = db.ConnectionString;
@@ -255,9 +257,18 @@ public abstract class GovernanceUpgradeTestsBase
         (await CountAsync(cs, "SELECT COUNT(*) FROM table_primary_key_columns")).ShouldBe(2, "additive: existing rows are untouched");
         (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
         (await QueryAsync(cs, AuditHashesSql)).ShouldBe(auditHashes, "step 0004 does not read or rewrite audit rows");
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('p0', 'no-such-table', 1)"), "the foreign key refuses a physical index of an unknown table");
+        await ExecAsync(cs, "INSERT INTO tables (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t404', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)");
         await ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('p1', 't404', 1)");
+        await ExecAsync(cs, "INSERT INTO table_physical_index_columns (index_id, column_ordinal, table_column_id) VALUES ('p1', 1, 'c1')");
         await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('p2', 't404', 1)"), "the ordinal is unique per table");
         await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('p3', 't404', 0)"));
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_index_columns (index_id, column_ordinal, table_column_id) VALUES ('no-such-index', 1, 'c1')"));
+
+        // I404 Phase 5: removing the table row cannot leave stale physical rows that a reused id would resurface.
+        await ExecAsync(cs, "DELETE FROM tables WHERE id = 't404'");
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_physical_indexes")).ShouldBe(0);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_physical_index_columns")).ShouldBe(0);
         await RunAsync(cs, GovernanceMigrationMode.Verify);
     });
 

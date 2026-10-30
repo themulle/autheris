@@ -145,4 +145,15 @@ public sealed class CatalogPhysicalIndexStoreTests : IDisposable
         Scalar("SELECT COUNT(*) FROM TABLE_INDEXES").ShouldBe(declaredBefore);
         (await ReadAsync("ta")).Indexes.ShouldHaveSingleItem().Name.ShouldBe("ix_declared");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-01")]
+    public void I404_SC_01_PhysicalIndexTables_HaveNoNameOrTimestampColumn()
+    {
+        using var cmd = _repo.RawConnection().CreateCommand();
+        cmd.CommandText = "SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_table_info('TABLE_PHYSICAL_INDEXES') UNION ALL SELECT name FROM pragma_table_info('TABLE_PHYSICAL_INDEX_COLUMNS'))";
+        var columns = Convert.ToString(cmd.ExecuteScalar())!.Split(',');
+        columns.OrderBy(c => c).ShouldBe(["column_ordinal", "id", "index_id", "index_ordinal", "is_descending", "table_column_id", "table_id"]);
+    }
 }
