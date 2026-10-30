@@ -58,7 +58,7 @@ public sealed class VisibleTablesTenancyTests
         => Names(await VisibleAsync(Wp0.User("root", "tenant-b", ["ClusterAdmin"]), mode, "tenant-b")).ShouldBe(["countries", "invoices_b", "orders_a"]);
 
     [Fact]
-    public async Task OverloadsWithoutTenancyMode_UseTheConfinedMultiView()
+    public async Task OverloadsWithoutTenantSelection_UseTheConfinedMultiView()
     {
         var consents = Wp0.Consents();
         var admin = Wp0.User("S-ADM", null, ["GovernanceAdmin"]);

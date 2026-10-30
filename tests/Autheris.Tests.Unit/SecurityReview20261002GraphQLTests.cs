@@ -384,7 +384,7 @@ public sealed class SecurityReview20261002GraphQLTests
     }
 
     [Fact]
-    public async Task M15_ConsentRevocationImpact_LegacySingleTenantConsent_IsNotVisibleToOtherTenant()
+    public async Task M15_ConsentRevocationImpact_DefaultTenantConsent_IsNotVisibleToOtherTenant()
     {
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();

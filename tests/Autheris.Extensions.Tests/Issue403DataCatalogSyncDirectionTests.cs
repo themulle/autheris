@@ -118,6 +118,29 @@ public sealed class Issue403DataCatalogSyncDirectionTests
     }
 
     [Fact]
+    public async Task Sync_PhysicalDirectionAudit_WithoutOwnerOrDefaultTenant_UsesThePlatformBucket()
+    {
+        // DT-A-6/DT-A-9: owner, else the sync tenant, else the default tenant, else the platform bucket.
+        Catalog(["id", "ts"]);
+        Physical(Known(Pk(["id", "ts"], A, D)));
+
+        await Sut().SyncCatalogAsync();
+
+        _audits.Single().TenantId.ShouldBe(TenantId.Platform);
+    }
+
+    [Fact]
+    public async Task Sync_PhysicalDirectionAudit_WithOwner_UsesTheOwnerTenant()
+    {
+        Catalog(["id", "ts"], existing: Stored(["id", "ts"], [A, A], owner: "tenant-a"));
+        Physical(Known(Pk(["id", "ts"], A, D)));
+
+        await Sut().SyncCatalogAsync();
+
+        _audits.Single().TenantId.ShouldBe(new TenantId("tenant-a"));
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     [Trait("SecurityCondition", "I403-SC-07")]
     public async Task AuditThrows_NoPhysicalDirectionPersisted_AuditBeforeUpsertOrdering()

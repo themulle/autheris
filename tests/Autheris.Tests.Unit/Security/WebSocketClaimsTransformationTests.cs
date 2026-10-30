@@ -232,7 +232,7 @@ public sealed class WebSocketClaimsTransformationTests
         // Arrange: Anonymous HTTP upgrade (no user/tenant on HttpContext)
         var httpContext = new DefaultHttpContext();
 
-        // Token resolves to LegacySingleTenant
+        // Token resolves to the default tenant
         var tokenClaims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-ALICE")
