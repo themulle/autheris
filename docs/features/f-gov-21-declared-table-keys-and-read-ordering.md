@@ -258,7 +258,7 @@ The bulk table stream seeks on the primary key (else the first unique index) and
 
 ### 6.1 Source databases (governed reads)
 
-Autheris runs no key or index catalog queries against sources (`sys.indexes`, `pg_index`, `pg_constraint`, `ALL_CONSTRAINTS`, `information_schema.table_constraints`, `pragma_index_list`, `duckdb_constraints` and similar); an architecture test enforces this for the catalog, data, OData and ingestion code.
+Governed reads, OData and ingestion run no key or index catalog queries against sources (`sys.indexes`, `pg_index`, `pg_constraint`, `ALL_CONSTRAINTS`, `information_schema.table_constraints`, `pragma_index_list`, `duckdb_constraints` and similar); an architecture test enforces this for the catalog, data, OData and ingestion code. The exceptions are listed in the table below, including the catalog sync's key direction readers.
 
 | Engine | Grants for governed reads |
 | :--- | :--- |
@@ -275,7 +275,8 @@ Optional features need more than `SELECT`:
 | Feature | Additional need |
 | :--- | :--- |
 | Governed stored procedures ([F-SQL-02](f-sql-02-governed-stored-procedures.md)) | `EXECUTE` on the procedure; `VIEW DEFINITION` for `StoredProcedureCatalogValidator` (module text and dependencies). |
-| Procedure row scope (`SqlProcedureRowScopeResolver`) | Reads `sys.indexes` / `pg_index` on the source to prove **physical** uniqueness of the row-scope key (an authorization path, fails closed). This is the one sanctioned key-catalog read; it needs only the metadata visibility that `SELECT` grants. Declared indexes do not replace it. |
+| Procedure row scope (`SqlProcedureRowScopeResolver`) | Reads `sys.indexes` / `pg_index` on the source to prove **physical** uniqueness of the row-scope key (an authorization path, fails closed). It needs only the metadata visibility that `SELECT` grants. Declared indexes do not replace it. |
+| Catalog sync key directions (`SqlServerKeyIndexMetadataReader`, `PostgreSqlKeyIndexMetadataReader`, used only by `GovernedCatalogProvider`) | Reads `sys.index_columns.is_descending_key` / `pg_index.indoption` with bound parameters to fill the direction of an already declared key whose column list matches the physical primary key or unique index exactly. It never adds, removes or reorders key columns, and declared or stored directions take precedence. Any read failure, ambiguity or mismatch leaves the key unchanged. SQL Server needs `VIEW DEFINITION` on the table; without it the directions stay unknown (ascending). SQLite, Oracle, DuckDB and Databricks are not read. |
 | MSSQL change tracking ([F-CDC-02](f-cdc-02-mssql-change-tracking.md), `MssqlChangeTrackingPoller`) | `VIEW CHANGE TRACKING` on the tracked tables; reads the source index catalog for the primary key. |
 | Governed DML | `INSERT`, `UPDATE`, `DELETE` on the target, only when DML is enabled for the data source. |
 

@@ -1,5 +1,7 @@
 namespace Autheris.Extensions.Tests;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -667,7 +669,7 @@ public sealed class SecurityReview20261002ExtensionsTests
             repo,
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.Collibra } }),
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync();
 
