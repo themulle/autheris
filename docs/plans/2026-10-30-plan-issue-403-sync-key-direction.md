@@ -62,3 +62,41 @@ Dialect matrix:
 - O-4 Should the sync audit every key-definition replacement (columns too), not only direction changes? Default: direction changes only in #403; a separate issue for the general case.
 - O-5 Source privilege: SQL Server needs `VIEW DEFINITION` on the table (missing gives `Unavailable` through D-3), and PostgreSQL catalogs are world-readable. Default: document it in the operator manual only on request; no new option.
 - O-6 Phase 3: does applying physical directions to the incoming column list by exact equality (D-5.3) satisfy I390-SC-12 "never combined across sides"? Default: yes (the physical list is a verification of the same list, not a second side).
+
+## 5. Phase 3 rulings (csharp-security-expert, 2026-10-30)
+
+**Verdict: APPROVED WITH CONDITIONS.** Defaults for O-1..O-5 are accepted. Code facts verified: the sync call site is `src/Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs:224-231` (not under Application; D-4/D-6 paths for the sync wiring are corrected accordingly); `GovernedCatalogProvider*.cs` has no command timeout of its own; `Apply` receives `null` directions whenever the asset declares columns without directions (including the `IsPrimaryKey` flag path).
+
+**Rulings.**
+- **O-6: YES, with I403-SC-04.** Applying physical directions to a column list that is exactly equal (same names, same order, dialect case rule) is a verification of one list, not a combination of two sides. Any partial overlap, reorder, subset or superset yields no direction.
+- **390a gap (asset re-declaring the same key columns without directions overwrites stored DESC): #403 closes it** (I403-SC-05). D-5.2 ("stored non-empty directions are operator-owned") is void if `Apply` has already reset them to empty before the reconciler runs, which is exactly what happens on every sync of an asset without directions when the physical read is Unsupported/Unavailable. It is a one-line precedence rule inside the same reconciler, so it is not split off.
+
+**Binding conditions.**
+- I403-SC-01 (fail closed): Any physical read failure (exception, cancellation, timeout, breaker open, no connection, dialect mismatch, empty result, row cap, ordinal gap/duplicate, duplicate column in one index, unknown index shape) yields `Unavailable`; the reconciler then changes nothing and never produces a partial key update. Directions and columns of one key are always replaced together or not at all.
+- I403-SC-02 (no injection): Readers use only fully qualified system catalogs with bound `@schema`/`@table` (or provider parameters); no identifier, name or object id is ever interpolated or concatenated into SQL. Names read from the catalog are data only and are never fed back into SQL, logs or audit.
+- I403-SC-03 (no new credential surface): The physical read uses only the existing `GovernedCatalogProvider` path (`FindConnection`, dialect admission, login breaker, `_connectionFactory`). No new `IOptions`, connection string, factory or second connection path; the connection is read-only use (catalog SELECTs only) and disposed per read. A login failure feeds the same breaker; key reads must not bypass an open breaker.
+- I403-SC-04 (O-6): Matching is exact-equality only (D-4); a physical primary key that differs in columns or order is `Mismatch` with no fallback; ambiguous candidates give no direction. Physical data never adds, removes or reorders a column and never creates a key definition (O-2 default).
+- I403-SC-05 (390a gap): For an identical column list, when the incoming side declares no directions (empty/null) and the stored list is non-empty, the stored directions are retained, independent of the physical result. Directions are reset only when the incoming column list differs from the stored one. This applies to the PK and to each unique index, and to the `IsPrimaryKey` flag path.
+- I403-SC-06 (precedence, no silent override): Order is fixed: asset-declared > stored non-empty > physical > unknown. Physical never overwrites a stored non-empty list or asset-declared directions; each difference yields a finding. Physical directions are applied only to a key whose columns the sync itself persists.
+- I403-SC-07 (audit before write): Every direction change applied from the physical source is audited (`CATALOG_KEY_DEFINITION_CHANGED`, `system:catalog-sync`, before/after directions, `directionSource=physical`) strictly before `UpsertTableMetadataAsync`. An audit exception (including cancellation) aborts the physical change: the table is upserted with the pre-reconcile (post-`Apply`, SC-05-corrected) metadata and `KEY_DIRECTION_AUDIT_FAILED` is warned. The upsert never happens with physical directions unless the audit succeeded. Audit payloads contain direction lists and table id only, no index names or constraint names.
+- I403-SC-08 (dry run): With `dryRun` the physical read and findings run, but no audit, no upsert, no epoch invalidation and no other write occur.
+- I403-SC-09 (confidentiality): Warnings, audit details, logs and API responses carry only a governed code and the table id. Never column names, index names, schema text, SQL text, exception messages or provider error text; exceptions are logged by type only. Findings obey `restrictToTenant` and the existing table visibility rule (no finding for tables the caller does not own or may not see).
+- I403-SC-10 (resource caps): The read is bounded by a hard row cap (`MaxIndexesPerTable * MaxColumnsPerKey`, enforced while streaming, aborting at cap + 1 without buffering beyond it), a command timeout no longer than the existing catalog column read timeout (and the linked cancellation token), and one read per table per sync. The cap abort yields `Unavailable`, never a truncated snapshot. The sync-wide per-run bound on tables stays as today; no unbounded fan-out per table.
+- I403-SC-11 (admission): The physical read only runs for tables that passed the existing governed-admission check and only for `DataSourceType.Sql`; a table denied by admission gets no physical read and no finding.
+- I403-SC-12 (no weakening): `CatalogGovernanceRatchet.Merge` still runs after reconcile; physical data never touches sensitivity, four-eyes, masking, active flags or any other security field; the SEC-SYNC-EPOCH invalidation stays.
+- I403-SC-13 (SQL Server privilege): An empty result for a table with readable columns is `Unavailable` (no direction, no finding that reveals metadata visibility beyond the code); no new option and no privilege escalation hint in responses.
+
+**Mandatory tests (all `[Trait("Category","Security")]`; in addition to the plan's S-tagged T-02, T-08, T-13..T-15, T-17..T-19, T-22..T-25, T-31, T-33, T-34, which stay mandatory).**
+- I403-T-S01 `Reader_Sql_NoInterpolation_BoundParametersOnly_BothDialects` (hostile quoted/mixed-case/`';--` table names stay data).
+- I403-T-S02 `PhysicalRead_UsesGovernedProviderPathAndBreaker_NoSecondConnection` (breaker open: factory never called).
+- I403-T-S03 `PartialOverlapOrReorder_NoDirectionApplied` (subset, superset, reorder, case variant per dialect).
+- I403-T-S04 `AssetWithoutDirections_SameColumns_StoredDescRetained_PkAndUnique_FlagPath` (390a gap; physical Unsupported and Unavailable variants).
+- I403-T-S05 `AssetWithoutDirections_ChangedColumns_DirectionsReset`.
+- I403-T-S06 `Precedence_AssetOverStoredOverPhysical_NeverSilentOverride` (each difference yields exactly one finding).
+- I403-T-S07 `AuditThrows_NoPhysicalDirectionPersisted_AuditBeforeUpsertOrdering` (call-order recorder, also cancellation).
+- I403-T-S08 `DryRun_NoAuditNoUpsertNoEpochInvalidation`.
+- I403-T-S09 `Warnings_AuditAndLogs_NeverContainIndexColumnOrExceptionText` (sentinel strings in index names, columns and exception messages).
+- I403-T-S10 `Streaming_RowCapPlusOne_AbortsUnavailable_NoPartialUpdate` and `CommandTimeout_Unavailable_NoPartialUpdate`.
+- I403-T-S11 `AdmissionDeniedTable_NoPhysicalRead_NoFinding`.
+- I403-T-S12 `PhysicalDirections_NeverChangeSecurityFlags_RatchetStillApplied`.
+- I403-T-S13 `OrdinalGapDuplicateOrDuplicateColumn_Unavailable`.
