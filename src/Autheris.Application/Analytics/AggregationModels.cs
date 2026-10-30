@@ -201,3 +201,19 @@ public sealed class AggregationRowCapExceededException : GatewaySecurityExceptio
     {
     }
 }
+
+/// <summary>
+/// #405: the refusal of a group key whose type cannot be grouped. <see cref="Exception.Message"/> and the reason are exactly those of the
+/// pre-#405 refusal, so every mapping site answers identically. <see cref="Family"/> is audit-only (I405-SC-02/-04): it is never part of the
+/// message, the response or a log line, and no constructor takes a type text or column name.
+/// </summary>
+public sealed class AggregationGroupKeyNotSupportedException : TrinoSqlEngine.SqlCompileNotSupportedException
+{
+    public Autheris.Application.Data.Services.GroupKeyTypeFamily Family { get; }
+
+    public AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily family)
+        : base(TrinoSqlEngine.SqlCompileNotSupportedReason.Construct, "aggregation group key type")
+    {
+        Family = family;
+    }
+}
