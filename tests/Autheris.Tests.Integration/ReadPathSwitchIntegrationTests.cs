@@ -98,6 +98,9 @@ public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<WebApp
             ;
     }
 
+    private static string MaskRequestIds(string body) =>
+        System.Text.RegularExpressions.Regex.Replace(body, "\"(correlationId|traceId)\":\"[^\"]*\"", "\"$1\":\"<ID>\"");
+
     private static HttpRequestMessage Request(string spec)
     {
         var parts = spec.Split(' ', 2);
@@ -137,7 +140,8 @@ public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<WebApp
                 var reference = spec.Contains("sample-rows", StringComparison.Ordinal) ? unknownDataset : unknown;
                 closed.Status.ShouldBe(reference.Status, spec);
                 if (ReferenceEquals(client, authenticated) && !spec.Contains("sample-rows", StringComparison.Ordinal)) closed.Body.ShouldBe(string.Empty, spec);
-                closed.Body.Replace("sample-rows", "<X>", StringComparison.Ordinal).ShouldBe(reference.Body.Replace("zzz-nonexistent-xyz", "<X>", StringComparison.Ordinal), spec);
+                // The catch-all answers both with the same governed problem; only the per-request ids differ, so they are masked.
+                MaskRequestIds(closed.Body.Replace("sample-rows", "<X>", StringComparison.Ordinal)).ShouldBe(MaskRequestIds(reference.Body.Replace("zzz-nonexistent-xyz", "<X>", StringComparison.Ordinal)), spec);
                 closed.Headers.ShouldBe(reference.Headers, spec);
             }
         }
