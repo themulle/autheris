@@ -196,6 +196,7 @@ public sealed partial class DbtMetadataIngestionService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    _logger.LogWarning(ex, "Dbt governance owner identity verification failed; treating the identity store as unavailable.");
                     status = OwnerIdentityStatus.Unavailable;
                 }
             }

@@ -83,3 +83,8 @@ Mandatory tests (all `[Trait("Category","Security")]`)
 - I393B-T-13 `ImportedOwner_CannotApproveConsentOfOtherTenant` (existing tenant check holds)
 - I393B-T-14 `ManifestSync_MetaOwner_WritesNoTableOwners` (as planned)
 - I393B-T-15 `Import_ErrorMessages_DoNotEchoIdentifiers`
+
+## Phase 5 notes (2026-10-30)
+
+- I393B-T-13 is covered at repository level by `Import_ImportedOwnerCanApprove_NonOwnerAndOtherTableCannot`; the approval code (consent tenant check, `IsSelfApproval`) is unchanged.
+- An owner apply that fails after the pre-check (a race) leaves the table metadata already committed; this is accepted and surfaced as a warning in the result.
