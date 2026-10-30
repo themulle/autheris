@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -144,7 +146,7 @@ public sealed class DataCatalogConnectorTests
             metadataRepo,
             epochService,
             options,
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await syncService.SyncCatalogAsync(dryRun: false);
 

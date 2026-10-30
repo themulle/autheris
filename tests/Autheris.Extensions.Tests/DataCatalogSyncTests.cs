@@ -1,5 +1,7 @@
 namespace Autheris.Extensions.Tests;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -54,7 +56,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
     }
 
     [Fact]
@@ -267,7 +269,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var tableId = new TableIdentifier("sales", "dbo", "leads_active");
         var catalogTable = new CatalogTableAsset
@@ -300,8 +302,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(new GatewayOptions()),
-            rebacStore,
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance, rebacStore);
 
         var tableId = new TableIdentifier("corp", "hr", "employees");
         var catalogTable = new CatalogTableAsset

@@ -1,5 +1,7 @@
 namespace Autheris.Extensions.Tests;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -806,7 +808,7 @@ public sealed class Round4OpenMetadataTests
                 Catalog = new DataCatalogOptions { Provider = provider, ActivateNewTables = activateNewTables },
                 OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ActivateNewTables = activateNewTables }
             }),
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         await sut.SyncCatalogAsync();
 

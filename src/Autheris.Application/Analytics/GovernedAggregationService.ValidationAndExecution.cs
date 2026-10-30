@@ -85,6 +85,51 @@ public sealed partial class GovernedAggregationService
         return decision;
     }
 
+    /// <summary>True when the aggregation is planned as SQL (the only path that refuses a group-key type). One helper so validation and execution cannot drift.</summary>
+    private bool UsesPlanner(TableMetadata metadata) =>
+        _sqlExecutionService != null && metadata.Table.DataSourceType == DataSourceType.Sql;
+
+    /// <summary>I405-SC-01: refuses the first non-groupable group-key type of a planned SQL aggregation. Runs once, after all other validation.</summary>
+    private void EnsureGroupKeysGroupable(IReadOnlyList<string> groupByColumns, TableMetadata metadata)
+    {
+        if (!UsesPlanner(metadata))
+        {
+            return;
+        }
+
+        foreach (var column in groupByColumns)
+        {
+            var colMeta = metadata.GetColumn(column);
+            if (colMeta != null)
+            {
+                GroupKeyTypeFamilies.EnsureGroupable(colMeta.DataType, metadata.Dialect);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The deny details of a refused request. Fixed key set and order (I405-SC-07); a refused group-key type adds only the closed family
+    /// literal and a fixed reason, never a type text or column name (I405-SC-02).
+    /// </summary>
+    private static Dictionary<string, object?> BuildValidationDenyDetails(Exception ex, AggregationQuery query)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["is_allowed"] = false,
+            ["reasons"] = new[] { ex.Message },
+            ["group_by"] = query.GroupBy,
+            ["filter"] = query.Where?.SqlPredicate
+        };
+
+        if (ex is AggregationGroupKeyNotSupportedException refused)
+        {
+            details["refusal_reason"] = "GROUP_KEY_TYPE_NOT_GROUPABLE";
+            details["group_key_type_family"] = GroupKeyTypeFamilies.ToAuditLiteral(refused.Family);
+        }
+
+        return details;
+    }
+
     private static List<string> ValidateAndResolveGroupBy(
         AggregationQuery query,
         TableMetadata metadata,
@@ -293,7 +338,7 @@ public sealed partial class GovernedAggregationService
     {
         // WP-2 (F-1): a SQL table is aggregated in the database by the governed planner, so no row cap applies. The in-memory branches
         // below serve the other source types and deployments without a SQL execution service.
-        bool usePlanner = _sqlExecutionService != null && metadata.Table.DataSourceType == DataSourceType.Sql;
+        bool usePlanner = UsesPlanner(metadata);
         var executor = usePlanner ? null : _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
         if (executor != null)
         {
@@ -358,18 +403,28 @@ public sealed partial class GovernedAggregationService
                 AggregationOptions.UpperBoundMaxGroups);
 
             TableFilterClause? trinoFilter = EnsureTrinoCapableFilter(query.Where, metadata);
-            var planned = _planner.PlanAggregate(
-                new TableAggregateIntent(
-                    query.Table,
-                    groupByColumns,
-                    resolvedAggregates,
-                    trinoFilter,
-                    query.OrderBy,
-                    Limit: sqlLimit + 1,
-                    Transport: query.Transport ?? SqlTransports.Rest,
-                    TimeBuckets: query.TimeBuckets),
-                metadata,
-                decision);
+            PlannedTableAggregate planned;
+            try
+            {
+                planned = _planner.PlanAggregate(
+                    new TableAggregateIntent(
+                        query.Table,
+                        groupByColumns,
+                        resolvedAggregates,
+                        trinoFilter,
+                        query.OrderBy,
+                        Limit: sqlLimit + 1,
+                        Transport: query.Transport ?? SqlTransports.Rest,
+                        TimeBuckets: query.TimeBuckets),
+                    metadata,
+                    decision);
+            }
+            catch (AggregationGroupKeyNotSupportedException ex)
+            {
+                // I405-SC-03: the planner's defense-in-depth refusal is audited exactly once (validation refusals never reach this point).
+                await RecordAuditAsync(tenantId, principal.GetUserSid()!.Value, query.Table, allowed: false, BuildValidationDenyDetails(ex, query), ct).ConfigureAwait(false);
+                throw;
+            }
 
             var sqlRequest = new GovernedSqlQueryRequest(
                 planned.Sql,

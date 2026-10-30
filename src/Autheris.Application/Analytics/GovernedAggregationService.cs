@@ -184,16 +184,13 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                 ValidateAggregatesForNoise(resolvedAggregates);
                 ValidateMeasureBoundsForNoise(resolvedAggregates, metadata);
             }
+
+            // I405-SC-01: the group-key type is refused last, so every access, mask, aggregate, WHERE and noise error wins over it.
+            EnsureGroupKeysGroupable(groupByColumns, metadata);
         }
         catch (Exception ex)
         {
-            await RecordAuditAsync(tenantId, userSid, query.Table, allowed: false, new Dictionary<string, object?>
-            {
-                ["is_allowed"] = false,
-                ["reasons"] = new[] { ex.Message },
-                ["group_by"] = query.GroupBy,
-                ["filter"] = query.Where?.SqlPredicate
-            }, ct).ConfigureAwait(false);
+            await RecordAuditAsync(tenantId, userSid, query.Table, allowed: false, BuildValidationDenyDetails(ex, query), ct).ConfigureAwait(false);
             throw;
         }
 

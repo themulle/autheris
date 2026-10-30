@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using System.Text;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.DataCatalog.Models;
@@ -90,7 +92,7 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
         var factory = Substitute.For<IDataCatalogClientFactory>();
         factory.GetActiveClient().Returns(client);
         var sut = new DataCatalogSyncService(factory, _repo, Substitute.For<IEpochValidationService>(),
-            Options.Create(new GatewayOptions()), NullLogger<DataCatalogSyncService>.Instance);
+            Options.Create(new GatewayOptions()), Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync(dryRun: false);
 
