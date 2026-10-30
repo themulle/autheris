@@ -339,22 +339,8 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             }
         }
 
-        if (keyView.Indexes.Count > 0)
-        {
-            var indexes = new JsonArray();
-            foreach (var index in keyView.Indexes)
-            {
-                var cols = new JsonArray();
-                foreach (var c in index.Columns)
-                {
-                    cols.Add(c);
-                }
-
-                indexes.Add(new JsonObject { ["name"] = index.Name, ["unique"] = index.IsUnique, ["columns"] = cols });
-            }
-
-            entitySchema["x-autheris-indexes"] = indexes;
-        }
+        // I404-SC-L3/SC-02: the document is cached per structure version and has no caller context, so it carries no indexes
+        // (and never an index name); a caller-specific clear set exists only in describe_dataset and the REST catalog detail.
 
         entitySchema["properties"] = properties;
         if (requiredCols.Count > 0)
