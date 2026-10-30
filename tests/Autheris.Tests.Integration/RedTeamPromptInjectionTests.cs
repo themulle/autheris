@@ -149,7 +149,7 @@ public class RedTeamPromptInjectionTests
         }
 
         public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
-            TableIdentifier table, System.Collections.Generic.IReadOnlyList<string> primaryKey, System.Collections.Generic.IReadOnlyList<TableIndexDefinition> indexes, System.Threading.CancellationToken ct = default) =>
+            TableIdentifier table, System.Collections.Generic.IReadOnlyList<string> primaryKey, System.Collections.Generic.IReadOnlyList<TableIndexDefinition> indexes, System.Collections.Generic.IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, System.Threading.CancellationToken ct = default) =>
             Task.FromResult<TableKeyDefinitionChange?>(null);
 
         public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, System.Threading.CancellationToken ct = default)

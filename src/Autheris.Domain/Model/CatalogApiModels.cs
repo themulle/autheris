@@ -40,7 +40,8 @@ public sealed record CatalogDatasetDetail(
     string? DisplayName = null,
     string? Description = null,
     string? LongDescription = null,
-    string? Language = null);
+    string? Language = null,
+    IReadOnlyList<string>? PrimaryKeyDirections = null);
 
 public sealed record CatalogDatasourceSummary(
     string Id,

@@ -136,10 +136,11 @@ public sealed class GovernanceSchemaMigrationTests
         using var repository = NewRawRepository(cs);
         var runner = NewRunner(repository, cs);
 
-        runner.Steps.Count.ShouldBe(1);
+        runner.Steps.Count.ShouldBe(2);
         runner.Steps[0].ShouldSatisfyAllConditions(
             s => s.Version.ShouldBe(1),
             s => s.Name.ShouldBe("baseline_governance_schema"));
+        runner.Steps[1].Name.ShouldBe("key_and_index_column_direction");
         await runner.RunAsync();
         await runner.RunAsync();
 
@@ -192,7 +193,7 @@ public sealed class GovernanceSchemaMigrationTests
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
         await NewRunner(repository, cs).RunAsync();
-        Exec(repository, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (2, 'future', 'x', 'now', 'test')");
+        Exec(repository, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (3, 'future', 'x', 'now', 'test')");
 
         await Should.ThrowAsync<GovernanceSchemaDriftException>(() => NewRunner(repository, cs).RunAsync());
         await NewRunner(repository, cs, allowNewerSchema: true).RunAsync();

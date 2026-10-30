@@ -56,6 +56,7 @@ public interface ITableMetadataRepository
         TableIdentifier table,
         IReadOnlyList<string> primaryKey,
         IReadOnlyList<TableIndexDefinition> indexes,
+        IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
         CancellationToken ct = default);
 
     /// <summary>

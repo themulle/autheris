@@ -52,7 +52,8 @@ public sealed class SqlServerGovernanceSchemaShapeTests : IClassFixture<SqlServe
     [Fact]
     public async Task EmbeddedSnapshot_EqualsShapeOfTheBaseline()
     {
-        await using var conn = new SqlConnection(_shared.Db.ConnectionString);
+        await using var db = await SqlServerTestDatabase.CreateAsync(); // a fresh database: the shared one may already hold migrated steps
+        await using var conn = new SqlConnection(db.ConnectionString);
         await conn.OpenAsync();
         // The baseline DDL is applied directly: the runner itself depends on the snapshot that this test generates.
         SqlServerBaselineSchema.Apply(conn);
@@ -71,7 +72,7 @@ public sealed class SqlServerGovernanceSchemaShapeTests : IClassFixture<SqlServe
         await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
         await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
 
-        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(1);
+        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(2, "baseline and step 0002");
     }
 
     [Fact]

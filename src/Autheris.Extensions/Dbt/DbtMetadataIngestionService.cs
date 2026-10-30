@@ -218,29 +218,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
     }
 
-    private TableMetadata ApplyDeclaredKeys(TableMetadata metadata, DbtDeclaredKeys declared)
-    {
-        var collector = new Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Collector();
-        if (declared.Invalid)
-        {
-            collector.AddPrimaryKey(null);
-        }
-        else
-        {
-            if (declared.PrimaryKey is not null)
-            {
-                collector.AddPrimaryKey(declared.PrimaryKey);
-            }
-
-            foreach (var unique in declared.UniqueConstraints)
-            {
-                collector.AddUnique(unique);
-            }
-        }
-
-        return Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "dbt");
-    }
-
     private static bool IsTenantAllowed(TableIdentifier id, DbtGovernanceImportCaller caller)
     {
         if (caller.IsClusterAdmin)
@@ -700,6 +677,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         Columns = updatedColumns,
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
+                        PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
                         PredefinedSyntheticSamples = mergedSamples
                     };
@@ -707,7 +685,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
                     if (model.DeclaredKeys is { } declared)
                     {
-                        updatedMetadata = ApplyDeclaredKeys(updatedMetadata, declared);
+                        updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
                     }
 
                     if (mergedSamples != null)
@@ -1554,7 +1532,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     Identifier = existingMeta.Identifier,
                     Columns = updatedCols,
                     ColumnMaskingRules = updatedMaskingRules,
-                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns
+                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
+                    PrimaryKeyDirections = existingMeta.PrimaryKeyDirections
                 };
 
                 pendingUpserts.Add(updatedMetadata);

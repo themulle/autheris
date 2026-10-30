@@ -431,12 +431,19 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
         }
 
         List<string>? primaryKey = null;
+        List<KeyColumnDirection>? primaryKeyDirections = null;
         var indexes = new List<TableIndexDefinition>();
         var valid = true;
 
         if (hasKey)
         {
             valid = TryReadColumns(keyElement, out primaryKey);
+        }
+
+        // Issue #390: sibling extension; a directions list needs a declared key of the same length, anything else drops the whole definition.
+        if (valid && schemaObj.TryGetProperty("x-autheris-primary-key-directions", out var keyDirectionsElement))
+        {
+            valid = hasKey && TryReadDirections(keyDirectionsElement, primaryKey!.Count, out primaryKeyDirections);
         }
 
         if (valid && hasIndexes)
@@ -469,7 +476,14 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                         unique = uniqueProp.GetBoolean();
                     }
 
-                    indexes.Add(new TableIndexDefinition(nameProp.GetString()!, indexColumns!, unique));
+                    List<KeyColumnDirection>? indexDirections = null;
+                    if (item.TryGetProperty("directions", out var directionsProp) && !TryReadDirections(directionsProp, indexColumns!.Count, out indexDirections))
+                    {
+                        valid = false;
+                        break;
+                    }
+
+                    indexes.Add(new TableIndexDefinition(nameProp.GetString()!, indexColumns!, unique, KeyDirections.Canonical(indexDirections)));
                 }
             }
         }
@@ -482,7 +496,31 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             return metadata;
         }
 
-        return CatalogKeyDefinitionImport.Apply(metadata, primaryKey, indexes, _logger, "OpenAPI");
+        return CatalogKeyDefinitionImport.Apply(metadata, primaryKey, indexes, _logger, "OpenAPI", KeyDirections.Canonical(primaryKeyDirections));
+    }
+
+    /// <summary>A JSON array of exactly <paramref name="expectedCount"/> strings, each <c>ASC</c> or <c>DESC</c> (ignoring case); false for any other shape.</summary>
+    private static bool TryReadDirections(JsonElement element, int expectedCount, out List<KeyColumnDirection>? directions)
+    {
+        directions = null;
+        if (element.ValueKind != JsonValueKind.Array || element.GetArrayLength() != expectedCount || expectedCount > TableKeyDefinitionValidator.MaxColumnsPerKey)
+        {
+            return false;
+        }
+
+        var result = new List<KeyColumnDirection>(expectedCount);
+        foreach (var item in element.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || !KeyDirections.TryParse(item.GetString(), out var direction))
+            {
+                return false;
+            }
+
+            result.Add(direction);
+        }
+
+        directions = result;
+        return true;
     }
 
     private static bool TryReadColumns(JsonElement element, out List<string>? columns)

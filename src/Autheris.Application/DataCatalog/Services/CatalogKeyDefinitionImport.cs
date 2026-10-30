@@ -23,36 +23,44 @@ public static class CatalogKeyDefinitionImport
     {
         private readonly List<TableIndexDefinition> _indexes = new();
         private IReadOnlyList<string>? _primaryKey;
+        private IReadOnlyList<KeyColumnDirection>? _primaryKeyDirections;
 
         public bool Invalid { get; private set; }
 
         public IReadOnlyList<string>? PrimaryKey => Invalid ? null : _primaryKey;
 
+        /// <summary>Directions of <see cref="PrimaryKey"/> (canonical: null when all ascending or undeclared).</summary>
+        public IReadOnlyList<KeyColumnDirection>? PrimaryKeyDirections => Invalid ? null : _primaryKeyDirections;
+
         public IReadOnlyList<TableIndexDefinition>? Indexes => Invalid ? null : _indexes;
 
         public bool HasDeclaration => !Invalid && (_primaryKey is { Count: > 0 } || _indexes.Count > 0);
 
-        public void AddPrimaryKey(IReadOnlyList<string>? columns)
+        public void AddPrimaryKey(IReadOnlyList<string>? columns, IReadOnlyList<KeyColumnDirection>? directions = null)
         {
-            if (!CapsHold(columns) || _primaryKey is not null)
+            if (!CapsHold(columns) || _primaryKey is not null || !DirectionsMatch(columns!, directions))
             {
                 Invalid = true;
                 return;
             }
 
             _primaryKey = columns!.ToArray();
+            _primaryKeyDirections = KeyDirections.Canonical(directions?.ToArray());
         }
 
-        public void AddUnique(IReadOnlyList<string>? columns)
+        public void AddUnique(IReadOnlyList<string>? columns, IReadOnlyList<KeyColumnDirection>? directions = null)
         {
-            if (!CapsHold(columns) || _indexes.Count >= TableKeyDefinitionValidator.MaxIndexesPerTable)
+            if (!CapsHold(columns) || _indexes.Count >= TableKeyDefinitionValidator.MaxIndexesPerTable || !DirectionsMatch(columns!, directions))
             {
                 Invalid = true;
                 return;
             }
 
-            _indexes.Add(new TableIndexDefinition(UniqueIndexName(_indexes.Count + 1), columns!.ToArray(), true));
+            _indexes.Add(new TableIndexDefinition(UniqueIndexName(_indexes.Count + 1), columns!.ToArray(), true, KeyDirections.Canonical(directions?.ToArray())));
         }
+
+        private static bool DirectionsMatch(IReadOnlyList<string> columns, IReadOnlyList<KeyColumnDirection>? directions) =>
+            directions is null || directions.Count == columns.Count;
 
         private static bool CapsHold(IReadOnlyList<string>? columns) =>
             columns is { Count: > 0 and <= TableKeyDefinitionValidator.MaxColumnsPerKey };
@@ -71,7 +79,7 @@ public static class CatalogKeyDefinitionImport
             return metadata;
         }
 
-        return Apply(metadata, collector.PrimaryKey, collector.Indexes, logger, source);
+        return Apply(metadata, collector.PrimaryKey, collector.Indexes, logger, source, collector.PrimaryKeyDirections);
     }
 
     /// <summary>Name of the n-th (1-based) unnamed unique constraint of a source, e.g. OpenMetadata <c>UNIQUE</c> or dbt <c>unique</c>.</summary>
@@ -86,7 +94,8 @@ public static class CatalogKeyDefinitionImport
         IReadOnlyList<string>? primaryKey,
         IReadOnlyList<TableIndexDefinition>? indexes,
         ILogger logger,
-        string source)
+        string source,
+        IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(logger);
@@ -103,6 +112,7 @@ public static class CatalogKeyDefinitionImport
             var validated = TableKeyDefinitionValidator.Validate(metadata with
             {
                 PrimaryKeyColumns = primaryKey ?? Array.Empty<string>(),
+                PrimaryKeyDirections = primaryKeyDirections ?? Array.Empty<KeyColumnDirection>(),
                 Indexes = indexes ?? Array.Empty<TableIndexDefinition>(),
                 ReplaceKeyDefinition = true
             });
