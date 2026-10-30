@@ -44,10 +44,11 @@ internal static class StepSqlLint
 
     private static readonly Regex SensitiveDml = Re(@"^(insert(\s+or\s+\w+)?\s+into|update|delete\s+from|merge\s+into|replace\s+into)\s+(audit_\w+|consent\w*)\b");
     // The one allowed dynamic form (SQL Server): the baseline default constraints are unnamed, so a step looks the generated name up and drops it with
-    // EXEC(N'ALTER TABLE <t> DROP CONSTRAINT ' + QUOTENAME(@name)). The form is rewritten to the equivalent static statement before linting, so the audit
-    // table rules (phase3 marker, DROP CONSTRAINT df_* only) still apply to it. Any other EXEC stays forbidden.
+    //   DECLARE @sql NVARCHAR(MAX) = N'ALTER TABLE <t> DROP CONSTRAINT ' + QUOTENAME(@name); [IF @name IS NOT NULL] EXEC(@sql);
+    // (EXEC cannot take a function call inside its argument, so the statement text is built in a variable first). The two statements are rewritten to the
+    // equivalent static statement before linting, so the audit table rules (phase3 marker, DROP CONSTRAINT df_* only) still apply. Any other EXEC stays forbidden.
     private static readonly Regex DynamicDropConstraint = Re(
-        @"(?:\bif\s+@\w+\s+is\s+not\s+null\s+)?\bexec\s*\(\s*N'alter\s+table\s+(?:dbo\.)?([A-Za-z_][A-Za-z0-9_]*)\s+drop\s+constraint\s+'\s*\+\s*quotename\s*\(\s*(@\w+)\s*\)\s*\)");
+        @"\bdeclare\s+(?<sql>@\w+)\s+nvarchar\s*\(\s*max\s*\)\s*=\s*N'alter\s+table\s+(?:dbo\.)?(?<t>[A-Za-z_][A-Za-z0-9_]*)\s+drop\s+constraint\s+'\s*\+\s*quotename\s*\(\s*(?<v>@\w+)\s*\)\s*;\s*(?:if\s+\k<v>\s+is\s+not\s+null\s+)?exec\s*\(\s*\k<sql>\s*\)");
     // The variable of the dynamic form must be declared from a sys.default_constraints lookup in the same step; any other variable is refused.
     private static readonly Regex DeclaredFromDefaultConstraintLookup = Re(
         @"\bdeclare\s+(@\w+)\s+\w+(?:\s*\(\s*\w+\s*\))?\s*=\s*\(\s*select\s+(?:\w+\.)?name\s+from\s+(?:sys\.)?default_constraints\b");
@@ -71,12 +72,12 @@ internal static class StepSqlLint
             .ToHashSet(StringComparer.Ordinal);
         var statements = Normalize(DynamicDropConstraint.Replace(normalizedSql, m =>
         {
-            if (!lookupVariables.Contains(m.Groups[2].Value.ToLowerInvariant()))
+            if (!lookupVariables.Contains(m.Groups["v"].Value.ToLowerInvariant()))
             {
                 violations.Add("the dynamic DROP CONSTRAINT variable is not declared from a sys.default_constraints lookup in the same step");
             }
 
-            return "ALTER TABLE " + m.Groups[1].Value + " DROP CONSTRAINT df_dynamic";
+            return "ALTER TABLE " + m.Groups["t"].Value + " DROP CONSTRAINT df_dynamic";
         }));
         if (statements.Count == 0)
         {

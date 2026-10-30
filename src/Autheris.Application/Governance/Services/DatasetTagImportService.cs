@@ -114,6 +114,7 @@ public sealed class DatasetTagImportService : IDatasetTagImportService
 
         await _audit.RecordRequiredAsync(new AuditLogEntry
         {
+            TenantId = TenantId.Platform, // the dbt import is tenant-less platform work (DT-A-6); a default(TenantId) audit row is refused
             EventType = AuditEventTypes.CatalogTagsChanged,
             ActorSid = ImportActor,
             TargetTable = table.ToString(),

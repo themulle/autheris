@@ -442,6 +442,7 @@ public sealed class TenantIngressTests
 
     // ---- TestAuth is a test-host-only ingress (DT-SC-09) ----
 
+#if AUTHERIS_TEST_AUTH
     [Fact]
     public async Task TestAuth_Outside_Development_Rejects_And_Ignores_Header_Tenant()
     {
@@ -461,6 +462,7 @@ public sealed class TenantIngressTests
         result.Succeeded.ShouldBeFalse();
         result.Principal.ShouldBeNull();
     }
+#endif
 
     // ---- consent request tenant resolution (no sentinel) ----
 

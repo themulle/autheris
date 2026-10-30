@@ -10,7 +10,9 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_consent_requests_tick
 -- batch
 -- The baseline default constraints are unnamed (system generated names), so the name is looked up and dropped (the one allowed dynamic form, see StepSqlLint).
 DECLARE @df sysname = (SELECT dc.name FROM sys.default_constraints dc INNER JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id WHERE dc.parent_object_id = OBJECT_ID(N'dbo.CONSENTS') AND c.name = N'tenant_id');
-IF @df IS NOT NULL EXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@df));
+DECLARE @sql NVARCHAR(MAX) = N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@df);
+IF @df IS NOT NULL EXEC(@sql);
 -- batch
 DECLARE @df sysname = (SELECT dc.name FROM sys.default_constraints dc INNER JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id WHERE dc.parent_object_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES') AND c.name = N'tenant_id');
-IF @df IS NOT NULL EXEC(N'ALTER TABLE dbo.AUDIT_LOG_ENTRIES DROP CONSTRAINT ' + QUOTENAME(@df));
+DECLARE @sql NVARCHAR(MAX) = N'ALTER TABLE dbo.AUDIT_LOG_ENTRIES DROP CONSTRAINT ' + QUOTENAME(@df);
+IF @df IS NOT NULL EXEC(@sql);

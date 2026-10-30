@@ -39,6 +39,7 @@ public abstract class UnkeyedTableODataReadBase : IDisposable
         _host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
+            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-unkeyed-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");

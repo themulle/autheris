@@ -87,6 +87,9 @@ public sealed class StepSqlLintTests
     [InlineData("DECLARE @n sysname = N'df_x';\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n));")]
     [InlineData("DECLARE @n sysname = (SELECT name FROM sys.objects);\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n));")]
     [InlineData("DECLARE @a sysname = (SELECT dc.name FROM sys.default_constraints dc);\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@b));")]
+    [InlineData("DECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc);\nDECLARE @s NVARCHAR(MAX) = N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n);\nEXEC(@other);")]
+    [InlineData("DECLARE @n sysname = N'df_x';\nDECLARE @s NVARCHAR(MAX) = N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n);\nEXEC(@s);")]
+    [InlineData("DECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc);\nDECLARE @s NVARCHAR(MAX) = N'ALTER TABLE dbo.CONSENTS ADD x INT; --' + QUOTENAME(@n);\nEXEC(@s);")]
     [InlineData("-- DECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc);\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n));")]
     public void StepLint_RejectsForbiddenAndDynamicSql_QuotedAndCommented(string sql)
     {
@@ -112,8 +115,8 @@ public sealed class StepSqlLintTests
     [InlineData("-- phase3: I388-SC-06\nALTER TABLE [dbo].[AUDIT_LOG_ENTRIES] ADD note NVARCHAR(10) NULL;")]
     [InlineData("-- phase3: I388-SC-14\nUPDATE CONSENTS SET tenant_id = 'a' WHERE tenant_id = 'b';")]
     [InlineData("INSERT INTO X (a) VALUES ('copy exec truncate');")]
-    [InlineData("-- phase3: I388-SC-06\nDECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc WHERE dc.parent_object_id = OBJECT_ID(N'dbo.CONSENTS'));\nIF @n IS NOT NULL EXEC(N'ALTER TABLE dbo.AUDIT_LOG_ENTRIES DROP CONSTRAINT ' + QUOTENAME(@n));")]
-    [InlineData("DECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc WHERE dc.parent_object_id = OBJECT_ID(N'dbo.CONSENTS'));\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n));")]
+    [InlineData("-- phase3: I388-SC-06\nDECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc WHERE dc.parent_object_id = OBJECT_ID(N'dbo.CONSENTS'));\nDECLARE @s NVARCHAR(MAX) = N'ALTER TABLE dbo.AUDIT_LOG_ENTRIES DROP CONSTRAINT ' + QUOTENAME(@n);\nIF @n IS NOT NULL EXEC(@s);")]
+    [InlineData("DECLARE @n sysname = (SELECT dc.name FROM sys.default_constraints dc WHERE dc.parent_object_id = OBJECT_ID(N'dbo.CONSENTS'));\nDECLARE @s NVARCHAR(MAX) = N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n);\nEXEC(@s);")]
     public void StepLint_AcceptsPlainDdlAndMarkedAuditForms(string sql)
     {
         var step = SqlMigrationStep.Parse("postgresql", 2, "ok_step", sql, EmptyDelta);

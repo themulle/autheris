@@ -213,7 +213,7 @@ public abstract class GovernanceUpgradeTestsBase
         var auditHashes = await QueryAsync(cs, AuditHashesSql);
         var checksum = SqlMigrationStep.LoadEmbedded(Engine).Single(s => s.Version == 2).Checksum;
 
-        await RunAsync(cs, GovernanceMigrationMode.Apply);
+        await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: 2);
 
         (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2 AND name = 'key_and_index_column_direction' AND checksum = '" + checksum + "'")).ShouldBe(1);
         (await CountAsync(cs, "SELECT COUNT(*) FROM table_primary_key_columns")).ShouldBe(2);
@@ -223,17 +223,18 @@ public abstract class GovernanceUpgradeTestsBase
         (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
         (await QueryAsync(cs, AuditHashesSql)).ShouldBe(auditHashes, "step 0002 does not read or rewrite audit rows");
         (await CountAsync(cs, TriggerCountSql)).ShouldBeGreaterThan(0, "the append-only audit triggers stay enabled");
+        // Rerun after the history row is lost (capped at step 2, so the schema is not yet past step 0003): the guarded statements are idempotent and the shape still verifies.
+        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version >= 2");
+        await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: 2);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2")).ShouldBe(1);
+        await RunAsync(cs, GovernanceMigrationMode.Verify, stepVersionCap: 2);
+
         (await AuditChainVerifiesAsync(cs, [])).ShouldBeTrue("the audit hash chain and anchor verify after step 0002");
 
         // A v1.5.0 binary (AllowNewerSchema rollback) inserts without the column and reads ascending.
         await ExecAsync(cs, "INSERT INTO table_primary_key_columns (table_id, key_ordinal, table_column_id) VALUES ('t390b', 1, 'c9')");
         (await CountAsync(cs, "SELECT SUM(CAST(is_descending AS INTEGER)) FROM table_primary_key_columns WHERE table_id = 't390b'")).ShouldBe(0);
 
-        // Rerun after the history row is lost: the guarded statements are idempotent and the shape still verifies.
-        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version >= 2");
-        await RunAsync(cs, GovernanceMigrationMode.Apply);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2")).ShouldBe(1);
-        await RunAsync(cs, GovernanceMigrationMode.Verify);
     });
 
     private static string InsertRequestSql(string id, string tenantLiteral) =>
@@ -266,10 +267,7 @@ public abstract class GovernanceUpgradeTestsBase
         (await AuditChainVerifiesAsync(cs, [])).ShouldBeTrue("the audit hash chain and anchor verify after step 0003");
         await Should.ThrowAsync<Exception>(() => ExecAsync(cs, InsertRequestSql("r2", "NULL")));
 
-        // Rerun after the history row is lost: the guarded statements are idempotent and the shape still verifies.
-        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 3");
-        await RunAsync(cs, GovernanceMigrationMode.Apply);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3")).ShouldBe(1);
+        // A schema past step 0003 without its history row is drift (the nullability is checked strictly), so there is no history-loss rerun here.
         await RunAsync(cs, GovernanceMigrationMode.Verify);
     });
 
@@ -410,7 +408,7 @@ public abstract class GovernanceUpgradeTestsBase
         renamed.Code.ShouldBe(GovernanceMigrationCodes.HistoryRenamed);
         await ExecAsync(cs, "UPDATE autheris_schema_migrations SET name = 'baseline_governance_schema' WHERE version = 1");
 
-        await ExecAsync(cs, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (4, 'x', 'y', 'z', 'w')");
+        await ExecAsync(cs, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (5, 'x', 'y', 'z', 'w')");
         var gap = await Should.ThrowAsync<GovernanceSchemaDriftException>(
             () => RunAsync(cs, GovernanceMigrationMode.Apply, [ProbeStep()], allowNewer: true, trace: trace));
         gap.Code.ShouldBe(GovernanceMigrationCodes.HistoryGap);

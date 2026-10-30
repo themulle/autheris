@@ -94,7 +94,7 @@ public sealed class DatasetTagImportServiceTests
         await Create().ImportDbtTagsAsync(Orders, ["pii"], default);
 
         await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e =>
-            e.EventType == AuditEventTypes.CatalogTagsChanged && e.TargetTable == Orders.ToString() && e.DetailsJson.Contains("\"source\":\"dbt\"")
+            e.EventType == AuditEventTypes.CatalogTagsChanged && e.TenantId == TenantId.Platform && e.TargetTable == Orders.ToString() && e.DetailsJson.Contains("\"source\":\"dbt\"")
             && e.DetailsJson.Contains("\"after\":{\"visibility\":\"Hidden\",\"tags\":[\"pii\"]}")), CancellationToken.None);
 
         _audit.ClearReceivedCalls();
