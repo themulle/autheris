@@ -12,7 +12,7 @@ public sealed record BulkTableStreamRequest(
     [property: JsonPropertyName("select")] IReadOnlyList<string>? Select = null,
     [property: JsonPropertyName("filter")] TypedFilterNode? Filter = null,
     [property: JsonPropertyName("cursor")] string? Cursor = null,
-    [property: JsonPropertyName("limit")] int Limit = 5000,
+    [property: JsonPropertyName("limit")] int? Limit = null,
     [property: JsonPropertyName("format")] string Format = "ndjson",
     [property: JsonPropertyName("includeMetadata")] bool IncludeMetadata = false)
 {
