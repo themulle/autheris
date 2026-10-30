@@ -109,3 +109,8 @@ Verdict: **APPROVED WITH CONDITIONS**. O-1..O-5 are taken as proposed (O-2 rulin
 - **I405-T-S05** `Architecture_SingleSubclass_NoExactTypeDispatch` (SC-06).
 - **I405-T-S06** `DenyEntry_WithFamily_HashChainVerifies_AndTamperingFamilyBreaksChain` (SC-07).
 - **I405-T-S07** `DetailsKeyOrder_IsFixed_ForRefusal` (SC-07).
+
+## Phase 5 notes (2026-10-30)
+
+- Accepted: the refusal is now `AggregationGroupKeyNotSupportedException`, a sealed subclass of `SqlCompileNotSupportedException`, so generic sinks that record `ex.GetType().Name` (exception handler, error sanitizing filter, `AuditExceptionCode`, telemetry `error.type`) see a different but constant name for this refusal. The aggregation endpoints catch it before those sinks, and the name carries no family, column or type text.
+- Accepted: `EnsureGroupKeysGroupable` runs at the very end of the audited validation (after order-by and noise checks), which is stricter than SC-01 requires. The byte-identity test (I405_T_08) masks the per-request `traceId`, `correlationId` and `instance` values, as in #409.
