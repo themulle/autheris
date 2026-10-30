@@ -361,7 +361,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     }
 
     // The scope is not None here, so the resolution usually carries the tenant; a ClusterAdmin without a resolved tenant is audited under its claim,
-    // and under the platform bucket (TenantId.Platform) when the claim is absent or invalid. The platform bucket is audit-only, never a request tenant.
+    // and under the platform bucket (TenantId.Platform) when the claim is absent; an invalid claim is rethrown (and denied earlier by CallerScopeResolver). The platform bucket is audit-only, never a request tenant.
     private static TenantId TenantOf(TenantResolution resolution, ClaimsPrincipal principal)
     {
         if (resolution.Tenant is { } resolved && resolved.Value is not null)
@@ -372,6 +372,10 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         try
         {
             return principal.GetTenantId();
+        }
+        catch (Autheris.Domain.Exceptions.TenantClaimInvalidException)
+        {
+            throw; // an invalid claim is never mapped to the platform bucket
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {

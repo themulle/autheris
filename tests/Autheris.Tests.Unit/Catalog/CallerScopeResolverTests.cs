@@ -24,6 +24,15 @@ public sealed class CallerScopeResolverTests
         CallerScopeResolver.Resolve(noSid, TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void DT_SC_02_Resolve_ClusterAdmin_With_Invalid_Tenant_Claim_IsNone_ClusterAdmin_Without_Claim_IsGlobal()
+    {
+        CallerScopeResolver.Resolve(Wp0.User("root", "bad tenant!!", ["ClusterAdmin"]), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(Wp0.User("root", "bad tenant!!", ["ClusterAdmin"]), TenancyShape.Single.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(Wp0.User("root", null, ["ClusterAdmin"]), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.Global);
+    }
+
     [Theory]
     [InlineData(TenancyShape.Multi)]
     [InlineData(TenancyShape.Single)]

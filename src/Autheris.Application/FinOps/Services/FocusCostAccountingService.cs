@@ -59,7 +59,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
-            tenantId = Autheris.Domain.Common.TenantId.Platform.Value; // DT-A-9: tenant-less usage is platform-scoped
+            tenantId = Autheris.Domain.Common.TenantId.Platform.Value; // DT-A-9: tenant-less usage is platform-scoped (accounted, never budget-enforced, see CheckBudgetAsync)
         }
 
         var options = _gatewayOptions.Value.FinOps;
@@ -144,6 +144,14 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         if (string.IsNullOrWhiteSpace(tenantId))
         {
             tenantId = Autheris.Domain.Common.TenantId.Platform.Value; // DT-A-9: tenant-less usage is platform-scoped
+        }
+
+        // Platform spend (the reserved _platform bucket) is accounted without budget enforcement, by design: it is not a tenant, has no budget
+        // entry, and never reads the default tenant budget or the spend of any tenant.
+        if (string.Equals(tenantId, Autheris.Domain.Common.TenantId.Platform.Value, StringComparison.Ordinal))
+        {
+            var platformSpend = _localSpend.TryGetValue(tenantId, out var recorded) ? recorded : 0m;
+            return new BudgetStatus(false, false, platformSpend, 0m, tenantId);
         }
 
         var options = _gatewayOptions.Value.FinOps;

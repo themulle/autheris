@@ -41,6 +41,37 @@ public sealed class FocusCostAccountingTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task DT_A_9_Platform_Spend_Is_Accounted_Without_Budget_Enforcement_And_Never_Touches_A_Tenant_Budget()
+    {
+        var options = new GatewayOptions
+        {
+            FinOps = new FinOpsOptions
+            {
+                Enabled = true,
+                DefaultMonthlyBudget = 1m,
+                SoftCapRatio = 0.8,
+                PricePerThousandPromptTokens = 0.003m,
+                PricePerThousandCompletionTokens = 0.015m,
+                PricePerComputeSecond = 0.0001m
+            }
+        };
+        var service = new FocusCostAccountingService(Options.Create(options), NullLogger<FocusCostAccountingService>.Instance);
+        await service.RecordUsageAsync("", "svc", "Op", "AI-Inference", 1_000_000, 1_000_000, 0, null, CancellationToken.None);
+        await service.RecordUsageAsync("tenant-a", "user-1", "Op", "AI-Inference", 1000, 0, 0, null, CancellationToken.None);
+
+        var platform = await service.CheckBudgetAsync("", CancellationToken.None);
+        var tenant = await service.CheckBudgetAsync("tenant-a", CancellationToken.None);
+
+        platform.TenantId.ShouldBe(Autheris.Domain.Common.TenantId.Platform.Value);
+        platform.IsExceeded.ShouldBeFalse("platform spend is accounted but never budget-enforced, by design");
+        platform.IsWarning.ShouldBeFalse();
+        platform.CurrentSpend.ShouldBeGreaterThan(1m, "the platform spend is still accounted");
+        tenant.IsExceeded.ShouldBeFalse();
+        tenant.CurrentSpend.ShouldBeLessThan(1m, "platform spend is never added to a tenant's budget");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task DT_A_9_RecordUsage_Without_Tenant_Is_Platform_Scoped_Never_Default()
     {
         var service = new FocusCostAccountingService(Options.Create(_options), NullLogger<FocusCostAccountingService>.Instance);

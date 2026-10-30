@@ -108,4 +108,4 @@ For SQL data sources the endpoint opens a real connection through the configured
 
 ## Listing Data Sources
 
-`GET /api/v1/catalog/datasources` (and the MCP tool `list_datasources`, the resource `autheris://catalog/datasources` and the `invoke_api` route of the same name) discloses endpoint base URLs and authentication state. It is restricted to `GovernanceAdmin` and `ClusterAdmin`; a `GovernanceAdmin` of a tenant sees only the data sources of the tables of its tenant. In `Gateway:Tenancy:Mode = Multi` a `GovernanceAdmin` without tenant claim receives `403` with the code `TENANCY_MODE_CLAIMLESS_ADMIN`.
+`GET /api/v1/catalog/datasources` (and the MCP tool `list_datasources`, the resource `autheris://catalog/datasources` and the `invoke_api` route of the same name) discloses endpoint base URLs and authentication state. It is restricted to `GovernanceAdmin` and `ClusterAdmin`; a `GovernanceAdmin` of a tenant sees only the data sources of the tables of its tenant. A `GovernanceAdmin` without a resolvable tenant receives `403` with the code `TENANT_UNRESOLVED` (no tenant claim and no `Gateway:Tenancy:DefaultTenantId`) or `TENANT_CLAIM_INVALID` (malformed claim).

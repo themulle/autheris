@@ -69,7 +69,6 @@ public static class ApiErrorCodes
 
     // O-5b step 2 (WP-0): codes of the migrated bare error bodies. Registered here once so no later work package touches this file.
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
-    public const string TenancyModeClaimlessAdmin = "TENANCY_MODE_CLAIMLESS_ADMIN";
     public const string InvalidTag = "INVALID_TAG";
     public const string InvalidVisibility = "INVALID_VISIBILITY";
     public const string TagLimitExceeded = "TAG_LIMIT_EXCEEDED";

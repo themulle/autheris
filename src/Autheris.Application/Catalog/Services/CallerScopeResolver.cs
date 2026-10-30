@@ -56,6 +56,12 @@ public static class CallerScopeResolver
             return CallerScope.None;
         }
 
+        // An invalid tenant claim denies every caller class, ClusterAdmin included (DT-SC-02); an absent claim is not invalid.
+        if (resolution.Outcome == TenantResolutionOutcome.Invalid)
+        {
+            return CallerScope.None;
+        }
+
         // Excludes forward-auth identities and tenant-prefixed roles.
         if (ClusterAdminPolicy.IsCanonicalClusterAdmin(user))
         {

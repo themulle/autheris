@@ -295,6 +295,18 @@ public sealed class TenantIngressTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task DT_SC_02_ClusterAdmin_With_Invalid_Claim_Gets_403_TenantClaimInvalid()
+    {
+        var (status, body, next, _) = await RunGateAsync(User("bad tenant!!", ["ClusterAdmin"]));
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        body.ShouldContain("TENANT_CLAIM_INVALID");
+        body.ShouldNotContain("bad tenant");
+        next.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task ClusterAdmin_Claimless_Passes_The_Gate_Without_A_Tenant()
     {
         var (status, _, next, ctx) = await RunGateAsync(User(null, ["ClusterAdmin"]));
