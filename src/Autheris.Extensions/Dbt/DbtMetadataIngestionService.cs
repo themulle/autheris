@@ -19,7 +19,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
-public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
+public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionService
 {
     private readonly IDbtProposalRepository _proposalRepository;
     private readonly ITableMetadataRepository _metadataRepository;
@@ -33,6 +33,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
     private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
     private readonly IDbtTestTargetMap? _testTargetMap;
+    private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
+    private readonly IAuditLogRepository? _auditLog;
+    private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -300,12 +303,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     public Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
     {
         // DT-A-9: a tenant-less sync runs for the configured default tenant; without one it is refused (no legacy fallback).
-        var effective = tenant ?? Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value.Tenancy);
-        if (effective is not { } resolved)
-        {
-            throw new InvalidOperationException("The dbt sync has no tenant: pass one or configure Gateway:Tenancy:DefaultTenantId.");
-        }
-
+        var resolved = tenant ?? Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value.Tenancy)
+            ?? throw new InvalidOperationException("The dbt sync has no tenant: pass one or configure Gateway:Tenancy:DefaultTenantId.");
         return IngestManifestStreamAsync(manifestStream, new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("system:dbt-sync"), IsSync: true, null), resolved, tenant == null), dryRun, ct);
     }
 
@@ -751,9 +750,12 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         var allowedRelationships = new List<DbtRelationshipDefinition>();
         foreach (var rel in relationships)
         {
-            if (rejectedSet.Contains(rel.ParentModelOrTable) || rejectedSet.Contains(rel.ChildModelOrTable))
+            if (rejectedSet.Contains(rel.ParentModelOrTable) || rejectedSet.Contains(rel.ChildModelOrTable) ||
+                (rel.ParentUniqueId is not null && rejectedSet.Contains(rel.ParentUniqueId)) ||
+                (rel.ChildUniqueId is not null && rejectedSet.Contains(rel.ChildUniqueId)))
             {
-                warnings.Add($"Relationship '{rel.Name}': dropped because it targets model outside caller's tenant.");
+                // I392-SC-07: the reason never names a node of another tenant.
+                warnings.Add("A relationship was dropped because it targets a model outside the caller's tenant.");
                 continue;
             }
             allowedRelationships.Add(rel);
@@ -908,24 +910,20 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         List<string> warnings,
         CancellationToken ct)
     {
-        var modelByName = new Dictionary<string, DbtModelDefinition>(StringComparer.OrdinalIgnoreCase);
-        foreach (var m in models)
-        {
-            modelByName[m.Name] = m;
-            modelByName[m.UniqueId] = m;
-        }
+        var lookup = new DbtRelationModelLookup(models);
 
-        // 1. Resolve models (UNKNOWN_MODEL).
+        // 1. Resolve models (UNKNOWN_MODEL, AMBIGUOUS_MODEL); never a first-wins or last-wins pick (issue #392).
         var resolved = new List<ResolvedRelation>(relationships.Count);
         foreach (var rel in relationships)
         {
-            if (modelByName.TryGetValue(rel.ParentModelOrTable, out var parent) && modelByName.TryGetValue(rel.ChildModelOrTable, out var child))
+            var failure = lookup.TryResolve(rel, out var parent, out var child);
+            if (failure is null && parent is not null && child is not null)
             {
                 resolved.Add(new ResolvedRelation(rel, parent, child, parent.ToTableIdentifier(), child.ToTableIdentifier()));
             }
             else
             {
-                warnings.Add(SkipWarning(rel, "UNKNOWN_MODEL"));
+                warnings.Add(SkipWarning(rel, failure ?? "UNKNOWN_MODEL"));
             }
         }
 
@@ -1208,6 +1206,15 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
+        // Issue #393 (part b): an owner payload is gated before anything is read or written (flag, global governance admin, repositories).
+        var ownerPayload = AnyOwnerKeys(modelsArray);
+        var ownerCollector = new OwnerImportCollector();
+        if (ownerPayload && OwnerImportGate(caller) is { } gateCode)
+        {
+            _logger.LogWarning("Dbt governance import rejected: the owner payload is not allowed ({Code}).", gateCode);
+            return OwnerFailure(gateCode, warnings);
+        }
+
         if (modelsArray.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in modelsArray.EnumerateArray())
@@ -1258,6 +1265,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         tableId = existingMeta.Identifier;
                     }
                 }
+                if (ownerPayload && DbtOwnerSpecValidator.HasOwnerKeys(item))
+                {
+                    if (existingMeta == null)
+                    {
+                        ownerCollector.Errors.Add(new OwnerImportError("dbt_owner_table_not_found", tableId.ToString(), "table"));
+                    }
+                    else
+                    {
+                        CollectOwners(item, existingMeta.Identifier, caller, ownerCollector);
+                    }
+                }
+
                 if (existingMeta == null)
                 {
                     // R-51: Distinguish routine / procedure from missing catalog tables
@@ -1569,6 +1588,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 RelaxedMaskingRulesCount: relaxedMaskingRulesCount);
         }
 
+        OwnerImportPlan? ownerPlan = null;
+        if (ownerPayload)
+        {
+            var (ownerFailure, plan) = await PrepareOwnerImportAsync(ownerCollector, caller, effectiveReplace, dryRun, warnings, ct).ConfigureAwait(false);
+            if (ownerFailure is not null)
+            {
+                return ownerFailure;
+            }
+
+            ownerPlan = plan;
+        }
+
         if (!dryRun)
         {
             foreach (var updatedMetadata in pendingUpserts)
@@ -1607,6 +1638,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
+        IReadOnlyList<DataOwnerChange> ownerChanges = ownerPlan?.Changes ?? [];
+        if (ownerPlan is not null && !dryRun)
+        {
+            var (applyFailure, applied) = await ApplyOwnersAsync(ownerCollector, ownerPlan, caller, effectiveReplace, warnings, ct).ConfigureAwait(false);
+            if (applyFailure is not null)
+            {
+                return applyFailure;
+            }
+
+            ownerChanges = applied;
+        }
+
         return new DbtGovernanceSyncResult(
             Success: true,
             UpdatedTablesCount: updatedTables,
@@ -1616,7 +1659,10 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             AccessProfilesCount: accessProfilesCount,
             Warnings: warnings,
             RemovedMaskingRulesCount: removedMaskingRulesCount,
-            RelaxedMaskingRulesCount: relaxedMaskingRulesCount
+            RelaxedMaskingRulesCount: relaxedMaskingRulesCount,
+            CreatedDataOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerCreated),
+            AssignedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerAssigned),
+            RemovedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerRemoved)
         );
     }
 
@@ -1649,218 +1695,6 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
 
         return false;
-    }
-
-    private static List<VirtualFilter> ParseVirtualFilters(JsonElement element, TenantId defaultTenant)
-    {
-        var result = new List<VirtualFilter>();
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prop in element.EnumerateObject())
-            {
-                var filter = ParseSingleFilter(prop.Name, prop.Value, defaultTenant);
-                if (filter != null) result.Add(filter);
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray())
-            {
-                var name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                if (string.IsNullOrWhiteSpace(name)) continue;
-                var filter = ParseSingleFilter(name, item, defaultTenant);
-                if (filter != null) result.Add(filter);
-            }
-        }
-        return result;
-    }
-
-    private static VirtualFilter? ParseSingleFilter(string name, JsonElement val, TenantId defaultTenant)
-    {
-        // A missing tenant is the caller's request tenant (never the legacy tenant); the caller checks explicit ones.
-        var tenantStr = val.TryGetProperty("tenant", out var tProp) ? tProp.GetString() : null;
-        var tenant = !string.IsNullOrWhiteSpace(tenantStr) ? new TenantId(tenantStr) : defaultTenant;
-        var source = val.TryGetProperty("source", out var sProp) ? sProp.GetString() ?? "" : "";
-        var sql = val.TryGetProperty("sql", out var sqlProp) ? sqlProp.GetString() : null;
-        var validFrom = val.TryGetProperty("valid_from", out var vfProp) ? vfProp.GetString() : null;
-        var validTo = val.TryGetProperty("valid_to", out var vtProp) ? vtProp.GetString() : null;
-
-        var keyCols = new List<string>();
-        if (val.TryGetProperty("key_columns", out var kcProp) && kcProp.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var k in kcProp.EnumerateArray()) if (k.GetString() is string s) keyCols.Add(s);
-        }
-
-        var supersedes = new List<string>();
-        if (val.TryGetProperty("supersedes", out var supProp) && supProp.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var s in supProp.EnumerateArray()) if (s.GetString() is string str) supersedes.Add(str);
-        }
-
-        StructuredFilterDefinition? structured = null;
-        if (val.TryGetProperty("from", out var fromProp) && fromProp.ValueKind == JsonValueKind.Object)
-        {
-            var fromTableStr = fromProp.TryGetProperty("table", out var ftProp) ? ftProp.GetString() ?? "" : "";
-            var fromAlias = fromProp.TryGetProperty("alias", out var faProp) ? faProp.GetString() ?? "" : "";
-            var parts = fromTableStr.Split('.');
-            var fromTable = parts.Length == 2 ? new TableIdentifier(source, parts[0], parts[1]) : new TableIdentifier(source, "dbo", fromTableStr);
-
-            var joins = new List<FilterJoin>();
-            if (val.TryGetProperty("joins", out var joinsProp) && joinsProp.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var j in joinsProp.EnumerateArray())
-                {
-                    var jTableStr = j.TryGetProperty("table", out var jt) ? jt.GetString() ?? "" : "";
-                    var jAlias = j.TryGetProperty("alias", out var ja) ? ja.GetString() ?? "" : "";
-                    var jLeft = j.TryGetProperty("left", out var jl) ? jl.GetString() ?? "" : "";
-                    var jRight = j.TryGetProperty("right", out var jr) ? jr.GetString() ?? "" : "";
-                    var jParts = jTableStr.Split('.');
-                    var jTable = jParts.Length == 2 ? new TableIdentifier(source, jParts[0], jParts[1]) : new TableIdentifier(source, "dbo", jTableStr);
-                    joins.Add(new FilterJoin(jTable, jAlias, jLeft, jRight));
-                }
-            }
-
-            var whereConditions = new List<FilterCondition>();
-            if (val.TryGetProperty("where", out var whereProp) && whereProp.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var w in whereProp.EnumerateArray())
-                {
-                    var col = w.TryGetProperty("column", out var wc) ? wc.GetString() ?? "" : "";
-                    var opStr = w.TryGetProperty("op", out var wo) ? wo.GetString() ?? "eq" : "eq";
-                    var wVal = w.TryGetProperty("value", out var wv) ? wv.GetString() : null;
-                    var op = opStr.ToLowerInvariant() switch
-                    {
-                        "eq" => FilterConditionOperator.Eq,
-                        "neq" => FilterConditionOperator.NotEq,
-                        "is_null" => FilterConditionOperator.IsNull,
-                        _ => FilterConditionOperator.IsNotNull
-                    };
-                    whereConditions.Add(new FilterCondition(col, op, wVal));
-                }
-            }
-
-            structured = new StructuredFilterDefinition
-            {
-                From = fromTable,
-                FromAlias = fromAlias,
-                Joins = joins,
-                Where = whereConditions
-            };
-        }
-
-        return new VirtualFilter
-        {
-            TenantId = tenant,
-            Name = name,
-            Source = source,
-            Sql = sql,
-            Structured = structured,
-            KeyColumns = keyCols,
-            ValidFromColumn = validFrom,
-            ValidToColumn = validTo,
-            Supersedes = supersedes
-        };
-    }
-
-    private static List<VirtualFilterAccessProfile> ParseAccessProfiles(JsonElement element, TenantId defaultTenant)
-    {
-        var result = new List<VirtualFilterAccessProfile>();
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prop in element.EnumerateObject())
-            {
-                var profile = ParseSingleProfile(prop.Name, prop.Value, defaultTenant);
-                if (profile != null) result.Add(profile);
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray())
-            {
-                var name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                if (string.IsNullOrWhiteSpace(name)) continue;
-                var profile = ParseSingleProfile(name, item, defaultTenant);
-                if (profile != null) result.Add(profile);
-            }
-        }
-        return result;
-    }
-
-    private static VirtualFilterAccessProfile? ParseSingleProfile(string name, JsonElement val, TenantId defaultTenant)
-    {
-        // A missing tenant is the caller's request tenant (never the legacy tenant); the caller checks explicit ones.
-        var tenantStr = val.TryGetProperty("tenant", out var tProp) ? tProp.GetString() : null;
-        var tenant = !string.IsNullOrWhiteSpace(tenantStr) ? new TenantId(tenantStr) : defaultTenant;
-        var scope = val.TryGetProperty("scope", out var scProp) ? scProp.GetString() ?? "*" : "*";
-
-        UncoveredPolicy? uncovered = null;
-        if (val.TryGetProperty("uncovered", out var uProp) && uProp.GetString() is string uStr)
-        {
-            uncovered = string.Equals(uStr, "skip", StringComparison.OrdinalIgnoreCase) ? UncoveredPolicy.Skip : UncoveredPolicy.Deny;
-        }
-
-        GranteeType granteeType = GranteeType.User;
-        Sid? granteeSid = null;
-        string? roleName = null;
-
-        if (val.TryGetProperty("grantee", out var gProp) && gProp.ValueKind == JsonValueKind.Object)
-        {
-            var gTypeStr = gProp.TryGetProperty("type", out var gt) ? gt.GetString() : "user";
-            granteeType = (gTypeStr?.ToLowerInvariant()) switch
-            {
-                "group" => GranteeType.Group,
-                "role" => GranteeType.Role,
-                "serviceprincipal" => GranteeType.ServicePrincipal,
-                _ => GranteeType.User
-            };
-            if (gProp.TryGetProperty("sid", out var gs) && gs.GetString() is string s)
-            {
-                granteeSid = new Sid(s);
-            }
-            if (gProp.TryGetProperty("role", out var gr) && gr.GetString() is string r)
-            {
-                roleName = r;
-            }
-        }
-
-        var bindings = new List<FilterBinding>();
-        if (val.TryGetProperty("bindings", out var bProp) && bProp.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var b in bProp.EnumerateArray())
-            {
-                var fName = b.TryGetProperty("filter", out var fn) ? fn.GetString() ?? "" : "";
-                var target = b.TryGetProperty("target", out var tgt) ? tgt.GetString() : null;
-                var timeCol = b.TryGetProperty("time_column", out var tc) ? tc.GetString() : null;
-                Dictionary<string, string>? map = null;
-                if (b.TryGetProperty("map", out var m) && m.ValueKind == JsonValueKind.Object)
-                {
-                    map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var kv in m.EnumerateObject())
-                    {
-                        if (kv.Value.GetString() is string mv) map[kv.Name] = mv;
-                    }
-                }
-                bindings.Add(new FilterBinding
-                {
-                    FilterName = fName,
-                    TargetPattern = target,
-                    TimeColumn = timeCol,
-                    ColumnMap = map
-                });
-            }
-        }
-
-        return new VirtualFilterAccessProfile
-        {
-            TenantId = tenant,
-            Name = name,
-            GranteeType = granteeType,
-            GranteeSid = granteeSid,
-            RoleName = roleName,
-            Scope = scope,
-            Uncovered = uncovered,
-            Bindings = bindings
-        };
     }
 
     private static TableIdentifier ParseTableIdentifier(string raw, string? explicitSchema = null, string? explicitDatabase = null)

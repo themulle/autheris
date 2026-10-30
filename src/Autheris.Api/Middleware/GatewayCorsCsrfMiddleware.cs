@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -89,12 +90,7 @@ public sealed class GatewayCorsCsrfMiddleware
 
                 if (!hasPreflightHeader)
                 {
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    var endpointType = isGraphQLEndpoint ? "GraphQL" : "REST";
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        error = $"CSRF Protection: Missing custom preflight header ('GraphQL-Preflight: 1', 'X-Requested-With', or 'X-CSRF-Token') on {endpointType} request."
-                    }, context.RequestAborted).ConfigureAwait(false);
+                    await ApiProblems.WriteAsync(context, StatusCodes.Status400BadRequest, ApiErrorCodes.CsrfValidationFailed, "CSRF Protection: Missing custom preflight header ('GraphQL-Preflight: 1', 'X-Requested-With', or 'X-CSRF-Token').", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
             }
@@ -153,11 +149,7 @@ public sealed class GatewayCorsCsrfMiddleware
 
                 if (!isOriginTrusted)
                 {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        error = $"CSRF Protection: Request Origin '{originHeader}' is not trusted."
-                    }, context.RequestAborted).ConfigureAwait(false);
+                    await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.UntrustedOrigin, "CSRF Protection: The request origin is not trusted.", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
             }
@@ -167,11 +159,7 @@ public sealed class GatewayCorsCsrfMiddleware
                 var secFetchSite = context.Request.Headers["Sec-Fetch-Site"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(secFetchSite) && !string.Equals(secFetchSite, "none", StringComparison.OrdinalIgnoreCase))
                 {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        error = "CSRF Protection: Origin or Referer header required for browser requests."
-                    }, context.RequestAborted).ConfigureAwait(false);
+                    await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.CsrfValidationFailed, "CSRF Protection: Origin or Referer header required for browser requests.", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
             }

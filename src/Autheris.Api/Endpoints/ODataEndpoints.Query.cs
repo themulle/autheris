@@ -70,7 +70,7 @@ public static partial class ODataEndpoints
                 );
             }
 
-            return Results.NotFound(new { error = new { code = "ResourceNotFound", message = $"The entity set '{entitySetName}' was not found." } });
+            return Results.NotFound(new { error = new { code = "ResourceNotFound", message = "The requested entity set was not found." } });
         }
 
         var table = matchingTables[0];

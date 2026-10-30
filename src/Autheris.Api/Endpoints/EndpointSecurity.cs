@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Globalization;
 using System.Linq;
@@ -178,7 +179,7 @@ internal static class EndpointSecurity
         }
         catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
-            return (null, Results.Json(new { error = tooLargeMessage }, statusCode: StatusCodes.Status413PayloadTooLarge));
+            return (null, ApiProblems.PayloadTooLarge(ApiProblems.SanitizeOperatorText(tooLargeMessage, "The request body is too large.")));
         }
     }
 
@@ -195,7 +196,7 @@ internal static class EndpointSecurity
         }
         catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
-            return Results.Json(new { error = tooLargeMessage }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            return ApiProblems.PayloadTooLarge(ApiProblems.SanitizeOperatorText(tooLargeMessage, "The request body is too large."));
         }
     }
 
@@ -212,7 +213,7 @@ internal static class EndpointSecurity
         }
         catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
-            return Results.Json(new { error = tooLargeMessage }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            return ApiProblems.PayloadTooLarge(ApiProblems.SanitizeOperatorText(tooLargeMessage, "The request body is too large."));
         }
     }
 

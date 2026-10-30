@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -58,22 +59,7 @@ public sealed class IncrementalDeliveryMiddleware
 
         if (!manager.TryAcquireStreamSlot(clientKey))
         {
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.ContentType = "application/json";
-
-            var err = JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = "Maximum concurrent incremental delivery streams exceeded for client.",
-                        extensions = new { code = "INCREMENTAL_STREAM_LIMIT_EXCEEDED", client = clientKey }
-                    }
-                }
-            });
-
-            await context.Response.WriteAsync(err, context.RequestAborted).ConfigureAwait(false);
+            await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.IncrementalStreamLimitExceeded, "Maximum concurrent incremental delivery streams exceeded for client.", 1, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 

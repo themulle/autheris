@@ -343,8 +343,14 @@ public sealed class RestDatasetHttpTableRestNotOptedInIntegrationTests : RestDat
         var body = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, body);
-        body.ShouldNotContain("Cross-catalog", Case.Insensitive);
-        body.ShouldNotContain("customers", Case.Insensitive);
-        body.ShouldNotContain("AllowedTransports", Case.Insensitive);
+        // The governed contract: ProblemDetails with a governed code. The request path (instance) is the caller's own input; every
+        // other member must be generic.
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("status").GetInt32().ShouldBe(403);
+        Autheris.Api.Errors.ApiErrorCodes.IsGoverned(doc.RootElement.GetProperty("code").GetString()).ShouldBeTrue(body);
+        var generic = System.Text.RegularExpressions.Regex.Replace(body, "\"instance\":\"[^\"]*\",?", string.Empty);
+        generic.ShouldNotContain("Cross-catalog", Case.Insensitive);
+        generic.ShouldNotContain("customers", Case.Insensitive);
+        generic.ShouldNotContain("AllowedTransports", Case.Insensitive);
     }
 }

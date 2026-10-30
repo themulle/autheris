@@ -301,7 +301,8 @@ public sealed class RepeatedReviewRound3Tests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         var responseText = new StreamReader(context.Response.Body).ReadToEnd();
-        responseText.ShouldContain("Access denied to table 'secret_unauthorized_table'");
+        responseText.ShouldContain("Access denied.");
+        responseText.ShouldNotContain("secret_unauthorized_table"); // NL-SC-21: no input echo
         responseText.ShouldNotContain("not found in metadata catalog");
     }
 

@@ -109,13 +109,18 @@ public static partial class GovernanceEndpoints
         if (evaluation.IsHardSunsetBlocked)
         {
             context.Response.Headers["Sunset"] = evaluation.HttpSunsetHeader;
-            return Results.Json(new
-            {
-                error = evaluation.DeprecationNotice,
-                phase = evaluation.Phase.ToString(),
-                sunsetDate = evaluation.SunsetDate,
-                replacement = evaluation.Rule.ReplacementField
-            }, statusCode: StatusCodes.Status410Gone);
+            return ApiProblems.Problem(
+                StatusCodes.Status410Gone,
+                ApiErrorCodes.ApiVersionSunset,
+                ApiProblems.SanitizeOperatorText(evaluation.DeprecationNotice, "The requested field has been sunset."),
+                context,
+                title: "Gone",
+                extraExtensions: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["phase"] = evaluation.Phase.ToString(),
+                    ["sunsetDate"] = evaluation.SunsetDate,
+                    ["replacement"] = evaluation.Rule.ReplacementField
+                });
         }
 
         if (evaluation.ShouldInjectSyntheticLatency && evaluation.SyntheticLatencyMs > 0)
@@ -126,13 +131,18 @@ public static partial class GovernanceEndpoints
         if (evaluation.ShouldRejectWith426)
         {
             context.Response.Headers["Sunset"] = evaluation.HttpSunsetHeader;
-            return Results.Json(new
-            {
-                error = "Chaos Testing: Upgrade Required. " + evaluation.DeprecationNotice,
-                phase = evaluation.Phase.ToString(),
-                sunsetDate = evaluation.SunsetDate,
-                replacement = evaluation.Rule.ReplacementField
-            }, statusCode: StatusCodes.Status426UpgradeRequired);
+            return ApiProblems.Problem(
+                StatusCodes.Status426UpgradeRequired,
+                ApiErrorCodes.ApiVersionUpgradeRequired,
+                ApiProblems.SanitizeOperatorText("Chaos Testing: Upgrade Required. " + evaluation.DeprecationNotice, "Upgrade required."),
+                context,
+                title: "Upgrade Required",
+                extraExtensions: new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["phase"] = evaluation.Phase.ToString(),
+                    ["sunsetDate"] = evaluation.SunsetDate,
+                    ["replacement"] = evaluation.Rule.ReplacementField
+                });
         }
 
         context.Response.Headers["Sunset"] = evaluation.HttpSunsetHeader;

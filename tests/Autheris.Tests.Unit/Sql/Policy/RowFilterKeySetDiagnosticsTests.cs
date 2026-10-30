@@ -112,7 +112,7 @@ public sealed class RowFilterKeySetDiagnosticsTests
     {
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
-        await Autheris.Api.Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(context, RowFilterKeySetErrorCodes.Unavailable(), NullLogger.Instance, "Access denied.", default);
+        await Autheris.Api.Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(context, RowFilterKeySetErrorCodes.Unavailable(), NullLogger.Instance, default);
 
         context.Response.StatusCode.ShouldBe(503);
     }
@@ -121,7 +121,7 @@ public sealed class RowFilterKeySetDiagnosticsTests
     {
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
-        await Autheris.Api.Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(context, denial, NullLogger.Instance, "Access denied.", default);
+        await Autheris.Api.Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(context, denial, NullLogger.Instance, default);
         context.Response.Body.Position = 0;
         return await new StreamReader(context.Response.Body).ReadToEndAsync();
     }

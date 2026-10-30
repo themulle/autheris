@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -58,7 +59,7 @@ public static class StreamingCdcEndpoints
 
             if (string.IsNullOrWhiteSpace(body))
             {
-                return Results.BadRequest(new { error = "Empty CDC payload" });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Empty CDC payload.");
             }
 
             try
@@ -93,7 +94,7 @@ public static class StreamingCdcEndpoints
             {
                 var logger = loggerFactory.CreateLogger("Autheris.CdcEndpoint");
                 logger.LogWarning(ex, "Failed to parse or ingest CDC event payload.");
-                return Results.BadRequest(new { error = "Invalid CDC event format" });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid CDC event format.");
             }
         }).RequireAuthorization()
           .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
@@ -130,7 +131,7 @@ public static class StreamingCdcEndpoints
         // A-1: even canonical cluster admins must name the target tenant explicitly (no implicit/null tenant).
         if (isClusterAdmin && string.IsNullOrWhiteSpace(cdcEvent.TenantId))
         {
-            return Results.BadRequest(new { error = "CDC event must carry an explicit tenant" });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "CDC event must carry an explicit tenant.");
         }
 
         if (isClusterAdmin)
@@ -154,12 +155,12 @@ public static class StreamingCdcEndpoints
         // No tenant value on the row: never stamp the caller tenant onto a tenant-scoped table.
         if (tableHasTenantColumn)
         {
-            return Results.BadRequest(new { error = "CDC row must carry a tenant value" });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "CDC row must carry a tenant value.");
         }
 
         if (requireTenantColumn)
         {
-            return Results.BadRequest(new { error = "CDC target table has no tenant column" });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "CDC target table has no tenant column.");
         }
 
         resolved = cdcEvent with { TenantId = callerTenant };
@@ -233,7 +234,7 @@ public static class StreamingCdcEndpoints
 
         if (subscription is null || string.IsNullOrWhiteSpace(subscription.TargetUrl) || !Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {
-            return Results.BadRequest(new { error = "Invalid absolute target URL" });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid absolute target URL.");
         }
 
         if (subscription.TargetUrl.Length > 2048

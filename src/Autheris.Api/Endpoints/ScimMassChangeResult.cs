@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.Http;
 /// <summary>WAVE3-SCIM-SC-04: fixed 429 SCIM error for a throttled deprovisioning; no user keys, counts or limit values.</summary>
 internal static class ScimMassChangeResult
 {
+    /// <summary>NL-SC-36: a compile-time constant; no principal or tenant is echoed.</summary>
+    internal const string ThrottledDetail = "Too many deprovisioning requests. Retry later.";
+
     internal static IResult TooManyRequests(ScimMassChangeBlockedException blocked) =>
         new ThrottledResult(blocked.RetryAfterSeconds);
 
@@ -21,7 +24,7 @@ internal static class ScimMassChangeResult
                 {
                     schemas = new[] { "urn:ietf:params:scim:api:messages:2.0:Error" },
                     status = "429",
-                    detail = "Too many deprovisioning requests. Retry later."
+                    detail = ThrottledDetail
                 },
                 statusCode: StatusCodes.Status429TooManyRequests).ExecuteAsync(httpContext);
         }

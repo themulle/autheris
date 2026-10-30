@@ -9,6 +9,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Api.Serialization;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
@@ -29,15 +30,12 @@ public static partial class WebSqlEndpoints
 
     private static async Task WriteRequestValidationErrorAsync(HttpContext httpContext, string code, string message, CancellationToken ct)
     {
-        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-        await httpContext.Response.WriteAsJsonAsync(new
-        {
-            error = "BadRequest",
-            code,
-            message,
-            traceId = httpContext.TraceIdentifier
-        }, ct);
+        await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, code, message, ct);
     }
+
+    /// <summary>SEC-12H-06: unknown and not-owned statements answer the same fixed bytes (NL-SC-22/28); the statement id is not echoed.</summary>
+    private static Task StatementNotFoundAsync(HttpContext httpContext) =>
+        ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Statement not found or expired.").ExecuteAsync(httpContext);
 
     internal static async Task HandleWebSqlRequest(
         HttpContext httpContext,
@@ -58,19 +56,14 @@ public static partial class WebSqlEndpoints
 
         if (httpContext.Request.ContentLength > 2 * 1024 * 1024)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Request body exceeds maximum size limit (2 MB)." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Request body exceeds maximum size limit (2 MB).", ct);
             return;
         }
 
         if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
             !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "Trino protocol violation: Missing required 'X-Trino-User' header."
-            }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Trino protocol violation: Missing required 'X-Trino-User' header.", ct);
             return;
         }
 
@@ -146,8 +139,7 @@ public static partial class WebSqlEndpoints
             var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
             if (string.IsNullOrWhiteSpace(callerIdentity))
             {
-                httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await httpContext.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A canonical user identity is required." }, ct);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "A canonical user identity is required.", ct);
                 return;
             }
             var owner = new Sid(callerIdentity);
@@ -386,8 +378,7 @@ public static partial class WebSqlEndpoints
         var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
         if (string.IsNullOrWhiteSpace(callerIdentity))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A canonical user identity is required." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "A canonical user identity is required.", ct);
             return;
         }
         var owner = new Sid(callerIdentity);
@@ -404,21 +395,18 @@ public static partial class WebSqlEndpoints
         }
         catch (KeyNotFoundException)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
+            await StatementNotFoundAsync(httpContext);
         }
         catch (SecurityException ex)
         {
             // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
             logger.Warning(ex, "Unauthorized statement access attempt for {StatementId}", statementId);
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
+            await StatementNotFoundAsync(httpContext);
         }
         catch (Exception ex)
         {
             logger.Error(ex, "Failed to poll statement {StatementId}", statementId);
-            httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "InternalServerError", message = GenericServerErrorMessage }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, GenericServerErrorMessage, ct);
         }
     }
 
@@ -434,8 +422,7 @@ public static partial class WebSqlEndpoints
         var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
         if (string.IsNullOrWhiteSpace(callerIdentity))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Unauthorized", message = "A canonical user identity is required." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "A canonical user identity is required.", ct);
             return;
         }
         var owner = new Sid(callerIdentity);
@@ -446,11 +433,7 @@ public static partial class WebSqlEndpoints
         if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
             !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "Trino protocol violation: Missing required 'X-Trino-User' header."
-            }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Trino protocol violation: Missing required 'X-Trino-User' header.", ct);
             return;
         }
 

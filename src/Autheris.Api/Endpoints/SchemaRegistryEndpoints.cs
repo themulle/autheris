@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,7 +32,7 @@ public static class SchemaRegistryEndpoints
         {
             if (!GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaPublisherRoles))
             {
-                return Results.Json(new { error = "Publishing schemas requires Developer, SchemaAdmin, or ClusterAdmin privileges." }, statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Publishing schemas requires Developer, SchemaAdmin, or ClusterAdmin privileges.");
             }
 
             // SEC M-07: Bounded read instead of a bypassable Content-Length check (model binding would read unbounded).
@@ -52,7 +53,7 @@ public static class SchemaRegistryEndpoints
             var isSchemaAdmin = GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaAdminRoles);
             if (request.ForceIfBreaking && !isSchemaAdmin)
             {
-                return Results.Json(new { error = "ForceIfBreaking requires administrative privileges (GovernanceAdmin, SchemaAdmin, or ClusterAdmin)." }, statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "ForceIfBreaking requires administrative privileges (GovernanceAdmin, SchemaAdmin, or ClusterAdmin).");
             }
 
             // SEC M-12: RegisteredBy is set server-side from the authenticated principal; the body value is ignored.
@@ -68,7 +69,7 @@ public static class SchemaRegistryEndpoints
                 var history = await registry.GetSchemaHistoryAsync(request.ServiceName, ct);
                 if (!IsServiceOwner(history, callerId))
                 {
-                    return Results.Json(new { error = $"Only the owner of service '{publicName}' or a SchemaAdmin may publish new schema versions." }, statusCode: StatusCodes.Status403Forbidden);
+                    return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Only the owner of the service or a SchemaAdmin may publish new schema versions.");
                 }
             }
 
@@ -99,7 +100,7 @@ public static class SchemaRegistryEndpoints
         {
             if (!GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaPublisherRoles))
             {
-                return Results.Json(new { error = "Checking schemas requires Developer, SchemaAdmin, or ClusterAdmin privileges." }, statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Checking schemas requires Developer, SchemaAdmin, or ClusterAdmin privileges.");
             }
 
             // SEC M-07: Bounded read instead of a bypassable Content-Length check.
@@ -141,7 +142,7 @@ public static class SchemaRegistryEndpoints
 
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var latest = await registry.GetLatestSchemaAsync(ScopeServiceName(tenantId, service), ct);
-            return latest != null ? Results.Ok(UnscopeSchema(latest, tenantId)) : Results.NotFound(new { error = $"No active schema found for service '{service}'." });
+            return latest != null ? Results.Ok(UnscopeSchema(latest, tenantId)) : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "No active schema found for the service.");
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/schema-registry/{service}/history", async (
@@ -288,7 +289,7 @@ public static class SchemaRegistryEndpoints
 
         if (string.IsNullOrWhiteSpace(body))
         {
-            return (null, Results.BadRequest(new { error = "Empty schema registration payload." }));
+            return (null, ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Empty schema registration payload."));
         }
 
         try
@@ -296,14 +297,14 @@ public static class SchemaRegistryEndpoints
             var request = JsonSerializer.Deserialize<SchemaRegistrationRequest>(body, RequestJsonOptions);
             if (request == null || string.IsNullOrWhiteSpace(request.ServiceName) || request.Sdl == null)
             {
-                return (null, Results.BadRequest(new { error = "Invalid schema registration payload." }));
+                return (null, ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid schema registration payload."));
             }
 
             return (request, null);
         }
         catch (JsonException)
         {
-            return (null, Results.BadRequest(new { error = "Invalid schema registration payload." }));
+            return (null, ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid schema registration payload."));
         }
     }
 }

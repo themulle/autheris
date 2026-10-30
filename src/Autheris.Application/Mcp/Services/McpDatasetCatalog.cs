@@ -25,7 +25,7 @@ using Autheris.Application.Catalog.Interfaces;
 /// (<see cref="McpCatalogVisibility"/>); rows are read only through <see cref="IGatewayExecutionService"/>, so consent,
 /// ReBAC, Casbin, row filters and masking apply exactly as for REST and GraphQL.
 /// </summary>
-public sealed class McpDatasetCatalog : IMcpDatasetCatalog
+public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 {
     public const int MaxListedDatasets = 200;
     public const int DefaultSampleRows = 5;
@@ -1089,10 +1089,8 @@ public sealed class McpDatasetCatalog : IMcpDatasetCatalog
     {
         // Relations are offered only to datasets the caller can see, so hidden table names do not leak.
         var visibleIds = await VisibleRelationTargetsAsync(principal, graphQl, ct).ConfigureAwait(false);
-        var relations = graphQl.Relations
-            .Select(r => new McpGraphQlRelation(r.Field, DatasetId(r.Target), r.IsList))
-            .Where(r => visibleIds.Contains(r.Dataset))
-            .ToList();
+        var relations = await new McpRelationColumnProjector(
+            (id, token) => VisibleTargetColumnsAsync(principal, id, token)).BuildAsync(graphQl.Relations, visibleIds, DatasetId, columns, ct).ConfigureAwait(false);
 
         var exampleFields = columns.Where(c => c.GraphQlField != null).Take(ExampleColumns).Select(c => c.GraphQlField);
         var example = $"query {{ {graphQl.QueryField}(first: 10) {{ {string.Join(' ', exampleFields)} }} }}";

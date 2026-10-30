@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -67,22 +68,7 @@ public sealed class SchemaContractMiddleware
         if (!contractManager.HasContract(contractName))
         {
             _logger.LogWarning("F-GOV-08 Request rejected: Unknown schema contract '{Contract}'", contractName);
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.Response.ContentType = "application/json";
-
-            var errJson = JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = $"Unknown schema contract '{contractName}'.",
-                        extensions = new { code = "INVALID_SCHEMA_CONTRACT", contract = contractName }
-                    }
-                }
-            });
-
-            await context.Response.WriteAsync(errJson, context.RequestAborted).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(context, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidSchemaContract, "The schema contract is unknown.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 

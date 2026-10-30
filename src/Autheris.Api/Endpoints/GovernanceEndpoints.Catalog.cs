@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -98,12 +99,12 @@ public static partial class GovernanceEndpoints
             var position = ex.LineNumber is { } line && ex.BytePositionInLine is { } column
                 ? $" (line {line + 1}, position {column + 1})"
                 : string.Empty;
-            return Results.BadRequest(new { error = "Invalid JSON in consent manifest.", details = $"The manifest could not be parsed{position}." });
+            return ApiProblems.BadRequest(ApiErrorCodes.InvalidJson, $"The manifest could not be parsed{position}.", context);
         }
 
         if (manifest == null)
         {
-            return Results.BadRequest(new { error = "Manifest payload is null or empty." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The manifest payload is null or empty.", context);
         }
 
         // SR-M-10: the resolved security context carries the caller's (plugin-enriched) groups and roles for the self-grant check.
@@ -125,18 +126,20 @@ public static partial class GovernanceEndpoints
         }
         catch (Autheris.Application.Governance.Services.DeclarativeDatasetCatalogException ex)
         {
-            return Results.Json(new { error = ex.ErrorCode }, statusCode: ex.StatusCode);
+            return ApiProblems.Problem(ex.StatusCode, ex.ErrorCode, "The dataset catalog declaration was rejected.", context);
         }
         catch (Autheris.Application.Governance.Services.DeclarativeManifestValidationException ex)
         {
             // SEC-GOV158I1-03: fixed message naming only the policy index, never the rejected text.
-            return Results.Json(new { error = "VALIDATION_ERROR", message = $"Manifest policy at index {ex.PolicyIndex} has an invalid description." }, statusCode: StatusCodes.Status400BadRequest);
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Manifest policy at index {ex.PolicyIndex} has an invalid description.", context);
         }
         catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException ex)
         {
-            return Results.Json(
-                new { error = ex.ErrorCode, message = ex.Decision.Reason, maxValidTo = ex.MaxValidTo },
-                statusCode: StatusCodes.Status400BadRequest);
+            return ApiProblems.BadRequest(
+                ex.ErrorCode,
+                "The grant violates the grant rules.",
+                context,
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["maxValidTo"] = ex.MaxValidTo });
         }
     }
 }

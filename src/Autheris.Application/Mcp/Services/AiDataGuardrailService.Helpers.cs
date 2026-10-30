@@ -85,12 +85,29 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), the bare
-    /// shape <c>{ "error": "...", "message": "..." }</c> (an object with a string <c>error</c>, an optional string <c>message</c> and
-    /// nothing else) or a governed ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c>). All are audited as
-    /// DENY and returned with <c>isError: true</c>.
+    /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), a governed
+    /// ProblemDetails body (integer <c>status</c> of 400 or more plus a string <c>code</c> or <c>type</c>) or a relayed protocol error
+    /// object. All are audited as DENY and returned with <c>isError: true</c>. The legacy bare <c>{ "error": "..." }</c> shape is no longer
+    /// produced anywhere (NoNewBareErrorBodiesTests, baseline empty) and is not recognised.
     /// </summary>
     public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
+    {
+        var isError = TryGetExecutorErrorCore(resultJson, out var rawCode);
+        errorCode = NormalizeAuditCode(rawCode);
+        return isError;
+    }
+
+    /// <summary>
+    /// NL-SC-39: the code a tool result supplies is attacker-influenceable text; before it reaches the audit trail it must be a governed
+    /// code format (upper-case identifier, at most 64 characters), otherwise the fixed <c>ERROR</c> marker is used.
+    /// </summary>
+    private static string? NormalizeAuditCode(string? code) =>
+        code is null ? null : (code.Length <= 64 && AuditCodeFormat().IsMatch(code) ? code : "ERROR");
+
+    [GeneratedRegex("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant, 50)]
+    private static partial Regex AuditCodeFormat();
+
+    private static bool TryGetExecutorErrorCore(string? resultJson, out string? errorCode)
     {
         errorCode = null;
         if (string.IsNullOrWhiteSpace(resultJson)) return false;
@@ -98,9 +115,9 @@ public sealed partial class AiDataGuardrailService
         {
             using var doc = JsonDocument.Parse(resultJson);
             var root = doc.RootElement;
-            if (root.ValueKind == JsonValueKind.Object && IsBareErrorShape(root, out var bareCode))
+            if (root.ValueKind == JsonValueKind.Object && IsProtocolErrorShape(root, out var protocolCode))
             {
-                errorCode = bareCode;
+                errorCode = protocolCode;
                 return true;
             }
 
@@ -130,42 +147,57 @@ public sealed partial class AiDataGuardrailService
     private static bool IsProblemDetailsShape(JsonElement root, out string? errorCode)
     {
         errorCode = null;
-        if (root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Number &&
-            status.TryGetInt32(out var statusCode) && statusCode >= 400 &&
-            root.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String &&
-            !string.IsNullOrWhiteSpace(code.GetString()))
+        if (!root.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.Number ||
+            !status.TryGetInt32(out var statusCode) || statusCode < 400)
+        {
+            return false;
+        }
+
+        // A governed problem body carries a string code; RFC 7807 bodies without one are recognised by their type URI (NL-SC-26).
+        if (root.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(code.GetString()))
         {
             errorCode = code.GetString();
+            return true;
+        }
+
+        if (root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(type.GetString()))
+        {
+            errorCode = "ERROR";
             return true;
         }
 
         return false;
     }
 
-    private static bool IsBareErrorShape(JsonElement root, out string? errorCode)
+    /// <summary>
+    /// Protocol-mandated error bodies that an MCP-reachable tool may relay (NL-SC-29): an object-valued <c>error</c> member with a string
+    /// <c>message</c> (JSON-RPC, OData, Iceberg, Backstage) or the Envoy pass-through <c>{ "error": "...", "status": 4xx }</c>.
+    /// </summary>
+    private static bool IsProtocolErrorShape(JsonElement root, out string? errorCode)
     {
         errorCode = null;
-        string? error = null;
-        foreach (var prop in root.EnumerateObject())
-        {
-            if (string.Equals(prop.Name, "error", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String)
-            {
-                error = prop.Value.GetString();
-            }
-            else if (!(string.Equals(prop.Name, "message", StringComparison.Ordinal) && prop.Value.ValueKind == JsonValueKind.String))
-            {
-                return false;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(error))
+        if (!root.TryGetProperty("error", out var error))
         {
             return false;
         }
 
-        // Only a code-like value (no blanks, short) is reported as the code; a free-text error is reported as ERROR.
-        errorCode = error.Length <= 64 && !error.Any(char.IsWhiteSpace) ? error : "ERROR";
-        return true;
+        // NL-SC-39 / NL-T-40: an object-valued top-level error member is an error even without a string message (fail closed).
+        if (error.ValueKind == JsonValueKind.Object)
+        {
+            errorCode = error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(code.GetString())
+                ? code.GetString()
+                : "ERROR";
+            return true;
+        }
+
+        if (error.ValueKind == JsonValueKind.String && root.TryGetProperty("status", out var status) &&
+            status.ValueKind == JsonValueKind.Number && status.TryGetInt32(out var statusCode) && statusCode >= 400)
+        {
+            errorCode = "ERROR";
+            return true;
+        }
+
+        return false;
     }
 
     internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(

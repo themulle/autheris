@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Globalization;
 using System.Security.Claims;
@@ -213,18 +214,14 @@ internal static class TotpFirstEnrollmentGuard
         if (authKind == TotpEnrollmentAuthKind.Unknown)
         {
             await RecordAsync(context, userSid, "DENY", phase, "unknown authentication type", ct).ConfigureAwait(false);
-            return new TotpFirstEnrollmentCheck(true, Results.Json(
-                new { error = "First 2FA enrollment is not permitted for this authentication method." },
-                statusCode: StatusCodes.Status403Forbidden));
+            return new TotpFirstEnrollmentCheck(true, ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "First 2FA enrollment is not permitted for this authentication method."));
         }
 
         if (authKind == TotpEnrollmentAuthKind.ProxyAsserted)
         {
             // ForwardAuth carries no authentication timestamp; the proxy session cannot prove a fresh sign-in.
             await RecordAsync(context, userSid, "DENY", phase, "ForwardAuth identity (no authentication time)", ct).ConfigureAwait(false);
-            return new TotpFirstEnrollmentCheck(true, Results.Json(
-                new { error = "First 2FA enrollment is not permitted for ForwardAuth (proxy) sign-ins, which carry no sign-in time. Sign in with Entra ID/ADFS (fresh sign-in), Kerberos or Basic and retry." },
-                statusCode: StatusCodes.Status403Forbidden));
+            return new TotpFirstEnrollmentCheck(true, ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "First 2FA enrollment is not permitted for ForwardAuth (proxy) sign-ins, which carry no sign-in time. Sign in with Entra ID/ADFS (fresh sign-in), Kerberos or Basic and retry."));
         }
 
         var totpOptions = context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value.Totp ?? new TotpOptions();
@@ -240,9 +237,7 @@ internal static class TotpFirstEnrollmentGuard
             ? (authKind == TotpEnrollmentAuthKind.ReplayableToken ? "auth_time claim missing" : "authentication time missing")
             : "authentication not fresh";
         await RecordAsync(context, userSid, "DENY", phase, reason, ct).ConfigureAwait(false);
-        return new TotpFirstEnrollmentCheck(true, Results.Json(
-            new { error = $"First 2FA enrollment requires a fresh sign-in (within {maxAge.TotalMinutes:0} minutes). Sign in again and retry." },
-            statusCode: StatusCodes.Status403Forbidden));
+        return new TotpFirstEnrollmentCheck(true, ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "First 2FA enrollment requires a fresh sign-in. Sign in again and retry."));
     }
 
     /// <summary>

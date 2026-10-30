@@ -36,7 +36,7 @@ public static class GovernancePlanEndpoints
 
             if (request == null || string.IsNullOrWhiteSpace(request.DatasetId) || request.Grants == null)
             {
-                return Results.BadRequest(new { error = "DatasetId and Grants are required." });
+                return ApiProblems.BadRequest(ApiErrorCodes.GovernancePlanInvalid, "DatasetId and Grants are required.", context);
             }
 
             var result = await planningService.PlanAccessAsync(request, adminSid, EndpointSecurity.GetRequestTenant(context).Value, context.User, ct).ConfigureAwait(false);
@@ -50,7 +50,7 @@ public static class GovernancePlanEndpoints
             CancellationToken ct) =>
         {
             var plan = await planningService.GetPlanAsync(planId, ct).ConfigureAwait(false);
-            return plan != null ? Results.Ok(plan) : Results.NotFound(new { error = $"Plan '{planId}' not found or expired." });
+            return plan != null ? Results.Ok(plan) : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The plan was not found or has expired.");
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
 
         // 3. Confirm Plan with TOTP 2FA: issues HMAC-signed confirmation token (ADR-03, ADR-05, R-62)
@@ -89,7 +89,7 @@ public static class GovernancePlanEndpoints
 
         if (request == null || string.IsNullOrWhiteSpace(request.TotpCode))
         {
-            return Results.BadRequest(new { error = "TotpCode is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.GovernancePlanInvalid, "TotpCode is required.", context);
         }
 
         try
@@ -124,7 +124,7 @@ public static class GovernancePlanEndpoints
 
         if (request == null || string.IsNullOrWhiteSpace(request.ConfirmationToken))
         {
-            return Results.BadRequest(new { error = "ConfirmationToken is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.GovernancePlanInvalid, "ConfirmationToken is required.", context);
         }
 
         try

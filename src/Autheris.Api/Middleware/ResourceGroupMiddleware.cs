@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -68,22 +69,7 @@ public sealed class ResourceGroupMiddleware
                 _logger.LogWarning(
                     "Persistent connection limit reached for tenant {TenantId} (max {MaxPerPrincipal} per principal / {MaxPerTenant} per tenant).",
                     tenantId, _connectionLimiter.MaxPerPrincipal, _connectionLimiter.MaxPerTenant);
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                context.Response.Headers["Retry-After"] = "30";
-                await context.Response.WriteAsJsonAsync(new
-                {
-                    errors = new[]
-                    {
-                        new
-                        {
-                            message = "Too many concurrent long-lived connections (WebSocket/SSE) for this principal or tenant.",
-                            extensions = new
-                            {
-                                code = "PERSISTENT_CONNECTION_LIMIT_EXCEEDED"
-                            }
-                        }
-                    }
-                }, cancellationToken: context.RequestAborted);
+                await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.PersistentConnectionLimitExceeded, "Too many concurrent long-lived connections (WebSocket/SSE) for this principal or tenant.", 30, context.RequestAborted).ConfigureAwait(false);
                 return;
             }
 
@@ -105,43 +91,12 @@ public sealed class ResourceGroupMiddleware
 
             if (string.Equals(leaseResult.RejectionReason, "QueueFull", StringComparison.OrdinalIgnoreCase))
             {
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                context.Response.Headers["Retry-After"] = "5";
-                await context.Response.WriteAsJsonAsync(new
-                {
-                    errors = new[]
-                    {
-                        new
-                        {
-                            message = $"Resource group queue full for tier '{tier}'. Please retry later.",
-                            extensions = new
-                            {
-                                code = "RESOURCE_GROUP_QUEUE_FULL",
-                                tier = tier.ToString()
-                            }
-                        }
-                    }
-                }, cancellationToken: context.RequestAborted);
+                await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.ResourceGroupQueueFull, "The resource group queue is full. Please retry later.", 5, context.RequestAborted).ConfigureAwait(false);
                 return;
             }
 
             // Timed out waiting in queue
-            context.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
-            await context.Response.WriteAsJsonAsync(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = $"Resource group lease acquisition timed out for tier '{tier}'.",
-                        extensions = new
-                        {
-                            code = "RESOURCE_GROUP_TIMEOUT",
-                            tier = tier.ToString()
-                        }
-                    }
-                }
-            }, cancellationToken: context.RequestAborted);
+            await ApiProblems.WriteAsync(context, StatusCodes.Status504GatewayTimeout, ApiErrorCodes.ResourceGroupTimeout, "The resource group lease acquisition timed out.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 

@@ -91,19 +91,24 @@ public sealed class CatalogTagsVisibilityEndpointTests
     }
 
     [Theory]
-    [InlineData(DatasetCatalogOutcome.NotFound, 404, "{\"error\":\"NOT_FOUND\"}")]
-    [InlineData(DatasetCatalogOutcome.Forbidden, 403, "{\"error\":\"FORBIDDEN\"}")]
-    [InlineData(DatasetCatalogOutcome.InvalidTag, 400, "{\"error\":\"INVALID_TAG\"}")]
-    [InlineData(DatasetCatalogOutcome.TagLimitExceeded, 400, "{\"error\":\"TAG_LIMIT_EXCEEDED\"}")]
-    [InlineData(DatasetCatalogOutcome.InvalidVisibility, 400, "{\"error\":\"INVALID_VISIBILITY\"}")]
-    [InlineData(DatasetCatalogOutcome.InvalidRequest, 400, "{\"error\":\"INVALID_REQUEST\"}")]
-    [InlineData(DatasetCatalogOutcome.Unavailable, 503, "{\"error\":\"UNAVAILABLE\"}")]
-    public async Task OutcomeMapping_IsStable(DatasetCatalogOutcome outcome, int status, string body)
+    [InlineData(DatasetCatalogOutcome.NotFound, 404, "RESOURCE_NOT_FOUND")]
+    [InlineData(DatasetCatalogOutcome.Forbidden, 403, "ACCESS_DENIED")]
+    [InlineData(DatasetCatalogOutcome.InvalidTag, 400, "INVALID_TAG")]
+    [InlineData(DatasetCatalogOutcome.TagLimitExceeded, 400, "TAG_LIMIT_EXCEEDED")]
+    [InlineData(DatasetCatalogOutcome.InvalidVisibility, 400, "INVALID_VISIBILITY")]
+    [InlineData(DatasetCatalogOutcome.InvalidRequest, 400, "BAD_REQUEST")]
+    [InlineData(DatasetCatalogOutcome.Unavailable, 503, "SERVICE_UNAVAILABLE")]
+    public async Task OutcomeMapping_IsStable(DatasetCatalogOutcome outcome, int status, string code)
     {
         _service.ApplyAsync(default, default!, default!, default!, default).ReturnsForAnyArgs(new DatasetCatalogResult(outcome));
 
-        (await Run(await CatalogApiEndpoints.PutDatasetVisibilityHandler("x", new SetDatasetVisibilityDto("Full"), _service, Context(), default)))
-            .ShouldBe((status, body));
+        var (actualStatus, body) = await Run(await CatalogApiEndpoints.PutDatasetVisibilityHandler("x", new SetDatasetVisibilityDto("Full"), _service, Context(), default));
+
+        // NL-T-20: status and governed code per outcome; no legacy `error` member.
+        actualStatus.ShouldBe(status);
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetString().ShouldBe(code);
+        doc.RootElement.TryGetProperty("error", out _).ShouldBeFalse();
     }
 
     [Trait("Category", "Security")]
@@ -122,7 +127,7 @@ public sealed class CatalogTagsVisibilityEndpointTests
             await Run(await CatalogApiEndpoints.PutDatasetVisibilityHandler("a.b.c", new SetDatasetVisibilityDto("Summary"), _service, ctx, default))
         };
 
-        results.ShouldAllBe(r => r.Status == 404 && r.Body == "{\"error\":\"NOT_FOUND\"}");
+        results.ShouldAllBe(r => r.Status == 404 && r.Body == results[0].Body && r.Body.Contains("RESOURCE_NOT_FOUND"));
     }
 
     [Fact]
