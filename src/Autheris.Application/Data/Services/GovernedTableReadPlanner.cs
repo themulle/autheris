@@ -158,10 +158,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                 }
 
                 // I398-SC-02/03: after the unknown, mask and access checks; one fixed refusal for every type, naming neither column nor type.
-                if (!DefaultReadOrdering.IsGroupableType(colMeta.DataType, metadata.Dialect))
-                {
-                    throw new TrinoSqlEngine.SqlCompileNotSupportedException(TrinoSqlEngine.SqlCompileNotSupportedReason.Construct, "aggregation group key type");
-                }
+                GroupKeyTypeFamilies.EnsureGroupable(colMeta.DataType, metadata.Dialect);
 
                 if (!groupByCols.Contains(colMeta.ColumnName, StringComparer.OrdinalIgnoreCase))
                 {

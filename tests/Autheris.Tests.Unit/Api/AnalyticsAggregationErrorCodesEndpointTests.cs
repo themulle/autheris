@@ -93,6 +93,9 @@ public sealed class AnalyticsAggregationErrorCodesEndpointTests
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Dialect, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
+        { new AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily.Xml), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
+        { new AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily.Spatial), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
+        { new AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily.Unknown), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage }
     };
 
@@ -125,6 +128,43 @@ public sealed class AnalyticsAggregationErrorCodesEndpointTests
         r.Body.ShouldContain(message);
         r.Body.ShouldNotContain(Sentinel);
         r.Log.Lines.ShouldAllBe(l => !l.Contains(Sentinel));
+    }
+
+    private static string NormalizeVolatile(string body) =>
+        System.Text.RegularExpressions.Regex.Replace(body, "\"(traceId|requestId|instance|trace_id|correlationId)\"\\s*:\\s*\"[^\"]*\"", "\"$1\":\"X\"");
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I405-T-08")]
+    public async Task I405_T_08_ResponseBody_IdenticalAcrossFamilies_Rest_GraphQl_Metrics()
+    {
+        var families = new[]
+        {
+            Autheris.Application.Data.Services.GroupKeyTypeFamily.Xml,
+            Autheris.Application.Data.Services.GroupKeyTypeFamily.Spatial,
+            Autheris.Application.Data.Services.GroupKeyTypeFamily.Unknown
+        };
+        var rest = new List<(int Status, string Body)>();
+        var metrics = new List<(int Status, string Body)>();
+        var graphQl = new List<string>();
+        foreach (var family in families)
+        {
+            var failure = new AggregationGroupKeyNotSupportedException(family);
+            var a = await AggregateAsync(failure);
+            var m = await MetricsAsync(failure);
+            rest.Add((a.Status, NormalizeVolatile(a.Body)));
+            metrics.Add((m.Status, NormalizeVolatile(m.Body)));
+            var g = Autheris.GraphQL.Catalog.AggregateFailureMapper.ForAggregate(failure)!;
+            graphQl.Add(g.Errors[0].Code + "|" + g.Errors[0].Message);
+        }
+
+        rest.Distinct().Count().ShouldBe(1, string.Join("\n", rest.Select(r => r.Body)));
+        metrics.Distinct().Count().ShouldBe(1);
+        graphQl.Distinct().Count().ShouldBe(1);
+        rest[0].Status.ShouldBe(422);
+        rest[0].Body.ShouldContain("AGGREGATION_NOT_SUPPORTED");
+        rest[0].Body.ShouldNotContain("family", Case.Insensitive);
+        graphQl[0].ShouldStartWith("AGGREGATION_NOT_SUPPORTED");
     }
 
     [Fact]

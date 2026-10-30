@@ -169,7 +169,7 @@ public enum SqlCompileNotSupportedReason { Dialect, StatementClass, Construct }
 /// The statement, dialect or construct is not (yet) supported by the governed compiler. Fail closed: nothing is emitted. The
 /// message names the category only, never request text.
 /// </summary>
-public sealed class SqlCompileNotSupportedException : SecurityException
+public class SqlCompileNotSupportedException : SecurityException
 {
     public SqlCompileNotSupportedReason Reason { get; }
 
