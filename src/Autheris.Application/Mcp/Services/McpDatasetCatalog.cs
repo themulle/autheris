@@ -543,7 +543,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             RequiredFilterColumns: table.RequiredFilterColumns.Length > 0 ? table.RequiredFilterColumns : null,
             RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null,
             Language: negotiatedLanguage,
-            RequestedLanguage: language);
+            RequestedLanguage: language, PrimaryKeyOrder: McpKeyColumn.FromKey(keyView));
     }
 
     /// <summary>

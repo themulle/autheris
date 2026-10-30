@@ -18,7 +18,8 @@ Related documents: [F-GOV-12 governance storage and schema shape verification](f
 | Element | Description |
 | :--- | :--- |
 | `PrimaryKeyColumns` | Ordered list of column names. Composite keys are supported. Empty means "no declared primary key"; there is no implicit `id` default. |
-| `Indexes` | List of `TableIndexDefinition(Name, Columns, IsUnique)`. Columns are ordered; composite and non-unique indexes are supported. |
+| `PrimaryKeyDirections` | Optional sort direction per primary key column (`ASC` / `DESC`), parallel to `PrimaryKeyColumns`. Empty means every column is ascending (the default and the only form of a table without a declared direction). When present it has exactly one entry per key column. |
+| `Indexes` | List of `TableIndexDefinition(Name, Columns, IsUnique, Directions)`. Columns are ordered; composite and non-unique indexes are supported. `Directions` is `null` (all ascending) or has one `ASC` / `DESC` entry per column; it is serialized as `directions` only when present. |
 
 ### 2.1 Validation rules (`TableKeyDefinitionValidator`)
 
@@ -32,6 +33,7 @@ The same validator runs on every write path (admin endpoint, every ingestion pat
 | Index: 1 to 32 columns. | `MaxColumnsPerKey = 32` |
 | At most 64 indexes per table. | `MaxIndexesPerTable = 64` |
 | Index name matches `^[A-Za-z_][A-Za-z0-9_]{0,127}$` and is unique per table (case-insensitive). | - |
+| A direction list has exactly one entry per column of its key or index and only the values `ASC` / `DESC`; an all-ascending list is normalized to the canonical empty form. | - |
 
 A unique index identical to the primary key is allowed. Size limits are checked before element data is copied. Validation messages echo caller-supplied names only in a bounded, markup-free form.
 
@@ -63,6 +65,7 @@ CREATE TABLE TABLE_PRIMARY_KEY_COLUMNS (
     table_id         TEXT    NOT NULL,              -- TABLES.id
     key_ordinal      INTEGER NOT NULL CHECK (key_ordinal >= 1),
     table_column_id  TEXT    NOT NULL,              -- TABLE_COLUMNS.id of the same table
+    is_descending    INTEGER NOT NULL DEFAULT 0 CHECK (is_descending IN (0, 1)),  -- governance step 0002
     PRIMARY KEY (table_id, key_ordinal)
 );
 CREATE UNIQUE INDEX UX_TABLE_PK_COLUMNS_COLUMN ON TABLE_PRIMARY_KEY_COLUMNS (table_id, table_column_id);
@@ -79,12 +82,15 @@ CREATE TABLE TABLE_INDEX_COLUMNS (
     index_id         TEXT    NOT NULL,              -- TABLE_INDEXES.id
     column_ordinal   INTEGER NOT NULL CHECK (column_ordinal >= 1),
     table_column_id  TEXT    NOT NULL,              -- TABLE_COLUMNS.id of the same table
+    is_descending    INTEGER NOT NULL DEFAULT 0 CHECK (is_descending IN (0, 1)),  -- governance step 0002
     PRIMARY KEY (index_id, column_ordinal)
 );
 CREATE UNIQUE INDEX UX_TABLE_INDEX_COLUMNS_COLUMN ON TABLE_INDEX_COLUMNS (index_id, table_column_id);
 ```
 
-The DDL above is the SQLite form. PostgreSQL uses the same structure with lower-case index names; SQL Server uses `NVARCHAR(128)` ids and names, `INT` ordinals and a `BIT` flag in schema `dbo`.
+The DDL above is the SQLite form. PostgreSQL uses the same structure with lower-case index names and a `BOOLEAN` direction flag; SQL Server uses `NVARCHAR(128)` ids and names, `INT` ordinals and `BIT` flags in schema `dbo`.
+
+**Directions (`is_descending`).** The two `is_descending` columns are added by the governance migration step `0002_key_and_index_column_direction` (guarded and idempotent on every engine; the column is `NOT NULL` with the constant default `0` / `FALSE`, so existing rows read as ascending and an older binary that inserts without the column also reads ascending). The reader accepts only `0` / `1` (or a boolean); any other value makes the table's definition unavailable (section 2.2) instead of ordering by a guess.
 
 A replacement runs in one transaction: the index columns of the table's indexes, its indexes and its primary key columns are deleted, then the new rows are inserted in list order (ordinal = position + 1). The governance epoch is incremented and cached metadata is invalidated.
 
@@ -114,17 +120,25 @@ Content-Type: application/json
 }
 ```
 
+Directions are optional. `primaryKeyDirections` (parallel to `primaryKey` or its alias) and, per index, `directions` take the strings `ASC` / `DESC` (case-insensitive), one entry per column; omitted means all ascending:
+
+```json
+{ "primaryKey": ["device_id", "ts"], "primaryKeyDirections": ["ASC", "DESC"] }
+```
+
+An unknown value or a count that differs from the column list is rejected with `400` and the generic message (the value is never echoed, nothing is persisted or audited).
+
 `primaryKeyColumns` is accepted as an alias of `primaryKey`. On an index, `unique` is the canonical flag (as in the OpenAPI extension) and `isUnique` is accepted as an alias; if both are given and disagree the request is rejected with `400`. Omitted lists are treated as empty, so `{}` clears the definition.
 
 | Status | When | Body |
 | :--- | :--- | :--- |
-| `200` | Definition replaced. | `{ "datasetId", "primaryKey", "indexes" }` in catalog spelling. |
+| `200` | Definition replaced. | `{ "datasetId", "primaryKey", "indexes" }` in catalog spelling; `primaryKeyDirections` (`ASC` / `DESC` strings) appears only when a key column is descending, an index carries `directions` only when one of its columns is. |
 | `400` | Missing body, or a validation rule of section 2.1 failed. | `{ "error": "..." }` without stack trace or values. |
 | `404` | The dataset is unknown or inactive. | The same fixed body `{ "error": "Dataset was not found." }` for both cases; the id is not echoed. A dataset whose stored definition is invalid (section 2.2) is **not** a 404: it can be repaired by this endpoint. |
 
 The endpoint writes narrowly: `IGovernanceRepository.ReplaceTableKeyDefinitionAsync` reads the stored columns, validates against them, replaces only the three definition tables and bumps the epoch once, all in one transaction. Columns and masking rules are not rewritten, so a concurrent masking change is preserved.
 
-**Audit.** Every successful replacement writes an audit entry `CATALOG_KEY_DEFINITION_CHANGED` through the HMAC-chained audit writer, with actor SID, request tenant, dataset id and the definition before and after (identifiers only, no data). When the stored definition was invalid, "before" is recorded as `{ "unavailable": true }` (no partial data). The entry is written **after** the commit: if the audit store is unavailable the caller receives `503`, but the definition change persists (the request can be repeated; replacing is idempotent).
+**Audit.** Every successful replacement writes an audit entry `CATALOG_KEY_DEFINITION_CHANGED` through the HMAC-chained audit writer, with actor SID, request tenant, dataset id and the definition before and after (identifiers only, no data; `primaryKeyDirections` appears only when a column is descending, as the closed strings `ASC` / `DESC`). A change of directions alone is a change and is audited. When the stored definition was invalid, "before" is recorded as `{ "unavailable": true }` (no partial data). The entry is written **after** the commit: if the audit store is unavailable the caller receives `503`, but the definition change persists (the request can be repeated; replacing is idempotent).
 
 The catalog is global (the `TABLES` table has no tenant column); a definition does not change authorization, so no four-eyes approval is required.
 
@@ -136,10 +150,10 @@ An ingested declaration replaces the **whole** definition (primary key and index
 
 | Source | Declaration read | Mapping |
 | :--- | :--- | :--- |
-| Data catalog sync (`DataCatalogSyncService`, Purview / Collibra / generic connectors) | `CatalogTableAsset.PrimaryKeyColumns` and `Indexes`; when no primary key is given, the columns flagged `CatalogColumnAsset.IsPrimaryKey` (in column order). | Primary key and indexes as declared. |
+| Data catalog sync (`DataCatalogSyncService`, Purview / Collibra / generic connectors) | `CatalogTableAsset.PrimaryKeyColumns` (with optional `PrimaryKeyDirections`) and `Indexes` (each with optional `Directions`); when no primary key is given, the columns flagged `CatalogColumnAsset.IsPrimaryKey` (in column order). | Primary key and indexes as declared. |
 | OpenMetadata (`OpenMetadataSyncService`, sync and webhook) | `tableConstraints` of the table (requested with `fields=...,tableConstraints`). | `PRIMARY_KEY` -> primary key; each `UNIQUE` -> unique index `uq_<n>` (1-based by position). |
-| dbt (`DbtArtifactStreamingParser`, `DbtMetadataIngestionService`) | Model-level and column-level `constraints` of type `primary_key` and `unique`; data tests `unique` and `unique_combination_of_columns` attached to the model. | `primary_key` -> primary key; each unique declaration -> unique index `uq_<n>`. |
-| OpenAPI ingestion (`OpenApiIngestionService`) | Vendor extensions on the schema object: `x-autheris-primary-key` (string array) and `x-autheris-indexes` (array of `{ "name", "columns", "unique" }`, `unique` optional boolean). | As declared. No key is guessed from `required`, `id`, `*_id` or the first property. |
+| dbt (`DbtArtifactStreamingParser`, `DbtMetadataIngestionService`) | Model-level and column-level `constraints` of type `primary_key` and `unique` (a model-level `columns` entry may end in `ASC` / `DESC`, e.g. `"ts DESC"`; the grammar of `KeyColumnSpec` allows exactly one trailing `ASC` / `DESC` after a plain identifier, any other shape such as `NULLS FIRST`, `COLLATE`, quotes or a second direction drops the whole declaration); data tests `unique` and `unique_combination_of_columns` attached to the model. | `primary_key` -> primary key; each unique declaration -> unique index `uq_<n>`. |
+| OpenAPI ingestion (`OpenApiIngestionService`) | Vendor extensions on the schema object: `x-autheris-primary-key` (string array) and `x-autheris-indexes` (array of `{ "name", "columns", "unique", "directions" }`, `unique` optional boolean, `directions` optional), plus `x-autheris-primary-key-directions` next to the key. Directions are arrays of `ASC` / `DESC` strings (case-insensitive) with exactly one entry per column; any other shape drops the whole definition. | As declared. No key is guessed from `required`, `id`, `*_id` or the first property. |
 
 OpenAPI example:
 
@@ -208,7 +222,9 @@ Precedence:
 
 **Orderable types.** Unknown types count as orderable. Not orderable: `json`/`jsonb`, `xml`, binary types (`binary`, `varbinary`, `bytea`, `blob`, `image`, `raw`, `long raw`, `bfile`), spatial types (`geometry`, `geography`, `hierarchyid`, `sdo_geometry`), `sql_variant`/`variant`, structured types (`array`, `map`, `struct`, `list`, `union`, `row`, `object`, `...[]`) and any `(max)` type; on SQL Server and Oracle also LOBs (`text`, `ntext`, `clob`, `nclob`, Oracle `long`). `text` stays orderable on PostgreSQL, SQLite and Databricks.
 
-**Explicit ordering.** An explicit order (`orderBy`, `$orderby`, GraphQL `order`) is validated as before: unknown and denied columns get the same "does not exist" message (no existence oracle); masked columns are rejected. The default ordering columns that the caller did not name are then appended ascending as a **tiebreaker**, so pages stay stable when the explicit columns contain duplicates. The tiebreaker is recomputed on the server for every request and is never written into a next link.
+**Directions.** The default order follows the declared direction of the chosen key or unique index: `ORDER BY a, b DESC` for a primary key `(a ASC, b DESC)`. Which candidate is chosen never depends on the direction, so the all-or-nothing rule above works the same for a descending key. Marker keys, the `(client_id, ts)` convention and the clear-column composite are ascending. A table without a declared direction compiles to byte-identical SQL. No `NULLS FIRST` / `NULLS LAST` is emitted: the placement of `NULL` values is defined by the engine (PostgreSQL sorts them first under `DESC`, SQL Server and SQLite treat `NULL` as the smallest value); declare keys on `NOT NULL` columns. Filters, row filters, masking and an explicit order are unaffected.
+
+**Explicit ordering.** An explicit order (`orderBy`, `$orderby`, GraphQL `order`) is validated as before: unknown and denied columns get the same "does not exist" message (no existence oracle); masked columns are rejected. The default ordering columns that the caller did not name are then appended with their declared direction as a **tiebreaker** (a column the caller names keeps the caller's direction), so pages stay stable when the explicit columns contain duplicates. The tiebreaker is recomputed on the server for every request and is never written into a next link.
 
 **No stable order (rule 6).**
 
@@ -223,6 +239,14 @@ Precedence:
 - A declared unique index is trusted as declared. Columns that contain `NULL` may tie; declare keys on `NOT NULL` columns.
 - With the clear-column composite, rows that are equal in all orderable clear columns can still swap places between pages. Fully duplicate rows keep the returned multiset exact.
 - The clear-column composite has no column cap. Its cost grows with the row count and is bounded by the execution timeout. Remedy: declare a primary key or a unique index.
+
+### 5.2.1 Bulk keyset stream
+
+The bulk table stream seeks on the primary key (else the first unique index) and follows the declared directions: `ORDER BY` uses each column's direction and the continuation predicate uses `<` for a descending column and `>` for an ascending one (the single-column form and every branch of the composite `OR` chain). The operator and the `ORDER BY` direction come from the same source. The cursor binds the direction signature in its signed context: `asc` when every column is ascending (cursors issued before directions existed stay valid), otherwise one word per column (for example `asc,desc`). A cursor issued before a direction change is rejected as `INVALID_CURSOR`; the stream never restarts silently. A row whose key value is `NULL` cannot be a cursor position (existing rule, independent of the direction).
+
+### 5.2.2 Reporting
+
+`describe_dataset` returns `primaryKeyOrder` (`[{ "column", "direction" }]`, key order, `ASC` / `DESC`) and the index `directions` only for a key or index whose columns are all visible to the caller; a key or index touching a hidden column is omitted as a whole, directions included. The catalog dataset detail reports `primaryKeyDirections` parallel to `primaryKeys` (omitted when every column is ascending). OData and the dynamic OpenAPI document have no direction concept and are unchanged.
 
 ### 5.3 OData next link
 
@@ -283,7 +307,7 @@ Compared with earlier builds:
 
 | Layer | Component |
 | :--- | :--- |
-| Domain | `TableMetadata.PrimaryKeyColumns`, `Indexes`, `ReplaceKeyDefinition`; `TableIndexDefinition`; `TableKeyDefinitionValidator`, `TableKeyMarkers`, `TableDefinitionException`; `TableMetadataUnavailableException`; `AuditEventTypes.CatalogKeyDefinitionChanged`. |
+| Domain | `TableMetadata.PrimaryKeyColumns`, `PrimaryKeyDirections`, `Indexes`, `ReplaceKeyDefinition`; `TableIndexDefinition`; `KeyColumnDirection`, `KeyDirections`; `TableKeyDefinitionValidator`, `TableKeyMarkers`, `TableDefinitionException`; `TableMetadataUnavailableException`; `AuditEventTypes.CatalogKeyDefinitionChanged`. |
 | Application | `DefaultReadOrdering`, `TableRowIdentity`, `TableKeyVisibility` (both use the Domain `TableKeyMarkers` parser); `GovernedTableReadPlanner`, `GovernedDataQueryService`; `CatalogKeyDefinitionImport` (shared ingestion import); `OpenApiIngestionService`; `CatalogGovernanceRatchet`. |
 | Infrastructure | `CatalogKeyDefinitionStore` and the `*GovernanceRepository.Catalog.cs` repositories (read, validate, replace); baseline DDL of the three tables. |
 | Api / Extensions | `CatalogApiEndpoints` (`PUT .../keys`); `DataCatalogSyncService`, `OpenMetadataSyncService`, `DbtArtifactStreamingParser` / `DbtMetadataIngestionService`; `ODataHandler`, `ODataCsdlGenerator`; `TreeSqlCompiler` (GraphQL). |

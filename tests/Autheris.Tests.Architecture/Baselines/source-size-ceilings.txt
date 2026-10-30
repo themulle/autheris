@@ -2,7 +2,7 @@
 src/Autheris.Application/Governance/Services/AccessPlanningService.cs|1061
 src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs|1319
 src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs|1143
-src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|1999
+src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|1977
 src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs|1346
 src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs|1139
 src/Autheris.GraphQL/Types/MutationTypes.cs|1385

@@ -122,11 +122,11 @@ public sealed class StepSqlLintTests
     }
 
     [Fact]
-    public void ShippedCatalogues_HaveNoFileStepsYet()
+    public void ShippedCatalogues_HoldExactlyStep0002KeyAndIndexColumnDirection()
     {
         foreach (var engine in new[] { "sqlite", "postgresql", "sqlserver" })
         {
-            SqlMigrationStep.LoadEmbedded(engine).ShouldBeEmpty();
+            SqlMigrationStep.LoadEmbedded(engine).Select(s => (s.Version, s.Name)).ShouldBe([(2, "key_and_index_column_direction")]);
         }
     }
 }

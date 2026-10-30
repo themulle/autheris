@@ -73,6 +73,18 @@ public static partial class TableKeyDefinitionValidator
             }
         }
 
+        IReadOnlyList<KeyColumnDirection> primaryKeyDirections = Array.Empty<KeyColumnDirection>();
+        if (metadata.PrimaryKeyDirections is { Count: > 0 } declaredDirections)
+        {
+            // Issue #390: one direction per declared column and only defined enum values; the message never echoes input.
+            if (declaredDirections.Count != primaryKey.Count || !AllDefined(declaredDirections))
+            {
+                throw new TableDefinitionException($"Primary key directions on table '{metadata.Identifier}' do not match its columns.");
+            }
+
+            primaryKeyDirections = KeyDirections.Canonical(declaredDirections) ?? Array.Empty<KeyColumnDirection>();
+        }
+
         var indexes = new List<TableIndexDefinition>();
         if (metadata.Indexes is { Count: > 0 } declaredIndexes)
         {
@@ -126,15 +138,35 @@ public static partial class TableKeyDefinitionValidator
                     normalizedCols.Add(col.ColumnName);
                 }
 
-                indexes.Add(new TableIndexDefinition(index.Name, normalizedCols, index.IsUnique));
+                if (index.Directions is { Count: > 0 } indexDirections && (indexDirections.Count != normalizedCols.Count || !AllDefined(indexDirections)))
+                {
+                    throw new TableDefinitionException(
+                        $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' has directions that do not match its columns.");
+                }
+
+                indexes.Add(new TableIndexDefinition(index.Name, normalizedCols, index.IsUnique, KeyDirections.Canonical(index.Directions)));
             }
         }
 
         return metadata with
         {
             PrimaryKeyColumns = primaryKey,
+            PrimaryKeyDirections = primaryKeyDirections,
             Indexes = indexes
         };
+    }
+
+    private static bool AllDefined(IReadOnlyList<KeyColumnDirection> directions)
+    {
+        for (var i = 0; i < directions.Count; i++)
+        {
+            if (!Enum.IsDefined(directions[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

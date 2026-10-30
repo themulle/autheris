@@ -327,7 +327,7 @@ p, auditor, *, {table}, read, true, allow
         }
 
         public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
-            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, CancellationToken ct = default)
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default)
         {
             var existing = _tables.FirstOrDefault(t => t.Identifier.Equals(table));
             if (existing == null) return Task.FromResult<TableKeyDefinitionChange?>(null);

@@ -29,6 +29,9 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     /// <summary>Test seam: extra steps appended to the catalogue. Never set in production code (an architecture test pins that).</summary>
     internal IReadOnlyList<MigrationStep> AdditionalSteps { get; init; } = [];
 
+    /// <summary>Test seam: ignores shipped catalogue steps (not <see cref="AdditionalSteps"/>) above this version (builds a database that holds an older release schema). Never set in production code (an architecture test pins that).</summary>
+    internal int? StepVersionCapOverride { get; init; }
+
     /// <summary>Test seam: receives <c>ddl:*</c> and <c>apply:N</c> markers right before the run mutates the database.</summary>
     internal Action<string>? Trace { get; init; }
 
@@ -160,7 +163,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
 
     public Task VerifyAsync(CancellationToken ct = default) => RunCoreAsync(GovernanceMigrationMode.Verify, ct);
 
-    private MigrationStep[] EffectiveSteps() => Steps.Concat(AdditionalSteps).OrderBy(s => s.Version).ToArray();
+    private MigrationStep[] EffectiveSteps() => Steps.Where(s => StepVersionCapOverride is not { } cap || s.Version <= cap).Concat(AdditionalSteps).OrderBy(s => s.Version).ToArray();
 
     private async Task RunCoreAsync(GovernanceMigrationMode mode, CancellationToken ct)
     {

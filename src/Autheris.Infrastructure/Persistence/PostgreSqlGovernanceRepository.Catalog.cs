@@ -175,10 +175,11 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
             IReadOnlyList<TableIndexDefinition> indexes;
             try
             {
-                (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
                     conn, null, CatalogKeyDefinitionStore.PostgreSql, table, tableId.Value, columns, ct,
                     _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tableId.Value, out var keyRows) ? keyRows : null).ConfigureAwait(false);
             }
@@ -198,6 +199,7 @@ public partial class PostgreSqlGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
@@ -523,10 +525,11 @@ public partial class PostgreSqlGovernanceRepository
                     : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
 
                 IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
                 IReadOnlyList<TableIndexDefinition> indexes;
                 try
                 {
-                    (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                    (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
                         conn, null, CatalogKeyDefinitionStore.PostgreSql, identifier, tid, columns, ct,
                         _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
                 }
@@ -545,6 +548,7 @@ public partial class PostgreSqlGovernanceRepository
                     Columns = columns,
                     ColumnMaskingRules = maskingRules,
                     PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
                     Indexes = indexes,
                     RowFilterEvaluation = rowFilterEvaluation
                 };
@@ -859,6 +863,7 @@ public partial class PostgreSqlGovernanceRepository
         TableIdentifier table,
         IReadOnlyList<string> primaryKey,
         IReadOnlyList<TableIndexDefinition> indexes,
+        IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
         CancellationToken ct = default)
     {
         TableKeyDefinitionChange? change;
@@ -868,7 +873,7 @@ public partial class PostgreSqlGovernanceRepository
             try
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
-                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, primaryKey, indexes,
+                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, primaryKey, indexes, primaryKeyDirections,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {

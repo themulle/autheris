@@ -176,10 +176,11 @@ public partial class SqlServerGovernanceRepository
             }
 
             IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
             IReadOnlyList<TableIndexDefinition> indexes;
             try
             {
-                (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
                     conn, null, CatalogKeyDefinitionStore.SqlServer, table, tableId.Value, columns, ct,
                     _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tableId.Value, out var keyRows) ? keyRows : null).ConfigureAwait(false);
             }
@@ -199,6 +200,7 @@ public partial class SqlServerGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
@@ -524,10 +526,11 @@ public partial class SqlServerGovernanceRepository
                     : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
 
                 IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
                 IReadOnlyList<TableIndexDefinition> indexes;
                 try
                 {
-                    (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                    (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
                         conn, null, CatalogKeyDefinitionStore.SqlServer, identifier, tid, columns, ct,
                         _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
                 }
@@ -546,6 +549,7 @@ public partial class SqlServerGovernanceRepository
                     Columns = columns,
                     ColumnMaskingRules = maskingRules,
                     PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
                     Indexes = indexes,
                     RowFilterEvaluation = rowFilterEvaluation
                 };
@@ -865,6 +869,7 @@ public partial class SqlServerGovernanceRepository
         TableIdentifier table,
         IReadOnlyList<string> primaryKey,
         IReadOnlyList<TableIndexDefinition> indexes,
+        IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
         CancellationToken ct = default)
     {
         TableKeyDefinitionChange? change;
@@ -874,7 +879,7 @@ public partial class SqlServerGovernanceRepository
             try
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
-                    conn, tx, CatalogKeyDefinitionStore.SqlServer, table, primaryKey, indexes,
+                    conn, tx, CatalogKeyDefinitionStore.SqlServer, table, primaryKey, indexes, primaryKeyDirections,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {

@@ -103,7 +103,7 @@ public sealed class McpCatalogSummaryViewTests
     public void Summary_AllowList_PinsTheExactPropertySet()
     {
         // A property added to the description is excluded from the Summary until it is classified here (BC-14).
-        var nonAllowListed = new[] { "LongDescription", "Columns", "Examples", "GraphQl", "OtherAccess", "Indexes", "Parameters", "RequiredFilterColumns", "RequiredFilterColumnGroups" };
+        var nonAllowListed = new[] { "LongDescription", "Columns", "Examples", "GraphQl", "OtherAccess", "Indexes", "PrimaryKeyOrder", "Parameters", "RequiredFilterColumns", "RequiredFilterColumnGroups" };
         var allowListed = new[]
         {
             "Id", "DisplayName", "Domain", "Schema", "Table", "Description", "Sensitivity", "RequiresApproval", "Tags", "DataOwner", "DataOwnerDelegates", "AccessStatus", "View", "Kind", "Language", "RequestedLanguage"

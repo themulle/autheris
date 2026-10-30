@@ -31,6 +31,9 @@ public sealed record CatalogTableAsset
     /// <summary>Declared primary key (ordered). When empty, the columns flagged <see cref="CatalogColumnAsset.IsPrimaryKey"/> (in column order) are used.</summary>
     public List<string> PrimaryKeyColumns { get; init; } = [];
 
+    /// <summary>Issue #390: direction per <see cref="PrimaryKeyColumns"/> entry; empty = all ascending. Only meaningful with declared <see cref="PrimaryKeyColumns"/>.</summary>
+    public List<KeyColumnDirection> PrimaryKeyDirections { get; init; } = [];
+
     /// <summary>Declared indexes (unique and non-unique). Replaces the stored definition only together with a declared key or when non-empty.</summary>
     public List<TableIndexDefinition> Indexes { get; init; } = [];
 

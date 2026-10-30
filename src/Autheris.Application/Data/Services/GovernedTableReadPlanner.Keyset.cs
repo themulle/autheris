@@ -54,19 +54,9 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         // 1. Resolve & Validate Primary Key / Unique Index
-        IReadOnlyList<string> pkCols = metadata.PrimaryKeyColumns;
-        if (pkCols.Count == 0)
-        {
-            var uniqueIdx = metadata.Indexes.FirstOrDefault(i => i.IsUnique && i.Columns.Count > 0);
-            if (uniqueIdx != null)
-            {
-                pkCols = uniqueIdx.Columns;
-            }
-            else
-            {
-                throw new KeysetStreamingUnavailableException("KEYSET_STREAMING_UNAVAILABLE: Table requires a primary key or unique index.");
-            }
-        }
+        var streamKey = BulkStreamKey.TryResolve(metadata)
+            ?? throw new KeysetStreamingUnavailableException("KEYSET_STREAMING_UNAVAILABLE: Table requires a primary key or unique index.");
+        IReadOnlyList<string> pkCols = streamKey.Columns;
 
         // SEC-DATA178-04 / SEC-DATA178-07: Masked or denied PK columns fail closed
         foreach (var pk in pkCols)
@@ -173,7 +163,7 @@ public sealed partial class GovernedTableReadPlanner
         {
             // The context is built by the same factory the endpoint issues cursors with (tenant, caller, table, key,
             // direction, filter and projection), and verified with the same DI encoder; any mismatch fails closed.
-            var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenantId, metadata, pkCols, callerSid, request);
+            var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenantId, metadata, pkCols, callerSid, request, streamKey.Directions);
             var pkValues = _cursorEncoder.DecodeCursor(request.Cursor, metadata, cursorContext);
 
             var cursorParamNames = new List<string>(pkCols.Count);
@@ -185,10 +175,12 @@ public sealed partial class GovernedTableReadPlanner
                 cursorParamNames.Add(paramName);
             }
 
+            // I390-SC-07/09: the seek operator and the ORDER BY direction of a column both come from streamKey.IsDescending (one source):
+            // '<' seeks past a descending column, '>' past an ascending one, in the single-column case and in every branch of the OR chain.
             if (pkCols.Count == 1)
             {
                 var canonCurr = metadata.GetColumn(pkCols[0])!.ColumnName;
-                seekSql = $"{DataApiFilterTranslator.QuoteIdentifier(canonCurr)} > {cursorParamNames[0]}";
+                seekSql = $"{DataApiFilterTranslator.QuoteIdentifier(canonCurr)} {(streamKey.IsDescending(0) ? "<" : ">")} {cursorParamNames[0]}";
             }
             else
             {
@@ -203,7 +195,7 @@ public sealed partial class GovernedTableReadPlanner
                     }
 
                     var canonCurr = metadata.GetColumn(pkCols[i])!.ColumnName;
-                    andTerms.Add($"{DataApiFilterTranslator.QuoteIdentifier(canonCurr)} > {cursorParamNames[i]}");
+                    andTerms.Add($"{DataApiFilterTranslator.QuoteIdentifier(canonCurr)} {(streamKey.IsDescending(i) ? "<" : ">")} {cursorParamNames[i]}");
 
                     orBranches.Add($"({string.Join(" AND ", andTerms)})");
                 }
@@ -237,7 +229,7 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         sb.Append(" ORDER BY ")
-          .Append(string.Join(", ", pkCols.Select(c => DataApiFilterTranslator.QuoteIdentifier(metadata.GetColumn(c)!.ColumnName) + " ASC")));
+          .Append(string.Join(", ", pkCols.Select((c, i) => DataApiFilterTranslator.QuoteIdentifier(metadata.GetColumn(c)!.ColumnName) + (streamKey.IsDescending(i) ? " DESC" : " ASC"))));
 
         int sliceLimit = request.Limit > 0 ? Math.Min(request.Limit, 10000) : 5000;
         sb.Append(" LIMIT ").Append((sliceLimit + 1).ToString(CultureInfo.InvariantCulture));

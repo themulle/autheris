@@ -106,7 +106,7 @@ internal sealed class GateTreeSources
             throw new NotSupportedException();
 
         public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
-            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, CancellationToken ct = default) =>
+            TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }
 }
