@@ -158,3 +158,6 @@ All tests carry `[Trait("Category","Security")]`; T-25..T-27 in WP-404-3 are sat
 - I404-T-S10 `OpenApi_EmitsNoIndexNames_AndNoIndexOverMaskedColumn`
 - I404-T-S11 `Describe_DedupAndCap_AppliedAfterVisibilityFilter_NoCountSideChannel`
 - I404-T-S12 `Describe_CacheNotSharedAcrossCallersWithDifferentClearSets`
+
+## Changelog
+- 2026-10-30 (leak fix, Phase 4): code facts verified against the branch. `PrimaryKeyOrder` does not exist as a property; the ordered `PrimaryKeys` list is the key output. The REST catalog detail (`CatalogDiscoveryService`) has no per-caller consent resolution, so its clear set is the catalog baseline (masking state `Clear`: not sensitive, no masking rule). OpenAPI has no caller context and emits no indexes. A key or index with more than 32 columns is omitted whole, never truncated. Indexes are de-duplicated by columns and uniqueness after the visibility filter.

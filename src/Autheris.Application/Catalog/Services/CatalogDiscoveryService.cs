@@ -164,22 +164,23 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 Language: lang);
         }
 
-        // SD-4: declared keys and indexes are reported only as a whole and only over the columns this response lists.
-        var keys = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(metadata, metadata.Columns);
+        // I404-SC-L1/L4: declared keys and indexes are reported only as a whole and only when every column is Clear. This detail
+        // describes the catalog baseline (masking state per column); a column in any other state is not clear.
+        var clear = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in metadata.Columns)
+        {
+            if (string.Equals(MaskingStateOf(metadata, column), "Clear", StringComparison.OrdinalIgnoreCase))
+            {
+                clear.Add(column.ColumnName);
+            }
+        }
+
+        var keys = Autheris.Application.Data.Services.DatasetIndexProjection.Project(metadata, clear);
         var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var columnDetails = metadata.Columns.Select(c =>
         {
-            var maskingState = "Clear";
-            if (metadata.ColumnMaskingRules != null &&
-                metadata.ColumnMaskingRules.TryGetValue(c.ColumnName, out var rule))
-            {
-                maskingState = rule.RuleType;
-            }
-            else if (c.IsSensitive)
-            {
-                maskingState = "Masked";
-            }
+            var maskingState = MaskingStateOf(metadata, c);
 
             var colResolved = !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
             return new CatalogColumnDetail(
@@ -209,6 +210,16 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             LongDescription: tableLongDescription,
             Language: lang
         );
+    }
+
+    private static string MaskingStateOf(TableMetadata metadata, TableColumn c)
+    {
+        if (metadata.ColumnMaskingRules != null && metadata.ColumnMaskingRules.TryGetValue(c.ColumnName, out var rule))
+        {
+            return rule.RuleType;
+        }
+
+        return c.IsSensitive ? "Masked" : "Clear";
     }
 
     private async Task<IReadOnlyList<RegisteredProcedure>> GetVisibleProceduresAsync(RequestContext context, CancellationToken ct)

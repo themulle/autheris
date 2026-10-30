@@ -136,7 +136,7 @@ public sealed record McpDatasetDescription(
     string? DataOwner = null,
     IReadOnlyList<string>? DataOwnerDelegates = null,
     string? AccessStatus = null,
-    IReadOnlyList<TableIndexDefinition>? Indexes = null,
+    IReadOnlyList<DatasetIndexInfo>? Indexes = null,
     string? View = null,
     string Kind = "table",
     IReadOnlyList<McpProcedureParameterInfo>? Parameters = null,
