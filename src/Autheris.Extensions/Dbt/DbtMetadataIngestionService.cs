@@ -218,29 +218,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
     }
 
-    private TableMetadata ApplyDeclaredKeys(TableMetadata metadata, DbtDeclaredKeys declared)
-    {
-        var collector = new Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Collector();
-        if (declared.Invalid)
-        {
-            collector.AddPrimaryKey(null);
-        }
-        else
-        {
-            if (declared.PrimaryKey is not null)
-            {
-                collector.AddPrimaryKey(declared.PrimaryKey, declared.PrimaryKeyDirections);
-            }
-
-            for (var i = 0; i < declared.UniqueConstraints.Count; i++)
-            {
-                collector.AddUnique(declared.UniqueConstraints[i], declared.UniqueDirections is { } unique && i < unique.Count ? unique[i] : null);
-            }
-        }
-
-        return Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "dbt");
-    }
-
     private static bool IsTenantAllowed(TableIdentifier id, DbtGovernanceImportCaller caller)
     {
         if (caller.IsClusterAdmin)
@@ -708,7 +685,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
                     if (model.DeclaredKeys is { } declared)
                     {
-                        updatedMetadata = ApplyDeclaredKeys(updatedMetadata, declared);
+                        updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
                     }
 
                     if (mergedSamples != null)
