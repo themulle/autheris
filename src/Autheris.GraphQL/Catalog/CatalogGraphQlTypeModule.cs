@@ -67,6 +67,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         _graphQlOptions = graphQlOptions ?? new GraphQLOptions();
     }
 
+    internal static string BuildOffsetDescription(int maxAllowedOffset) =>
+        maxAllowedOffset <= 0
+            ? "Offset pagination is not supported."
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Offset pagination is supported up to offset {maxAllowedOffset}.");
+
     private Func<TableMetadata, bool>? GetTableFilter()
     {
         if (_graphQlOptions.SchemaPartitioning == GraphQlSchemaPartitioningMode.None)
@@ -321,6 +326,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     MetricGraphQlTypes.AddQueryField(d);
                 }
 
+                // I417-SC-A07: the offset text comes only from the numeric MaxAllowedOffset option.
+                var offsetText = BuildOffsetDescription(_graphQlOptions.MaxAllowedOffset);
                 foreach (var table in schemaModel.Tables)
                 {
                     var pk = table.Metadata.PrimaryKeyColumns.Count > 0 ? table.Metadata.PrimaryKeyColumns[0] : "id";
@@ -329,7 +336,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                         pk = "id";
                     }
                     d.Field(table.QueryFieldName)
-                        .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ {pk}: {{ gt: $last{pk} }} }}, orderBy: [{{ {pk}: ASC }}]. Offset pagination is supported up to offset 10000.")
+                        .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ {pk}: {{ gt: $last{pk} }} }}, orderBy: [{{ {pk}: ASC }}]. {offsetText}")
                         .Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.TypeName)))))
                         .Argument("where", a => a.Type(new NamedTypeNode(table.FilterTypeName)))
                         .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.OrderByTypeName)))))
