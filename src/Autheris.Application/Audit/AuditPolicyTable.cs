@@ -59,6 +59,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.AuditPipelineFault] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuditRetentionPurge] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogKeyDefinitionChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CatalogPhysicalIndexesChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogVisibilityChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogTagsChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogProbeSuppressed] = AuditFailurePolicy.BestEffort,

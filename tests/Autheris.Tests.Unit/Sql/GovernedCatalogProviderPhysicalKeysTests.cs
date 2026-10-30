@@ -82,8 +82,8 @@ public sealed class GovernedCatalogProviderPhysicalKeysTests
         return (sut, reader, factory, log);
     }
 
-    private static DbKeyIndexColumn Row(string index, int ordinal, string column, bool pk = false, bool clustered = false, bool desc = false) =>
-        new(index, pk, clustered, ordinal, column, desc);
+    private static DbKeyIndexColumn Row(string index, int ordinal, string column, bool pk = false, bool clustered = false, bool desc = false, bool unique = true) =>
+        new(index, pk, clustered, ordinal, column, desc, unique);
 
     [Fact]
     public async Task Read_BuildsKeysWithDirections()
@@ -187,7 +187,7 @@ public sealed class GovernedCatalogProviderPhysicalKeysTests
     {
         // I403-T-24 / I403-T-S10 (row cap plus one aborts while streaming)
         var (sut, reader, _, _) = Build();
-        reader.RowsToStream = TableKeyDefinitionValidator.MaxIndexesPerTable * TableKeyDefinitionValidator.MaxColumnsPerKey + 1;
+        reader.RowsToStream = (TableKeyDefinitionValidator.MaxIndexesPerTable + TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable) * TableKeyDefinitionValidator.MaxColumnsPerKey + 1;
 
         var snapshot = await sut.ReadAsync(Table(), CancellationToken.None);
 
@@ -259,5 +259,84 @@ public sealed class GovernedCatalogProviderPhysicalKeysTests
         cts.CancelAfter(50);
 
         await Should.ThrowAsync<OperationCanceledException>(async () => await sut.ReadAsync(Table(), cts.Token));
+    }
+
+    [Fact]
+    public async Task I404_Read_BuildsNonUniqueIndexes_InKeyOrderWithDirections_KeysUnchanged()
+    {
+        var (sut, reader, _, _) = Build();
+        reader.Rows =
+        [
+            Row("pk", 1, "id", pk: true, clustered: true),
+            Row("uq", 1, "code"),
+            Row("ix_a", 1, "ts", unique: false), Row("ix_a", 2, "id", desc: true, unique: false),
+            Row("ix_b", 1, "code", unique: false)
+        ];
+
+        var snapshot = await sut.ReadAsync(Table(), CancellationToken.None);
+
+        snapshot.State.ShouldBe(PhysicalKeySnapshotState.Known);
+        snapshot.Keys!.Count.ShouldBe(2);
+        snapshot.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Known);
+        snapshot.NonUnique.Indexes!.Select(i => string.Join(",", i.Columns) + "|" + string.Join(",", i.Directions)).ToArray()
+            .ShouldBe(["ts,id|Ascending,Descending", "code|Ascending"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-06")]
+    public async Task I404_T_S05_Reader_Caps_33rdIndex_NonUniqueUnavailable_KeysStayKnown()
+    {
+        var (sut, reader, _, _) = Build();
+        var rows = new List<DbKeyIndexColumn> { Row("pk", 1, "id", pk: true, clustered: true) };
+        for (var i = 0; i <= TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable; i++)
+        {
+            rows.Add(Row("ix" + i, 1, "c" + i, unique: false));
+        }
+
+        reader.Rows = rows;
+
+        var snapshot = await sut.ReadAsync(Table(), CancellationToken.None);
+
+        snapshot.State.ShouldBe(PhysicalKeySnapshotState.Known, "a non-unique read failure never downgrades known keys (I404-SC-05)");
+        snapshot.Keys!.ShouldHaveSingleItem();
+        snapshot.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
+        snapshot.NonUnique.Indexes.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-05")]
+    public async Task I404_T_14_BrokenNonUniqueShape_NonUniqueUnavailable_KeysKnown_AndKeyUnavailableImpliesNonUniqueUnavailable()
+    {
+        var (sut, reader, _, _) = Build();
+        reader.Rows = [Row("pk", 1, "id", pk: true), Row("ix", 1, "a", unique: false), Row("ix", 3, "b", unique: false)];
+
+        var snapshot = await sut.ReadAsync(Table(), CancellationToken.None);
+
+        snapshot.State.ShouldBe(PhysicalKeySnapshotState.Known);
+        snapshot.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unavailable, "an ordinal gap fails the whole non-unique read, never partially");
+
+        // No key rows at all is untrustworthy (I403-SC-13), so the non-unique side is unavailable as well (I404-SC-05).
+        reader.Rows = [Row("ix", 1, "a", unique: false)];
+        var onlyNonUnique = await sut.ReadAsync(Table(), CancellationToken.None);
+        onlyNonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
+        onlyNonUnique.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
+        PhysicalKeySnapshot.Unavailable.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
+        PhysicalKeySnapshot.Unsupported.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-06")]
+    public async Task I404_T_15_RowCap_AllUnavailable()
+    {
+        var (sut, reader, _, _) = Build();
+        reader.RowsToStream = (TableKeyDefinitionValidator.MaxIndexesPerTable + TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable) * TableKeyDefinitionValidator.MaxColumnsPerKey + 1;
+
+        var snapshot = await sut.ReadAsync(Table(), CancellationToken.None);
+
+        snapshot.State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
+        snapshot.NonUnique.State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
     }
 }

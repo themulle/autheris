@@ -85,8 +85,43 @@ public abstract class KeyIndexMetadataReaderContractTests
 
         rows.GroupBy(r => r.IndexName).Select(g => (g.Key, Cols: string.Join(",", g.Select(x => x.ColumnName))))
             .OrderBy(x => x.Key, StringComparer.Ordinal).ToArray()
-            .ShouldBe(new[] { ("pk_" + t, "a"), ("ux_inc_" + t, "b") });
+            .ShouldBe(new[] { ("ix_plain_" + t, "d"), ("pk_" + t, "a"), ("ux_inc_" + t, "b") }, "issue #404: a plain non-unique index is reported, filtered and disabled ones are not");
         rows.Single(r => r.IndexName == "ux_inc_" + t).IsDescending.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task I404_T_11_NonUnique_AscDesc_ReportedInKeyOrder_AfterPrimaryKeyAndUnique()
+    {
+        await using var conn = await OpenAsync();
+        var t = Unique("kd_nu");
+        await ExecAsync(conn, $"CREATE TABLE {Quote(Schema)}.{Quote(t)} (a int NOT NULL, b int NOT NULL, c int NOT NULL, d int NOT NULL, CONSTRAINT {Quote("pk_" + t)} PRIMARY KEY (a))");
+        await ExecAsync(conn, $"CREATE INDEX {Quote("ix_a_" + t)} ON {Quote(Schema)}.{Quote(t)} (b {DescKeyword}, c)");
+        await ExecAsync(conn, $"CREATE UNIQUE INDEX {Quote("ux_d_" + t)} ON {Quote(Schema)}.{Quote(t)} (d)");
+
+        var rows = await ReadAsync(conn, t);
+
+        rows.Select(r => (r.IndexName, r.IsPrimaryKey, r.IsUnique)).Distinct().ToArray()
+            .ShouldBe(new[] { ("pk_" + t, true, true), ("ux_d_" + t, false, true), ("ix_a_" + t, false, false) }, "primary key, then unique, then non-unique");
+        rows.Where(r => !r.IsUnique).Select(r => (r.KeyOrdinal, r.ColumnName, r.IsDescending)).ToArray()
+            .ShouldBe(new[] { (1, "b", true), (2, "c", false) });
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-11")]
+    public async Task I404_T_12_FilteredPartialExpressionIncluded_Excluded()
+    {
+        await using var conn = await OpenAsync();
+        var t = Unique("kd_ex");
+        await ExecAsync(conn, $"CREATE TABLE {Quote(Schema)}.{Quote(t)} (a int NOT NULL, b int NOT NULL, c int NOT NULL, d int NULL, CONSTRAINT {Quote("pk_" + t)} PRIMARY KEY (a))");
+        await ExecAsync(conn, $"CREATE INDEX {Quote("ix_flt_" + t)} ON {Quote(Schema)}.{Quote(t)} (b) WHERE b > 0");
+        await ExecAsync(conn, $"CREATE INDEX {Quote("ix_inc_" + t)} ON {Quote(Schema)}.{Quote(t)} (c) INCLUDE (b)");
+        await ExtraIgnoredIndexesAsync(conn, t);
+
+        var rows = await ReadAsync(conn, t);
+
+        rows.Where(r => !r.IsUnique).Select(r => (r.IndexName, r.ColumnName)).ToArray()
+            .ShouldBe(new[] { ("ix_inc_" + t, "c") }, "only the key column of the plain index; filtered, partial, expression and INCLUDE columns are not reported");
     }
 
     /// <summary>A disabled index (SQL Server) or an expression index (PostgreSQL) that must not be reported.</summary>

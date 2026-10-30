@@ -1,0 +1,8 @@
+{
+  "ops": [
+    {"op": "addTable", "table": "TABLE_PHYSICAL_INDEXES", "newTable": {"name": "TABLE_PHYSICAL_INDEXES", "columns": [{"name": "id", "type": "NVARCHAR", "family": "string", "nullable": false}, {"name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false}, {"name": "index_ordinal", "type": "INT", "family": "integer", "nullable": false}], "primaryKey": ["id"], "indexes": []}},
+    {"op": "addIndex", "table": "TABLE_PHYSICAL_INDEXES", "name": "UX_TABLE_PHYSICAL_INDEXES_ORDINAL", "unique": true, "columns": ["table_id", "index_ordinal"]},
+    {"op": "addTable", "table": "TABLE_PHYSICAL_INDEX_COLUMNS", "newTable": {"name": "TABLE_PHYSICAL_INDEX_COLUMNS", "columns": [{"name": "index_id", "type": "NVARCHAR", "family": "string", "nullable": false}, {"name": "column_ordinal", "type": "INT", "family": "integer", "nullable": false}, {"name": "table_column_id", "type": "NVARCHAR", "family": "string", "nullable": false}, {"name": "is_descending", "type": "BIT", "family": "boolean", "nullable": false}], "primaryKey": ["index_id", "column_ordinal"], "indexes": []}},
+    {"op": "addIndex", "table": "TABLE_PHYSICAL_INDEX_COLUMNS", "name": "UX_TABLE_PHYSICAL_INDEX_COLUMNS_COLUMN", "unique": true, "columns": ["index_id", "table_column_id"]}
+  ]
+}

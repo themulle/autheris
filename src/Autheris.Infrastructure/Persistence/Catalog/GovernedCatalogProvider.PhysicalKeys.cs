@@ -16,7 +16,8 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 public sealed partial class GovernedCatalogProvider
 {
     /// <summary>Hard row cap while streaming (I403-SC-10).</summary>
-    private const int MaxPhysicalKeyRows = TableKeyDefinitionValidator.MaxIndexesPerTable * TableKeyDefinitionValidator.MaxColumnsPerKey;
+    private const int MaxPhysicalKeyRows =
+        (TableKeyDefinitionValidator.MaxIndexesPerTable + TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable) * TableKeyDefinitionValidator.MaxColumnsPerKey;
 
     /// <summary>Command timeout of the physical key read (I403-SC-10); the linked caller token applies as well.</summary>
     internal TimeSpan PhysicalKeyReadTimeout { get; init; } = TimeSpan.FromSeconds(30);
@@ -52,6 +53,8 @@ public sealed partial class GovernedCatalogProvider
             await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connectionOptions, timeout.Token).ConfigureAwait(false);
             var identity = new TableIdentity(metadata.Table.SchemaName, metadata.Table.TableName);
             var rows = new List<DbKeyIndexColumn>();
+            var nonUniqueNames = new HashSet<string>(StringComparer.Ordinal);
+            var nonUniqueOverflow = false;
             await foreach (var row in reader.ReadAsync(connection, identity, timeout.Token).ConfigureAwait(false))
             {
                 if (rows.Count >= MaxPhysicalKeyRows)
@@ -59,12 +62,34 @@ public sealed partial class GovernedCatalogProvider
                     return PhysicalKeySnapshot.Unavailable;   // cap + 1 reached: abort without buffering further
                 }
 
+                // I404-SC-06: keys come first, so stopping at the 33rd non-unique index keeps the key part complete.
+                if (!row.IsPrimaryKey && !row.IsUnique && !nonUniqueNames.Contains(row.IndexName)
+                    && nonUniqueNames.Count >= TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable)
+                {
+                    nonUniqueOverflow = true;
+                    break;
+                }
+
+                if (!row.IsPrimaryKey && !row.IsUnique)
+                {
+                    nonUniqueNames.Add(row.IndexName);
+                }
+
                 rows.Add(row);
             }
 
-            return TryBuild(rows, out var keys)
-                ? new PhysicalKeySnapshot(PhysicalKeySnapshotState.Known, keys, target)
-                : PhysicalKeySnapshot.Unavailable;
+            var keyRows = rows.Where(static r => r.IsPrimaryKey || r.IsUnique).ToList();
+            if (!TryBuild(keyRows, out var keys))
+            {
+                return PhysicalKeySnapshot.Unavailable;
+            }
+
+            var nonUnique = nonUniqueOverflow
+                ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable)
+                : TryBuildNonUnique(rows.Where(static r => !r.IsPrimaryKey && !r.IsUnique).ToList(), out var indexes)
+                    ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Known, indexes)
+                    : new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable);
+            return new PhysicalKeySnapshot(PhysicalKeySnapshotState.Known, keys, target, nonUnique);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -132,6 +157,46 @@ public sealed partial class GovernedCatalogProvider
         }
 
         keys = result;
+        return true;
+    }
+
+    // Issue #404: groups the non-unique rows (already ordered by index and key ordinal). A gap or duplicate ordinal, a duplicate column,
+    // an oversized index or a name that appears in two runs is an unknown shape: the whole non-unique read fails closed (never partial).
+    private static bool TryBuildNonUnique(List<DbKeyIndexColumn> rows, out IReadOnlyList<PhysicalNonUniqueIndex> indexes)
+    {
+        indexes = [];
+        var result = new List<PhysicalNonUniqueIndex>();
+        var seenNames = new HashSet<string>(StringComparer.Ordinal);
+        var position = 0;
+        while (position < rows.Count)
+        {
+            var name = rows[position].IndexName;
+            if (!seenNames.Add(name))
+            {
+                return false;
+            }
+
+            var columns = new List<string>();
+            var directions = new List<KeyColumnDirection>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (position < rows.Count && string.Equals(rows[position].IndexName, name, StringComparison.Ordinal))
+            {
+                var row = rows[position];
+                if (row.KeyOrdinal != columns.Count + 1 || string.IsNullOrEmpty(row.ColumnName) || !seen.Add(row.ColumnName)
+                    || columns.Count >= TableKeyDefinitionValidator.MaxColumnsPerKey)
+                {
+                    return false;
+                }
+
+                columns.Add(row.ColumnName);
+                directions.Add(row.IsDescending ? KeyColumnDirection.Descending : KeyColumnDirection.Ascending);
+                position++;
+            }
+
+            result.Add(new PhysicalNonUniqueIndex(columns, directions));
+        }
+
+        indexes = result;
         return true;
     }
 

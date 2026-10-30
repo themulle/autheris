@@ -65,6 +65,9 @@ public static class AuditEventTypes
     // Catalog definition changes (Tier A, issue #94 SEC-94-06): declared primary key / index replacement with before and after.
     public const string CatalogKeyDefinitionChanged = "CATALOG_KEY_DEFINITION_CHANGED";
 
+    /// <summary>Issue #404: the sync replaced the physical non-unique index list of a table (table id and counts only).</summary>
+    public const string CatalogPhysicalIndexesChanged = "CATALOG_PHYSICAL_INDEXES_CHANGED";
+
     // Catalog visibility and tag changes (Tier A, issue #111): before/after, actor and source.
     public const string CatalogVisibilityChanged = "CATALOG_VISIBILITY_CHANGED";
     public const string CatalogTagsChanged = "CATALOG_TAGS_CHANGED";
