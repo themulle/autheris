@@ -59,7 +59,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
-            tenantId = "default";
+            tenantId = Autheris.Domain.Common.TenantId.Platform.Value; // DT-A-9: tenant-less usage is platform-scoped
         }
 
         var options = _gatewayOptions.Value.FinOps;
@@ -143,7 +143,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
-            tenantId = "default";
+            tenantId = Autheris.Domain.Common.TenantId.Platform.Value; // DT-A-9: tenant-less usage is platform-scoped
         }
 
         var options = _gatewayOptions.Value.FinOps;
@@ -220,7 +220,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
-            tenantId = "default";
+            tenantId = Autheris.Domain.Common.TenantId.Platform.Value; // DT-A-9: tenant-less usage is platform-scoped
         }
 
         _localSpend[tenantId] = 0m;

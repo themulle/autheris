@@ -31,15 +31,6 @@ public sealed partial class DefaultTenantRatchetTests(ITestOutputHelper output)
     /// <summary>The removed-key guard names the removed keys by design.</summary>
     private const string RemovedKeyGuard = "src/Autheris.Api/Configuration/LegacySwitchGuard.cs";
 
-    /// <summary>Known literal-"default" tenant fallbacks (DT-A-9 residue outside the WP-DT-6 scope). Shrink only: path|exact count.</summary>
-    private static readonly IReadOnlyDictionary<string, int> LiteralDefaultAllowance = new Dictionary<string, int>(StringComparer.Ordinal)
-    {
-        ["src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs"] = 3,
-        ["src/Autheris.Application/Security/Rebac/Services/InMemoryRebacStore.cs"] = 1,
-        ["src/Autheris.Application/Security/Rebac/Services/ZanzibarRebacEvaluator.cs"] = 4,
-        ["src/Autheris.Infrastructure/Rebac/RedisRebacStore.cs"] = 1
-    };
-
     private static readonly (string Name, Regex Pattern)[] Forbidden =
     [
         ("LegacySingleTenant", LegacyTenantSymbol()),
@@ -170,7 +161,7 @@ public sealed partial class DefaultTenantRatchetTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void DT_A_9_No_Literal_Default_Tenant_Fallback_Beyond_The_Shrink_Only_Allowance()
+    public void DT_A_9_No_Literal_Default_Tenant_Fallback()
     {
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var (path, text) in ScannedFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal)))
@@ -186,22 +177,7 @@ public sealed partial class DefaultTenantRatchetTests(ITestOutputHelper output)
 
         counts.ToList().ForEach(c => output.WriteLine($"{c.Key}|{c.Value}"));
 
-        var problems = new List<string>();
-        foreach (var (path, count) in counts)
-        {
-            if (!LiteralDefaultAllowance.TryGetValue(path, out var allowed) || count > allowed)
-            {
-                problems.Add($"{path}: {count} literal \"default\" tenant fallback(s), allowed {(LiteralDefaultAllowance.TryGetValue(path, out var a) ? a : 0)}");
-            }
-        }
-
-        foreach (var (path, allowed) in LiteralDefaultAllowance)
-        {
-            if (!counts.TryGetValue(path, out var count) || count < allowed)
-            {
-                problems.Add($"{path}: allowance {allowed} is stale (found {(counts.TryGetValue(path, out var c) ? c : 0)}); lower it");
-            }
-        }
+        var problems = counts.Select(c => $"{c.Key}: {c.Value} literal \"default\" tenant fallback(s), allowed 0").ToList();
 
         problems.ShouldBeEmpty("DT-A-9: use the resolved tenant or fail closed with TENANT_UNRESOLVED instead of a literal \"default\" tenant");
     }

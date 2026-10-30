@@ -40,6 +40,27 @@ public sealed class FocusCostAccountingTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task DT_A_9_RecordUsage_Without_Tenant_Is_Platform_Scoped_Never_Default()
+    {
+        var service = new FocusCostAccountingService(Options.Create(_options), NullLogger<FocusCostAccountingService>.Instance);
+
+        await service.RecordUsageAsync("", "user-1", "Op", "AI-Inference", 1000, 0, 0, null, CancellationToken.None);
+
+        var platform = new List<FocusCostRecord>();
+        await foreach (var r in service.GetRecordsAsync(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(5), Autheris.Domain.Common.TenantId.Platform.Value))
+        {
+            platform.Add(r);
+        }
+
+        platform.Count.ShouldBe(1);
+        await foreach (var _ in service.GetRecordsAsync(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(5), "default"))
+        {
+            Assert.Fail("A tenant-less usage record must not land in a tenant named default.");
+        }
+    }
+
+    [Fact]
     public async Task RecordUsage_CalculatesCostCorrectly_AccordingToFOCUSv12()
     {
         // Arrange
