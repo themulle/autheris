@@ -74,15 +74,23 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
         }
 
         var realmId = realm?.RealmId ?? "workforce-entra";
-        if (realm != null)
+
+        // Test host only (compile-gated): a TestAuth principal is not an identity-provider token, so its tenant claims are the tenant statement
+        // (the realm binding does not replace them); the realm claim is stamped after the tenant decision, like for a realm-less principal.
+#if AUTHERIS_TEST_AUTH
+        var tenantByClaims = identity.AuthenticationType == TestAuthHandler.SchemeName;
+#else
+        const bool tenantByClaims = false;
+#endif
+        if (realm != null && !tenantByClaims)
         {
             // An unregistered fallback id is not stamped: the tenant resolver treats a non-blank realm claim as an authoritative realm.
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
 
         // DT-A-3 / DT-SC-05: the one tenant decision of the ingress. Inbound tenant_source claims are removed, the resolved tenant is stamped.
-        var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null);
-        if (realm == null)
+        var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null && !tenantByClaims);
+        if (realm == null || tenantByClaims)
         {
             // The unregistered fallback id is stamped after the tenant decision (the resolver must not treat it as a realm); route-realm guards read it.
             identity.AddClaim(new Claim("autheris:realm", realmId));

@@ -14,6 +14,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -57,6 +58,11 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
             if (tenancyMode == "Single")
             {
                 b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default-tenant");
+            }
+            else
+            {
+                // appsettings.Development.json configures D; a Multi host has none (an empty value is rejected, so the key is nulled).
+                b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
             }
 
             b.UseSetting("Gateway:Rebac:Enabled", rebac ? "true" : "false");

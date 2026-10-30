@@ -38,6 +38,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
 
         _factory = factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
@@ -119,7 +120,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     {
         await RegisterTableAsync("customers", "id", "name", "email", "active", "tenant_id");
         var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", "tenant_alpha");
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
 
         var payload = new
         {
@@ -140,7 +142,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     public async Task WebSql_DdlStatement_IsForbiddenWith403()
     {
         var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", "tenant_alpha");
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
 
         var payload = new
         {
@@ -160,7 +163,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     public async Task WebSql_DmlStatement_WhenDisallowed_IsForbiddenWith403()
     {
         var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", "tenant_alpha");
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
 
         var payload = new
         {
@@ -266,7 +270,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     private static async Task<(HttpStatusCode Status, string Body)> PostSqlAsync(WebApplicationFactory<Program> factory, string sql, string tenant = "tenant_alpha")
     {
         var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant);
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
         var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
         return (response.StatusCode, await response.Content.ReadAsStringAsync());
     }
@@ -409,7 +414,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     {
         await RegisterTableAsync("users", "id", "name", "tenant_id");
         var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", "tenant_gamma");
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_gamma");
 
         var payload = new
         {

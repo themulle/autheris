@@ -39,8 +39,8 @@ public sealed class GovernanceAdvancedMoatsIntegrationTests : IClassFixture<WebA
         var client = CreateAuthClient();
 
         var draftCsv = @"
-p, S-1-5-21-USER-1, legacy-single-tenant, Orders, read, true, allow
-p, S-1-5-21-USER-2, legacy-single-tenant, Orders, read, true, deny
+p, S-1-5-21-USER-1, default, Orders, read, true, allow
+p, S-1-5-21-USER-2, default, Orders, read, true, deny
 ";
 
         var request = new PolicySimulationRequest(
@@ -62,7 +62,7 @@ p, S-1-5-21-USER-2, legacy-single-tenant, Orders, read, true, deny
     {
         var client = CreateAuthClient();
 
-        // The caller resolves to legacy-single-tenant; a draft for another tenant is invalid client input.
+        // The claim-less caller resolves to the default tenant ("default" from appsettings.Development.json); a draft for another tenant is invalid client input.
         var request = new PolicySimulationRequest(
             DraftPolicyCsv: "p, S-1-5-21-USER-1, other-tenant, Orders, read, true, allow",
             TargetTable: "Orders",
