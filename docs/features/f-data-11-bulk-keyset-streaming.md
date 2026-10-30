@@ -121,7 +121,7 @@ To prevent denial-of-service via massive query spikes while maintaining fair bil
 
 ## 4. Configuration & Options
 
-Configure streaming limits and query cost parameters under `Gateway:DataApi` and `Gateway:Governance:QueryCost` in `appsettings.json`:
+Configure streaming limits and query cost parameters under `Gateway:DataApi` and `Gateway:QueryCost` in `appsettings.json`:
 
 ```json
 {
@@ -135,14 +135,12 @@ Configure streaming limits and query cost parameters under `Gateway:DataApi` and
         "AllowedFormats": [ "ndjson", "arrow" ]
       }
     },
-    "Governance": {
-      "QueryCost": {
-        "BaseCost": 5.0,
-        "CostPerRow": 0.05,
-        "CostPerJoinDepth": 2.0,
-        "DefaultListMultiplier": 10,
-        "SingleObjectMultiplier": 1
-      }
+    "QueryCost": {
+      "BaseCost": 1,
+      "RowCostFactor": 0.5,
+      "NestedCostFactor": 1,
+      "CostPerSingleRowLookup": 1,
+      "DefaultListMultiplier": 10
     }
   }
 }

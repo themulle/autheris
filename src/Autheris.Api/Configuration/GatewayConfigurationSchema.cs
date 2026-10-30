@@ -42,7 +42,6 @@ public static class GatewayConfigurationSchema
         ("Gateway:Governance:QueryAnalysis", typeof(GovernanceQueryAnalysisOptions)),
         ("Gateway:Governance:IndividualGrants", typeof(IndividualGrantOptions)),
         ("Gateway:Governance:RestrictedScopes", typeof(RestrictedScopeOptions)),
-        ("Gateway:Governance:QueryCost", typeof(QueryCostOptions)),
         ("Gateway:Plugins:Auth", typeof(AuthPluginOptions)),
         ("Gateway:Telemetry", typeof(TelemetryOptions)),
         ("Gateway:Subscriptions", typeof(RevocationWatchOptions)),
