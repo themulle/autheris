@@ -892,52 +892,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         bool isGranted,
         bool bypass)
     {
-        Dictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel> levels;
-        if (isAdmin)
-        {
-            levels = new Dictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in table.Columns)
-            {
-                levels[col.ColumnName] = Autheris.Domain.Interfaces.ColumnAccessLevel.Clear;
-            }
-
-            return levels;
-        }
-
-        try
-        {
-            // The explicit (production-blocked) MCP auth bypass may have no SID: it keeps the catalog baseline (AC-127-9).
-            var userSid = principal.GetUserSid() ?? (bypass ? new Sid("MCP_AUTH_BYPASS") : (Sid?)null);
-            if (userSid == null)
-            {
-                levels = CatalogColumnAccessResolver.AllDeny(table);
-            }
-            else
-            {
-                var tenantId = principal.GetTenantId();
-                var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
-                var groups = principal.GetGroupSids();
-                var roles = principal.GetUserRoles();
-                var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
-
-                levels = isGranted
-                    ? CatalogColumnAccessResolver.ResolveGranted(consentResolution, table, userSid.Value, groups, roles, tenantConsents, scopes)
-                    : CatalogColumnAccessResolver.ResolveBaseline(consentResolution, table, userSid.Value, groups, roles, tenantConsents, scopes);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Fail closed; only the table and the exception type are logged (no consent content, scopes or values).
-            logger?.LogWarning("Column level resolution failed for {Dataset} ({ExceptionType}); all columns denied.", DatasetId(table.Identifier), ex.GetType().Name);
-            levels = CatalogColumnAccessResolver.AllDeny(table);
-        }
-
-        CatalogColumnAccessResolver.ApplyCatalogDenyRules(levels, table);
-        return levels;
+        return CatalogCallerColumnLevels.Resolve(consentResolution, principal, table, activeConsents, isAdmin, isGranted, bypass, logger);
     }
 
     private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)

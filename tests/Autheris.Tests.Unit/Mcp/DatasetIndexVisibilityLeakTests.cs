@@ -120,6 +120,8 @@ public sealed class DatasetIndexVisibilityLeakTests
         var mcp = await Mcp(Table()).DescribeDatasetAsync(User(), "sales.public.orders");
         var rest = await Rest(Table()).GetDatasetDetailAsync(Orders, Admin());
 
+        // GraphQL: the MCP GraphQL tool answers through the same DescribeDatasetAsync path (GatewayMcpQueryExecutor), so the
+        // describe assertions below cover it; there is no separate GraphQL projection.
         // Parity (I404-SC-L5): both surfaces answer with the single whole, clear-only index.
         Columns(mcp.Indexes).ShouldBe("id,amount");
         Columns(rest!.Indexes).ShouldBe("id,amount");
@@ -218,7 +220,86 @@ public sealed class DatasetIndexVisibilityLeakTests
         partial.Indexes.ShouldAllBe(i => !i.Columns.Contains("c39"));
     }
 
-    private sealed class ThrowingResolution : IConsentResolutionService
+    private static readonly TableIdentifier Plain = new("sales", "dbo", "orders");
+
+    private static TableMetadata PlainTable() => Wp0.Table("sales", "orders", "Orders", ["id", "amount"]) with
+    {
+        PrimaryKeyColumns = ["id", "amount"],
+        Indexes = [new TableIndexDefinition("ix_amount", ["amount"], false), new TableIndexDefinition("ix_id", ["id"], true)]
+    };
+
+    private static async Task<DatasetIndexInfoView> RestAsUserAsync(ColumnAccessLevel amountLevel, IConsentResolutionService? resolution = null)
+    {
+        var consent = new Consent
+        {
+            TableIdentifier = Plain,
+            TenantId = Wp0.TenantA,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-USER"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules =
+            [
+                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "amount", AccessLevel = amountLevel }
+            ]
+        };
+        var tables = Wp0.Tables(PlainTable());
+        var consents = Wp0.Consents(consent);
+        var options = Wp0.Options(TenancyMode.Multi);
+        var service = new CatalogDiscoveryService(
+            tables,
+            Substitute.For<IAuditLogRepository>(),
+            Options.Create(options),
+            CatalogVisibilityTestFactory.Create(tables, consents, options, Substitute.For<IRebacEvaluator>()),
+            Substitute.For<IKeyVaultSecretProvider>(),
+            Substitute.For<IOpenApiIngestionService>(),
+            Substitute.For<ICatalogSearchEngine>(),
+            NullLogger<CatalogDiscoveryService>.Instance,
+            consentResolution: resolution,
+            consentRepository: consents);
+
+        var detail = await service.GetDatasetDetailAsync(Plain, Wp0.Context(Wp0.User("S-USER", "tenant-a")));
+        detail.ShouldNotBeNull();
+        return new DatasetIndexInfoView(Columns(detail.Indexes), detail.PrimaryKeys.Count, detail.Columns.Any(c => c.IsPrimaryKey));
+    }
+
+    private sealed record DatasetIndexInfoView(string Indexes, int PrimaryKeys, bool AnyPkFlag);
+
+    [Fact]
+    public async Task I404_T_SL1_Rest_NonAdmin_AllClear_ShowsKeysAndIndexes()
+    {
+        var view = await RestAsUserAsync(ColumnAccessLevel.Clear);
+
+        view.Indexes.ShouldBe("amount|id");
+        view.PrimaryKeys.ShouldBe(2);
+    }
+
+    [Theory]
+    [InlineData(ColumnAccessLevel.Mask)]
+    [InlineData(ColumnAccessLevel.Deny)]
+    public async Task I404_T_SL1_Rest_NonAdmin_ConsentLowersBaselineClearColumn_IndexAndPkOmitted(ColumnAccessLevel level)
+    {
+        var view = await RestAsUserAsync(level);
+
+        // "amount" is baseline-clear in the catalog; the caller's consent lowers it, so only the index over "id" survives.
+        view.Indexes.ShouldBe("id");
+        view.PrimaryKeys.ShouldBe(0);
+        view.AnyPkFlag.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task I404_T_SL2_Rest_ResolverFailure_OmitsEveryKeyAndIndex()
+    {
+        var view = await RestAsUserAsync(ColumnAccessLevel.Clear, new ThrowingResolution());
+
+        view.Indexes.ShouldBeEmpty();
+        view.PrimaryKeys.ShouldBe(0);
+        view.AnyPkFlag.ShouldBeFalse();
+    }
+
+    private sealed class ThrowingResolution :IConsentResolutionService
     {
         public TableAccessDecision ResolveAccess(
             Sid userSid,

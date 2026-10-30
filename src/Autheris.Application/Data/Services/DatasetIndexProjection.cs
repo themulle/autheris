@@ -43,19 +43,13 @@ public static class DatasetIndexProjection
             return DatasetKeyProjection.Empty;
         }
 
-        // Only columns that really exist in the table can be clear; a stale name in a key never resolves.
-        var known = new HashSet<string>(table.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-        bool Readable(IReadOnlyList<string> names) =>
-            names.Count is > 0 and <= MaxColumnsPerKey
-            && names.All(n => known.Contains(n) && clearColumns.Contains(n));
-
-        var primaryKey = Readable(table.PrimaryKeyColumns) ? table.PrimaryKeyColumns.ToArray() : [];
+        var primaryKey = Readable(table, table.PrimaryKeyColumns, clearColumns) ? table.PrimaryKeyColumns.ToArray() : [];
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var indexes = new List<DatasetIndexInfo>();
         foreach (var index in table.Indexes)
         {
-            if (!Readable(index.Columns))
+            if (!Readable(table, index.Columns, clearColumns))
             {
                 continue;
             }
@@ -74,6 +68,38 @@ public static class DatasetIndexProjection
         }
 
         return new DatasetKeyProjection(primaryKey, indexes);
+    }
+
+    // Every name must be a real column of the table (a stale name never resolves) and Clear for the caller; no allocation.
+    private static bool Readable(TableMetadata table, IReadOnlyList<string> names, IReadOnlySet<string> clear)
+    {
+        if (names.Count is 0 or > MaxColumnsPerKey)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (!clear.Contains(names[i]) || !IsColumnOf(table, names[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsColumnOf(TableMetadata table, string name)
+    {
+        for (var i = 0; i < table.Columns.Count; i++)
+        {
+            if (string.Equals(table.Columns[i].ColumnName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The columns whose level is exactly <c>Clear</c>; a missing level is not clear.</summary>

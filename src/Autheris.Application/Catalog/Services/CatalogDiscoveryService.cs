@@ -32,6 +32,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IOpenApiIngestionService? _openApiIngestionService;
     private readonly ICatalogSearchEngine? _searchEngine;
+    private readonly IConsentResolutionService? _consentResolution;
+    private readonly IConsentRepository? _consentRepository;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<CatalogDiscoveryService> _logger;
     private readonly long _maxSpecDownloadBytes;
     private readonly IHttpClientFactory? _httpClientFactory;
@@ -54,8 +57,14 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IOptions<CatalogDiscoveryOptions>? options = null,
         IHttpClientFactory? httpClientFactory = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        IConsentResolutionService? consentResolution = null,
+        IConsentRepository? consentRepository = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _consentResolution = consentResolution;
+        _consentRepository = consentRepository;
         _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -164,12 +173,14 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 Language: lang);
         }
 
-        // I404-SC-L1/L4: declared keys and indexes are reported only as a whole and only when every column is Clear. This detail
-        // describes the catalog baseline (masking state per column); a column in any other state is not clear.
+        // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
+        // caller: the caller's resolved access level (shared with describe_dataset) and the catalog masking state must both say Clear.
+        var callerClear = await ResolveCallerClearColumnsAsync(metadata, context, ct).ConfigureAwait(false);
         var clear = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in metadata.Columns)
         {
-            if (string.Equals(MaskingStateOf(metadata, column), "Clear", StringComparison.OrdinalIgnoreCase))
+            if (callerClear.Contains(column.ColumnName)
+                && string.Equals(MaskingStateOf(metadata, column), "Clear", StringComparison.OrdinalIgnoreCase))
             {
                 clear.Add(column.ColumnName);
             }
@@ -210,6 +221,50 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             LongDescription: tableLongDescription,
             Language: lang
         );
+    }
+
+    /// <summary>
+    /// The columns that are Clear for the REST caller, from the same resolution as describe_dataset
+    /// (<see cref="CatalogCallerColumnLevels"/>). A missing dependency, no SID, or any failure except cancellation yields the empty
+    /// set, which omits every key and index (fail closed).
+    /// </summary>
+    private async Task<IReadOnlySet<string>> ResolveCallerClearColumnsAsync(TableMetadata metadata, RequestContext context, CancellationToken ct)
+    {
+        var empty = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var principal = context.User;
+            var scope = CallerScopeResolver.Resolve(principal, TenancyMode);
+            var resolution = _consentResolution ?? new ConsentResolutionService();
+            if (CallerScopeResolver.IsAdminView(scope))
+            {
+                return Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(
+                    CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, [], isAdmin: true, isGranted: false, bypass: false, _logger));
+            }
+
+            var userSid = principal.GetUserSid();
+            if (_consentRepository == null || userSid == null || scope == CallerScope.None)
+            {
+                return empty;
+            }
+
+            var tenantId = principal.GetTenantId();
+            var subjects = principal.GetGroupSids().Append(userSid.Value).ToList();
+            var consents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
+                subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), tenantId, ct).ConfigureAwait(false);
+            var granted = consents.Any(c => c.Effect == ConsentEffect.Allow && c.TableIdentifier == metadata.Identifier && c.TenantId == tenantId);
+            return Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(
+                CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, consents, isAdmin: false, isGranted: granted, bypass: false, _logger));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Catalog detail key visibility lookup failed for {Dataset} ({ExceptionType}); keys and indexes omitted.", metadata.Identifier.ToString(), ex.GetType().Name);
+            return empty;
+        }
     }
 
     private static string MaskingStateOf(TableMetadata metadata, TableColumn c)
