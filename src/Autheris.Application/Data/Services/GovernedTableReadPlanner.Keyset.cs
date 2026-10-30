@@ -231,7 +231,7 @@ public sealed partial class GovernedTableReadPlanner
         sb.Append(" ORDER BY ")
           .Append(string.Join(", ", pkCols.Select((c, i) => DataApiFilterTranslator.QuoteIdentifier(metadata.GetColumn(c)!.ColumnName) + (streamKey.IsDescending(i) ? " DESC" : " ASC"))));
 
-        int sliceLimit = request.Limit > 0 ? Math.Min(request.Limit, 10000) : 5000;
+        int sliceLimit = request.Limit is > 0 ? Math.Min(request.Limit.Value, 10000) : 5000;
         sb.Append(" LIMIT ").Append((sliceLimit + 1).ToString(CultureInfo.InvariantCulture));
 
         return new PlannedTableRead(sb.ToString(), parameters, columnsToSelect, DefaultOrderingKind.Explicit);

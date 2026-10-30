@@ -259,10 +259,10 @@ public static class TableStreamEndpoints
         // 7. Token Bucket Admission (Phase 1: Upfront Reservation)
         var rateLimiter = httpContext.RequestServices!.GetService<IRateLimiterService>();
         var tierResolver = httpContext.RequestServices!.GetService<IClientTierResolver>();
-        int sliceLimit = request.Limit > 0 ? Math.Min(request.Limit, 10000) : 5000;
-        int baseCost = 10;
-        int costPerRow = 1;
-        int reservedCost = baseCost + (sliceLimit * costPerRow);
+        const int baseCost = 10;
+        const int costPerRow = 1;
+        const int maxSliceLimit = 10000;
+        const int defaultSliceLimit = 5000;
 
         ClientQuotaPolicy policy;
         ClientQuotaContext? clientContext = null;
@@ -278,6 +278,34 @@ public static class TableStreamEndpoints
         {
             policy = ClientQuotaPolicy.ForTier(ClientTier.Internal);
         }
+
+        // I418-SC-02/03: the slice must fit the caller's bucket (capacity - base cost). Long arithmetic avoids overflow;
+        // a capacity at or below the base cost can never admit a slice and fails closed.
+        long maxAdmissibleLimit = Math.Min((long)policy.MaxTokensCapacity - baseCost, maxSliceLimit);
+        if (maxAdmissibleLimit < 1)
+        {
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming request cannot be admitted for this caller.", ct).ConfigureAwait(false);
+            return;
+        }
+
+        int sliceLimit;
+        if (request.Limit is > 0)
+        {
+            int requested = Math.Min(request.Limit.Value, maxSliceLimit);
+            if (requested > maxAdmissibleLimit)
+            {
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, $"The limit must not exceed {maxAdmissibleLimit.ToString(CultureInfo.InvariantCulture)} for this caller.", ct).ConfigureAwait(false);
+                return;
+            }
+
+            sliceLimit = requested;
+        }
+        else
+        {
+            sliceLimit = (int)Math.Min(defaultSliceLimit, maxAdmissibleLimit);
+        }
+
+        int reservedCost = baseCost + (sliceLimit * costPerRow);
 
         if (rateLimiter != null)
         {
