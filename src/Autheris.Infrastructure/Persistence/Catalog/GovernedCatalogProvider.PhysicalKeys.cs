@@ -72,7 +72,7 @@ public sealed partial class GovernedCatalogProvider
         }
         catch (Exception ex)
         {
-            LogPhysicalKeyFailure(metadata.Identifier, ex);
+            LogPhysicalKeyFailure(metadata.Table.SourceName, metadata.Identifier, ex);
             return PhysicalKeySnapshot.Unavailable;
         }
     }
@@ -136,7 +136,7 @@ public sealed partial class GovernedCatalogProvider
     }
 
     // I403-SC-09: the exception type and the table id only; no message, SQL text or catalog name.
-    private void LogPhysicalKeyFailure(TableIdentifier table, Exception ex)
+    private void LogPhysicalKeyFailure(string dataSourceName, TableIdentifier table, Exception ex)
     {
         var diagnostic = ex as SqlSourceLoginBlockedException;
         if (diagnostic is not null)
@@ -145,7 +145,9 @@ public sealed partial class GovernedCatalogProvider
             return;
         }
 
-        _logger.LogWarning("Physical key read failed for table {Table} ({ExceptionType}); no direction is applied.",
+        // Same throttling as the column read: a down source logs at Warning once per window, repeats at Debug.
+        _logger.Log(NextLoadFailureLevel($"{dataSourceName}|physical-keys|{ex.GetType().Name}"),
+            "Physical key read failed for table {Table} ({ExceptionType}); no direction is applied.",
             table.ToQualifiedName(), ex.GetType().Name);
     }
 }
