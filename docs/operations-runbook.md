@@ -331,6 +331,28 @@ Individual grants are time-bound ([F-GOV-22](features/f-gov-22-time-bound-indivi
 - **After a user reports lost access:** check the grant in `GET /api/v1/governance/grants?grantee=<sid>&includeInactive=true` (`effectiveValidTo`, `clamped`, `isActive`). Restore access through a renewal by an owner or delegate, or convert recurring needs into a group/role mapping. The grantee cannot renew its own grant.
 - **`Unmasked` profiles:** an `Unmasked` assignment is effective only as an approved group/role mapping, a four-eyes individual grant (≤ 30 days) or a break-glass exception (≤ 72 hours, approved within 24 hours). Unapproved assignments are ignored, so masking stays on.
 
+### 4.al Aggregation group-key refusal (AGGREGATE_QUERY details)
+
+A governed aggregation that groups by a column whose type cannot be grouped is refused with the fixed `AGGREGATION_NOT_SUPPORTED` answer. Every refusal writes one Required-tier audit entry with event type `AGGREGATE_QUERY` and decision `DENY`. The details of that entry carry, in this order, `is_allowed`, `reasons`, `group_by`, `filter`, `refusal_reason` and `group_key_type_family`.
+
+- **`refusal_reason`:** the fixed value `GROUP_KEY_TYPE_NOT_GROUPABLE`.
+- **`group_key_type_family`:** the family of the first refused group key, one of the closed set below. It is never raw type text and never a column name. Only the first refused key is recorded.
+- **`group_by`:** holds the column names exactly as the caller supplied them in the request. It is caller-supplied text, not schema data.
+- **Audit only:** the family appears only in this entry. Responses, logs and metrics are identical for every family, so a caller cannot derive the type of a column from a response.
+- **Precedence:** a request that also fails an access, mask, aggregate, filter or privacy check is refused with that error and its entry carries no `group_key_type_family`.
+
+| `group_key_type_family` | Meaning |
+|---|---|
+| `json` | JSON document type |
+| `xml` | XML document type |
+| `spatial` | Geometry or geography type |
+| `binary` | Binary type |
+| `lob` | Large-object or legacy long-text type |
+| `structured` | Array, map, struct, range or other composite type |
+| `unknown` | The type is not on the allow-list and has no named family |
+
+SIEM rule of thumb: alert on a sudden rise of `AGGREGATE_QUERY` DENY entries that carry `group_key_type_family`, per actor and table.
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync

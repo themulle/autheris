@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.DataApi;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Autheris.Application.Analytics;
 using Autheris.Application.Data.Services;
@@ -165,5 +166,31 @@ public sealed class Issue405GroupKeyAuditTests
         // the classifier never decides refusal: an oversized type is still refused by the allow-list.
         Should.Throw<AggregationGroupKeyNotSupportedException>(() => GroupKeyTypeFamilies.EnsureGroupable(oversized, DatabaseDialect.SqlServer))
             .Family.ShouldBe(GroupKeyTypeFamily.Unknown);
+    }
+
+    [Fact]
+    public void I405_T_13_RunbookSection_ListsEveryLiteral()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Autheris.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        var text = File.ReadAllText(Path.Combine(dir!.FullName, "docs", "operations-runbook.md"));
+        var start = text.IndexOf("### 4.al ", StringComparison.Ordinal);
+        start.ShouldBeGreaterThan(0);
+        var end = text.IndexOf("\n## ", start, StringComparison.Ordinal);
+        var section = text[start..end];
+
+        foreach (var literal in ClosedLiterals)
+        {
+            section.ShouldContain($"`{literal}`");
+        }
+
+        section.ShouldContain("group_key_type_family");
+        section.ShouldContain("refusal_reason");
+        section.ShouldContain("caller-supplied");
+        section.ShouldContain("never raw type text");
     }
 }
