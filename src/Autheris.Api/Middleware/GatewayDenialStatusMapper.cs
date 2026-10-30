@@ -23,30 +23,17 @@ internal static class GatewayDenialStatusMapper
     };
 
     /// <summary>
-    /// The WebSQL response of a denial: the status of <see cref="Map"/> with a generic message. Only the code and the
-    /// exception type are logged, never the exception object: the inner exception of a key source failure may quote
-    /// data values (C-8, SEC-11).
+    /// The WebSQL response of a denial: the status and fixed title of <see cref="Map"/> in the same problem body the global handler writes
+    /// (<see cref="GatewayProblemWriter"/>, NL-T-30). Only the code and the exception type are logged, never the exception object: the
+    /// inner exception of a key source failure may quote data values (C-8, SEC-11).
     /// </summary>
-    internal static async Task WriteWebSqlResponseAsync(
-        HttpContext httpContext, GatewaySecurityException denial, ILogger logger, string forbiddenMessage, CancellationToken ct)
+    internal static Task WriteWebSqlResponseAsync(
+        HttpContext httpContext, GatewaySecurityException denial, ILogger logger, CancellationToken ct)
     {
         logger.LogWarning(
             "WebSQL denied by the gateway ({ErrorCode}, {ExceptionType}). TraceId={TraceId}",
             denial.ErrorCode, denial.GetType().Name, httpContext.TraceIdentifier);
         var (status, title) = Map(denial);
-        httpContext.Response.StatusCode = status;
-        httpContext.Response.ContentType = "application/json; charset=utf-8";
-        await httpContext.Response.WriteAsJsonAsync(new
-        {
-            error = status switch
-            {
-                StatusCodes.Status401Unauthorized => "Unauthorized",
-                StatusCodes.Status400BadRequest => "BadRequest",
-                StatusCodes.Status503ServiceUnavailable => "ServiceUnavailable",
-                _ => "Forbidden"
-            },
-            message = status == StatusCodes.Status403Forbidden ? forbiddenMessage : title,
-            traceId = httpContext.TraceIdentifier
-        }, ct);
+        return GatewayProblemWriter.WriteAsync(httpContext, status, title, Autheris.Api.Errors.ApiErrorCodes.StatusDefault(status), null, null, Autheris.Api.Errors.ApiProblems.ResolveTraceId(httpContext), ct);
     }
 }

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -32,7 +33,7 @@ public static class HitLEndpoints
         {
             if (!options.Value.HitLStepUp.Enabled)
             {
-                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
             // SEC C-05: Only approvers may list tickets, and only those of their own tenant.
@@ -59,7 +60,7 @@ public static class HitLEndpoints
         {
             if (!options.Value.HitLStepUp.Enabled)
             {
-                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
             if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(request.ApprovalId))
@@ -92,7 +93,7 @@ public static class HitLEndpoints
         {
             if (!options.Value.HitLStepUp.Enabled)
             {
-                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
             if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(ticketId))
@@ -124,7 +125,7 @@ public static class HitLEndpoints
         {
             if (!options.Value.HitLStepUp.Enabled)
             {
-                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
             if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(request.ApprovalId))

@@ -46,8 +46,7 @@ public static class DuckDbOlapEndpoints
         var options = gatewayOptions.Value.DuckDbOlap ?? new DuckDbOlapOptions();
         if (!options.Enabled)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "In-memory DuckDB OLAP engine is currently disabled." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "In-memory DuckDB OLAP engine is currently disabled.", ct);
             return;
         }
 
@@ -55,8 +54,7 @@ public static class DuckDbOlapEndpoints
         if (user?.Identity?.IsAuthenticated != true &&
             !gatewayOptions.Value.IsQuickstartProfile)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Authentication required for analytical OLAP execution." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "Authentication required for analytical OLAP execution.", ct);
             return;
         }
 
@@ -68,15 +66,13 @@ public static class DuckDbOlapEndpoints
         catch (JsonException ex)
         {
             logger.Warning(ex, "Invalid JSON payload in OLAP query request.");
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON payload in request body." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidJson, "Invalid JSON payload in request body.", ct);
             return;
         }
 
         if (dto == null || string.IsNullOrWhiteSpace(dto.Sql))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Missing 'sql' query in request body." }, ct);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Missing 'sql' query in request body.", ct);
             return;
         }
 
@@ -122,13 +118,22 @@ public static class DuckDbOlapEndpoints
                 }
             }
         }
-        else if (outcome.ErrorCode != null)
-        {
-            await httpContext.Response.WriteAsJsonAsync(new { error = outcome.Error, code = outcome.ErrorCode }, ct);
-        }
         else
         {
-            await httpContext.Response.WriteAsJsonAsync(new { error = outcome.Error }, ct);
+            // The outcome text can quote table names, counts or exception text: only a fixed detail per status reaches the body (NL-SC-21).
+            await ApiProblems.WriteAsync(httpContext, outcome.StatusCode, outcome.ErrorCode ?? string.Empty, OutcomeDetail(outcome.StatusCode), ct);
         }
     }
+
+    private static string OutcomeDetail(int status) => status switch
+    {
+        StatusCodes.Status400BadRequest => "The analytical request could not be processed.",
+        StatusCodes.Status401Unauthorized => "Authentication required for analytical OLAP execution.",
+        StatusCodes.Status403Forbidden => "Access denied.",
+        StatusCodes.Status404NotFound => "The requested resource was not found.",
+        StatusCodes.Status429TooManyRequests => "OLAP capacity limit reached. Please retry later.",
+        StatusCodes.Status502BadGateway => "The analytical request could not be completed.",
+        StatusCodes.Status504GatewayTimeout => "The analytical request timed out.",
+        _ => "The analytical request failed."
+    };
 }

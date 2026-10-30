@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
@@ -45,9 +46,7 @@ public sealed class TenantResolutionMiddleware(RequestDelegate next)
                     bool isAdmin = context.User.IsInRole("GatewayAdmin") || context.User.IsInRole("PlatformAdmin");
                     if (!isAdmin)
                     {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        context.Response.ContentType = "application/json";
-                        await context.Response.WriteAsync("{\"errors\":[{\"message\":\"Cross-tenant access forbidden. Requested header tenant does not match authenticated token claim.\",\"code\":\"CROSS_TENANT_ACCESS_FORBIDDEN\"}]}");
+                        await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.CrossTenantAccessForbidden, "Cross-tenant access forbidden. Requested header tenant does not match authenticated token claim.", context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
                     rawTenant = headerTenant;
@@ -66,9 +65,7 @@ public sealed class TenantResolutionMiddleware(RequestDelegate next)
                     bool isAdmin = context.User.IsInRole("GatewayAdmin") || context.User.IsInRole("PlatformAdmin");
                     if (!isAdmin)
                     {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        context.Response.ContentType = "application/json";
-                        await context.Response.WriteAsync("{\"errors\":[{\"message\":\"Cross-tenant access forbidden. Authenticated user does not possess a tenant claim and is not authorized to select arbitrary tenants via header.\",\"code\":\"CROSS_TENANT_ACCESS_FORBIDDEN\"}]}");
+                        await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.CrossTenantAccessForbidden, "Cross-tenant access forbidden. Authenticated user does not possess a tenant claim and is not authorized to select a tenant.", context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
                     rawTenant = headerTenant;
@@ -93,9 +90,7 @@ public sealed class TenantResolutionMiddleware(RequestDelegate next)
             }
             catch (ArgumentException)
             {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync("{\"errors\":[{\"message\":\"Invalid tenant identifier.\",\"code\":\"INVALID_TENANT_ID\"}]}");
+                await ApiProblems.WriteAsync(context, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidTenantId, "Invalid tenant identifier.", context.RequestAborted).ConfigureAwait(false);
                 return;
             }
         }

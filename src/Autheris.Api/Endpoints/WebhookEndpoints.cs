@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Linq;
 using System.Text.Json;
@@ -98,7 +99,7 @@ public static class WebhookEndpoints
             var success = await syncService.HandleWebhookEventAsync(payload, signature, context.RequestAborted);
             if (!success)
             {
-                return Results.BadRequest(new { error = "Failed to process webhook or invalid signature." });
+                return ApiProblems.BadRequest(ApiErrorCodes.WebhookSignatureOrFormatInvalid, "Failed to process webhook or invalid signature.");
             }
 
             return Results.Ok(new { status = "Processed" });
@@ -153,7 +154,7 @@ public static class WebhookEndpoints
                 // EP-14: malformed handshake bodies are a 400, never an unhandled exception on this anonymous route.
                 return TryReadValidationCode(payload, out var validationCode)
                     ? Results.Ok(new { validationResponse = validationCode ?? "" })
-                    : Results.BadRequest(new { error = "Invalid EventGrid validation payload." });
+                    : ApiProblems.BadRequest(ApiErrorCodes.WebhookPayloadInvalid, "Invalid EventGrid validation payload.");
             }
 
             string? signature = null;
@@ -189,12 +190,12 @@ public static class WebhookEndpoints
             {
                 if (!timestamp.HasValue)
                 {
-                    return Results.Json(new { error = "Missing required timestamp header (X-Catalog-Timestamp)." }, statusCode: StatusCodes.Status401Unauthorized);
+                    return ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, "Missing required timestamp header (X-Catalog-Timestamp).");
                 }
 
                 if ((DateTimeOffset.UtcNow - timestamp.Value).Duration() > TimeSpan.FromMinutes(5))
                 {
-                    return Results.Json(new { error = "Webhook timestamp is outside the permitted 5-minute tolerance window." }, statusCode: StatusCodes.Status401Unauthorized);
+                    return ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, "Webhook timestamp is outside the permitted 5-minute tolerance window.");
                 }
             }
 
@@ -236,7 +237,7 @@ public static class WebhookEndpoints
                 // EP-14: malformed handshake bodies are a 400, never an unhandled exception on this anonymous route.
                 return TryReadValidationCode(payload, out var validationCode)
                     ? Results.Ok(new { validationResponse = validationCode ?? "" })
-                    : Results.BadRequest(new { error = "Invalid EventGrid validation payload." });
+                    : ApiProblems.BadRequest(ApiErrorCodes.WebhookPayloadInvalid, "Invalid EventGrid validation payload.");
             }
 
             string? signature = null;
@@ -273,12 +274,12 @@ public static class WebhookEndpoints
             {
                 if (!timestamp.HasValue)
                 {
-                    return Results.Json(new { error = "Missing required timestamp header (X-Catalog-Timestamp)." }, statusCode: StatusCodes.Status401Unauthorized);
+                    return ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, "Missing required timestamp header (X-Catalog-Timestamp).");
                 }
 
                 if ((DateTimeOffset.UtcNow - timestamp.Value).Duration() > TimeSpan.FromMinutes(5))
                 {
-                    return Results.Json(new { error = "Webhook timestamp is outside the permitted 5-minute tolerance window." }, statusCode: StatusCodes.Status401Unauthorized);
+                    return ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, "Webhook timestamp is outside the permitted 5-minute tolerance window.");
                 }
             }
 
@@ -317,7 +318,7 @@ public static class WebhookEndpoints
 
         if (string.IsNullOrWhiteSpace(payload))
         {
-            return Results.BadRequest(new { error = "Empty webhook payload." });
+            return ApiProblems.BadRequest(ApiErrorCodes.WebhookPayloadInvalid, "Empty webhook payload.");
         }
 
         var opts = options.Value;
@@ -344,7 +345,7 @@ public static class WebhookEndpoints
         {
             if (!opts.IsWebhookTimestampToleranceIgnored)
             {
-                return Results.BadRequest(new { error = "Header X-ITSM-Timestamp is required and must be a valid ISO 8601 timestamp or Unix time in seconds." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Header X-ITSM-Timestamp is required and must be a valid ISO 8601 timestamp or Unix time in seconds.");
             }
             timestamp = DateTimeOffset.UtcNow;
         }

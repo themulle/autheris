@@ -13,22 +13,22 @@ public sealed class ProblemDetailsShapeTests
     [Fact]
     public void Problem_Details_Has_No_Top_Level_Error()
     {
-        var result = ApiProblems.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Not allowed.");
+        var result = ApiProblems.Problem(StatusCodes.Status403Forbidden, "ACCESS_DENIED", "Not allowed.");
         var problem = result.ShouldBeOfType<ProblemHttpResult>().ProblemDetails;
 
         problem.Extensions.ContainsKey("error").ShouldBeFalse();
-        problem.Extensions["code"].ShouldBe("FORBIDDEN");
+        problem.Extensions["code"].ShouldBe("ACCESS_DENIED");
         problem.Detail.ShouldBe("Not allowed.");
         problem.Status.ShouldBe(403);
-        problem.Type.ShouldBe("urn:autheris:error:FORBIDDEN");
+        problem.Type.ShouldBe("urn:autheris:error:ACCESS_DENIED");
     }
 
     [Fact]
     public void Created_Problem_Details_Has_No_Top_Level_Error()
     {
-        var problem = ApiProblems.CreateProblemDetails(StatusCodes.Status400BadRequest, "BAD", "Bad request.");
+        var problem = ApiProblems.CreateProblemDetails(StatusCodes.Status400BadRequest, "BAD_REQUEST", "Bad request.");
 
         problem.Extensions.ContainsKey("error").ShouldBeFalse();
-        problem.Extensions["code"].ShouldBe("BAD");
+        problem.Extensions["code"].ShouldBe("BAD_REQUEST");
     }
 }

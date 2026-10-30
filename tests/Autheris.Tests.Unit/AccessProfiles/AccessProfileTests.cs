@@ -1237,7 +1237,7 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        body.ShouldContain("Invalid maskingMode");
+        body.ShouldContain("The maskingMode is invalid");
         (await repo.GetAllProfilesAsync(TenantLiebherr)).ShouldBeEmpty();
     }
 

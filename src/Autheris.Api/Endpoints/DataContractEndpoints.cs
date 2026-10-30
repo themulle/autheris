@@ -53,7 +53,7 @@ public static class DataContractEndpoints
             }
 
             var success = await dataHubClient.IngestMetadataChangeEventAsync(payload, context.RequestAborted);
-            return success ? Results.Ok(new { received = true }) : Results.BadRequest(new { error = "Invalid event payload." });
+            return success ? Results.Ok(new { received = true }) : ApiProblems.BadRequest(ApiErrorCodes.DataContractInvalid, "The event payload is invalid.");
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
           .WithRequestBodyLimit(10 * 1024 * 1024)
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
@@ -87,7 +87,7 @@ public static class DataContractEndpoints
 
             if (contract == null)
             {
-                return Results.BadRequest(new { error = "Invalid contract payload." });
+                return ApiProblems.BadRequest(ApiErrorCodes.DataContractInvalid, "The contract payload is invalid.");
             }
 
             await contractEngine.RegisterContractAsync(contract, context.RequestAborted);

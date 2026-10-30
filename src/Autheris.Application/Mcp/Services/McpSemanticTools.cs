@@ -170,7 +170,7 @@ public static class McpSemanticTools
 
         if (string.IsNullOrWhiteSpace(metricName))
         {
-            return JsonSerializer.Serialize(new { error = "Argument 'metric' is required." });
+            return McpToolError.Serialize("INVALID_PARAMS", "Argument 'metric' is required.");
         }
 
         var tenant = tenancy.ResolveCallerTenant(principal);
@@ -179,7 +179,7 @@ public static class McpSemanticTools
             : null;
         if (metric == null)
         {
-            return JsonSerializer.Serialize(new { error = $"Metric '{metricName}' was not found in the semantic catalog." });
+            return McpToolError.Serialize("NOT_FOUND", "The metric was not found in the semantic catalog.");
         }
 
         return JsonSerializer.Serialize(SemanticMetricCatalogProjection.ProjectOne(metric, principal), IndentedOptions);
@@ -264,13 +264,13 @@ public static class McpSemanticTools
             }
             catch (JsonException)
             {
-                return JsonSerializer.Serialize(new { error = "INVALID_JSON", message = "Arguments must be valid JSON." }, IndentedOptions);
+                return McpToolError.Serialize("INVALID_JSON", "Arguments must be valid JSON.");
             }
         }
 
         if (metrics.Count == 0)
         {
-            return JsonSerializer.Serialize(new { error = "INVALID_PARAMS", message = "Argument 'metrics' is required." }, IndentedOptions);
+            return McpToolError.Serialize("INVALID_PARAMS", "Argument 'metrics' is required.");
         }
 
         TableFilterClause? whereClause = !string.IsNullOrWhiteSpace(whereSql)
@@ -288,11 +288,8 @@ public static class McpSemanticTools
         }
         catch (GatewaySecurityException secEx)
         {
-            return JsonSerializer.Serialize(new
-            {
-                error = secEx.ErrorCode,
-                message = secEx.Message
-            }, IndentedOptions);
+            // NL-SC-31/21: the stable code only; the exception message never reaches the result.
+            return McpToolError.Serialize(secEx.ErrorCode, "The request was denied by governance policy.");
         }
     }
 }

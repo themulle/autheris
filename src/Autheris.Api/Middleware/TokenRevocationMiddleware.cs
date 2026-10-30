@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -31,38 +32,14 @@ public sealed class TokenRevocationMiddleware
             catch (TokenRevocationUnavailableException)
             {
                 // SR-L-10: fail closed. The revocation status is unknown, so the pipeline must not run.
-                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                context.Response.Headers["Retry-After"] = "5";
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                {
-                    errors = new[]
-                    {
-                        new
-                        {
-                            message = "Token revocation status is temporarily unavailable.",
-                            extensions = new { code = "TOKEN_REVOCATION_UNAVAILABLE" }
-                        }
-                    }
-                }), context.RequestAborted).ConfigureAwait(false);
+                context.Response.Headers.RetryAfter = "5";
+                await ApiProblems.WriteAsync(context, StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.TokenRevocationUnavailable, "Token revocation status is temporarily unavailable.", context.RequestAborted).ConfigureAwait(false);
                 return;
             }
 
             if (revoked)
             {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                {
-                    errors = new[]
-                    {
-                        new
-                        {
-                            message = "Authentication token has been revoked.",
-                            extensions = new { code = "TOKEN_REVOKED" }
-                        }
-                    }
-                }), context.RequestAborted).ConfigureAwait(false);
+                await ApiProblems.WriteAsync(context, StatusCodes.Status401Unauthorized, ApiErrorCodes.TokenRevoked, "Authentication token has been revoked.", context.RequestAborted).ConfigureAwait(false);
                 return;
             }
         }

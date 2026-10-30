@@ -27,10 +27,10 @@ public sealed class ParityAssertTests : ParityTestBase
     [ParityFact]
     public void NoServerError_Tolerates501WithCatalogueCode()
     {
-        Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "NotImplemented", "{\"error\":\"NotImplemented\"}")));
+        Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "NotImplemented", "{\"title\":\"NotImplemented\"}")));
         Should.Throw<ParityHardFailureException>(() => ParityAssert.NoServerError(Result(501, "Whatever", "{}")));
         // A 501 with a stable catalogue code (an unsupported function for the dialect) is Unsupported, not a server fault.
-        Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", "{\"error\":\"NotImplemented\",\"code\":\"SQL_FUNCTION_UNSUPPORTED_DIALECT\"}")));
+        Should.NotThrow(() => ParityAssert.NoServerError(Result(501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", "{\"title\":\"NotImplemented\",\"code\":\"SQL_FUNCTION_UNSUPPORTED_DIALECT\"}")));
     }
 
     [ParityTheory]
@@ -42,15 +42,15 @@ public sealed class ParityAssertTests : ParityTestBase
     [ParityFact]
     public void NoServerError_FailsOnStackTrace() =>
         Should.Throw<ParityHardFailureException>(() => ParityAssert.NoServerError(
-            Result(400, "BAD_REQUEST", "{\"error\":\"x\",\"detail\":\"at Autheris.Api.Foo.Bar(String s) in /src/Foo.cs:line 12\"}")));
+            Result(400, "BAD_REQUEST", "{\"title\":\"x\",\"detail\":\"at Autheris.Api.Foo.Bar(String s) in /src/Foo.cs:line 12\"}")));
 
     [ParityFact]
     public void NoServerError_FailsOnUnknownCode()
     {
-        var unknown = Result(400, "SOMETHING_NEW", "{\"error\":\"x\"}");
+        var unknown = Result(400, "SOMETHING_NEW", "{\"title\":\"x\"}");
         Should.NotThrow(() => ParityAssert.NoServerError(unknown));
         Should.Throw<XunitException>(() => ParityAssert.StableCode(unknown));
-        Should.Throw<XunitException>(() => ParityAssert.StableCode(Result(400, null, "{\"error\":\"x\"}")));
+        Should.Throw<XunitException>(() => ParityAssert.StableCode(Result(400, null, "{\"title\":\"x\"}")));
     }
 
     [ParityFact]
@@ -66,7 +66,7 @@ public sealed class ParityAssertTests : ParityTestBase
     [InlineData(401, "UNAUTHORIZED")]
     public void NoServerError_AcceptsStable4xx(int status, string code)
     {
-        var r = Result(status, code, "{\"error\":\"Invalid SQL syntax.\",\"code\":\"" + code + "\"}");
+        var r = Result(status, code, "{\"title\":\"Invalid SQL syntax.\",\"code\":\"" + code + "\"}");
         ParityAssert.NoServerError(r);
         ParityAssert.StableCode(r);
     }
@@ -126,7 +126,7 @@ public sealed class ParityAssertTests : ParityTestBase
         // SEC-PAR-07: the check applies to all status codes (4xx and 501 included), not only 5xx.
         foreach (var status in new[] { 400, 404, 422, 501 })
         {
-            var r = Result(status, status == 501 ? "NotImplemented" : "BAD_REQUEST", "{\"error\":\"BadRequest\",\"message\":\"" + leak.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"}");
+            var r = Result(status, status == 501 ? "NotImplemented" : "BAD_REQUEST", "{\"title\":\"BadRequest\",\"message\":\"" + leak.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"}");
             Should.Throw<ParityHardFailureException>(() => ParityAssert.NoServerError(r), $"{name} @ {status}");
         }
     }
@@ -160,8 +160,8 @@ public sealed class ParityAssertTests : ParityTestBase
     {
         string[] bodies =
         [
-            "{\"error\":\"BadRequest\",\"code\":\"SQL_SYNTAX_ERROR\",\"message\":\"Invalid SQL syntax.\",\"traceId\":\"ed2434e6931cbdceacce75996aeba0df\"}",
-            "{\"error\":\"Forbidden\",\"code\":\"SQL_POLICY_DENIED\",\"message\":\"Access to a referenced table or column is denied.\"}",
+            "{\"title\":\"BadRequest\",\"code\":\"SQL_SYNTAX_ERROR\",\"message\":\"Invalid SQL syntax.\",\"traceId\":\"ed2434e6931cbdceacce75996aeba0df\"}",
+            "{\"title\":\"Forbidden\",\"code\":\"SQL_POLICY_DENIED\",\"message\":\"Access to a referenced table or column is denied.\"}",
             "{\"type\":\"https://httpwg.org/specs/rfc9110.html#status.400\",\"title\":\"Bad Request\",\"status\":400,\"code\":\"BAD_REQUEST\"}",
         ];
         foreach (var body in bodies)
@@ -225,7 +225,7 @@ public sealed class ParityAssertTests : ParityTestBase
             new ParityCellInfo("t", "WebSql", "cap", "tolerated501"),
             () =>
             {
-                ParityAssert.NoServerError(Result(501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", "{\"error\":\"NotImplemented\"}"));
+                ParityAssert.NoServerError(Result(501, "SQL_FUNCTION_UNSUPPORTED_DIALECT", "{\"title\":\"NotImplemented\"}"));
                 return Task.CompletedTask;
             },
             writer);

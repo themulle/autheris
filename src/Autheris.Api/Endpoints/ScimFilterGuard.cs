@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.Http;
 /// </summary>
 internal static class ScimFilterGuard
 {
+    /// <summary>NL-SC-36: a compile-time constant; the filter text is never echoed.</summary>
+    internal const string UnsupportedFilterDetail = "Filter expressions are not supported by this service provider.";
+
     internal static IResult? RejectUnsupportedFilter(string? filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
@@ -21,7 +24,7 @@ internal static class ScimFilterGuard
                 schemas = new[] { "urn:ietf:params:scim:api:messages:2.0:Error" },
                 status = "400",
                 scimType = "invalidFilter",
-                detail = "Filter expressions are not supported by this service provider."
+                detail = UnsupportedFilterDetail
             },
             statusCode: StatusCodes.Status400BadRequest);
     }
