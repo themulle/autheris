@@ -200,8 +200,8 @@ The virtual system tables (`governance.system.*`) carry their key definition in 
 Consumers compute it on metadata that is **already filtered for the caller** (`TableKeyVisibility.Restrict`): every declared key, every index and the marker key survive only if all of their columns are visible to the caller; a candidate that touches a hidden column is dropped as a whole, never reported as a subset.
 
 - **OData CSDL `<Key>`:** the row identity of the caller's filtered metadata; without one, all visible properties form a composite key (CSDL requires a key). A table without columns keeps the `id` placeholder.
-- **Dynamic OpenAPI:** the declared primary key columns listed as `required` properties; declared indexes in `x-autheris-indexes` (`name`, `unique`, `columns`). Both only when wholly visible to the caller.
-- **Catalog discovery, catalog search and MCP dataset catalog:** the declared primary key and `Indexes`, restricted to the columns that the response lists.
+- **Dynamic OpenAPI:** the declared primary key columns listed as `required` properties, only when wholly visible to the caller. The document emits no indexes, because it is cached per structure version and has no caller context.
+- **Catalog discovery (REST detail), MCP `describe_dataset` and GraphQL MCP:** the primary key (with directions) and indexes as `Columns`, `Unique` and `Directions` only; index names are never emitted. A key or an index appears only when every one of its columns is `Clear` for the caller, as resolved from the catalog baseline lowered by the caller's Deny/Mask consents. If that resolution fails, no key or index is emitted. At most 32 indexes and 32 columns per index are emitted, counted after the visibility filter.
 
 ### 5.2 Default read ordering
 
