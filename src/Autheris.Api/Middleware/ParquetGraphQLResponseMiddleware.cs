@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -155,7 +156,7 @@ public sealed class ParquetGraphQLResponseMiddleware
             {
                 _logger.LogWarning("GraphQL response exceeded the Parquet source buffer limit of {Limit} bytes. TraceId={TraceId}", maxBytes, context.TraceIdentifier);
                 await WriteJsonErrorAsync(context, StatusCodes.Status413PayloadTooLarge,
-                    $"The GraphQL result exceeds the Parquet conversion limit of {maxBytes} bytes. Use paging or a smaller selection.", ct);
+                    "The GraphQL result exceeds the Parquet conversion limit. Use paging or a smaller selection.", ct);
             }
             else
             {
@@ -235,7 +236,7 @@ public sealed class ParquetGraphQLResponseMiddleware
             if (!TryExtractRows(rootField, out var rows, out var extractionError))
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status406NotAcceptable,
-                    $"The root field '{ParquetResponseWriter.SanitizeName(rootFieldName)}' cannot be converted to Apache Parquet: {extractionError}", ct);
+                    "The GraphQL root field cannot be converted to Apache Parquet: " + extractionError, ct);
                 return;
             }
 
@@ -430,9 +431,8 @@ public sealed class ParquetGraphQLResponseMiddleware
 
     private static async Task WriteJsonErrorAsync(HttpContext context, int statusCode, string error, CancellationToken ct)
     {
-        context.Response.StatusCode = statusCode;
         context.Response.ContentLength = null;
-        context.Response.ContentType = "application/json; charset=utf-8";
-        await context.Response.WriteAsJsonAsync(new { error, supported = SupportedOnGraphQL }, ct);
+        var code = statusCode == StatusCodes.Status413PayloadTooLarge ? ApiErrorCodes.PayloadTooLarge : ApiErrorCodes.NotAcceptable;
+        await ApiProblems.WriteAsync(context, statusCode, code, error + " Supported media types: " + string.Join(", ", SupportedOnGraphQL) + ".", ct);
     }
 }

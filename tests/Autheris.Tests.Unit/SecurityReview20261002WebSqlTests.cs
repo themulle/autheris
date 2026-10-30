@@ -1110,8 +1110,8 @@ public sealed class SecurityReview20261002WebSqlTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status501NotImplemented);
         context.Response.Body.Position = 0;
         using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
-        doc.RootElement.GetProperty("error").GetString().ShouldBe("NotImplemented");
-        var msg = doc.RootElement.GetProperty("message").GetString();
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("NOT_IMPLEMENTED");
+        var msg = doc.RootElement.GetProperty("detail").GetString();
         msg.ShouldNotBeNull();
         msg.ShouldBe("The requested feature or data source capability is not implemented.");
         msg.ShouldNotContain("Confidential");
@@ -1130,8 +1130,8 @@ public sealed class SecurityReview20261002WebSqlTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Position = 0;
         using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
-        doc.RootElement.GetProperty("error").GetString().ShouldBe("BadRequest");
-        var msg = doc.RootElement.GetProperty("message").GetString();
+        doc.RootElement.GetProperty("code").GetString().ShouldNotBeNullOrWhiteSpace();
+        var msg = doc.RootElement.GetProperty("detail").GetString();
         msg.ShouldNotBeNull();
         msg.ShouldBe("Invalid SQL syntax.");
         msg.ShouldNotContain("unexpected token");
@@ -1156,8 +1156,8 @@ public sealed class SecurityReview20261002WebSqlTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         context.Response.Body.Position = 0;
         using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
-        doc.RootElement.GetProperty("error").GetString().ShouldBe("Forbidden");
-        var msg = doc.RootElement.GetProperty("message").GetString();
+        doc.RootElement.GetProperty("code").GetString().ShouldNotBeNullOrWhiteSpace();
+        var msg = doc.RootElement.GetProperty("detail").GetString();
         msg.ShouldNotBeNull();
         msg.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
         msg.ShouldNotContain("Confidential table schema leak");

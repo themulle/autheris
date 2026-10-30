@@ -1,3 +1,4 @@
+using Autheris.Api.Errors;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Interfaces;
@@ -74,20 +75,7 @@ public sealed class PreAuthIpRateLimitingMiddleware
         if (!result.Allowed)
         {
             RecordRejection("pre_auth_ip");
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.Headers.RetryAfter = result.RetryAfterSeconds.ToString();
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = "Pre-auth IP rate limit exceeded. Wait before retrying.",
-                        extensions = new { code = "RATE_LIMIT_EXCEEDED" }
-                    }
-                }
-            }));
+            await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.RateLimitExceeded, "Pre-auth IP rate limit exceeded. Wait before retrying.", result.RetryAfterSeconds, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -161,19 +149,7 @@ public sealed class PostAuthSidRateLimitingMiddleware
         var sid = context.User.GetUserSid()?.Value;
         if (string.IsNullOrEmpty(sid))
         {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = "Zero-Trust Error: Authenticated user lacks a valid SID claim (PrimarySid, objectSid, or NameIdentifier).",
-                        extensions = new { code = "UNAUTHORIZED_NO_SID" }
-                    }
-                }
-            }));
+            await ApiProblems.WriteAsync(context, StatusCodes.Status401Unauthorized, ApiErrorCodes.UnauthorizedNoSid, "Authenticated user lacks a valid SID claim.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -181,20 +157,7 @@ public sealed class PostAuthSidRateLimitingMiddleware
         if (!result.Allowed)
         {
             PreAuthIpRateLimitingMiddleware.RecordRejection("post_auth_sid");
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.Headers.RetryAfter = result.RetryAfterSeconds.ToString();
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = "Per-user SID rate limit exceeded.",
-                        extensions = new { code = "RATE_LIMIT_EXCEEDED" }
-                    }
-                }
-            }));
+            await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.RateLimitExceeded, "Per-user SID rate limit exceeded.", result.RetryAfterSeconds, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -241,20 +204,7 @@ public sealed class UnauthenticatedBearerIpRateLimitingMiddleware
         if (!ipResult.Allowed)
         {
             PreAuthIpRateLimitingMiddleware.RecordRejection("pre_auth_ip");
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.Headers.RetryAfter = ipResult.RetryAfterSeconds.ToString();
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = "Pre-auth IP rate limit exceeded. Wait before retrying.",
-                        extensions = new { code = "RATE_LIMIT_EXCEEDED" }
-                    }
-                }
-            }));
+            await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.RateLimitExceeded, "Pre-auth IP rate limit exceeded. Wait before retrying.", ipResult.RetryAfterSeconds, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 

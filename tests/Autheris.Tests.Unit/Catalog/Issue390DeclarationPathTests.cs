@@ -377,7 +377,12 @@ public sealed class Issue390DeclarationPathTests : IDisposable
         var (status, body) = await Run(await Put(new SetDatasetKeysDto(PrimaryKey: ["a", "b"], PrimaryKeyDirections: ["ASC", invalid])));
 
         status.ShouldBe(400);
-        body.ShouldBe("{\"error\":\"Invalid table key or index definition.\"}");
+        using (var problem = System.Text.Json.JsonDocument.Parse(body))
+        {
+            problem.RootElement.GetProperty("code").GetString().ShouldBe("BAD_REQUEST");
+            problem.RootElement.GetProperty("detail").GetString().ShouldBe("The table key or index definition is invalid.");
+        }
+
         if (!string.IsNullOrEmpty(invalid))
         {
             body.ShouldNotContain(invalid);

@@ -91,7 +91,7 @@ public static partial class GovernanceEndpoints
         {
             if (!PageCursor.TryDecodeLong(cursor, out var decoded))
             {
-                return Results.BadRequest(new { error = "INVALID_CURSOR", message = "The cursor is malformed." });
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidCursor, "The cursor is malformed.", context);
             }
 
             before = decoded;
@@ -152,7 +152,7 @@ public static partial class GovernanceEndpoints
         {
             if (!TableIdentifier.TryParse(table, out var parsedTable))
             {
-                return Results.BadRequest(new { error = "INVALID_TABLE", message = "The table filter is malformed." });
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidTable, "The table filter is malformed.", context);
             }
 
             tableFilter = parsedTable;
@@ -163,7 +163,7 @@ public static partial class GovernanceEndpoints
         {
             if (!Enum.TryParse<GranteeType>(granteeType, ignoreCase: true, out var parsedType) || !Enum.IsDefined(parsedType))
             {
-                return Results.BadRequest(new { error = "INVALID_GRANTEE_TYPE", message = "Supported values: User, Group, Role, ServicePrincipal." });
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidGranteeType, "Supported values: User, Group, Role, ServicePrincipal.", context);
             }
 
             typeFilter = parsedType;
@@ -174,7 +174,7 @@ public static partial class GovernanceEndpoints
         {
             if (!PageCursor.TryDecode(cursor, out var raw) || !Guid.TryParse(raw, out var afterId))
             {
-                return Results.BadRequest(new { error = "INVALID_CURSOR", message = "The cursor is malformed." });
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidCursor, "The cursor is malformed.", context);
             }
 
             after = afterId;
@@ -426,9 +426,10 @@ public static partial class GovernanceEndpoints
             catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException)
             {
                 // MISC-11: no table scope means no honest report; never a report that implies completeness.
-                return Results.Json(
-                    new { error = Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode, message = "The GDPR report scope cannot be resolved: name the table that holds the data subject's data." },
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
+                return ApiProblems.Unprocessable(
+                    Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode,
+                    "The GDPR report scope cannot be resolved: name the table that holds the data subject's data.",
+                    context);
             }
 
             var exportResult = pdfExporter.ExportReportToPdf(report);

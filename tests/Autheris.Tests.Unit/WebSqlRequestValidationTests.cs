@@ -52,9 +52,9 @@ public sealed class WebSqlRequestValidationTests
         var (status, json, raw) = await PostAsync(body);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        json.GetProperty("error").GetString().ShouldBe("BadRequest");
+        json.GetProperty("status").GetInt32().ShouldBe(400);
         json.GetProperty("code").GetString().ShouldBe("INVALID_JSON");
-        json.GetProperty("message").GetString().ShouldNotBeNullOrWhiteSpace();
+        json.GetProperty("detail").GetString().ShouldNotBeNullOrWhiteSpace();
         json.TryGetProperty("traceId", out _).ShouldBeTrue();
         AssertNoInternals(raw);
     }
@@ -71,9 +71,9 @@ public sealed class WebSqlRequestValidationTests
         var (status, json, raw) = await PostAsync(body);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        json.GetProperty("error").GetString().ShouldBe("BadRequest");
+        json.GetProperty("status").GetInt32().ShouldBe(400);
         json.GetProperty("code").GetString().ShouldBe("MISSING_REQUIRED_FIELD");
-        json.GetProperty("message").GetString().ShouldNotBeNullOrWhiteSpace();
+        json.GetProperty("detail").GetString().ShouldNotBeNullOrWhiteSpace();
         json.TryGetProperty("traceId", out _).ShouldBeTrue();
         AssertNoInternals(raw);
     }
@@ -96,10 +96,10 @@ public sealed class WebSqlRequestValidationTests
         var (_, missing, rawMissing) = await PostAsync("{}");
 
         // The message does not depend on where the parser stopped.
-        otherInvalid.GetProperty("message").GetString().ShouldBe(invalid.GetProperty("message").GetString());
+        otherInvalid.GetProperty("detail").GetString().ShouldBe(invalid.GetProperty("detail").GetString());
         AssertNoInternals(rawInvalid);
         AssertNoInternals(rawMissing);
-        missing.GetProperty("message").GetString().ShouldNotBe(invalid.GetProperty("message").GetString());
+        missing.GetProperty("detail").GetString().ShouldNotBe(invalid.GetProperty("detail").GetString());
     }
 
     private static void AssertNoInternals(string raw)

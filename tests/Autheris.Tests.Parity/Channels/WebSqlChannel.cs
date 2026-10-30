@@ -96,8 +96,8 @@ public sealed class WebSqlChannel(ParityHostFixture host) : IParityChannel
             string? code = null;
             if (root.ValueKind == JsonValueKind.Object)
             {
-                code = root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString()
-                    : root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() : null;
+                // O-5b step 2: every WebSQL error is a governed problem body with a string `code`; the bare `error` name is gone.
+                code = root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
             }
 
             return new ChannelResult(status, code, ChannelResult.NoRows, body);

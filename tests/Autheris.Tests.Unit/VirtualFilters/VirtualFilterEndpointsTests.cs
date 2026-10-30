@@ -362,7 +362,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
         approve.Response.Body.Position = 0;
-        new StreamReader(approve.Response.Body).ReadToEnd().ShouldContain("expected_hash_required");
+        new StreamReader(approve.Response.Body).ReadToEnd().ShouldContain("The expected hash is required.");
         (await _repository.LoadSnapshotAsync()).Filters.Single().Status.ShouldBe(FilterApprovalStatus.PendingApproval);
     }
 

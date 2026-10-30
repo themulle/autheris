@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -143,7 +144,7 @@ public static class DbtEndpoints
             }
             catch (KeyNotFoundException)
             {
-                return Results.NotFound(new { error = $"Proposal '{id}' not found." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.");
             }
             catch (InvalidOperationException ex)
             {
@@ -179,7 +180,7 @@ public static class DbtEndpoints
             }
             catch (KeyNotFoundException)
             {
-                return Results.NotFound(new { error = $"Proposal '{id}' not found." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.");
             }
             catch (InvalidOperationException ex)
             {

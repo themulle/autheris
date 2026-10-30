@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -142,7 +143,7 @@ public static partial class VirtualFilterEndpoints
         var deliveryId = context.Request.Headers["X-GitHub-Delivery"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(deliveryId))
         {
-            return Results.BadRequest(new { error = "Header X-GitHub-Delivery is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Header X-GitHub-Delivery is required.");
         }
 
         var opt = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();

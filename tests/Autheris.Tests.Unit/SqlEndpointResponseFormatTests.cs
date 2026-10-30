@@ -115,7 +115,7 @@ public sealed class SqlEndpointResponseFormatTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         var json = await JsonDocument.ParseAsync(context.Response.Body);
-        var error = json.RootElement.GetProperty("error").GetString();
+        var error = json.RootElement.GetProperty("detail").GetString();
         error.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
         error.ShouldNotBeNull();
         error.ShouldNotContain("Secret table hr.salaries");
@@ -144,7 +144,7 @@ public sealed class SqlEndpointResponseFormatTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         var json = await JsonDocument.ParseAsync(context.Response.Body);
-        var error = json.RootElement.GetProperty("error").GetString();
+        var error = json.RootElement.GetProperty("detail").GetString();
         error.ShouldBe(WebSqlEndpoints.GenericBadRequestMessage);
         error.ShouldNotBeNull();
         error.ShouldNotContain("Invalid internal parameter @secretParam");

@@ -479,7 +479,8 @@ public sealed class DuckDbOlapSecurityTests
         httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         httpContext.Response.Body.Seek(0, SeekOrigin.Begin);
         var responseText = new StreamReader(httpContext.Response.Body).ReadToEnd();
-        responseText.ShouldContain("exceeds maximum allowed staging rows (10)");
+        responseText.ShouldContain("The analytical request could not be processed."); // NL-SC-21: fixed text, no counts or table names
+        responseText.ShouldNotContain("(10)");
     }
 
     [Theory]
@@ -566,7 +567,7 @@ public sealed class DuckDbOlapSecurityTests
         httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         httpContext.Response.Body.Seek(0, SeekOrigin.Begin);
         var responseText = new StreamReader(httpContext.Response.Body).ReadToEnd();
-        responseText.ShouldContain("maximum allowed distinct table count");
+        responseText.ShouldContain("The analytical request could not be processed.");
     }
 }
 

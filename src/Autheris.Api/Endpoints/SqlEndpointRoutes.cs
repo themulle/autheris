@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -84,13 +85,13 @@ public static class SqlEndpointRoutes
 
         if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Sql))
         {
-            return Results.BadRequest((object)new { error = "Name and Sql are required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Name and Sql are required.", context);
         }
 
         string trimmedName = request.Name.Trim();
         if (!IsValidEndpointName(trimmedName))
         {
-            return Results.BadRequest((object)new { error = "Invalid endpoint name. Must contain only alphanumeric characters, underscores, or hyphens and not exceed 128 characters." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid endpoint name. Must contain only alphanumeric characters, underscores, or hyphens and not exceed 128 characters.", context);
         }
 
         var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
@@ -130,7 +131,7 @@ public static class SqlEndpointRoutes
 
         if (!overwrite && registry.TryGet(trimmedName, out _))
         {
-            return Results.Conflict((object)new { error = $"An endpoint named '{trimmedName}' already exists. Use overwrite=true to replace it." });
+            return ApiProblems.Conflict(ApiErrorCodes.Conflict, "An endpoint with this name already exists. Use overwrite=true to replace it.", context);
         }
 
         registry.Register(definition);
@@ -411,10 +412,9 @@ public static class SqlEndpointRoutes
 
             await WriteResultAsync(httpContext, name, result, parquet, ct).ConfigureAwait(false);
         }
-        catch (KeyNotFoundException knf)
+        catch (KeyNotFoundException)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = knf.Message }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The SQL endpoint was not found.", ct).ConfigureAwait(false);
         }
         catch (TrinoSqlEngine.Ast.Emit.ClientListException listEx)
         {
@@ -423,26 +423,17 @@ public static class SqlEndpointRoutes
         catch (ArgumentException argEx)
         {
             logger.LogWarning(argEx, "Invalid request when executing endpoint '{EndpointName}'.", name);
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = WebSqlEndpoints.GenericBadRequestMessage
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, WebSqlEndpoints.GenericBadRequestMessage, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = WebSqlEndpoints.GenericForbiddenMessage
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, WebSqlEndpoints.GenericForbiddenMessage, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unexpected error executing SQL endpoint '{EndpointName}'.", name);
-            httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "An internal error occurred during query execution." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred during query execution.", ct).ConfigureAwait(false);
         }
     }
 
@@ -458,8 +449,7 @@ public static class SqlEndpointRoutes
 
         if (httpContext.Request.ContentLength > 2 * 1024 * 1024)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Request body exceeds maximum size limit (2 MB)." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Request body exceeds maximum size limit (2 MB).", ct).ConfigureAwait(false);
             return;
         }
 
@@ -493,10 +483,9 @@ public static class SqlEndpointRoutes
 
             await WriteResultAsync(httpContext, name, result, parquet, ct).ConfigureAwait(false);
         }
-        catch (KeyNotFoundException knf)
+        catch (KeyNotFoundException)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = knf.Message }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The SQL endpoint was not found.", ct).ConfigureAwait(false);
         }
         catch (TrinoSqlEngine.Ast.Emit.ClientListException listEx)
         {
@@ -505,26 +494,17 @@ public static class SqlEndpointRoutes
         catch (ArgumentException argEx)
         {
             logger.LogWarning(argEx, "Invalid request when executing endpoint '{EndpointName}'.", name);
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = WebSqlEndpoints.GenericBadRequestMessage
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, WebSqlEndpoints.GenericBadRequestMessage, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = WebSqlEndpoints.GenericForbiddenMessage
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, WebSqlEndpoints.GenericForbiddenMessage, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unexpected error executing SQL endpoint '{EndpointName}'.", name);
-            httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "An internal error occurred during query execution." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred during query execution.", ct).ConfigureAwait(false);
         }
     }
 
@@ -532,8 +512,9 @@ public static class SqlEndpointRoutes
     internal static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
     {
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(error, out var mapped);
-        httpContext.Response.StatusCode = mapped.Status == 0 ? StatusCodes.Status400BadRequest : mapped.Status;
-        await httpContext.Response.WriteAsJsonAsync(new { error = mapped.Title ?? "The request is invalid.", code = error.Code }, ct).ConfigureAwait(false);
+        var status = mapped.Status == 0 ? StatusCodes.Status400BadRequest : mapped.Status;
+        // The mapper's fixed title is the detail; an unregistered code falls back to the status default inside ApiProblems.
+        await ApiProblems.WriteAsync(httpContext, status, error.Code, mapped.Title ?? "The request is invalid.", ct).ConfigureAwait(false);
     }
 
     private static (bool Requested, IParquetExportService? Service) ResolveParquetService(HttpContext httpContext)

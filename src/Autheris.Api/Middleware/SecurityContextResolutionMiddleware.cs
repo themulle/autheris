@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -145,12 +146,10 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         return !string.IsNullOrWhiteSpace(issuer) ? issuer : $"scheme:{user.Identity?.AuthenticationType ?? "unknown"}";
     }
 
-    private static Task WriteJsonAsync(HttpContext context, int status, string message, string code)
-    {
-        context.Response.StatusCode = status;
-        context.Response.ContentType = "application/json";
-        return context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new { errors = new[] { new { message, code } } }));
-    }
+    private static Task WriteJsonAsync(HttpContext context, int status, string message, string code) =>
+        status == StatusCodes.Status429TooManyRequests
+            ? ApiProblems.WriteTooManyRequests(context, code, message, 60, context.RequestAborted)
+            : ApiProblems.WriteAsync(context, status, code, message, context.RequestAborted);
 
     private static async Task WriteCollisionDenialAsync(HttpContext context, SecurityPrincipalContext securityContext, string reason)
     {
@@ -176,10 +175,8 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
                 .LogError(ex, "Audit write for a tenant collision denial failed.");
         }
 
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            "{\"errors\":[{\"message\":\"The tenant id is ambiguous (differs from another tenant id only in case) and is denied until an operator resolves the collision.\",\"code\":\"" + TenantCollisionCode + "\"}]}").ConfigureAwait(false);
+        await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, TenantCollisionCode,
+            "The tenant id is ambiguous (differs from another tenant id only in case) and is denied until an operator resolves the collision.", context.RequestAborted).ConfigureAwait(false);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -189,31 +186,23 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         {
             securityContext = SecurityContextFactory.CreateFromHttpContext(context);
         }
-        catch (SecurityException ex)
+        catch (SecurityException)
         {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
-            {
-                errors = new[] { new { message = ex.Message, code = "CROSS_TENANT_ACCESS_FORBIDDEN" } }
-            })).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.CrossTenantAccessForbidden,
+                "Cross-tenant access forbidden.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
         catch (UnauthorizedAccessException)
         {
             // RV-02: authenticated principal without canonical SID – never fall back to a display name.
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                "{\"errors\":[{\"message\":\"Authenticated user lacks a valid SID claim.\",\"code\":\"UNAUTHORIZED_NO_SID\"}]}").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(context, StatusCodes.Status401Unauthorized, ApiErrorCodes.UnauthorizedNoSid,
+                "Authenticated user lacks a valid SID claim.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
         catch (ArgumentException)
         {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                "{\"errors\":[{\"message\":\"Invalid tenant identifier.\",\"code\":\"INVALID_TENANT_ID\"}]}").ConfigureAwait(false);
+            await ApiProblems.WriteAsync(context, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidTenantId,
+                "Invalid tenant identifier.", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -251,11 +240,9 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             var enrichment = await authPluginHost.EnrichRolesAsync(pluginContext, context.RequestAborted).ConfigureAwait(false);
             if (!enrichment.IsSuccess)
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "application/json";
-                var errorCode = enrichment.ErrorCode ?? "AUTH_PLUGIN_FAILED";
-                await context.Response.WriteAsync(
-                    $"{{\"errors\":[{{\"message\":\"Authentication plugin execution failed.\",\"code\":\"{errorCode}\"}}]}}").ConfigureAwait(false);
+                await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden,
+                    string.Equals(enrichment.ErrorCode, ApiErrorCodes.AuthPluginTimeout, StringComparison.Ordinal) ? ApiErrorCodes.AuthPluginTimeout : ApiErrorCodes.AuthPluginFailed,
+                    "Authentication plugin execution failed.", context.RequestAborted).ConfigureAwait(false);
                 return;
             }
 

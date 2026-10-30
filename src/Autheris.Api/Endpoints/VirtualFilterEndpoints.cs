@@ -102,9 +102,9 @@ public static partial class VirtualFilterEndpoints
             case EffectiveFilterInspectionKind.Forbidden:
                 return Forbidden();
             case EffectiveFilterInspectionKind.BadRequest:
-                return Results.Json(new { error = inspection.Error }, statusCode: StatusCodes.Status400BadRequest);
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The effective filter inspection request is invalid.");
             case EffectiveFilterInspectionKind.NotFound:
-                return Results.Json(new { error = inspection.Error }, statusCode: StatusCodes.Status404NotFound);
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The requested resource was not found.");
             case EffectiveFilterInspectionKind.SingleTable:
                 return Results.Ok(ExplanationView(inspection.User!, inspection.Table!, inspection.Explanation!));
             case EffectiveFilterInspectionKind.Page:

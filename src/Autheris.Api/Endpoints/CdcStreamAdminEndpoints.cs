@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading;
@@ -77,7 +78,7 @@ public static class CdcStreamAdminEndpoints
         // SEC-CDC99-21: the destructive variant needs an explicit confirmation naming the stream.
         if (discardUnreadable && !string.Equals(confirmStreamId, streamId.Value, StringComparison.Ordinal))
         {
-            return Results.BadRequest(new { error = "discardUnreadable requires confirmStreamId equal to the stream id." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "discardUnreadable requires confirmStreamId equal to the stream id.");
         }
 
         var outcome = await service.ResyncAsync(streamId, discardUnreadable, ct).ConfigureAwait(false);
@@ -111,9 +112,9 @@ public static class CdcStreamAdminEndpoints
         return outcome.Status switch
         {
             CdcResyncStatus.Done => Results.Ok(new { streamId = streamId.Value, discardedEvents = outcome.DiscardedEvents }),
-            CdcResyncStatus.KeyUnavailable => Results.Json(new { error = CdcActivationCodes.KeyUnavailable }, statusCode: StatusCodes.Status503ServiceUnavailable),
-            CdcResyncStatus.Unavailable => Results.Json(
-                new { error = "The stream could not be restarted now; retry later.", discardedEvents = outcome.DiscardedEvents }, statusCode: StatusCodes.Status503ServiceUnavailable),
+            CdcResyncStatus.KeyUnavailable => ApiProblems.ServiceUnavailable(CdcActivationCodes.KeyUnavailable, "The stream encryption key is unavailable."),
+            CdcResyncStatus.Unavailable => ApiProblems.Problem(StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "The stream could not be restarted now; retry later.",
+                extraExtensions: new Dictionary<string, object?> { ["discardedEvents"] = outcome.DiscardedEvents }),
             _ => throw new InvalidOperationException("Unhandled CDC resync status.")
         };
     }
@@ -150,7 +151,7 @@ public static class CdcStreamAdminEndpoints
 
         if (request is null || string.IsNullOrWhiteSpace(request.Justification) || request.Dimensions is null)
         {
-            return Results.BadRequest(new { error = "Justification and Dimensions are required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Justification and Dimensions are required.");
         }
 
         if (!await service.ResetWatermarkAsync(streamId, request.Dimensions, request.Justification, ct).ConfigureAwait(false))

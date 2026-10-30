@@ -13,6 +13,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Apache.Arrow.Ipc;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Caching.Interfaces;
 using Autheris.Application.Data;
@@ -68,6 +69,10 @@ public static class TableStreamEndpoints
         return app;
     }
 
+    /// <summary>One byte-identical body for every table that is missing, hidden or not authorized (SEC-DATA178-04, NL-SC-22).</summary>
+    private static IResult TableNotFound() =>
+        ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The table was not found.");
+
     internal static async Task HandleBulkStreamAsync(
         string domain,
         string schema,
@@ -88,8 +93,7 @@ public static class TableStreamEndpoints
         var readPathSwitches = httpContext.RequestServices?.GetService<IReadPathSwitches>();
         if (readPathSwitches != null && !readPathSwitches.BulkStreamEnabled)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Bulk streaming endpoint is disabled." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The bulk streaming endpoint is not available.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -99,20 +103,14 @@ public static class TableStreamEndpoints
             domain.Contains('\\') || schema.Contains('\\') || table.Contains('\\') ||
             domain.Contains(';') || schema.Contains(';') || table.Contains(';'))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Domain, schema, and table must be valid single segment identifiers." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The domain, schema and table must be valid single segment identifiers.", ct).ConfigureAwait(false);
             return;
         }
 
         // SEC-DATA178-05: Reject OFFSET pagination
         if (httpContext.Request.Query.ContainsKey("offset"))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "OFFSET pagination is not supported on bulk keyset streaming endpoint. Use cursor-based keyset pagination instead.",
-                code = "OFFSET_NOT_SUPPORTED"
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.OffsetNotSupported, "OFFSET pagination is not supported on the bulk keyset streaming endpoint. Use cursor-based keyset pagination instead.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -130,8 +128,7 @@ public static class TableStreamEndpoints
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to deserialize bulk stream request body");
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid JSON request body." }, ct).ConfigureAwait(false);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidJson, "The request body is not valid JSON.", ct).ConfigureAwait(false);
                 return;
             }
         }
@@ -142,12 +139,7 @@ public static class TableStreamEndpoints
 
         if (request.AdditionalProperties != null && request.AdditionalProperties.ContainsKey("offset"))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "OFFSET pagination is not supported on bulk keyset streaming endpoint. Use cursor-based keyset pagination instead.",
-                code = "OFFSET_NOT_SUPPORTED"
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.OffsetNotSupported, "OFFSET pagination is not supported on the bulk keyset streaming endpoint. Use cursor-based keyset pagination instead.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -168,15 +160,13 @@ public static class TableStreamEndpoints
         // SEC-DATA178-04: Non-existent or hidden tables return 404 anti-enumeration parity
         if (metadata == null || (!metadata.Table.IsActive && !httpContext.User.IsInRole("admin")))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{tableId.ToQualifiedName()}' not found." }, ct).ConfigureAwait(false);
+            await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
         if (metadata.Table.Visibility == DatasetVisibility.Hidden && !httpContext.User.IsInRole("admin"))
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{tableId.ToQualifiedName()}' not found." }, ct).ConfigureAwait(false);
+            await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
@@ -204,16 +194,14 @@ public static class TableStreamEndpoints
         {
             usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyAccess, 0, false);
             // Anti-enumeration parity: unauthorized table returns 404
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{tableId.ToQualifiedName()}' not found." }, ct).ConfigureAwait(false);
+            await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
         // Anti-enumeration parity: unauthorized table returns 404
         if (!decision.IsAllowed)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{tableId.ToQualifiedName()}' not found." }, ct).ConfigureAwait(false);
+            await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
@@ -221,12 +209,7 @@ public static class TableStreamEndpoints
         var streamKey = BulkStreamKey.TryResolve(metadata);
         if (streamKey is null)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "Table requires a primary key or unique index for keyset streaming.",
-                code = "KEYSET_STREAMING_UNAVAILABLE"
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "The table requires a primary key or unique index for keyset streaming.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -237,12 +220,7 @@ public static class TableStreamEndpoints
             var access = decision.GetEffectiveColumnAccess(pk, metadata);
             if (access == ColumnAccessLevel.Mask || access == ColumnAccessLevel.Deny)
             {
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = $"Primary key column '{pk}' is masked or denied for caller.",
-                    code = "KEYSET_STREAMING_UNAVAILABLE"
-                }, ct).ConfigureAwait(false);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "A primary key column is masked or denied for the caller.", ct).ConfigureAwait(false);
                 return;
             }
         }
@@ -256,29 +234,25 @@ public static class TableStreamEndpoints
         catch (InvalidCursorException ex)
         {
             logger.LogWarning(ex, "Invalid cursor in bulk stream request");
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "The supplied cursor is invalid.", code = InvalidCursorException.ErrorCode }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidCursor, "The supplied cursor is invalid.", ct).ConfigureAwait(false);
             return;
         }
         catch (RequiredFilterColumnMissingException ex)
         {
             logger.LogWarning(ex, "Required filter column missing in bulk stream request");
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "A required filter column is missing.", code = RequiredFilterColumnMissingException.ErrorCode }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.RequiredFilterColumnMissing, "A required filter column is missing.", ct).ConfigureAwait(false);
             return;
         }
         catch (KeysetStreamingUnavailableException ex)
         {
             logger.LogWarning(ex, "Keyset streaming unavailable for bulk stream request");
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Keyset streaming is unavailable for this query.", code = KeysetStreamingUnavailableException.ErrorCode }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "Keyset streaming is unavailable for this query.", ct).ConfigureAwait(false);
             return;
         }
         catch (ArgumentException ex)
         {
             logger.LogWarning(ex, "Invalid argument in bulk stream request");
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Invalid streaming argument." }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming arguments are invalid.", ct).ConfigureAwait(false);
             return;
         }
 
@@ -311,19 +285,11 @@ public static class TableStreamEndpoints
             if (!reservation.Allowed)
             {
                 usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
-                httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                httpContext.Response.Headers["Retry-After"] = reservation.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
                 if (!string.IsNullOrWhiteSpace(clientContext?.ResolvedScope))
                 {
                     httpContext.Response.Headers["X-RateLimit-Scope"] = clientContext.ResolvedScope;
                 }
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "Rate limit exceeded. Wait until the next time window.",
-                    code = "RATE_LIMIT_EXCEEDED",
-                    retryAfterSeconds = reservation.RetryAfterSeconds,
-                    scope = clientContext?.ResolvedScope
-                }, ct).ConfigureAwait(false);
+                await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Rate limit exceeded. Wait until the next time window.", reservation.RetryAfterSeconds, ct).ConfigureAwait(false);
                 return;
             }
         }
@@ -614,15 +580,7 @@ public static class TableStreamEndpoints
         catch (GatewayThrottledException ex) when (!httpContext.Response.HasStarted)
         {
             httpContext.Response.Clear();
-            httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            httpContext.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "Too many concurrent requests. Retry later.",
-                code = "TOO_MANY_REQUESTS",
-                retryAfterSeconds = ex.RetryAfterSeconds,
-                traceId = httpContext.TraceIdentifier
-            }, ct).ConfigureAwait(false);
+            await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ex.RetryAfterSeconds, ct).ConfigureAwait(false);
             return;
         }
         finally

@@ -562,5 +562,32 @@ public sealed class ODataEndpointsTests
         var root = ODataEndpoints.ResolveServiceRoot(context);
         root.ShouldBe(expectedServiceRoot);
     }
+
+    [Theory]
+    [InlineData("Production", 403, "ACCESS_DENIED")]
+    [InlineData("Development", 404, "ResourceNotFound")]
+    [Trait("Category", "Security")]
+    public async Task OData_EntitySet_NotFound_Is_Fixed_Access_Denied_Outside_Development(string environment, int status, string code)
+    {
+        // NL-T-34 / NL-SC-34: the entity-set name is never echoed; outside Development the answer is the fixed ACCESS_DENIED 403.
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns(environment);
+        var context = CreateHttpContext(path: "/odata/v4/SecretEntity_XYZ");
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, env);
+        Microsoft.Extensions.DependencyInjection.LoggingServiceCollectionExtensions.AddLogging(services);
+        context.RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var repo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync("SecretEntity_XYZ", CreateMockHandler(new ODataQueryResult(true, 200, new object())), repo, context);
+        await result.ExecuteAsync(context);
+
+        context.Response.StatusCode.ShouldBe(status);
+        context.Response.Body.Position = 0;
+        var body = new StreamReader(context.Response.Body).ReadToEnd();
+        body.ShouldContain(code);
+        body.ShouldNotContain("SecretEntity_XYZ");
+    }
 }
 
