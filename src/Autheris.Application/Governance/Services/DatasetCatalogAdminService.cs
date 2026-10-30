@@ -360,7 +360,8 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return TableIdentifier.TryParse(id.Replace('/', '.'), out var identifier) ? identifier : null;
     }
 
-    // The scope is not None here, so the resolution carries the tenant; a ClusterAdmin without tenant is audited under its claim, else unresolved.
+    // The scope is not None here, so the resolution usually carries the tenant; a ClusterAdmin without a resolved tenant is audited under its claim,
+    // and under the platform bucket (TenantId.Platform) when the claim is absent or invalid. The platform bucket is audit-only, never a request tenant.
     private static TenantId TenantOf(TenantResolution resolution, ClaimsPrincipal principal)
     {
         if (resolution.Tenant is { } resolved && resolved.Value is not null)

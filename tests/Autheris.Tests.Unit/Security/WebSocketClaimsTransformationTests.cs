@@ -221,7 +221,7 @@ public sealed class WebSocketClaimsTransformationTests
         // Act
         var result = await interceptor.OnConnectAsync(session, payload);
 
-        // Assert: Strict equality rejects mismatch between LegacySingleTenant and acme
+        // Assert: Strict equality: a token tenant that does not match the claimed tenant is rejected
         result.Accepted.ShouldBeFalse();
         result.Message.ShouldBe("Token tenant unresolved");
     }

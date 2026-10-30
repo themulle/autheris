@@ -1156,7 +1156,7 @@ Whether the deployment is single- or multi-tenant is a **deployment setting**. I
 
 Single-tenant deployments set `Gateway:Tenancy:DefaultTenantId`; multi-tenant deployments omit it and carry a tenant claim in every token. The removed keys `Gateway:Tenancy:Mode` and `Gateway:Authentication:ForwardAuth:DefaultTenantId` fail start-up on presence, whatever their value and spelling (for example `Gateway__Tenancy__Mode`).
 
-Identity realms are read from `Authentication:Realms` once at start and registered in the realm registry; a principal issued by a realm resolves its tenant from the realm (`FixedTenantId`, a tenant claim mapping, or the default tenant for an unbound realm).
+Identity realms are read from `Authentication:Realms` once at start and registered in the realm registry; a principal issued by a realm resolves its tenant from the realm (`FixedTenantId`, a tenant claim mapping, or the default tenant for an unbound realm). Changes to `Authentication:Realms` need an application restart: the realm registry is initialised once at start-up and is not reloaded.
 
 **Catalog caller classes.** Every catalog channel (REST `/api/v1/catalog/*`, GraphQL `catalog`, MCP tools and resources, `invoke_api`, Trino/Arrow/Iceberg metadata) decides the caller class from the authenticated principal only, through one resolver:
 

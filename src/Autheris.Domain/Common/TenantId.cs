@@ -51,7 +51,7 @@ public readonly record struct TenantId
     /// <summary>True when the value starts with the reserved <c>_</c> prefix (DT-SC-07).</summary>
     public static bool IsReserved(string? value) => value is { Length: > 0 } && value[0] == ReservedPrefix;
 
-    /// <summary>True for a reserved id such as <see cref="Platform"/>; <c>default</c> is not reserved (it is invalid, DT-SC-04).</summary>
+    /// <summary>True for a reserved id such as <see cref="Platform"/>; <c>default</c> is not reserved: it is an ordinary valid id (the Development default tenant). Only <c>default(TenantId)</c> is invalid (DT-SC-04).</summary>
     public static bool IsReserved(TenantId tenantId) => IsReserved(tenantId.Value);
 
     public static bool TryParse(string? value, out TenantId tenantId)

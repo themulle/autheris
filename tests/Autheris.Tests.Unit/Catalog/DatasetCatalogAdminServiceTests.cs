@@ -104,6 +104,19 @@ public sealed class DatasetCatalogAdminServiceTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task DT_SC_02_ClusterAdmin_With_Invalid_Tenant_Claim_Is_Audited_Under_The_Platform_Bucket()
+    {
+        // A canonical ClusterAdmin is global and needs no tenant; a malformed claim never becomes the audit tenant.
+        var invalid = Wp0.User("S-1-5-21-root", "bad tenant!!", ["ClusterAdmin"]);
+
+        var result = await Create().ApplyAsync(invalid, "sales.dbo.orders", Vis("Full"), "admin", default);
+
+        result.Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e => e.TenantId == TenantId.Platform), CancellationToken.None);
+    }
+
+    [Fact]
     public async Task TagReplace_AuditsTagsChanged_NotVisibility()
     {
         var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", Replace("Pii", "finance"), "admin", default);
