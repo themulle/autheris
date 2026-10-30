@@ -135,6 +135,7 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<IKeyIndexMetadataReader, SqlServerKeyIndexMetadataReader>();
         services.AddSingleton<GovernedCatalogProvider>();
         services.AddSingleton<IGovernedCatalogProvider>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
+        services.AddSingleton<IPhysicalKeyCatalog>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
         services.AddSingleton<AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditChainIntegrityMonitor>());
         // SEC R3-4: anonymous /health/ready must not drive the DB probe per request -> cached, single-flight decorator.
