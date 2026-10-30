@@ -276,7 +276,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     private static string WithoutTrace(string body)
     {
         using var doc = JsonDocument.Parse(body);
-        return string.Join("|", doc.RootElement.EnumerateObject().Where(p => p.Name != "traceId").Select(p => p.Name + "=" + p.Value));
+        return string.Join("|", doc.RootElement.EnumerateObject().Where(p => p.Name is not ("traceId" or "correlationId")).Select(p => p.Name + "=" + p.Value));
     }
 
     [Trait("Category", "Security")]

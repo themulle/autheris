@@ -65,7 +65,10 @@ public static class BackstageEndpoints
             var entity = await backstageService.ExportEntityByNameAsync(name, ct);
             if (entity == null)
             {
-                return Results.NotFound(new { error = $"Backstage entity '{name}' not found." });
+                // Backstage ErrorResponseBody (protocol allowlist, NL-SC-29): fixed message, no entity-name echo.
+                return Results.Json(
+                    new { error = new { name = "NotFoundError", message = "The requested Backstage entity was not found." }, response = new { statusCode = StatusCodes.Status404NotFound } },
+                    statusCode: StatusCodes.Status404NotFound);
             }
 
             var accept = context.Request.Headers.Accept.ToString();

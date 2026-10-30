@@ -51,7 +51,7 @@ public static class RebacEndpoints
 
     /// <summary>400 with the governed code and no echo of the submitted value.</summary>
     private static IResult InvalidTenantResult() =>
-        Results.BadRequest(new { error = "The ReBAC tuple tenant is not a valid tenant id.", errorCode = ApiErrorCodes.InvalidTenantId });
+        ApiProblems.BadRequest(ApiErrorCodes.InvalidTenantId, "The ReBAC tuple tenant is not a valid tenant id.");
 
     internal static async Task AuditInvalidationFailureAsync(
         IAuditWriter auditWriter, HttpContext http, string tenantId, Exception ex)
@@ -91,7 +91,7 @@ public static class RebacEndpoints
                 string.IsNullOrWhiteSpace(t.TenantId) ||
                 (t.Object.Contains(':') && (string.IsNullOrWhiteSpace(t.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(t.Object.Split(':')[1]))))
             {
-                return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty.");
             }
 
             if (InvalidTupleTenant(t.TenantId))
@@ -123,7 +123,7 @@ public static class RebacEndpoints
             var parsed = RebacSubject.Parse(t.User);
             if (!parsed.IsValid)
             {
-                return Results.BadRequest(new { error = $"Invalid ReBAC subject: '{t.User}'.", errorCode = "INVALID_REBAC_SUBJECT" });
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidRebacSubject, "The ReBAC subject is invalid.");
             }
             canonicalTuples.Add(t with { User = parsed.Canonical });
         }
@@ -145,7 +145,7 @@ public static class RebacEndpoints
                 GranteeType.User, t.User, GrantKind.RebacTuple, t.ExpiresAt, now, Requester: requester));
             if (!decision.Allowed)
             {
-                return Results.BadRequest(new { error = decision.Reason, errorCode = decision.ErrorCode, maxValidTo = decision.MaxValidTo });
+                return ApiProblems.BadRequest(decision.ErrorCode ?? ApiErrorCodes.BadRequest, "The grant is not allowed by the grant policy.", extraExtensions: new Dictionary<string, object?> { ["maxValidTo"] = decision.MaxValidTo });
             }
         }
 
@@ -184,7 +184,7 @@ public static class RebacEndpoints
             string.IsNullOrWhiteSpace(tuple.TenantId) ||
             (tuple.Object.Contains(':') && (string.IsNullOrWhiteSpace(tuple.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(tuple.Object.Split(':')[1]))))
         {
-            return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty.");
         }
 
         if (InvalidTupleTenant(tuple.TenantId))
@@ -195,7 +195,7 @@ public static class RebacEndpoints
         var parsed = RebacSubject.Parse(tuple.User);
         if (!parsed.IsValid)
         {
-            return Results.BadRequest(new { error = $"Invalid ReBAC subject: '{tuple.User}'.", errorCode = "INVALID_REBAC_SUBJECT" });
+            return ApiProblems.BadRequest(ApiErrorCodes.InvalidRebacSubject, "The ReBAC subject is invalid.");
         }
         var canonicalTuple = tuple with { User = parsed.Canonical };
 
@@ -300,7 +300,7 @@ public static class RebacEndpoints
                 string.IsNullOrWhiteSpace(check.Object) ||
                 string.IsNullOrWhiteSpace(check.TenantId))
             {
-                return Results.BadRequest(new { error = "ReBAC check fields (User, Relation, Object, TenantId) must not be empty." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReBAC check fields (User, Relation, Object, TenantId) must not be empty.");
             }
 
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
@@ -335,7 +335,7 @@ public static class RebacEndpoints
         {
             if (batchCheck.Checks == null || batchCheck.Checks.Count > 100)
             {
-                return Results.BadRequest(new { error = "Batch check count cannot exceed 100 items." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Batch check count cannot exceed 100 items.");
             }
 
             // POL-7: Reject empty fields in batch check
@@ -346,7 +346,7 @@ public static class RebacEndpoints
                     string.IsNullOrWhiteSpace(c.Object) ||
                     string.IsNullOrWhiteSpace(c.TenantId)))
             {
-                return Results.BadRequest(new { error = "ReBAC batch check items must not contain empty fields." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReBAC batch check items must not contain empty fields.");
             }
 
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
@@ -355,7 +355,7 @@ public static class RebacEndpoints
             // tenant (otherwise the outer tenant check is meaningless).
             if (batchCheck.Checks.Any(c => c == null || !string.Equals(c.TenantId?.Trim(), batchCheck.TenantId?.Trim(), StringComparison.OrdinalIgnoreCase)))
             {
-                return Results.BadRequest(new { error = "All checks must use the tenant of the batch." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "All checks must use the tenant of the batch.");
             }
 
             if (!secContext.IsClusterAdmin)

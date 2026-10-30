@@ -69,8 +69,17 @@ public sealed class SyntheticSamplesGetEndpointTests
     {
         var result = await CatalogApiEndpoints.GetDatasetSyntheticSamplesHandler(
             id, repository, new SyntheticSampleRowGenerator(), visibility, CreateContext(), CancellationToken.None);
+        if (result is not IValueHttpResult valueResult)
+        {
+            // The anti-enumeration problem (ApiProblems.Indistinguishable) writes fixed bytes.
+            var ctx = new DefaultHttpContext();
+            ctx.Response.Body = new MemoryStream();
+            await result.ExecuteAsync(ctx);
+            return (ctx.Response.StatusCode, System.Text.Encoding.UTF8.GetString(((MemoryStream)ctx.Response.Body).ToArray()));
+        }
+
         var status = ((IStatusCodeHttpResult)result).StatusCode ?? StatusCodes.Status200OK;
-        return (status, JsonSerializer.Serialize(((IValueHttpResult)result).Value));
+        return (status, JsonSerializer.Serialize(valueResult.Value));
     }
 
     /// <summary>Endpoint construction binds each handler parameter; every interface counts as a registered service so none is inferred as a body.</summary>

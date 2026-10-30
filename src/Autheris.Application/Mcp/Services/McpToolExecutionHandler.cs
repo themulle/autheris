@@ -462,7 +462,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             if (_metricQueryService == null)
             {
-                return JsonSerializer.Serialize(new { isError = true, error = new { code = "NOT_AVAILABLE", message = "Semantic metric query service is not configured." } }, JsonOpts);
+                return McpToolError.Serialize("NOT_AVAILABLE", "Semantic metric query service is not configured.");
             }
 
             return await McpSemanticTools.ExecuteQueryMetricsAsync(_metricQueryService, userPrincipal, argumentsJson, ct).ConfigureAwait(false);
@@ -599,20 +599,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         return detail != null;
     }
 
-    private static string CreateMcpError(string tenantId, string tool, string code, string message)
-    {
-        return JsonSerializer.Serialize(new
-        {
-            tenantId,
-            tool,
-            isError = true,
-            error = new
-            {
-                code,
-                message
-            }
-        }, JsonOpts);
-    }
+    private static string CreateMcpError(string tenantId, string tool, string code, string message) =>
+        McpToolError.Serialize(code, message, tenantId, tool);
 
     private static ClaimsPrincipal BuildUserPrincipal(McpSessionContext session)
     {

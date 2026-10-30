@@ -48,7 +48,8 @@ public sealed class ConsentManifestApplyEndpointTests
             await GovernanceEndpoints.ApplyConsentManifestAsync(context, Substitute.For<IDeclarativeConsentApplyService>(), CancellationToken.None), context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        text.ShouldContain("Invalid JSON in consent manifest.");
+        text.ShouldContain("INVALID_JSON");
+        text.ShouldContain("The manifest could not be parsed");
         text.ShouldNotContain(Marker);
         text.ShouldNotContain("could not be converted");
         text.ShouldNotContain("System.");

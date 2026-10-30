@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Diagnostics;
 using System.Text.Json;
@@ -87,28 +88,7 @@ public sealed class FinOpsBudgetMiddleware
 
         if (budgetStatus.IsExceeded)
         {
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            context.Response.ContentType = "application/json";
-
-            var errJson = JsonSerializer.Serialize(new
-            {
-                errors = new[]
-                {
-                    new
-                    {
-                        message = $"Monthly FinOps budget exceeded for tenant '{tenantId}'.",
-                        extensions = new
-                        {
-                            code = "FINOPS_BUDGET_EXCEEDED",
-                            tenantId,
-                            currentSpend = budgetStatus.CurrentSpend,
-                            budgetLimit = budgetStatus.BudgetLimit
-                        }
-                    }
-                }
-            });
-
-            await context.Response.WriteAsync(errJson, context.RequestAborted).ConfigureAwait(false);
+            await ApiProblems.WriteTooManyRequests(context, ApiErrorCodes.FinOpsBudgetExceeded, "The monthly FinOps budget of the tenant is exceeded.", 3600, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 

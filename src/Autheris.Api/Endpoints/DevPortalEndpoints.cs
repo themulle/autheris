@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Linq;
 using System.Security.Claims;
@@ -113,7 +114,7 @@ public static class DevPortalEndpoints
 
             if (string.IsNullOrWhiteSpace(code))
             {
-                return Results.BadRequest(new { error = "Code is required." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Code is required.");
             }
 
             // Security review (TOTP TOFU): checked again on activation, the pending seed alone does not prove a fresh sign-in.
@@ -136,11 +137,11 @@ public static class DevPortalEndpoints
             return outcome switch
             {
                 TotpEnrollmentOutcome.Completed => Results.Ok(new { success = true, message = "2FA Enrollment completed successfully." }),
-                TotpEnrollmentOutcome.NoPendingEnrollment => Results.BadRequest(new { error = "No pending enrollment found. Reload the enrollment page first." }),
-                TotpEnrollmentOutcome.CurrentCodeRequired => Results.BadRequest(new { error = "A code from the currently enrolled authenticator is required to replace the 2FA secret." }),
-                TotpEnrollmentOutcome.InvalidCurrentCode => Results.BadRequest(new { error = "Invalid or expired code for the current authenticator." }),
+                TotpEnrollmentOutcome.NoPendingEnrollment => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "No pending enrollment found. Reload the enrollment page first."),
+                TotpEnrollmentOutcome.CurrentCodeRequired => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "A code from the currently enrolled authenticator is required to replace the 2FA secret."),
+                TotpEnrollmentOutcome.InvalidCurrentCode => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid or expired code for the current authenticator."),
                 TotpEnrollmentOutcome.StoreUnavailable => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
-                _ => Results.BadRequest(new { error = "Invalid or expired TOTP code." })
+                _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid or expired TOTP code.")
             };
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentVerified);
 
@@ -152,7 +153,7 @@ public static class DevPortalEndpoints
         {
             if (!options.Value.HitLStepUp.Enabled)
             {
-                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
             if (!EndpointSecurity.IsApprover(context.User))
@@ -179,7 +180,7 @@ public static class DevPortalEndpoints
         {
             if (!options.Value.HitLStepUp.Enabled)
             {
-                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
             if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(ticketId))
@@ -221,7 +222,7 @@ public static class DevPortalEndpoints
             var result = await hitlService.ApproveStepUpRequestAsync(ticketId, approver, totpCode, ct);
             if (!result.IsApproved)
             {
-                return Results.BadRequest(new { error = result.Message ?? "Step-Up Approval failed." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Step-up approval failed.");
             }
 
             return Results.Ok(new { success = true, confirmationToken = result.Ticket?.Signature ?? result.Ticket?.ApprovalId ?? ticketId });

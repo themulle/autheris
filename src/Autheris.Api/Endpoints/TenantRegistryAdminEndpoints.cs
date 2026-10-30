@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System.Text.Json;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
@@ -50,7 +51,7 @@ public static class TenantRegistryAdminEndpoints
 
         if (!TenantId.TryParse(tenantId, out var keep))
         {
-            return Results.BadRequest(new { error = "tenantId is not a valid tenant id." });
+            return ApiProblems.BadRequest(ApiErrorCodes.InvalidTenantId, "tenantId is not a valid tenant id.");
         }
 
         TenantId actorTenant;
@@ -66,12 +67,12 @@ public static class TenantRegistryAdminEndpoints
         var resolution = await registry.ResolveCollisionAsync(keep, body?.ExpectedCurrent, ct).ConfigureAwait(false);
         if (resolution.Status == TenantCollisionResolutionStatus.NotFound)
         {
-            return Results.NotFound(new { error = "No collided tenant group exists for this tenant id." });
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "No collided tenant group exists for this tenant id.");
         }
 
         if (resolution.Status == TenantCollisionResolutionStatus.ExpectedMismatch)
         {
-            return Results.Conflict(new { error = "The group holds another spelling than expectedCurrent; nothing was changed.", current = resolution.PreviousTenantId });
+            return ApiProblems.Conflict(ApiErrorCodes.Conflict, "The group holds another spelling than expectedCurrent; nothing was changed.");
         }
 
         await audit.RecordAsync(new AuditLogEntry

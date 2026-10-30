@@ -104,7 +104,7 @@ public static partial class GovernanceEndpoints
 
         if (req == null)
         {
-            return Results.BadRequest(new { error = "Request body is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Request body is required.", context);
         }
 
         // NL-SC-07 (O-5d): the plain subject list was removed. A body that still carries it is refused before any lookup or store call;
@@ -119,7 +119,7 @@ public static partial class GovernanceEndpoints
 
         if (string.IsNullOrWhiteSpace(req.Subject))
         {
-            return Results.BadRequest(new { error = "Subject is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Subject is required.", context);
         }
 
         var trimmedSubject = req.Subject.Trim();
@@ -129,32 +129,32 @@ public static partial class GovernanceEndpoints
         // (SID, name, UPN, e-mail, oid, sub, ...), their account-name forms and the caller's groups, case-insensitively.
         if (IsSelfGrantSubject(context, trimmedSubject))
         {
-            return Results.BadRequest(new { error = "Segregation of Duties (SoD) violation: Self-grant of access profiles is strictly prohibited." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Segregation of Duties (SoD) violation: Self-grant of access profiles is strictly prohibited.", context);
         }
 
         // Justification validation (minimum 15 characters)
         if (string.IsNullOrWhiteSpace(req.Justification) || req.Justification.Trim().Length < 15)
         {
-            return Results.BadRequest(new { error = "Justification is required and must be at least 15 characters long." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Justification is required and must be at least 15 characters long.", context);
         }
 
         // ValidDays validation (1 to 180 days)
         if (req.ValidDays < 1 || req.ValidDays > 180)
         {
-            return Results.BadRequest(new { error = "validDays must be between 1 and 180." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "validDays must be between 1 and 180.", context);
         }
 
         // MaskingMode validation. Enum.TryParse also accepts any numeric string (e.g. "7"), so an undefined value is rejected explicitly:
         // it would otherwise be stored and ranked/applied as an unknown mode.
         if (!Enum.TryParse<MaskingPolicyMode>(req.MaskingMode, ignoreCase: true, out var mode) || !Enum.IsDefined(mode))
         {
-            return Results.BadRequest(new { error = $"Invalid maskingMode '{req.MaskingMode}'. Supported values: Default, Unmasked, Strict." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The maskingMode is invalid. Supported values: Default, Unmasked, Strict.", context);
         }
 
         // Tables validation
         if (req.Tables == null || req.Tables.Count == 0)
         {
-            return Results.BadRequest(new { error = "At least one target table pattern must be provided in 'tables'." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "At least one target table pattern must be provided in 'tables'.", context);
         }
 
         // Overbroad wildcard restriction: *.* or * is forbidden for Unmasked
@@ -162,7 +162,7 @@ public static partial class GovernanceEndpoints
         {
             if (req.Tables.Any(t => string.IsNullOrWhiteSpace(t) || t.Trim() is "*.*" or "*"))
             {
-                return Results.BadRequest(new { error = "Overbroad wildcard '*.*' is prohibited for Unmasked access profiles. Minimum schema scope required (e.g. 'tem.*')." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Overbroad wildcard '*.*' is prohibited for Unmasked access profiles. Minimum schema scope required (e.g. 'tem.*').", context);
             }
         }
 
@@ -170,9 +170,10 @@ public static partial class GovernanceEndpoints
         // the bulk path activates profiles immediately and therefore never creates them.
         if (mode == MaskingPolicyMode.Unmasked)
         {
-            return Results.Json(
-                new { error = "Unmasked access profiles cannot be created via bulk consent because they require approval by a different administrator. Use the consent request/approval workflow." },
-                statusCode: StatusCodes.Status403Forbidden);
+            return ApiProblems.Forbidden(
+                ApiErrorCodes.AccessDenied,
+                "Unmasked access profiles cannot be created via bulk consent because they require approval by a different administrator. Use the consent request/approval workflow.",
+                context);
         }
 
         // RowFilter sandbox AST validation
@@ -181,7 +182,7 @@ public static partial class GovernanceEndpoints
             var trimmedFilter = req.RowFilter.Trim();
             if (trimmedFilter.Contains(';') || trimmedFilter.Contains("--") || trimmedFilter.Contains("/*") || trimmedFilter.Contains("*/"))
             {
-                return Results.BadRequest(new { error = "Row filter predicate contains prohibited SQL constructs (semicolons or comments)." });
+                return ApiProblems.BadRequest(ApiErrorCodes.RowFilterSyntaxInvalid, "Row filter predicate contains prohibited SQL constructs (semicolons or comments).", context);
             }
 
             try
@@ -233,7 +234,7 @@ public static partial class GovernanceEndpoints
         // WP-SC-16: every individual grant is time-bound within the class maximum (also for bulk grants).
         if (!Enum.TryParse<GranteeType>(subjectType, ignoreCase: true, out var bulkGranteeType) || !Enum.IsDefined(bulkGranteeType))
         {
-            return Results.BadRequest(new { error = $"Invalid subjectType '{subjectType}'. Supported values: User, Group, Role, ServicePrincipal." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The subjectType is invalid. Supported values: User, Group, Role, ServicePrincipal.", context);
         }
 
         var grantPolicy = context.RequestServices.GetService<IGrantPolicy>() ?? new GrantPolicy();
@@ -249,9 +250,11 @@ public static partial class GovernanceEndpoints
             Justification: req.Justification.Trim()));
         if (!grantDecision.Allowed)
         {
-            return Results.Json(
-                new { error = grantDecision.ErrorCode, message = grantDecision.Reason, maxValidTo = grantDecision.MaxValidTo },
-                statusCode: StatusCodes.Status400BadRequest);
+            return ApiProblems.BadRequest(
+                grantDecision.ErrorCode ?? ApiErrorCodes.BadRequest,
+                "The grant violates the grant rules.",
+                context,
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["maxValidTo"] = grantDecision.MaxValidTo });
         }
 
         var profile = new AccessProfile
@@ -292,7 +295,7 @@ public static partial class GovernanceEndpoints
         catch (AccessProfileAssignmentRejectedException ex)
         {
             await accessProfileRepo.DeleteProfileAsync(tenantId, profileId, CancellationToken.None).ConfigureAwait(false);
-            return Results.Json(new { error = ex.Code, message = "The access profile assignment violates the grant rules." }, statusCode: StatusCodes.Status400BadRequest);
+            return ApiProblems.BadRequest(ex.Code, "The access profile assignment violates the grant rules.", context);
         }
         catch
         {
@@ -421,7 +424,7 @@ public static partial class GovernanceEndpoints
         var profile = await accessProfileRepo.GetProfileAsync(tenantId, id, ct).ConfigureAwait(false);
         if (profile == null)
         {
-            return Results.NotFound(new { error = $"Profile '{id}' not found." });
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The profile was not found.", context);
         }
 
         return Results.Ok(profile);
@@ -447,7 +450,7 @@ public static partial class GovernanceEndpoints
         if (req == null || string.IsNullOrWhiteSpace(req.Subject) || !Enum.TryParse<AccessProfileSubjectType>(req.SubjectType ?? "User", ignoreCase: true, out var subjectType) ||
             !Enum.IsDefined(subjectType))
         {
-            return Results.BadRequest(new { error = "subject and a valid subjectType (User, Group, Role) are required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "subject and a valid subjectType (User, Group, Role) are required.", context);
         }
 
         var callerSid = context.User.GetUserSid()?.Value ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? context.User.Identity?.Name ?? string.Empty;
@@ -462,13 +465,12 @@ public static partial class GovernanceEndpoints
         var assignment = profile?.Assignments.FirstOrDefault(a => a.SubjectType == subjectType && string.Equals(a.Subject, subject, StringComparison.OrdinalIgnoreCase));
         if (profile == null || assignment == null)
         {
-            return Results.NotFound(new { error = "The assignment does not exist." });
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The assignment does not exist.", context);
         }
 
         if (string.Equals(assignment.CreatedBy?.Trim(), callerSid, StringComparison.OrdinalIgnoreCase) || IsSelfGrantSubject(context, subject))
         {
-            return Results.Json(new { error = AccessProfileAssignmentRules.SameApprover, message = "Four-eyes: the approver must differ from the requester and the grantee." },
-                statusCode: StatusCodes.Status403Forbidden);
+            return ApiProblems.Forbidden(AccessProfileAssignmentRules.SameApprover, "Four-eyes: the approver must differ from the requester and the grantee.", context);
         }
 
         // Route (b): an individual Unmasked grant needs the data owner (or delegate) of every matched table.
@@ -477,8 +479,7 @@ public static partial class GovernanceEndpoints
             // EP-01: Individual unmasked assignment may only be approved for concrete patterns (no wildcard)
             if (profile.HasWildcardPattern)
             {
-                return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = "Individual unmasked assignments cannot be approved for wildcard target tables." },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(ApiErrorCodes.DataOwnerApprovalRequired, "Individual unmasked assignments cannot be approved for wildcard target tables.", context);
             }
 
             var owners = context.RequestServices.GetService<IDataOwnershipRepository>();
@@ -495,16 +496,14 @@ public static partial class GovernanceEndpoints
             // EP-01: At least one table must match
             if (matched.Count == 0)
             {
-                return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = "No catalogued tables match the profile target tables." },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(ApiErrorCodes.DataOwnerApprovalRequired, "No catalogued tables match the profile target tables.", context);
             }
 
             foreach (var table in matched)
             {
                 if (!await owners.IsAuthorizedApproverForTableAsync(table.Identifier, new Sid(callerSid), ct).ConfigureAwait(false))
                 {
-                    return Results.Json(new { error = "DATA_OWNER_APPROVAL_REQUIRED", message = $"The approver is not the data owner or a delegate of '{table.Identifier}'." },
-                        statusCode: StatusCodes.Status403Forbidden);
+                    return ApiProblems.Forbidden(ApiErrorCodes.DataOwnerApprovalRequired, "The approver is not the data owner or a delegate of a matched table.", context);
                 }
             }
         }
@@ -516,7 +515,7 @@ public static partial class GovernanceEndpoints
         }
         catch (AccessProfileAssignmentRejectedException ex)
         {
-            return Results.Json(new { error = ex.Code, message = "The approval violates the grant rules." }, statusCode: StatusCodes.Status400BadRequest);
+            return ApiProblems.BadRequest(ex.Code, "The approval violates the grant rules.", context);
         }
 
         var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
@@ -578,7 +577,7 @@ public static partial class GovernanceEndpoints
         var profile = await accessProfileRepo.GetProfileAsync(tenantId, id, ct).ConfigureAwait(false);
         if (profile == null)
         {
-            return Results.NotFound(new { error = $"Profile '{id}' not found." });
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The profile was not found.", context);
         }
 
         await accessProfileRepo.DeleteProfileAsync(tenantId, id, ct).ConfigureAwait(false);

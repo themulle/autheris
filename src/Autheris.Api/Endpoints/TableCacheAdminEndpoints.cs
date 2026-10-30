@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
 using Microsoft.AspNetCore.Builder;
@@ -30,16 +31,17 @@ public static class TableCacheAdminEndpoints
             string tableName,
             ITableCacheCatalog catalog,
             ITableCacheManager manager,
+            HttpContext context,
             CancellationToken ct) =>
         {
             if (!TableIdentifier.TryParse(tableName, out var table))
             {
-                return Results.BadRequest($"Invalid table identifier format: '{tableName}'. Expected 'domain.schema.table' or 'schema.table'.");
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidTableIdentifier, "The table identifier must be 'domain.schema.table' or 'schema.table'.", context);
             }
 
             if (!catalog.TryGet(table, out var target) || target is null)
             {
-                return Results.NotFound(new { Message = $"Table '{table}' is not registered in the table cache catalog." });
+                return ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "The table is not registered in the table cache catalog.", context);
             }
 
             try
@@ -57,16 +59,17 @@ public static class TableCacheAdminEndpoints
             string tableName,
             ITableCacheCatalog catalog,
             ITableCacheInvalidator invalidator,
+            HttpContext context,
             CancellationToken ct) =>
         {
             if (!TableIdentifier.TryParse(tableName, out var table))
             {
-                return Results.BadRequest($"Invalid table identifier format: '{tableName}'. Expected 'domain.schema.table' or 'schema.table'.");
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidTableIdentifier, "The table identifier must be 'domain.schema.table' or 'schema.table'.", context);
             }
 
             if (!catalog.TryGet(table, out var target) || target is null)
             {
-                return Results.NotFound(new { Message = $"Table '{table}' is not registered in the table cache catalog." });
+                return ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "The table is not registered in the table cache catalog.", context);
             }
 
             await invalidator.InvalidateAsync(target.Table, "Admin request", ct).ConfigureAwait(false);

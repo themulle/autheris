@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -69,8 +70,9 @@ public static class EnvoyExtAuthzEndpoints
                 }
             }
 
-            var body = decision.HttpResponse.DeniedResponse?.Body ?? "Access Denied by Autheris PDP";
-            return Results.Json(new { error = body, status = statusCode }, statusCode: statusCode);
+            // NL-SC-22: the PDP text passes the control-character strip and length cap before it is echoed; the protocol shape stays.
+            var safeBody = ApiProblems.SanitizeOperatorText(decision.HttpResponse.DeniedResponse?.Body, "Access Denied by Autheris PDP");
+            return Results.Json(new { error = safeBody, status = statusCode }, statusCode: statusCode);
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // GET /api/v1/envoy/export/envoyfilter.yaml: Export Istio EnvoyFilter CRD
@@ -94,7 +96,7 @@ public static class EnvoyExtAuthzEndpoints
             }
             catch (ArgumentException)
             {
-                return Results.BadRequest(new { error = "Invalid export parameters (namespace/host must be DNS names, port numeric)." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid export parameters (namespace/host must be DNS names, port numeric).");
             }
         }).WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataExport);
 
@@ -119,7 +121,7 @@ public static class EnvoyExtAuthzEndpoints
             }
             catch (ArgumentException)
             {
-                return Results.BadRequest(new { error = "Invalid export parameters (namespace/host must be DNS names, port numeric)." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid export parameters (namespace/host must be DNS names, port numeric).");
             }
         }).WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataExport);
 

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -33,7 +34,7 @@ public static class SystemEndpoints
             var sysOpts = options.Value.SystemMetrics;
             if (!sysOpts.Enabled || !sysOpts.ExposeRestEndpoints)
             {
-                return Results.NotFound(new { error = "System metrics endpoints are disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "System metrics endpoints are disabled.");
             }
 
             if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
@@ -55,7 +56,7 @@ public static class SystemEndpoints
             var sysOpts = options.Value.SystemMetrics;
             if (!sysOpts.Enabled || !sysOpts.ExposeRestEndpoints)
             {
-                return Results.NotFound(new { error = "System metrics endpoints are disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "System metrics endpoints are disabled.");
             }
 
             if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
@@ -84,7 +85,7 @@ public static class SystemEndpoints
             var sysOpts = options.Value.SystemMetrics;
             if (!sysOpts.Enabled || !sysOpts.ExposeRestEndpoints)
             {
-                return Results.NotFound(new { error = "System metrics endpoints are disabled." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "System metrics endpoints are disabled.");
             }
 
             if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
