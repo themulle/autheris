@@ -163,7 +163,7 @@ public sealed class DatasetIndexVisibilityLeakTests
             json.ShouldNotContain("\"Name\":\"ix");
         }
 
-        typeof(DatasetIndexInfo).GetProperties().Select(p => p.Name).Order().ShouldBe(new[] { "Columns", "Unique" });
+        typeof(DatasetIndexInfo).GetProperties().Select(p => p.Name).Order().ShouldBe(new[] { "Columns", "Directions", "Unique" });
 
         // OpenAPI has no caller context: it emits no index and no index name at all.
         var repo = Substitute.For<ITableMetadataRepository>();

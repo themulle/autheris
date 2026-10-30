@@ -6,10 +6,19 @@ using System.Linq;
 using Autheris.Domain.Model;
 
 /// <summary>The primary key and declared indexes a caller may see (I404-SC-L1..L6).</summary>
-public sealed record DatasetKeyProjection(IReadOnlyList<string> PrimaryKeyColumns, IReadOnlyList<DatasetIndexInfo> Indexes)
+public sealed record DatasetKeyProjection(
+    IReadOnlyList<string> PrimaryKeyColumns,
+    IReadOnlyList<KeyColumnDirection> PrimaryKeyDirections,
+    IReadOnlyList<DatasetIndexInfo> Indexes)
 {
     /// <summary>Nothing visible: the fail-closed result.</summary>
-    public static DatasetKeyProjection Empty { get; } = new([], []);
+    public static DatasetKeyProjection Empty { get; } = new([], [], []);
+
+    /// <summary>Issue #390: the key columns in key order with their direction; null when the key is not wholly readable.</summary>
+    public IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder =>
+        PrimaryKeyColumns.Count == 0
+            ? null
+            : PrimaryKeyColumns.Select((c, i) => new McpKeyColumn(c, KeyDirections.IsDescending(PrimaryKeyDirections, i) ? "DESC" : "ASC")).ToList();
 }
 
 /// <summary>
@@ -43,7 +52,11 @@ public static class DatasetIndexProjection
             return DatasetKeyProjection.Empty;
         }
 
-        var primaryKey = Readable(table, table.PrimaryKeyColumns, clearColumns) ? table.PrimaryKeyColumns.ToArray() : [];
+        var pkReadable = Readable(table, table.PrimaryKeyColumns, clearColumns);
+        var primaryKey = pkReadable ? table.PrimaryKeyColumns.ToArray() : [];
+        IReadOnlyList<KeyColumnDirection> primaryKeyDirections = pkReadable
+            ? KeyDirections.Canonical(table.PrimaryKeyDirections)?.ToArray() ?? []
+            : [];
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var indexes = new List<DatasetIndexInfo>();
@@ -54,20 +67,21 @@ public static class DatasetIndexProjection
                 continue;
             }
 
-            var key = (index.IsUnique ? "U:" : "N:") + string.Join('\u0001', index.Columns);
+            var directions = KeyDirections.Canonical(index.Directions)?.ToArray();
+            var key = (index.IsUnique ? "U:" : "N:") + string.Join('\u0001', index.Columns) + "|" + (directions == null ? "" : string.Join(',', directions));
             if (!seen.Add(key))
             {
                 continue;
             }
 
-            indexes.Add(new DatasetIndexInfo(index.Columns.ToArray(), index.IsUnique));
+            indexes.Add(new DatasetIndexInfo(index.Columns.ToArray(), index.IsUnique, directions));
             if (indexes.Count == MaxIndexesPerTable)
             {
                 break;
             }
         }
 
-        return new DatasetKeyProjection(primaryKey, indexes);
+        return new DatasetKeyProjection(primaryKey, primaryKeyDirections, indexes);
     }
 
     // Every name must be a real column of the table (a stale name never resolves) and Clear for the caller; no allocation.
