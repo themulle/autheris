@@ -29,6 +29,11 @@ public abstract class KeyIndexMetadataReaderContractTests
 
     protected abstract string DescKeyword { get; }
 
+    /// <summary>PostgreSQL primary key constraints cannot declare DESC (always ascending); SQL Server can.</summary>
+    protected abstract bool PrimaryKeySupportsDesc { get; }
+
+    private string PkDesc => PrimaryKeySupportsDesc ? DescKeyword : string.Empty;
+
     private static string Unique(string stem) => stem + Guid.NewGuid().ToString("N")[..8];
 
     private async Task<List<DbKeyIndexColumn>> ReadAsync(DbConnection conn, string table)
@@ -55,12 +60,12 @@ public abstract class KeyIndexMetadataReaderContractTests
         // I403-T-04
         await using var conn = await OpenAsync();
         var t = Unique("kd_pk");
-        await ExecAsync(conn, $"CREATE TABLE {Quote(Schema)}.{Quote(t)} (a int NOT NULL, b int NOT NULL, c int NOT NULL, CONSTRAINT {Quote("pk_" + t)} PRIMARY KEY (b {DescKeyword}, a))");
+        await ExecAsync(conn, $"CREATE TABLE {Quote(Schema)}.{Quote(t)} (a int NOT NULL, b int NOT NULL, c int NOT NULL, CONSTRAINT {Quote("pk_" + t)} PRIMARY KEY (b {PkDesc}, a))");
 
         var rows = await ReadAsync(conn, t);
 
         rows.Select(r => (r.KeyOrdinal, r.ColumnName, r.IsDescending, r.IsPrimaryKey)).ToArray()
-            .ShouldBe(new[] { (1, "b", true, true), (2, "a", false, true) });
+            .ShouldBe(new[] { (1, "b", PrimaryKeySupportsDesc, true), (2, "a", false, true) });
         rows.Select(r => r.IndexName).Distinct().Single().ShouldBe("pk_" + t);
     }
 
@@ -113,11 +118,11 @@ public abstract class KeyIndexMetadataReaderContractTests
         // I403-T-08 / I403-T-S01 (container half)
         await using var conn = await OpenAsync();
         var t = Unique("Kd\"Mixed'--");
-        await ExecAsync(conn, $"CREATE TABLE {Quote(Schema)}.{Quote(t)} ({Quote("Id")} int NOT NULL, CONSTRAINT {Quote("pk_" + t)} PRIMARY KEY ({Quote("Id")} {DescKeyword}))");
+        await ExecAsync(conn, $"CREATE TABLE {Quote(Schema)}.{Quote(t)} ({Quote("Id")} int NOT NULL, CONSTRAINT {Quote("pk_" + t)} PRIMARY KEY ({Quote("Id")} {PkDesc}))");
 
         var rows = await ReadAsync(conn, t);
 
-        rows.Select(r => (r.ColumnName, r.IsDescending)).ToArray().ShouldBe(new[] { ("Id", true) });
+        rows.Select(r => (r.ColumnName, r.IsDescending)).ToArray().ShouldBe(new[] { ("Id", PrimaryKeySupportsDesc) });
         (await ReadAsync(conn, t + "' OR '1'='1")).ShouldBeEmpty();
         (await ReadAsync(conn, t.ToUpperInvariant() + "x")).ShouldBeEmpty();
     }
@@ -132,6 +137,7 @@ public sealed class SqlServerKeyIndexMetadataReaderContractTests : KeyIndexMetad
     protected override IKeyIndexMetadataReader Reader { get; } = new SqlServerKeyIndexMetadataReader();
     protected override string Schema => "dbo";
     protected override string DescKeyword => "DESC";
+    protected override bool PrimaryKeySupportsDesc => true;
     protected override string Quote(string identifier) => "[" + identifier.Replace("]", "]]", StringComparison.Ordinal) + "]";
 
     protected override async Task<DbConnection> OpenAsync()
@@ -168,6 +174,7 @@ public sealed class PostgreSqlKeyIndexMetadataReaderContractTests : KeyIndexMeta
     protected override IKeyIndexMetadataReader Reader { get; } = new PostgreSqlKeyIndexMetadataReader();
     protected override string Schema => "public";
     protected override string DescKeyword => "DESC";
+    protected override bool PrimaryKeySupportsDesc => false;
     protected override string Quote(string identifier) => "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
 
     protected override async Task<DbConnection> OpenAsync()
