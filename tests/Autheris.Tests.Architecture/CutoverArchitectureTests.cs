@@ -407,6 +407,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository", "governance store repository"),
         ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
+        ("Autheris.Infrastructure.Persistence.CatalogPhysicalIndexStore", "governance store: physical non-unique index tables (issue #404), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.DatasetCatalogStore", "governance store: dataset catalog tags and visibility tier (issue #111), fixed statements with bound values over the three engines, no client text"),

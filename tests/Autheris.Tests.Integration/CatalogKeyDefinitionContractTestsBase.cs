@@ -377,4 +377,50 @@ public abstract class CatalogKeyDefinitionContractTestsBase
         InvalidateCache();
         (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBeEmpty();
     }
+
+    private static PhysicalIndexDefinition Phys(string[] columns, params KeyColumnDirection[] directions) => new(columns, directions);
+
+    [Fact]
+    public async Task I404_PhysicalIndexes_Replace_RoundTripsInOrder_AndNeverTouchesDeclaredIndexes()
+    {
+        if (!Available) return;
+        var id = await SeedFullAsync();
+        var port = (IPhysicalIndexRepository)Repo;
+
+        (await port.ReplacePhysicalIndexesAsync(id, [Phys(["b", "c"], KeyColumnDirection.Ascending, KeyColumnDirection.Descending), Phys(["d"])])).ShouldBeTrue();
+        InvalidateCache();
+
+        var read = (await Repo.GetTableMetadataAsync(id))!;
+        read.PhysicalIndexes.Count.ShouldBe(2);
+        read.PhysicalIndexes[0].Columns.ShouldBe(["b", "c"]);
+        read.PhysicalIndexes[0].Directions.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        read.PhysicalIndexes[1].Columns.ShouldBe(["d"]);
+        read.Indexes.Count.ShouldBe(2, "declared indexes are untouched");
+
+        (await port.ReplacePhysicalIndexesAsync(id, [])).ShouldBeTrue();
+        InvalidateCache();
+        (await Repo.GetTableMetadataAsync(id))!.PhysicalIndexes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task I404_T_S06_S07_PhysicalIndexes_Replace_RejectsInvalid_WritesNothing_AndIsolatesTables()
+    {
+        if (!Available) return;
+        var a = await SeedFullAsync();
+        var b = await SeedFullAsync();
+        var port = (IPhysicalIndexRepository)Repo;
+        await port.ReplacePhysicalIndexesAsync(a, [Phys(["b"])]);
+        await port.ReplacePhysicalIndexesAsync(b, [Phys(["c"])]);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => port.ReplacePhysicalIndexesAsync(a, [Phys(["b", "B"])]));
+        await Should.ThrowAsync<InvalidOperationException>(() => port.ReplacePhysicalIndexesAsync(a, [Phys(["nope"])]));
+        await Should.ThrowAsync<InvalidOperationException>(() => port.ReplacePhysicalIndexesAsync(
+            a, Enumerable.Range(0, TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable + 1).Select(_ => Phys(["b"])).ToList()));
+        (await port.ReplacePhysicalIndexesAsync(new TableIdentifier("sales", "dbo", "missing_" + Guid.NewGuid().ToString("N")), [Phys(["b"])])).ShouldBeFalse();
+        InvalidateCache();
+
+        (await Repo.GetTableMetadataAsync(a))!.PhysicalIndexes.ShouldHaveSingleItem().Columns.ShouldBe(["b"]);
+        (await Repo.GetTableMetadataAsync(b))!.PhysicalIndexes.ShouldHaveSingleItem().Columns.ShouldBe(["c"]);
+    }
 }

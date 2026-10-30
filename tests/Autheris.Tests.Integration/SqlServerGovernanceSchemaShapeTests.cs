@@ -72,7 +72,7 @@ public sealed class SqlServerGovernanceSchemaShapeTests : IClassFixture<SqlServe
         await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
         await GovernanceSchemaTestSupport.RunSqlServerAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
 
-        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(3, "baseline, step 0002 and step 0003");
+        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM dbo.autheris_schema_migrations")).ShouldBe(4, "baseline and steps 0002 to 0004");
     }
 
     [Fact]
