@@ -24,12 +24,13 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 /// re-validated against a fingerprint of the security-relevant governance inputs (data source, provider, dialect, governed columns,
 /// tenant column), so a governance change takes effect on the next compile and not only after the TTL.
 /// </summary>
-public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
+public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, IPhysicalKeyCatalog
 {
     private readonly IGovernanceRepository _governance;
     private readonly IOptions<GatewayOptions> _gateway;
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly IReadOnlyDictionary<TargetSqlDialect, IColumnMetadataReader> _readers;
+    private readonly IReadOnlyDictionary<TargetSqlDialect, IKeyIndexMetadataReader> _keyReaders;
     private readonly TimeSpan _ttl;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
@@ -44,7 +45,8 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         IEnumerable<IColumnMetadataReader> readers,
         GovernedCatalogOptions options,
         TimeProvider? time = null,
-        ILogger<GovernedCatalogProvider>? logger = null)
+        ILogger<GovernedCatalogProvider>? logger = null,
+        IEnumerable<IKeyIndexMetadataReader>? keyReaders = null)
     {
         ArgumentNullException.ThrowIfNull(governance);
         ArgumentNullException.ThrowIfNull(gateway);
@@ -56,6 +58,7 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         _gateway = gateway;
         _connectionFactory = connectionFactory;
         _readers = readers.ToDictionary(static r => r.Dialect);
+        _keyReaders = (keyReaders ?? []).ToDictionary(static r => r.Dialect);
         _ttl = TimeSpan.FromSeconds(options.CacheTtlSeconds);
         _time = time ?? TimeProvider.System;
         _logger = logger ?? NullLogger<GovernedCatalogProvider>.Instance;

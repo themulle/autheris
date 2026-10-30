@@ -43,7 +43,11 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
     private static readonly Dictionary<string, string> Allowlist = new(StringComparer.Ordinal)
     {
         ["Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"] =
-            "Proves PHYSICAL uniqueness for row-scope authorization (fails closed); a declared, unverified index must not replace it (SEC-94-10)."
+            "Proves PHYSICAL uniqueness for row-scope authorization (fails closed); a declared, unverified index must not replace it (SEC-94-10).",
+        ["Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs"] =
+            "Issue #403: reads PK and unique-index shape only to look up directions of declared keys; the declared definition stays the only key (I403-SC-04, SC-06).",
+        ["Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"] =
+            "Issue #403: reads PK and unique-index shape only to look up directions of declared keys; the declared definition stays the only key (I403-SC-04, SC-06)."
     };
 
     private const string MigrationsDirectory = "Autheris.Infrastructure/Persistence/Migrations/";
@@ -94,7 +98,9 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
     {
         Allowlist.Keys.Order(StringComparer.Ordinal).ShouldBe(
         [
-            "Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"
+            "Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs",
+            "Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs",
+            "Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"
         ]);
         foreach (var (path, reason) in Allowlist)
         {
@@ -123,6 +129,29 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
         scanned.ShouldContain("Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs");
         scanned.ShouldContain("Autheris.Extensions/Cdc/CdcTableActivator.cs");
         scanned.ShouldContain("Autheris.Extensions/Cdc/CdcSourceQueries.cs");
+    }
+
+    [Fact]
+    public void KeyIndexReaders_AreReferencedOnlyByTheGovernedCatalogProviderAndComposition()
+    {
+        // Issue #403: the direction readers have exactly one consumer (the governed catalog provider, via the port); nothing else may read key shape.
+        const string Persistence = "Autheris.Infrastructure/Persistence/Catalog/";
+        const string Composition = "Autheris.Api/Extensions/DependencyInjection/GatewayStorageServiceExtensions.cs";
+        var concrete = new[] { "SqlServerKeyIndexMetadataReader", "PostgreSqlKeyIndexMetadataReader" };
+        var port = new[]
+        {
+            "Autheris.Application/Sql/Catalog/IKeyIndexMetadataReader.cs", Persistence + "SqlServerKeyIndexMetadataReader.cs",
+            Persistence + "PostgreSqlKeyIndexMetadataReader.cs", Persistence + "GovernedCatalogProvider.cs",
+            Composition
+        };
+
+        var portUsers = AllSourceFiles().Where(f => File.ReadAllText(f).Contains("IKeyIndexMetadataReader", StringComparison.Ordinal)).Select(Relative).Order(StringComparer.Ordinal);
+        portUsers.ShouldBe(port.Order(StringComparer.Ordinal));
+
+        var concreteUsers = AllSourceFiles()
+            .Where(f => { var text = File.ReadAllText(f); return concrete.Any(c => text.Contains(c, StringComparison.Ordinal)); })
+            .Select(Relative).Order(StringComparer.Ordinal);
+        concreteUsers.ShouldBe(new[] { Composition, Persistence + "PostgreSqlKeyIndexMetadataReader.cs", Persistence + "SqlServerKeyIndexMetadataReader.cs" }.Order(StringComparer.Ordinal));
     }
 
     private static readonly (string Pattern, string Sample)[] Samples =

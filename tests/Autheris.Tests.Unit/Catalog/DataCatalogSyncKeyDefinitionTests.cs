@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.DataCatalog.Models;
 using Autheris.Application.Interfaces;
@@ -30,7 +32,7 @@ public sealed class DataCatalogSyncKeyDefinitionTests
             .Returns(c => { _upserts.Add(c.Arg<TableMetadata>()); return Task.FromResult(c.Arg<TableMetadata>()); });
         return new DataCatalogSyncService(factory, _repo, Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.MicrosoftPurview } }),
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
     }
 
     private static CatalogTableAsset Asset(Action<CatalogTableAsset, List<CatalogColumnAsset>>? configure = null)
