@@ -216,19 +216,19 @@ public sealed class GovernedCatalogProviderPhysicalKeysTests
     public async Task OrdinalGapDuplicateOrDuplicateColumn_Unavailable()
     {
         // I403-T-S13
-        var bad = new List<List<DbKeyIndexColumn>>
-        {
+        DbKeyIndexColumn[][] bad =
+        [
             [Row("pk", 1, "a", pk: true), Row("pk", 3, "b", pk: true)],              // gap
             [Row("pk", 1, "a", pk: true), Row("pk", 1, "b", pk: true)],              // duplicate ordinal
             [Row("pk", 1, "a", pk: true), Row("pk", 2, "A", pk: true)],              // duplicate column
             [Row("pk", 2, "a", pk: true)],                                           // does not start at 1
             [Row("a", 1, "x", pk: true), Row("b", 1, "y", pk: true)],                // two primary keys
             [Row("u", 1, "x"), Row("v", 1, "y"), Row("u", 2, "z")]                   // key split into two runs
-        };
+        ];
         foreach (var rows in bad)
         {
             var (sut, reader, _, _) = Build();
-            reader.Rows = rows;
+            reader.Rows = rows.ToList();
             (await sut.ReadAsync(Table(), CancellationToken.None)).State.ShouldBe(PhysicalKeySnapshotState.Unavailable);
         }
     }
