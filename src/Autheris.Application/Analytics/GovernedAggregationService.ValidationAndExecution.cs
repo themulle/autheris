@@ -434,7 +434,9 @@ public sealed partial class GovernedAggregationService
             {
                 GatewayParameters = planned.Parameters.Count > 0 ? planned.Parameters : null,
                 // I398-SC-04: (max) text group keys are read under a fixed byte budget.
-                ResultByteBudget = Autheris.Application.Sql.ResultByteBudget.GroupKeys,
+                ResultByteBudget = metadata.Dialect == DatabaseDialect.Sqlite
+                    ? Autheris.Application.Sql.ResultByteBudget.GroupKeysWholeValue
+                    : Autheris.Application.Sql.ResultByteBudget.GroupKeys,
             };
 
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(sqlRequest, principal, tenantId, ct).ConfigureAwait(false);
