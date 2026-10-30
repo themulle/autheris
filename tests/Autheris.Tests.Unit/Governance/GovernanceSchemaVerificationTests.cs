@@ -128,7 +128,7 @@ public sealed class GovernanceSchemaVerificationTests : IDisposable
             var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => NewRunner(repository, cs).RunAsync());
             ex.Message.ShouldContain("missing column     CONSENT_COLUMN_RULES.applicable_scopes (expected TEXT, family string)");
             ex.Message.ShouldContain("missing table      TABLE_INDEX_COLUMNS");
-            ex.Message.ShouldContain("applied migrations: 0001; pending: none");
+            ex.Message.ShouldContain("applied migrations: 0001, 0002; pending: none");
         }
     }
 
@@ -254,6 +254,6 @@ public sealed class GovernanceSchemaVerificationTests : IDisposable
             .ToArray();
 
         await Task.WhenAll(runs);
-        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations").ShouldBe(2);
     }
 }

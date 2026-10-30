@@ -19,7 +19,9 @@ public sealed record DbtColumnDefinition(
 public sealed record DbtDeclaredKeys(
     IReadOnlyList<string>? PrimaryKey,
     IReadOnlyList<IReadOnlyList<string>> UniqueConstraints,
-    bool Invalid);
+    bool Invalid,
+    IReadOnlyList<KeyColumnDirection>? PrimaryKeyDirections = null,
+    IReadOnlyList<IReadOnlyList<KeyColumnDirection>?>? UniqueDirections = null);
 
 public sealed record DbtModelDefinition(
     string UniqueId,

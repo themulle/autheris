@@ -331,6 +331,7 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.Columns),
         nameof(TableMetadata.ColumnMaskingRules),
         nameof(TableMetadata.PrimaryKeyColumns),
+        nameof(TableMetadata.PrimaryKeyDirections),
         nameof(TableMetadata.Indexes),
         nameof(TableMetadata.ReplaceKeyDefinition),
         nameof(TableMetadata.CatalogTags),

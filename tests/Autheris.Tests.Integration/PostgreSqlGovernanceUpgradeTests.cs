@@ -86,7 +86,8 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
         int lockTimeoutSeconds = 300,
         bool requireLeastPrivilege = false,
         List<string>? log = null,
-        List<string>? trace = null)
+        List<string>? trace = null,
+        bool baselineOnly = false)
     {
         var options = Opts(connectionString, mode, allowNewer, lockTimeoutSeconds, requireLeastPrivilege);
         using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
@@ -94,6 +95,7 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
             repository, options, log is null ? null : new CaptureLogger<PostgreSqlGovernanceMigrationRunner>(log))
         {
             AdditionalSteps = extra ?? [],
+            StepVersionCapOverride = baselineOnly ? 1 : null,
             Trace = trace is null ? null : s => { lock (trace) { trace.Add(s); } }
         };
         await runner.RunAsync();
@@ -104,6 +106,30 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
         await using var repository = GovernanceStoreFactory.CreatePostgreSql(
             Substitute.For<IEpochValidationService>(), Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false));
         await SeedCoreAsync(repository, () => repository.FlushAuditChannelAsync());
+    }
+
+    protected override async Task SeedBaselineAsync(string connectionString)
+    {
+        var options = Opts(connectionString, GovernanceMigrationMode.Apply, false, 300, false);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
+        await new PostgreSqlGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 1 }.RunAsync();
+        await repository.InitializeAsync();
+        for (var i = 0; i < 25; i++)
+        {
+            await repository.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
+            {
+                EventType = "UPGRADE_390",
+                ActorSid = new Autheris.Domain.Common.Sid("S-1-390-" + i),
+                TargetTable = "dbo.t",
+                TraceId = Guid.NewGuid().ToString("N")
+            });
+        }
+
+        await repository.FlushAuditChannelAsync();
+        if (!await repository.VerifyAuditHashChainAsync())
+        {
+            throw new InvalidOperationException("The seeded v1.5.0 audit chain must verify before the upgrade.");
+        }
     }
 
     protected override async Task<bool> AuditChainVerifiesAsync(string connectionString, IReadOnlyList<MigrationStep> extra)

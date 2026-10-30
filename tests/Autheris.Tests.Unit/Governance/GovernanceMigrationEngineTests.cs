@@ -63,6 +63,7 @@ public sealed class GovernanceMigrationEngineTests
             logger)
         {
             AdditionalSteps = extra ?? [],
+            StepVersionCapOverride = 1, // the engine tests run on the frozen baseline catalogue plus a synthetic step 0002
             Trace = trace is null ? null : trace.Add,
             IsProduction = production,
             RuntimeLoginRunsDdlOverride = runtimeDdl,

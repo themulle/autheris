@@ -232,11 +232,103 @@ public sealed class TableColumn
 }
 
 
-/// <summary>A declared index: ordered columns and the unique flag.</summary>
-public sealed record TableIndexDefinition(string Name, IReadOnlyList<string> Columns, bool IsUnique);
+/// <summary>Issue #390: the declared sort direction of one key or index column. Serialized as the closed strings <c>ASC</c> and <c>DESC</c>.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<KeyColumnDirection>))]
+public enum KeyColumnDirection
+{
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("ASC")]
+    Ascending = 0,
 
-/// <summary>The declared key definition of a table: ordered primary key and indexes (identifiers only, no data).</summary>
-public sealed record TableKeyDefinition(IReadOnlyList<string> PrimaryKey, IReadOnlyList<TableIndexDefinition> Indexes);
+    [System.Text.Json.Serialization.JsonStringEnumMemberName("DESC")]
+    Descending = 1
+}
+
+/// <summary>
+/// Helpers for the parallel direction lists of keys and indexes. Canonical form: an all-ascending key has no list at all (empty or null), so
+/// equality, audit JSON and responses of tables without a declared direction are unchanged; otherwise there is one entry per column.
+/// </summary>
+public static class KeyDirections
+{
+    /// <summary>True when column <paramref name="index"/> is declared descending; a missing list or entry reads as ascending.</summary>
+    public static bool IsDescending(IReadOnlyList<KeyColumnDirection>? directions, int index) =>
+        directions is not null && (uint)index < (uint)directions.Count && directions[index] == KeyColumnDirection.Descending;
+
+    /// <summary>True when any column is descending.</summary>
+    public static bool AnyDescending(IReadOnlyList<KeyColumnDirection>? directions)
+    {
+        if (directions is null)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < directions.Count; i++)
+        {
+            if (directions[i] == KeyColumnDirection.Descending)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The canonical form: <c>null</c> for an absent or all-ascending list.</summary>
+    public static IReadOnlyList<KeyColumnDirection>? Canonical(IReadOnlyList<KeyColumnDirection>? directions) =>
+        AnyDescending(directions) ? directions : null;
+
+    /// <summary>The closed wire spelling (<c>ASC</c>/<c>DESC</c>); never raw input.</summary>
+    public static string ToWire(KeyColumnDirection direction) => direction == KeyColumnDirection.Descending ? "DESC" : "ASC";
+
+    /// <summary>Wire spellings of a direction list for audit details; empty for the canonical (all ascending) form.</summary>
+    public static string[] ToWire(IReadOnlyList<KeyColumnDirection>? directions)
+    {
+        if (!AnyDescending(directions))
+        {
+            return [];
+        }
+
+        var wire = new string[directions!.Count];
+        for (var i = 0; i < wire.Length; i++)
+        {
+            wire[i] = ToWire(directions[i]);
+        }
+
+        return wire;
+    }
+
+    /// <summary>Parses <c>ASC</c>/<c>DESC</c> (ordinal, ignoring case); anything else is refused.</summary>
+    public static bool TryParse(string? value, out KeyColumnDirection direction)
+    {
+        if (string.Equals(value, "ASC", StringComparison.OrdinalIgnoreCase))
+        {
+            direction = KeyColumnDirection.Ascending;
+            return true;
+        }
+
+        if (string.Equals(value, "DESC", StringComparison.OrdinalIgnoreCase))
+        {
+            direction = KeyColumnDirection.Descending;
+            return true;
+        }
+
+        direction = default;
+        return false;
+    }
+}
+
+/// <summary>A declared index: ordered columns, the unique flag and (issue #390) the per-column directions (null = all ascending).</summary>
+public sealed record TableIndexDefinition(
+    string Name,
+    IReadOnlyList<string> Columns,
+    bool IsUnique,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<KeyColumnDirection>? Directions = null);
+
+/// <summary>The declared key definition of a table: ordered primary key (with optional directions) and indexes (identifiers only, no data).</summary>
+public sealed record TableKeyDefinition(
+    IReadOnlyList<string> PrimaryKey,
+    IReadOnlyList<TableIndexDefinition> Indexes,
+    IReadOnlyList<KeyColumnDirection>? PrimaryKeyDirections = null);
 
 /// <summary>Result of a narrow key definition replacement (audit before/after). <c>BeforeUnavailable</c>: the stored definition was invalid and is not reported.</summary>
 public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After, bool BeforeUnavailable = false);
@@ -262,6 +354,9 @@ public sealed record TableMetadata
     public IReadOnlyDictionary<string, MaskingRule> ColumnMaskingRules { get; init; } = new Dictionary<string, MaskingRule>();
     /// <summary>Declared primary key (ordered). Empty when none was declared; no key is ever inferred.</summary>
     public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = Array.Empty<string>();
+
+    /// <summary>Issue #390: declared direction per primary key column. Empty (canonical) when all ascending or undeclared; otherwise one entry per column.</summary>
+    public IReadOnlyList<KeyColumnDirection> PrimaryKeyDirections { get; init; } = Array.Empty<KeyColumnDirection>();
 
     /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
     public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();

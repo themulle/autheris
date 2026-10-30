@@ -206,20 +206,14 @@ public static class TableStreamEndpoints
         }
 
         // 5. Enforce Primary Key & Masking Gating (SEC-DATA178-04, SEC-DATA178-07)
-        IReadOnlyList<string> pkCols = metadata.PrimaryKeyColumns;
-        if (pkCols.Count == 0)
+        var streamKey = BulkStreamKey.TryResolve(metadata);
+        if (streamKey is null)
         {
-            var uniqueIdx = metadata.Indexes.FirstOrDefault(i => i.IsUnique && i.Columns.Count > 0);
-            if (uniqueIdx != null)
-            {
-                pkCols = uniqueIdx.Columns;
-            }
-            else
-            {
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "The table requires a primary key or unique index for keyset streaming.", ct).ConfigureAwait(false);
-                return;
-            }
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "The table requires a primary key or unique index for keyset streaming.", ct).ConfigureAwait(false);
+            return;
         }
+
+        IReadOnlyList<string> pkCols = streamKey.Columns;
 
         foreach (var pk in pkCols)
         {
@@ -436,7 +430,7 @@ public static class TableStreamEndpoints
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
                     // Same factory and encoder the planner verifies continuation cursors with.
-                    var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenant.Value, metadata, pkCols, callerSid, request);
+                    var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenant.Value, metadata, pkCols, callerSid, request, streamKey.Directions);
                     nextCursor = cursorEncoder.EncodeCursor(lastRowPk, cursorContext);
                 }
             }
@@ -559,7 +553,7 @@ public static class TableStreamEndpoints
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
                     // Same factory and encoder the planner verifies continuation cursors with.
-                    var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenant.Value, metadata, pkCols, callerSid, request);
+                    var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenant.Value, metadata, pkCols, callerSid, request, streamKey.Directions);
                     nextCursor = cursorEncoder.EncodeCursor(lastRowPk, cursorContext);
                 }
 

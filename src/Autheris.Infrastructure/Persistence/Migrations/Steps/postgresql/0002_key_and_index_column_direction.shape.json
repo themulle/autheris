@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "table_primary_key_columns", "column": { "name": "is_descending", "type": "BOOLEAN", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "table_index_columns", "column": { "name": "is_descending", "type": "BOOLEAN", "family": "boolean", "nullable": false } }
+  ]
+}

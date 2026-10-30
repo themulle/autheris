@@ -216,10 +216,11 @@ public partial class SqliteGovernanceRepository
             }
 
             IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
             IReadOnlyList<TableIndexDefinition> indexes;
             try
             {
-                (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
                     conn, null, CatalogKeyDefinitionStore.Sqlite, table, tableId.Value, columns, ct, _keyTables).ConfigureAwait(false);
             }
             catch (TableMetadataUnavailableException)
@@ -238,6 +239,7 @@ public partial class SqliteGovernanceRepository
                 Columns = columns,
                 ColumnMaskingRules = maskingRules,
                 PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
@@ -445,10 +447,11 @@ public partial class SqliteGovernanceRepository
                     ? rules
                     : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
                 IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
                 IReadOnlyList<TableIndexDefinition> indexes;
                 try
                 {
-                    (pkColumns, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                    (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
                         conn, null, CatalogKeyDefinitionStore.Sqlite, identifier, id, columns, ct, _keyTables,
                         prefetched is not null && prefetched.TryGetValue(id, out var keyRows) ? keyRows : null).ConfigureAwait(false);
                 }
@@ -466,6 +469,7 @@ public partial class SqliteGovernanceRepository
                     Columns = columns,
                     ColumnMaskingRules = maskingRules,
                     PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
                     Indexes = indexes
                 };
                 try
@@ -522,6 +526,7 @@ public partial class SqliteGovernanceRepository
             string? targetLongDesc = metadata.Table.LongDescription;
             string? targetDocSource = metadata.Table.DocumentationSource;
             IReadOnlyList<string> persistedPks;
+            IReadOnlyList<KeyColumnDirection> persistedPkDirections;
             IReadOnlyList<TableIndexDefinition> persistedIndexes;
             using var tx = conn.BeginTransaction();
             try
@@ -801,19 +806,21 @@ public partial class SqliteGovernanceRepository
                     structuralChange = true;
                     await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
                     persistedPks = metadata.PrimaryKeyColumns;
+                    persistedPkDirections = metadata.PrimaryKeyDirections;
                     persistedIndexes = metadata.Indexes;
                 }
                 else
                 {
                     try
                     {
-                        (persistedPks, persistedIndexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                        (persistedPks, persistedPkDirections, persistedIndexes) = await CatalogKeyDefinitionStore.ReadAsync(
                             conn, tx, CatalogKeyDefinitionStore.Sqlite, metadata.Identifier, tableId, updatedColumns, ct).ConfigureAwait(false);
                     }
                     catch (TableMetadataUnavailableException)
                     {
                         // The stored definition is invalid or not covered by the columns of this write: the upsert neither fails nor touches it.
                         persistedPks = metadata.PrimaryKeyColumns;
+                    persistedPkDirections = metadata.PrimaryKeyDirections;
                         persistedIndexes = metadata.Indexes;
                     }
                 }
@@ -861,6 +868,7 @@ public partial class SqliteGovernanceRepository
                 Columns = metadata.Columns,
                 ColumnMaskingRules = metadata.ColumnMaskingRules,
                 PrimaryKeyColumns = persistedPks,
+                PrimaryKeyDirections = persistedPkDirections,
                 Indexes = persistedIndexes
             };
         }
@@ -870,6 +878,7 @@ public partial class SqliteGovernanceRepository
         TableIdentifier table,
         IReadOnlyList<string> primaryKey,
         IReadOnlyList<TableIndexDefinition> indexes,
+        IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
         CancellationToken ct = default)
     {
         TableKeyDefinitionChange? change;
@@ -880,7 +889,7 @@ public partial class SqliteGovernanceRepository
             try
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
-                    conn, tx, CatalogKeyDefinitionStore.Sqlite, table, primaryKey, indexes,
+                    conn, tx, CatalogKeyDefinitionStore.Sqlite, table, primaryKey, indexes, primaryKeyDirections,
                     () => IncrementTableEpochInternalAsync(conn, table, tx, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {

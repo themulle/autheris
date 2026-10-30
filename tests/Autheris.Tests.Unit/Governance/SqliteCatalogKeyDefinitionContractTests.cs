@@ -203,6 +203,64 @@ public sealed class SqliteCatalogKeyDefinitionContractTests : IDisposable
     }
 
     [Fact]
+    public async Task KeyDefinition_RoundTripsDirections()
+    {
+        var id = Orders;
+        await _repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"],
+            indexes: [new TableIndexDefinition("ux_cd", ["c", "d"], true, [KeyColumnDirection.Descending, KeyColumnDirection.Ascending]), new TableIndexDefinition("ix_d", ["d"], false)])
+            with { PrimaryKeyDirections = [KeyColumnDirection.Ascending, KeyColumnDirection.Descending] });
+
+        var read = (await _repo.GetTableMetadataAsync(id))!;
+
+        read.PrimaryKeyColumns.ShouldBe(["a", "b"]);
+        read.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        read.Indexes.Single(i => i.Name == "ux_cd").Directions.ShouldBe([KeyColumnDirection.Descending, KeyColumnDirection.Ascending]);
+        read.Indexes.Single(i => i.Name == "ix_d").Directions.ShouldBeNull("an all-ascending index has the canonical (absent) form");
+        (await _repo.GetAllTablesAsync()).Single(t => t.Identifier.Equals(id)).PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+    }
+
+    [Fact]
+    public async Task KeyDefinition_UndeclaredDirections_ReadAsCanonicalEmpty()
+    {
+        var id = (await SeedFullDefinitionAsync()).Identifier;
+
+        var read = (await _repo.GetTableMetadataAsync(id))!;
+
+        read.PrimaryKeyDirections.ShouldBeEmpty();
+        read.Indexes.ShouldAllBe(i => i.Directions == null);
+    }
+
+    [Fact]
+    public async Task I390_T_11_DirectionOnlyChange_ReturnsChange_BumpsEpoch_AndIsVisibleWithoutRestart()
+    {
+        var id = Orders;
+        await _repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"]));
+        (await _repo.GetTableMetadataAsync(id))!.PrimaryKeyDirections.ShouldBeEmpty(); // primes the metadata cache
+        var epochBefore = await _repo.GetTableEpochAsync(id);
+
+        var change = await _repo.ReplaceTableKeyDefinitionAsync(id, ["a", "b"], [], primaryKeyDirections: [KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+
+        change.ShouldNotBeNull();
+        change.Before.PrimaryKey.ShouldBe(change.After.PrimaryKey);
+        KeyDirections.AnyDescending(change.Before.PrimaryKeyDirections).ShouldBeFalse();
+        change.After.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        (await _repo.GetTableEpochAsync(id)).ShouldBe(epochBefore + 1);
+        // I390-SC-08: no manual cache invalidation; the next read already sees the new direction.
+        (await _repo.GetTableMetadataAsync(id))!.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+    }
+
+    [Fact]
+    public async Task ReplaceTableKeyDefinition_DirectionCountMismatch_Throws_AndKeepsStored()
+    {
+        var id = Orders;
+        await _repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"]));
+
+        await Should.ThrowAsync<TableDefinitionException>(() => _repo.ReplaceTableKeyDefinitionAsync(id, ["a", "b"], [], primaryKeyDirections: [KeyColumnDirection.Descending]));
+
+        (await _repo.GetTableMetadataAsync(id))!.PrimaryKeyDirections.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task ReplaceTableKeyDefinition_BumpsEpochOnce()
     {
         await _repo.UpsertTableMetadataAsync(Meta(Orders));

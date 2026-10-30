@@ -492,15 +492,51 @@ public static class DbtArtifactStreamingParser
             return;
         }
 
-        var columns = ReadColumnArray(constraint, "columns");
+        // Issue #390: a constraint column may end in ASC/DESC (strict shared grammar); any other shape drops the whole definition.
+        var columns = ReadKeyColumnArray(constraint, "columns", out var directions);
         if (isPrimaryKey)
         {
-            builder.AddPrimaryKey(columns);
+            builder.AddPrimaryKey(columns, directions);
         }
         else
         {
-            builder.AddUnique(columns);
+            builder.AddUnique(columns, directions);
         }
+    }
+
+    /// <summary>
+    /// Like <see cref="ReadColumnArray"/> for constraint columns that may carry a direction (<see cref="KeyColumnSpec"/>). Null (invalid) for any
+    /// other shape; <paramref name="directions"/> is null when no column is descending.
+    /// </summary>
+    private static List<string>? ReadKeyColumnArray(JsonElement owner, string property, out List<KeyColumnDirection>? directions)
+    {
+        directions = null;
+        if (!owner.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var length = array.GetArrayLength();
+        if (length is 0 or > TableKeyDefinitionValidator.MaxColumnsPerKey)
+        {
+            return null;
+        }
+
+        var names = new List<string>(length);
+        var parsedDirections = new List<KeyColumnDirection>(length);
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || !KeyColumnSpec.TryParse(item.GetString(), out var column, out var direction))
+            {
+                return null;
+            }
+
+            names.Add(column);
+            parsedDirections.Add(direction);
+        }
+
+        directions = KeyDirections.AnyDescending(parsedDirections) ? parsedDirections : null;
+        return names;
     }
 
     /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> tests declare a unique constraint on the attached model.</summary>
@@ -557,7 +593,12 @@ public static class DbtArtifactStreamingParser
     private static DbtDeclaredKeys? ToDeclaredKeys(CatalogKeyDefinitionImport.Collector collector) =>
         collector.Invalid ? new DbtDeclaredKeys(null, [], true)
         : !collector.HasDeclaration ? null
-        : new DbtDeclaredKeys(collector.PrimaryKey, collector.Indexes!.Select(i => i.Columns).ToList(), false);
+        : new DbtDeclaredKeys(
+            collector.PrimaryKey,
+            collector.Indexes!.Select(i => i.Columns).ToList(),
+            false,
+            collector.PrimaryKeyDirections,
+            collector.Indexes!.Select(i => i.Directions).ToList());
 
     public static string ExtractModelName(string raw)
     {

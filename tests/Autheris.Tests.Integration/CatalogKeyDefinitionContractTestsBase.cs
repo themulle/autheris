@@ -113,6 +113,72 @@ public abstract class CatalogKeyDefinitionContractTestsBase
     }
 
     [Fact]
+    public async Task KeyDefinition_RoundTripsDirections()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"],
+            indexes: [new TableIndexDefinition("ux_cd", ["c", "d"], true, [KeyColumnDirection.Descending, KeyColumnDirection.Ascending]), new TableIndexDefinition("ix_d", ["d"], false)])
+            with { PrimaryKeyDirections = [KeyColumnDirection.Ascending, KeyColumnDirection.Descending] });
+        InvalidateCache();
+
+        var read = (await Repo.GetTableMetadataAsync(id))!;
+
+        read.PrimaryKeyColumns.ShouldBe(["a", "b"]);
+        read.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        read.Indexes.Single(i => i.Name == "ux_cd").Directions.ShouldBe([KeyColumnDirection.Descending, KeyColumnDirection.Ascending]);
+        read.Indexes.Single(i => i.Name == "ix_d").Directions.ShouldBeNull("an all-ascending index has the canonical (absent) form");
+        (await Repo.GetAllTablesAsync()).Single(t => t.Identifier.Equals(id)).PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        Count("SELECT COUNT(*) FROM TABLE_PRIMARY_KEY_COLUMNS WHERE table_id = @t AND key_ordinal = 2 AND CAST(is_descending AS INTEGER) = 1", ("@t", TableId(id))).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task KeyDefinition_UndeclaredDirections_ReadAsCanonicalEmpty()
+    {
+        if (!Available) return;
+        var id = await SeedFullAsync();
+        InvalidateCache();
+
+        var read = (await Repo.GetTableMetadataAsync(id))!;
+
+        read.PrimaryKeyDirections.ShouldBeEmpty();
+        read.Indexes.ShouldAllBe(i => i.Directions == null);
+    }
+
+    [Fact]
+    public async Task I390_T_11_DirectionOnlyChange_ReturnsChange_BumpsEpoch_AndIsVisibleWithoutRestart()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"]));
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyDirections.ShouldBeEmpty(); // primes the metadata cache
+        var epochBefore = await Repo.GetTableEpochAsync(id);
+
+        var change = await Repo.ReplaceTableKeyDefinitionAsync(id, ["a", "b"], [], primaryKeyDirections: [KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+
+        change.ShouldNotBeNull();
+        change.Before.PrimaryKey.ShouldBe(change.After.PrimaryKey);
+        KeyDirections.AnyDescending(change.Before.PrimaryKeyDirections).ShouldBeFalse();
+        change.After.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+        (await Repo.GetTableEpochAsync(id)).ShouldBe(epochBefore + 1);
+        // I390-SC-08: no manual cache invalidation; the next read already sees the new direction.
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyDirections.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+    }
+
+    [Fact]
+    public async Task ReplaceTableKeyDefinition_DirectionCountMismatch_Throws_AndKeepsStored()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"]));
+
+        await Should.ThrowAsync<TableDefinitionException>(() => Repo.ReplaceTableKeyDefinitionAsync(id, ["a", "b"], [], primaryKeyDirections: [KeyColumnDirection.Descending]));
+
+        InvalidateCache();
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyDirections.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task UpsertWithoutReplace_KeepsDefinition_AndWithReplaceEmpty_Clears()
     {
         if (!Available) return;

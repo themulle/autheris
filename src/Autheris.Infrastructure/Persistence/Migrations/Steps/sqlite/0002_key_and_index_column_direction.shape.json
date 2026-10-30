@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "TABLE_PRIMARY_KEY_COLUMNS", "column": { "name": "is_descending", "type": "INTEGER", "family": "integer", "nullable": false } },
+    { "op": "addColumn", "table": "TABLE_INDEX_COLUMNS", "column": { "name": "is_descending", "type": "INTEGER", "family": "integer", "nullable": false } }
+  ]
+}

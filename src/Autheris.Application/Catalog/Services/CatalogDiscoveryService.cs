@@ -219,7 +219,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             DisplayName: tableDisplayName,
             Description: tableDescription,
             LongDescription: tableLongDescription,
-            Language: lang
+            Language: lang,
+            // Issue #390: parallel to PrimaryKeys; null unless a column is descending, and never for a key with a hidden column (Restrict drops it).
+            PrimaryKeyDirections: KeyDirections.AnyDescending(keys.PrimaryKeyDirections) ? KeyDirections.ToWire(keys.PrimaryKeyDirections) : null
         );
     }
 
