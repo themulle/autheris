@@ -76,12 +76,13 @@ public static partial class GovernanceEndpoints
         var effectiveTenant = ResolveRequestTenant(context);
         if (!string.IsNullOrWhiteSpace(tenant) && !string.Equals(tenant, effectiveTenant.Value, StringComparison.Ordinal))
         {
-            if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin) || !TenantId.TryParse(tenant, out var requested))
+            // DT-A-6: the platform bucket (_platform) is readable by ClusterAdmin only; every other reserved value stays rejected.
+            if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin) || !StoredTenant.IsValidAudit(tenant))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            effectiveTenant = requested;
+            effectiveTenant = StoredTenant.ParseAudit(tenant);
         }
 
         long? before = null;

@@ -500,7 +500,7 @@ public partial class SqlServerGovernanceRepository
             cmd.Parameters.Add("@batch", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(batch);
             cmd.Parameters.Add("@err", SqlDbType.NVarChar, -1).Value = errorMessage;
             cmd.Parameters.Add("@failed", SqlDbType.NVarChar, 64).Value = DateTimeOffset.UtcNow.ToString("O");
-            cmd.Parameters.Add("@tenant", SqlDbType.NVarChar, 128).Value = batch.FirstOrDefault()?.TenantId.Value ?? "unknown";
+            cmd.Parameters.Add("@tenant", SqlDbType.NVarChar, 128).Value = batch.FirstOrDefault()?.TenantId.Value ?? TenantId.Platform.Value;
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         catch (Exception dlEx)

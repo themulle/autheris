@@ -249,6 +249,28 @@ public sealed class PagingTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Platform_Audit_Visible_To_ClusterAdmin_Only()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        AuditLogPageQuery? seen = null;
+        repo.QueryAuditLogPageAsync(Arg.Do<AuditLogPageQuery>(q => seen = q), Arg.Any<CancellationToken>()).Returns(new AuditLogPage([], null));
+
+        // DT-A-6: a tenant administrator can never reach the platform bucket.
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, null, null, null, null, null, "_platform")).ShouldBe(403);
+        await repo.DidNotReceiveWithAnyArgs().QueryAuditLogPageAsync(default!, default);
+
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "_platform")).ShouldBe(200);
+        seen!.Tenant.ShouldBe(TenantId.Platform);
+
+        // every other reserved value stays rejected, also for ClusterAdmin
+        repo.ClearReceivedCalls();
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "_other")).ShouldBe(403);
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "_PLATFORM")).ShouldBe(403);
+        await repo.DidNotReceiveWithAnyArgs().QueryAuditLogPageAsync(default!, default);
+    }
+
+    [Fact]
     public async Task SEC_SC_16_GrantsPage_IsTenantBound_AndMarksClampedGrants()
     {
         var legacy = C(1, validFrom: Now.AddDays(-10), validTo: DateTimeOffset.MaxValue);

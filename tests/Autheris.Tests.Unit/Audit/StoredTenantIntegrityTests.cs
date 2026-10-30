@@ -125,6 +125,18 @@ public sealed class StoredTenantIntegrityTests : IDisposable
     }
 
     [Fact]
+    public void DT_SC_04_Entry_Hash_Matches_The_V1_5_0_Golden()
+    {
+        // Literal golden: HMAC-SHA256 (32 zero bytes) over the v1.5.0 canonical payload
+        // "v2|1|<id>|GENESIS_<64 zeros>|2026-01-01T00:00:00.0000000+00:00|auth.succeeded|S-1-5-21-1|dbo.Users||ALLOW|trace-1|{}|tenant-a",
+        // computed independently of the current code. A change of the canonicalisation breaks every stored audit chain.
+        var hash = AuditChainEngine.ComputeEntryHash(
+            new byte[32], 1, "00000000-0000-0000-0000-000000000001", AuditChainEngine.AuditGenesisHash,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), "auth.succeeded", "S-1-5-21-1", "dbo.Users", null, "ALLOW", "trace-1", "{}", "tenant-a");
+        hash.ShouldBe("607FFE72122C4B28E1A646F736DAA35F8224A7B2C5C985791182D55D00A16482");
+    }
+
+    [Fact]
     public async Task DT_SC_04_Sqlite_Audit_Write_Without_Tenant_Throws()
     {
         using var repo = CreateRepository();

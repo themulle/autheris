@@ -332,7 +332,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             cmd.Parameters.AddWithValue("@batch", JsonSerializer.Serialize(batch));
             cmd.Parameters.AddWithValue("@err", errorMessage);
             cmd.Parameters.AddWithValue("@failed", DateTimeOffset.UtcNow.ToString("O"));
-            cmd.Parameters.AddWithValue("@tenant", batch.FirstOrDefault()?.TenantId.Value ?? "unknown");
+            cmd.Parameters.AddWithValue("@tenant", batch.FirstOrDefault()?.TenantId.Value ?? TenantId.Platform.Value);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         catch (Exception dlEx)
