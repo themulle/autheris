@@ -79,6 +79,11 @@ public sealed class StepSqlLintTests
     [InlineData("DROP TABLE audit_purge_checkpoints;")]
     [InlineData("UPDATE CONSENTS SET tenant_id = 'x';")]
     [InlineData("-- phase3: not a marker!\nSELECT 1;")]
+    [InlineData("DECLARE @n sysname = N'x';\nEXEC(N'ALTER TABLE dbo.AUDIT_LOG_ENTRIES DROP CONSTRAINT ' + QUOTENAME(@n));")]
+    [InlineData("-- phase3: I388-SC-06\nEXEC(N'DROP TABLE dbo.CONSENTS; ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n));")]
+    [InlineData("-- phase3: I388-SC-06\nEXEC(N'ALTER TABLE dbo.CONSENTS ADD x INT; --' + QUOTENAME(@n));")]
+    [InlineData("-- phase3: I388-SC-06\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + @n);")]
+    [InlineData("-- phase3: I388-SC-06\nEXEC(@sql);")]
     public void StepLint_RejectsForbiddenAndDynamicSql_QuotedAndCommented(string sql)
     {
         Should.Throw<InvalidOperationException>(() => SqlMigrationStep.Parse("postgresql", 2, "bad_step", sql, EmptyDelta))
@@ -103,6 +108,8 @@ public sealed class StepSqlLintTests
     [InlineData("-- phase3: I388-SC-06\nALTER TABLE [dbo].[AUDIT_LOG_ENTRIES] ADD note NVARCHAR(10) NULL;")]
     [InlineData("-- phase3: I388-SC-14\nUPDATE CONSENTS SET tenant_id = 'a' WHERE tenant_id = 'b';")]
     [InlineData("INSERT INTO X (a) VALUES ('copy exec truncate');")]
+    [InlineData("-- phase3: I388-SC-06\nDECLARE @n sysname = N'x';\nIF @n IS NOT NULL EXEC(N'ALTER TABLE dbo.AUDIT_LOG_ENTRIES DROP CONSTRAINT ' + QUOTENAME(@n));")]
+    [InlineData("DECLARE @n sysname = N'x';\nEXEC(N'ALTER TABLE dbo.CONSENTS DROP CONSTRAINT ' + QUOTENAME(@n));")]
     public void StepLint_AcceptsPlainDdlAndMarkedAuditForms(string sql)
     {
         var step = SqlMigrationStep.Parse("postgresql", 2, "ok_step", sql, EmptyDelta);
@@ -122,11 +129,11 @@ public sealed class StepSqlLintTests
     }
 
     [Fact]
-    public void ShippedCatalogues_HoldExactlyStep0002KeyAndIndexColumnDirection()
+    public void ShippedCatalogues_HoldExactlySteps0002And0003()
     {
         foreach (var engine in new[] { "sqlite", "postgresql", "sqlserver" })
         {
-            SqlMigrationStep.LoadEmbedded(engine).Select(s => (s.Version, s.Name)).ShouldBe([(2, "key_and_index_column_direction")]);
+            SqlMigrationStep.LoadEmbedded(engine).Select(s => (s.Version, s.Name)).ShouldBe([(2, "key_and_index_column_direction"), (3, "tenant_default_removal_and_request_tenant")]);
         }
     }
 }

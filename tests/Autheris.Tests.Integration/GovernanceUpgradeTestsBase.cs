@@ -35,6 +35,12 @@ public abstract class GovernanceUpgradeTestsBase
     protected abstract string AddProbeColumnSql { get; }
     protected abstract string ProbeColumnCountSql { get; }
     protected abstract string TriggerCountSql { get; }
+
+    /// <summary>Number of column defaults on <c>tenant_id</c> of the given table (0 = no default).</summary>
+    protected abstract string TenantDefaultCountSql(string table);
+
+    /// <summary>1 when <c>CONSENT_REQUESTS.tenant_id</c> is nullable, 0 when it is NOT NULL.</summary>
+    protected abstract string RequestTenantNullableSql { get; }
     protected abstract string AuditHashesSql { get; }
     protected abstract string FingerprintSql { get; }
     protected abstract string DropSomeBaselineTableSql { get; }
@@ -55,7 +61,8 @@ public abstract class GovernanceUpgradeTestsBase
         bool requireLeastPrivilege = false,
         List<string>? log = null,
         List<string>? trace = null,
-        bool baselineOnly = false);
+        bool baselineOnly = false,
+        int? stepVersionCap = null);
 
     /// <summary>Creates the current-schema database through the real catalogue and seeds consents, catalog metadata and a verified audit chain.</summary>
     protected abstract Task SeedV150Async(string connectionString);
@@ -75,9 +82,9 @@ public abstract class GovernanceUpgradeTestsBase
     {
         var sql = AddProbeColumnSql;
         return new MigrationStep(
-            3,
+            4,
             StepName,
-            SqlMigrationStep.ComputeChecksum(Engine, 3, StepName, seed + sql),
+            SqlMigrationStep.ComputeChecksum(Engine, 4, StepName, seed + sql),
             ctx =>
             {
                 onApply?.Invoke();
@@ -125,6 +132,7 @@ public abstract class GovernanceUpgradeTestsBase
         {
             await repository.RecordAuditEventAsync(new AuditLogEntry
             {
+                TenantId = "tenant-388",
                 EventType = "UPGRADE_388",
                 ActorSid = new Sid("S-1-388-" + i),
                 TargetTable = "dbo.t",
@@ -173,7 +181,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
 
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3 AND name = '" + StepName + "' AND checksum = '" + step.Checksum + "'")).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4 AND name = '" + StepName + "' AND checksum = '" + step.Checksum + "'")).ShouldBe(1);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
         (await CountAsync(cs, $"SELECT COUNT(*) FROM {ConsentsTable}")).ShouldBe(consents);
         (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
@@ -184,7 +192,7 @@ public abstract class GovernanceUpgradeTestsBase
         // A second run and a Verify run are no-ops on the upgraded database.
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
         await RunAsync(cs, GovernanceMigrationMode.Verify, [step]);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(3);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(4);
     });
 
     private const string SeedV1KeyRowsSql =
@@ -222,10 +230,66 @@ public abstract class GovernanceUpgradeTestsBase
         (await CountAsync(cs, "SELECT SUM(CAST(is_descending AS INTEGER)) FROM table_primary_key_columns WHERE table_id = 't390b'")).ShouldBe(0);
 
         // Rerun after the history row is lost: the guarded statements are idempotent and the shape still verifies.
-        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 2");
+        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version >= 2");
         await RunAsync(cs, GovernanceMigrationMode.Apply);
         (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 2")).ShouldBe(1);
         await RunAsync(cs, GovernanceMigrationMode.Verify);
+    });
+
+    private static string InsertRequestSql(string id, string tenantLiteral) =>
+        "INSERT INTO consent_requests (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, tenant_id) " +
+        $"VALUES ('{id}', 't', 'S-1', 'Role', 'R', 'j', 'Pending', '2026-01-01', '2026-02-01', {tenantLiteral})";
+
+    [Fact]
+    public Task WPDT2b_Step0003_UpgradeFromV150_WithData_DropsDefaults_RequiresRequestTenant_KeepsAuditChain() => WithDbAsync(async db =>
+    {
+        var cs = db.ConnectionString;
+        await SeedBaselineAsync(cs);
+        await ExecAsync(cs, InsertRequestSql("r1", "'tenant-a'"));
+        (await CountAsync(cs, TenantDefaultCountSql("consents"))).ShouldBe(1, "the v1.5.0 baseline carries the dead default");
+        var consents = await CountAsync(cs, $"SELECT COUNT(*) FROM {ConsentsTable}");
+        var auditCount = await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries");
+        var auditHashes = await QueryAsync(cs, AuditHashesSql);
+        var triggers = await CountAsync(cs, TriggerCountSql);
+
+        await RunAsync(cs, GovernanceMigrationMode.Apply);
+
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3")).ShouldBe(1);
+        (await CountAsync(cs, TenantDefaultCountSql("consents"))).ShouldBe(0);
+        (await CountAsync(cs, TenantDefaultCountSql("audit_log_entries"))).ShouldBe(0);
+        (await CountAsync(cs, RequestTenantNullableSql)).ShouldBe(0);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM consent_requests WHERE tenant_id = 'tenant-a'")).ShouldBe(1);
+        (await CountAsync(cs, $"SELECT COUNT(*) FROM {ConsentsTable}")).ShouldBe(consents);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
+        (await QueryAsync(cs, AuditHashesSql)).ShouldBe(auditHashes, "step 0003 does not read or rewrite audit rows");
+        (await CountAsync(cs, TriggerCountSql)).ShouldBe(triggers, "the append-only audit triggers stay enabled");
+        (await AuditChainVerifiesAsync(cs, [])).ShouldBeTrue("the audit hash chain and anchor verify after step 0003");
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, InsertRequestSql("r2", "NULL")));
+
+        // Rerun after the history row is lost: the guarded statements are idempotent and the shape still verifies.
+        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 3");
+        await RunAsync(cs, GovernanceMigrationMode.Apply);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3")).ShouldBe(1);
+        await RunAsync(cs, GovernanceMigrationMode.Verify);
+    });
+
+    [Fact]
+    public Task WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002() => WithDbAsync(async db =>
+    {
+        var cs = db.ConnectionString;
+        await SeedBaselineAsync(cs);
+        await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: 2);
+        await ExecAsync(cs, InsertRequestSql("r-null", "NULL"));
+        var before = await QueryAsync(cs, FingerprintSql);
+
+        var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => RunAsync(cs, GovernanceMigrationMode.Apply));
+
+        ex.Code.ShouldBe(GovernanceMigrationCodes.StepFailed);
+        (await CountAsync(cs, "SELECT MAX(version) FROM autheris_schema_migrations")).ShouldBe(2);
+        (await CountAsync(cs, TenantDefaultCountSql("consents"))).ShouldBe(1, "the failed step was rolled back");
+        (await CountAsync(cs, RequestTenantNullableSql)).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM consent_requests WHERE tenant_id IS NULL")).ShouldBe(1, "no silent backfill");
+        (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
     });
 
     [Fact]
@@ -280,7 +344,7 @@ public abstract class GovernanceUpgradeTestsBase
         await Task.WhenAll(runs);
 
         applied.ShouldBe(1);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(3);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(4);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
     });
 
@@ -390,7 +454,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Pending);
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(2);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(3);
     });
 
     [Fact]
@@ -406,7 +470,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Drift);
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.WrongNullability && d.Name == ProbeColumn);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3")).ShouldBe(0);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4")).ShouldBe(0);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(0, "the transactional DDL of the step was rolled back");
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
 

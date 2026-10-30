@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "alterColumn", "table": "consent_requests", "column": { "name": "tenant_id", "type": "TEXT", "family": "string", "nullable": false } }
+  ]
+}

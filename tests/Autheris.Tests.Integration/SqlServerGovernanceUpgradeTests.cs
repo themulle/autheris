@@ -24,6 +24,8 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
     protected override string AddProbeColumnSql => "IF COL_LENGTH(N'dbo.CONSENTS', N'probe_388') IS NULL ALTER TABLE dbo.CONSENTS ADD probe_388 NVARCHAR(50) NULL";
     protected override string ProbeColumnCountSql => "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.CONSENTS') AND name = N'probe_388'";
     protected override string TriggerCountSql => "SELECT COUNT(*) FROM sys.triggers WHERE parent_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES') AND is_disabled = 0";
+    protected override string TenantDefaultCountSql(string table) => $"SELECT COUNT(*) FROM sys.default_constraints dc INNER JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id WHERE dc.parent_object_id = OBJECT_ID(N'dbo.{table}') AND c.name = N'tenant_id'";
+    protected override string RequestTenantNullableSql => "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.CONSENT_REQUESTS') AND name = N'tenant_id' AND is_nullable = 1";
     protected override string AuditHashesSql => "SELECT CONVERT(varchar(64), HASHBYTES('SHA2_256', CONVERT(nvarchar(max), (SELECT STRING_AGG(CONVERT(nvarchar(max), entry_hash), ',') WITHIN GROUP (ORDER BY seq) FROM dbo.AUDIT_LOG_ENTRIES))), 2)";
     protected override string HistoryTableCountSql => "SELECT COUNT(*) FROM sys.tables WHERE name = N'autheris_schema_migrations'";
     protected override string DropSomeBaselineTableSql => "DROP TABLE dbo.CONSUMER_APP_DAILY";
@@ -88,7 +90,8 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
         bool requireLeastPrivilege = false,
         List<string>? log = null,
         List<string>? trace = null,
-        bool baselineOnly = false)
+        bool baselineOnly = false,
+        int? stepVersionCap = null)
     {
         var options = Opts(connectionString, mode, allowNewer, lockTimeoutSeconds, requireLeastPrivilege);
         using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
@@ -96,7 +99,7 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
             repository, options, log is null ? null : new CaptureLogger<SqlServerGovernanceMigrationRunner>(log))
         {
             AdditionalSteps = extra ?? [],
-            StepVersionCapOverride = baselineOnly ? 1 : null,
+            StepVersionCapOverride = stepVersionCap ?? (baselineOnly ? 1 : null),
             Trace = trace is null ? null : s => { lock (trace) { trace.Add(s); } }
         };
         await runner.RunAsync();
@@ -119,6 +122,7 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
         {
             await repository.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
             {
+                TenantId = "tenant-390",
                 EventType = "UPGRADE_390",
                 ActorSid = new Autheris.Domain.Common.Sid("S-1-390-" + i),
                 TargetTable = "dbo.t",

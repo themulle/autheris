@@ -106,10 +106,10 @@ public sealed class GovernanceSqliteUpgradeTests
         consents.ShouldBe(1);
         audit.ShouldBeGreaterThanOrEqualTo(25);
 
-        var step = ProbeStep(3);
+        var step = ProbeStep(4);
         await new SqliteGovernanceMigrationRunner(repository, options) { AdditionalSteps = [step] }.RunAsync();
 
-        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('CONSENTS') WHERE name = 'probe_388'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM CONSENTS").ShouldBe(consents);
         Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);
@@ -168,6 +168,7 @@ public sealed class GovernanceSqliteUpgradeTests
         {
             await repository.RecordAuditEventAsync(new AuditLogEntry
             {
+                TenantId = "tenant-390",
                 EventType = "UPGRADE_390",
                 ActorSid = new Sid("S-1-390-" + i),
                 TargetTable = "dbo.t",
@@ -211,7 +212,7 @@ public sealed class GovernanceSqliteUpgradeTests
         var options = Opts(cs);
         using var repository = NewUnmigrated(options);
         await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
-        Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version = 2");
+        Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version >= 2");
 
         await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
 
@@ -231,5 +232,68 @@ public sealed class GovernanceSqliteUpgradeTests
 
         Scalar(repository, "SELECT is_descending FROM TABLE_PRIMARY_KEY_COLUMNS WHERE table_id = 't'").ShouldBe(0);
         Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PRIMARY_KEY_COLUMNS (table_id, key_ordinal, table_column_id, is_descending) VALUES ('t', 2, 'd', 2)"));
+    }
+
+    private const string TenantStepName = "tenant_default_removal_and_request_tenant";
+
+    private static string InsertRequestSql(string id, string tenantLiteral) =>
+        "INSERT INTO CONSENT_REQUESTS (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, tenant_id) " +
+        $"VALUES ('{id}', 't', 'S-1', 'Role', 'R', 'j', 'Pending', '2026-01-01', '2026-02-01', {tenantLiteral})";
+
+    [Fact]
+    public async Task WPDT2b_Step0003_UpgradeFromV150_WithData_KeepsRowsAndAuditChain_AndKeepsTheAuditDefaultOnSqlite()
+    {
+        var cs = $"Data Source=up0003_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Opts(cs);
+        using var repository = NewUnmigrated(options);
+        await BaselineRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+        await SeedV150KeysAndAuditAsync(repository);
+        Exec(repository, InsertRequestSql("r1", "'tenant-a'"));
+        var audit = Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES");
+        var hashes = Text(repository, "SELECT group_concat(entry_hash, ',') FROM (SELECT entry_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq)");
+
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+
+        var checksum = SqlMigrationStep.LoadEmbedded("sqlite").Single(s => s.Version == 3).Checksum;
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3 AND name = '{TenantStepName}' AND checksum = '{checksum}'").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM CONSENT_REQUESTS WHERE tenant_id = 'tenant-a'").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);
+        Text(repository, "SELECT group_concat(entry_hash, ',') FROM (SELECT entry_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq)").ShouldBe(hashes);
+        (await repository.VerifyAuditHashChainAsync()).ShouldBeTrue("the audit hash chain and anchor verify after step 0003");
+        // SQLite decision (plan section 11): the append-only audit table is never rebuilt, so its dead column default stays.
+        Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('AUDIT_LOG_ENTRIES') WHERE name = 'tenant_id' AND dflt_value IS NOT NULL").ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002()
+    {
+        var cs = $"Data Source=up0003n_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Opts(cs);
+        using var repository = NewUnmigrated(options);
+        await new SqliteGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 2 }.RunAsync();
+        Exec(repository, InsertRequestSql("r-null", "NULL"));
+
+        var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(
+            () => new SqliteGovernanceMigrationRunner(repository, options).RunAsync());
+
+        ex.Code.ShouldBe(GovernanceMigrationCodes.StepFailed);
+        ex.Message.ShouldContain(TenantStepName);
+        Scalar(repository, "SELECT MAX(version) FROM autheris_schema_migrations").ShouldBe(2);
+        Scalar(repository, "SELECT COUNT(*) FROM CONSENT_REQUESTS WHERE tenant_id IS NULL").ShouldBe(1, "no silent backfill");
+    }
+
+    [Fact]
+    public async Task WPDT2b_Step0003_Rerun_IsIdempotent()
+    {
+        var cs = $"Data Source=up0003i_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Opts(cs);
+        using var repository = NewUnmigrated(options);
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+        Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version = 3");
+
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3").ShouldBe(1);
     }
 }

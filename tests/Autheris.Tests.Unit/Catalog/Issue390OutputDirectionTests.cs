@@ -135,7 +135,7 @@ public sealed class Issue390OutputDirectionTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Readings, Arg.Any<CancellationToken>()).Returns(table);
         var consents = Substitute.For<IConsentRepository>();
-        var options = Wp0.Options(Autheris.Domain.Options.TenancyMode.Single);
+        var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         var service = new CatalogDiscoveryService(
             repo,
             Substitute.For<IAuditLogRepository>(),

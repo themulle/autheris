@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "alterColumn", "table": "CONSENT_REQUESTS", "column": { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false } }
+  ]
+}

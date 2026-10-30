@@ -43,6 +43,11 @@ internal static class StepSqlLint
         @"^alter\s+table\s+(if\s+exists\s+)?audit_log_entries\s+(alter\s+column\s+\w+\s+drop\s+default|drop\s+constraint\s+df_\w+|add\s+(?!constraint\b|foreign\b|primary\b|check\b|unique\b|index\b)[^;]+)$");
 
     private static readonly Regex SensitiveDml = Re(@"^(insert(\s+or\s+\w+)?\s+into|update|delete\s+from|merge\s+into|replace\s+into)\s+(audit_\w+|consent\w*)\b");
+    // The one allowed dynamic form (SQL Server): the baseline default constraints are unnamed, so a step looks the generated name up and drops it with
+    // EXEC(N'ALTER TABLE <t> DROP CONSTRAINT ' + QUOTENAME(@name)). The form is rewritten to the equivalent static statement before linting, so the audit
+    // table rules (phase3 marker, DROP CONSTRAINT df_* only) still apply to it. Any other EXEC stays forbidden.
+    private static readonly Regex DynamicDropConstraint = Re(
+        @"(?:\bif\s+@\w+\s+is\s+not\s+null\s+)?\bexec\s*\(\s*N'alter\s+table\s+(?:dbo\.)?([A-Za-z_][A-Za-z0-9_]*)\s+drop\s+constraint\s+'\s*\+\s*quotename\s*\(\s*@\w+\s*\)\s*\)");
     private static readonly Regex Qualifier = new(@"\b[a-z_][a-z0-9_$]*\.(?=[a-z_])", RegexOptions.CultureInvariant);
     private static readonly Regex Blanks = new(@"\s+", RegexOptions.CultureInvariant);
     private static readonly Regex MarkerId = new(@"^[A-Z0-9][A-Z0-9-]{2,40}$", RegexOptions.CultureInvariant);
@@ -58,7 +63,7 @@ internal static class StepSqlLint
             violations.Add("the phase3 marker id is malformed");
         }
 
-        var statements = Normalize(normalizedSql);
+        var statements = Normalize(DynamicDropConstraint.Replace(normalizedSql, "ALTER TABLE $1 DROP CONSTRAINT df_dynamic"));
         if (statements.Count == 0)
         {
             violations.Add("the step contains no statement");
