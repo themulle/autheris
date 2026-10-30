@@ -226,7 +226,9 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             IReadOnlyList<string> declaredPrimaryKey = tableAsset.PrimaryKeyColumns.Count > 0
                 ? tableAsset.PrimaryKeyColumns
                 : tableAsset.Columns.Where(c => c.IsPrimaryKey).Select(c => c.ColumnName).Take(TableKeyDefinitionValidator.MaxColumnsPerKey + 1).ToList();
-            metadata = CatalogKeyDefinitionImport.Apply(metadata, declaredPrimaryKey, tableAsset.Indexes, _logger, "DataCatalog");
+            metadata = CatalogKeyDefinitionImport.Apply(
+                metadata, declaredPrimaryKey, tableAsset.Indexes, _logger, "DataCatalog",
+                tableAsset.PrimaryKeyColumns.Count > 0 ? tableAsset.PrimaryKeyDirections : null);
 
             // SEC M-32: merge with the persisted state – security flags can only be tightened by a catalog sync.
             metadata = CatalogGovernanceRatchet.Merge(metadata, existing);

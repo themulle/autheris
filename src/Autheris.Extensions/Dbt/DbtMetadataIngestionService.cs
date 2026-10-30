@@ -226,12 +226,12 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         {
             if (declared.PrimaryKey is not null)
             {
-                collector.AddPrimaryKey(declared.PrimaryKey);
+                collector.AddPrimaryKey(declared.PrimaryKey, declared.PrimaryKeyDirections);
             }
 
-            foreach (var unique in declared.UniqueConstraints)
+            for (var i = 0; i < declared.UniqueConstraints.Count; i++)
             {
-                collector.AddUnique(unique);
+                collector.AddUnique(declared.UniqueConstraints[i], declared.UniqueDirections is { } unique && i < unique.Count ? unique[i] : null);
             }
         }
 
