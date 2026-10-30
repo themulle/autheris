@@ -65,11 +65,11 @@ public sealed class CatalogKeyDefinitionReportTests
         detail.ShouldNotBeNull();
         detail.PrimaryKeys.ShouldBeEmpty();
         detail.Columns.ShouldAllBe(c => !c.IsPrimaryKey);
-        detail.Indexes.ShouldNotBeNull().Select(i => i.Name).ShouldBe(new[] { "ux_ok" });
+        detail.Indexes.ShouldNotBeNull().Select(i => string.Join(",", i.Columns)).ShouldBe(new[] { "a,b" });
     }
 
     [Fact]
-    public async Task OpenApi_ReportsIndexesWholeOnly_AndNoPartialRequiredKey()
+    public async Task OpenApi_ReportsNoIndexes_AndNoPartialRequiredKey()
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
@@ -79,9 +79,10 @@ public sealed class CatalogKeyDefinitionReportTests
 
         json.ShouldNotContain("ghost");
         using var doc = JsonDocument.Parse(json);
+        json.ShouldNotContain("x-autheris-indexes");
+        json.ShouldNotContain("ux_ok");
         var entity = doc.RootElement.GetProperty("components").GetProperty("schemas").EnumerateObject()
-            .Select(p => p.Value).First(v => v.TryGetProperty("x-autheris-indexes", out _));
-        entity.GetProperty("x-autheris-indexes").EnumerateArray().Select(i => i.GetProperty("name").GetString()).ShouldBe(new[] { "ux_ok" });
+            .Select(p => p.Value).First(v => v.TryGetProperty("properties", out var props) && props.TryGetProperty("a", out _));
         entity.TryGetProperty("required", out _).ShouldBeFalse();
     }
 }

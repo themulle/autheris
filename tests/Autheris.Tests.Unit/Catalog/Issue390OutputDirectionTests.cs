@@ -126,7 +126,7 @@ public sealed class Issue390OutputDirectionTests
 
         var result = await DescribeAsync(table, "device_id", "ts");
 
-        result.Indexes.ShouldNotBeNull().Select(i => i.Name).ShouldBe(["ux_visible"]);
+        result.Indexes.ShouldNotBeNull().Select(i => string.Join(",", i.Columns)).ShouldBe(["device_id,ts"]);
         System.Text.Json.JsonSerializer.Serialize(result.Indexes).ShouldNotContain("secret_key");
     }
 
