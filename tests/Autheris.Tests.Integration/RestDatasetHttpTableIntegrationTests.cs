@@ -76,6 +76,8 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:Rebac:Enabled", "false");
+            // The seeded table is owned by the shared test default tenant; claim-less test principals are assigned it.
+            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:WebSql:CrossSource:Enabled", crossSourceEnabled ? "true" : "false");
             if (crossSourceEnabled && restTransportAllowed)
             {
