@@ -21,7 +21,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #151 (WP-151-4): composite foreign keys in the dbt parser and importer, reason-coded warnings and limits.</summary>
-public sealed class DbtCompositeRelationTests
+public sealed partial class DbtCompositeRelationTests
 {
     private static Dictionary<string, object> Fk(string to, string[]? columns, string[]? toColumns, string? expression = null)
     {

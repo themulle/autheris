@@ -72,7 +72,9 @@ public sealed record DbtRelationshipDefinition(
     string ParentModelOrTable,
     string ChildModelOrTable,
     IReadOnlyList<string> ParentColumns,
-    IReadOnlyList<string> ChildColumns
+    IReadOnlyList<string> ChildColumns,
+    string? ParentUniqueId = null,
+    string? ChildUniqueId = null
 );
 
 /// <summary>

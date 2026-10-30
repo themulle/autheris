@@ -29,6 +29,9 @@ public static class DbtArtifactStreamingParser
 
         var models = new List<DbtModelDefinition>();
         var relations = new RelationCollector();
+        // Issue #392: node index and relations collected during the node pass, resolved once models and sources are indexed.
+        var resolver = new DbtManifestReferenceResolver();
+        var pending = new List<DbtPendingRelation>();
         // Issue #94 (D-8): declared keys per model unique id (constraints and unique tests may arrive in any node order).
         var keyBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
 
@@ -54,58 +57,9 @@ public static class DbtArtifactStreamingParser
                 // R-31: Inspect test nodes for relationship tests
                 if (nodeProperty.Name.StartsWith("test.", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (node.TryGetProperty("test_metadata", out var tmProp) &&
-                        tmProp.TryGetProperty("name", out var tmNameProp) &&
-                        string.Equals(tmNameProp.GetString(), "relationships", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (tmProp.TryGetProperty("kwargs", out var kwProp))
-                        {
-                            var childCol = kwProp.TryGetProperty("column_name", out var ccProp) ? ccProp.GetString() ?? "" : "";
-                            var parentRef = kwProp.TryGetProperty("to", out var toProp) ? toProp.GetString() ?? "" : "";
-                            var parentCol = kwProp.TryGetProperty("field", out var fProp) ? fProp.GetString() ?? "" : "";
+                    DbtRelationImport.CollectTest(node, root, relations, pending);
 
-                            var cleanParent = ExtractModelName(parentRef);
-                            string childModel = "";
-                            if (node.TryGetProperty("attached_node", out var anProp) && anProp.GetString() is string an && !string.IsNullOrWhiteSpace(an))
-                            {
-                                childModel = ExtractModelName(an);
-                            }
-                            else if (node.TryGetProperty("depends_on", out var depProp) &&
-                                     depProp.TryGetProperty("nodes", out var depNodes) &&
-                                     depNodes.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var dn in depNodes.EnumerateArray())
-                                {
-                                    var dnStr = dn.GetString() ?? "";
-                                    if (dnStr.StartsWith("model.", StringComparison.OrdinalIgnoreCase) ||
-                                        dnStr.StartsWith("source.", StringComparison.OrdinalIgnoreCase) ||
-                                        dnStr.StartsWith("seed.", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        var mName = ExtractModelName(dnStr);
-                                        if (!string.Equals(mName, cleanParent, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            childModel = mName;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (!string.IsNullOrWhiteSpace(cleanParent) && !string.IsNullOrWhiteSpace(childModel) &&
-                                !string.IsNullOrWhiteSpace(childCol))
-                            {
-                                var relName = cleanParent.StartsWith("stg_") ? cleanParent[4..] : cleanParent;
-                                relations.TryAdd(
-                                    relName,
-                                    cleanParent,
-                                    childModel,
-                                    string.IsNullOrWhiteSpace(parentCol) ? [] : [parentCol],
-                                    [childCol]);
-                            }
-                        }
-                    }
-
-                    CollectUniqueTest(node, keyBuilders);
+                    CollectUniqueTest(nodeProperty.Name, node, keyBuilders, relations);
 
                     // EXT-08: collect test target model mappings for circuit breaker attribution
                     var testUniqueId = nodeProperty.Name;
@@ -139,6 +93,20 @@ public static class DbtArtifactStreamingParser
                     }
 
                     continue;
+                }
+
+                // Issue #392: every model, seed and snapshot is a possible ref() target.
+                if (nodeProperty.Name.StartsWith("model.", StringComparison.OrdinalIgnoreCase) ||
+                    nodeProperty.Name.StartsWith("seed.", StringComparison.OrdinalIgnoreCase) ||
+                    nodeProperty.Name.StartsWith("snapshot.", StringComparison.OrdinalIgnoreCase))
+                {
+                    resolver.RegisterNode(
+                        nodeProperty.Name,
+                        node.TryGetProperty("name", out var idxName) && idxName.ValueKind == JsonValueKind.String ? idxName.GetString() ?? "" : "",
+                        ReadString(node, "package_name"),
+                        node.TryGetProperty("version", out var idxVersion) && idxVersion.ValueKind is JsonValueKind.Number or JsonValueKind.String
+                            ? idxVersion.ValueKind == JsonValueKind.String ? idxVersion.GetString() : idxVersion.GetRawText()
+                            : null);
                 }
 
                 // Only inspect model and seed nodes (e.g. "model.my_project.customers")
@@ -197,6 +165,7 @@ public static class DbtArtifactStreamingParser
 
                 // R-31: Model-level constraints (foreign_key); issue #94: primary_key and unique
                 var modelKeys = GetBuilder(keyBuilders, uniqueId);
+                var ownDependsOn = DbtRelationReferenceResolution.ReadDependsOn(node);
                 if (node.TryGetProperty("constraints", out var modelConsProp) && modelConsProp.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var con in modelConsProp.EnumerateArray())
@@ -205,21 +174,22 @@ public static class DbtArtifactStreamingParser
                         if (con.TryGetProperty("type", out var typeProp) &&
                             string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
                         {
-                            var toModel = ReadModelRef(con);
+                            var toRaw = ReadConstraintTarget(con);
                             var childCols = ReadKeyArray(con, "columns");
                             var parentCols = ReadKeyArray(con, "to_columns");
+                            var toModel = ExtractModelName(toRaw);
                             var relName = toModel.StartsWith("stg_") ? toModel[4..] : toModel;
                             if (childCols.Count == 0 && con.TryGetProperty("expression", out _))
                             {
                                 relations.Skip(relName, name, toModel, "UNSUPPORTED_FORM");
                             }
-                            else if (string.IsNullOrWhiteSpace(toModel))
+                            else if (string.IsNullOrWhiteSpace(toRaw))
                             {
                                 relations.Skip(relName, name, toModel, "MISSING_TARGET");
                             }
-                            else
+                            else if (relations.Reserve() && relations.ReserveDependsOn(ownDependsOn.Count))
                             {
-                                relations.TryAdd(relName, toModel, name, parentCols, childCols);
+                                pending.Add(new DbtPendingRelation(toRaw, null, ownDependsOn, parentCols, childCols, null, uniqueId, name));
                             }
                         }
                     }
@@ -265,7 +235,8 @@ public static class DbtArtifactStreamingParser
                                 if (con.TryGetProperty("type", out var typeProp) &&
                                     string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    var toModel = ReadModelRef(con);
+                                    var toRaw = ReadConstraintTarget(con);
+                                    var toModel = ExtractModelName(toRaw);
                                     var parentCols = new List<string>(1);
                                     if (con.TryGetProperty("field", out var fP) && fP.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(fP.GetString()))
                                     {
@@ -280,7 +251,7 @@ public static class DbtArtifactStreamingParser
                                     }
 
                                     var relName = toModel.StartsWith("stg_") ? toModel[4..] : toModel;
-                                    if (string.IsNullOrWhiteSpace(toModel))
+                                    if (string.IsNullOrWhiteSpace(toRaw))
                                     {
                                         relations.Skip(relName, name, toModel, "MISSING_TARGET");
                                     }
@@ -288,9 +259,9 @@ public static class DbtArtifactStreamingParser
                                     {
                                         relations.Skip(relName, name, toModel, "UNSUPPORTED_FORM");
                                     }
-                                    else
+                                    else if (relations.Reserve() && relations.ReserveDependsOn(ownDependsOn.Count))
                                     {
-                                        relations.TryAdd(relName, toModel, name, parentCols, [colName]);
+                                        pending.Add(new DbtPendingRelation(toRaw, null, ownDependsOn, parentCols, [colName], null, uniqueId, name));
                                     }
                                 }
                             }
@@ -389,6 +360,8 @@ public static class DbtArtifactStreamingParser
                     }
                 }
 
+                resolver.RegisterSource(uniqueId, ReadString(srcNode, "source_name") ?? "", name, ReadString(srcNode, "package_name"));
+
                 models.Add(new DbtModelDefinition(
                     uniqueId,
                     name,
@@ -405,6 +378,8 @@ public static class DbtArtifactStreamingParser
             }
         }
 
+        DbtRelationImport.ResolveAll(pending, resolver, relations);
+
         for (var i = 0; i < models.Count; i++)
         {
             if (keyBuilders.TryGetValue(models[i].UniqueId, out var builder) && ToDeclaredKeys(builder) is { } keys)
@@ -416,14 +391,17 @@ public static class DbtArtifactStreamingParser
         return new DbtManifestParseResult(models, relations.Relationships, relations.Finish(), testToModels);
     }
 
-    private static string ReadModelRef(JsonElement constraint) =>
-        constraint.TryGetProperty("to", out var to) && to.ValueKind == JsonValueKind.String ? ExtractModelName(to.GetString() ?? "") : "";
+    private static string ReadConstraintTarget(JsonElement constraint) =>
+        constraint.TryGetProperty("to", out var to) && to.ValueKind == JsonValueKind.String ? to.GetString() ?? "" : "";
+
+    private static string? ReadString(JsonElement owner, string property) =>
+        owner.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>
     /// Reads an ordered string array for a relation key. At most <c>MaxKeyColumns + 1</c> elements are read (one more than allowed
     /// is enough to report TOO_WIDE); a non-string element becomes an empty string and is rejected later as invalid.
     /// </summary>
-    private static List<string> ReadKeyArray(JsonElement owner, string property)
+    internal static List<string> ReadKeyArray(JsonElement owner, string property)
     {
         var result = new List<string>();
         if (!owner.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
@@ -441,98 +419,6 @@ public static class DbtArtifactStreamingParser
         }
 
         return result;
-    }
-
-    /// <summary>Collects relation definitions and reason-coded warnings with the SEC-REL151-02 limits.</summary>
-    private sealed class RelationCollector
-    {
-        public const int MaxRelations = 10_000;
-
-        private readonly List<DbtRelationshipDefinition> _relationships = [];
-        private readonly List<string> _warnings = [];
-        private int _attempts;
-        private bool _overflow;
-
-        public IReadOnlyList<DbtRelationshipDefinition> Relationships => _relationships;
-
-        public IReadOnlyList<string> Finish()
-        {
-            if (_overflow)
-            {
-                _warnings.Add($"Relation import limited to {MaxRelations} relations per manifest; the rest were skipped: TOO_MANY_RELATIONS");
-            }
-
-            return _warnings;
-        }
-
-        public void Skip(string name, string child, string parent, string code)
-        {
-            if (!Count())
-            {
-                return;
-            }
-
-            AddWarning(name, child, parent, code);
-        }
-
-        public void TryAdd(string name, string parent, string child, IReadOnlyList<string> parentColumns, IReadOnlyList<string> childColumns)
-        {
-            if (!Count())
-            {
-                return;
-            }
-
-            if (!DbtIdentifierSanitizer.IsValidIdentifier(name) || !DbtIdentifierSanitizer.IsValidIdentifier(parent) ||
-                !DbtIdentifierSanitizer.IsValidIdentifier(child) || HasInvalid(parentColumns) || HasInvalid(childColumns))
-            {
-                AddWarning(name, child, parent, "INVALID_IDENTIFIER");
-                return;
-            }
-
-            var violation = RelationKeyRules.Validate(parentColumns, childColumns);
-            if (violation is not null)
-            {
-                AddWarning(name, child, parent, violation.Value switch
-                {
-                    RelationKeyViolation.MissingColumns => "MISSING_COLUMNS",
-                    RelationKeyViolation.CountMismatch => "COUNT_MISMATCH",
-                    RelationKeyViolation.DuplicateColumn => "DUPLICATE_COLUMN",
-                    RelationKeyViolation.TooWide => "TOO_WIDE",
-                    _ => "INVALID_IDENTIFIER"
-                });
-                return;
-            }
-
-            _relationships.Add(new DbtRelationshipDefinition(name, parent, child, [.. parentColumns], [.. childColumns]));
-        }
-
-        private bool Count()
-        {
-            if (_attempts >= MaxRelations)
-            {
-                _overflow = true;
-                return false;
-            }
-
-            _attempts++;
-            return true;
-        }
-
-        private static bool HasInvalid(IReadOnlyList<string> columns)
-        {
-            foreach (var c in columns)
-            {
-                if (!DbtIdentifierSanitizer.IsValidIdentifier(c))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private void AddWarning(string name, string child, string parent, string code) =>
-            _warnings.Add($"Relation '{DbtIdentifierSanitizer.ForLog(name)}' ({DbtIdentifierSanitizer.ForLog(child)} -> {DbtIdentifierSanitizer.ForLog(parent)}) skipped: {code}");
     }
 
     private static CatalogKeyDefinitionImport.Collector GetBuilder(Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, string uniqueId)
@@ -654,7 +540,7 @@ public static class DbtArtifactStreamingParser
     }
 
     /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> tests declare a unique constraint on the attached model.</summary>
-    private static void CollectUniqueTest(JsonElement node, Dictionary<string, CatalogKeyDefinitionImport.Collector> builders)
+    private static void CollectUniqueTest(string testId, JsonElement node, Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, RelationCollector warnings)
     {
         if (!node.TryGetProperty("test_metadata", out var testMetadata) ||
             !testMetadata.TryGetProperty("name", out var nameProp) ||
@@ -674,23 +560,20 @@ public static class DbtArtifactStreamingParser
         string? attached = node.TryGetProperty("attached_node", out var attachedProp) && attachedProp.ValueKind == JsonValueKind.String
             ? attachedProp.GetString()
             : null;
-        if (string.IsNullOrWhiteSpace(attached) &&
-            node.TryGetProperty("depends_on", out var depends) &&
-            depends.TryGetProperty("nodes", out var depNodes) &&
-            depNodes.ValueKind == JsonValueKind.Array)
+        if (string.IsNullOrWhiteSpace(attached))
         {
-            foreach (var dep in depNodes.EnumerateArray())
+            // I392-SC-04: without attached_node the key attaches only to the single eligible depends_on node (model, seed, snapshot or source).
+            var eligible = DbtRelationReferenceResolution.DistinctEligible(DbtRelationReferenceResolution.ReadDependsOn(node));
+            if (eligible.Count != 1)
             {
-                var depId = dep.ValueKind == JsonValueKind.String ? dep.GetString() : null;
-                if (depId is not null && depId.StartsWith("model.", StringComparison.OrdinalIgnoreCase))
-                {
-                    attached = depId;
-                    break;
-                }
+                warnings.Warn($"Key test '{DbtIdentifierSanitizer.ForLog(testId)}' skipped: AMBIGUOUS_ATTACHMENT");
+                return;
             }
+
+            attached = eligible[0];
         }
 
-        if (string.IsNullOrWhiteSpace(attached) || !testMetadata.TryGetProperty("kwargs", out var kwargs) || kwargs.ValueKind != JsonValueKind.Object)
+        if (!testMetadata.TryGetProperty("kwargs", out var kwargs) || kwargs.ValueKind != JsonValueKind.Object)
         {
             return;
         }

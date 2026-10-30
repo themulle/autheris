@@ -46,7 +46,7 @@ public sealed class CatalogGraphQlMap(
             entry.FilterTypeName,
             entry.OrderByTypeName,
             entry.Columns.Select(c => new GraphQlColumnMapping(c.ColumnName, c.FieldName, CatalogGraphQlTypeModule.GetScalarName(c.FieldType))).ToList(),
-            entry.Relations.Select(r => new GraphQlRelationMapping(r.FieldName, r.TargetTableIdentifier, r.IsList)).ToList());
+            entry.Relations.Select(r => new GraphQlRelationMapping(r.FieldName, r.TargetTableIdentifier, r.IsList, r.ParentColumns, r.ChildColumns)).ToList());
     }
 
     public async Task<IReadOnlyList<TableIdentifier>?> ResolveDocumentTablesAsync(string document, CancellationToken ct = default)

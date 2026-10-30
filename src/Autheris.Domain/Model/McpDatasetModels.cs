@@ -94,7 +94,11 @@ public sealed record McpDatasetColumn(
     string? DisplayName = null);
 
 /// <summary>A navigation from a dataset to a related dataset in the GraphQL API.</summary>
-public sealed record McpGraphQlRelation(string Field, string Dataset, bool IsList);
+/// <param name="Columns">Ordered join column pairs (catalog names); null when not disclosed (a join column is hidden from the caller).</param>
+public sealed record McpGraphQlRelation(string Field, string Dataset, bool IsList, IReadOnlyList<McpRelationColumnPair>? Columns = null);
+
+/// <summary>One join column pair of a relation: a column of the described dataset and the matching column of the related dataset.</summary>
+public sealed record McpRelationColumnPair(string Column, string TargetColumn);
 
 /// <summary>How to query a dataset through GraphQL, the preferred query path.</summary>
 public sealed record McpGraphQlAccess(
@@ -167,7 +171,9 @@ public sealed record GraphQlTableMapping(
 
 public sealed record GraphQlColumnMapping(string ColumnName, string Field, string GraphQlType);
 
-public sealed record GraphQlRelationMapping(string Field, TableIdentifier Target, bool IsList);
+/// <param name="Columns">Join columns of the owning table, ordered (catalog names).</param>
+/// <param name="TargetColumns">Matching join columns of <paramref name="Target"/>, same order.</param>
+public sealed record GraphQlRelationMapping(string Field, TableIdentifier Target, bool IsList, IReadOnlyList<string>? Columns = null, IReadOnlyList<string>? TargetColumns = null);
 
 /// <summary>Result of the MCP <c>sample_rows</c> tool: rows as returned by the governed read path (masked, row filtered) or synthetic generator.</summary>
 public sealed record McpDatasetSample(
