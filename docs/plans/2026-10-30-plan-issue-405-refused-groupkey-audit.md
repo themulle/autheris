@@ -75,3 +75,37 @@ Size: S, about 120-160 LOC src and 13 tests. One sequential lane: WP-1, then WP-
 3. Multiple refused keys: record all families or only the first? **Default: first only.** Validation stops at the first refusal, and this keeps details cardinality fixed.
 4. A metric counter labelled by family? **Default: no.** It is out of scope, and it keeps I398-SC-06 simple.
 5. A container integration test for the audit entry? **Default: no.** The path is dialect-independent and the classifier is pure. The unit tests above cover it. The existing `SqlServerMaxGroupKeyTests` stays unchanged.
+
+## Phase 3 rulings (csharp-security-expert, 2026-10-30)
+
+Verdict: **APPROVED WITH CONDITIONS**. O-1..O-5 are taken as proposed (O-2 ruling below). Verified on the worktree: REST (`AnalyticsEndpoints.cs:77`), GraphQL (`AggregateErrors.cs:71`) and `SqlCompilerErrorMapper.cs:125-130` all match with `is`, never on the exact type, so a subclass maps identically. The audit `catch` writes `ex.Message` into `reasons`; `ValidateAndResolveGroupBy` checks column existence, then mask, then access, per column.
+
+### Rulings on the focus points
+1. Response: unchanged message and `Reason: Construct`; the family exists only in the audit entry. Approved, see SC-04/SC-05.
+2. Closed set: `Classify` returns an enum, and only `ToAuditLiteral` output reaches details. No column name, raw type or dialect string is added by the new keys. Approved.
+3. Order: the plan's per-column placement is insufficient. In a loop, a clear `xml` key at position 1 would refuse before a masked or unavailable key at position 2 is examined, and before aggregate, WHERE and negation-guard errors. The type check must run once, after every access validation has passed (SC-01). Then a refusal, its audit family and its timing only ever exist for a request whose every referenced column the caller may already see. The check is in-memory metadata only, so there is no timing channel beyond branch order.
+4. Unsealing: no exact-type consumer exists in `src`. The risk is a future subclass or exact-type mapper silently diverging. Mitigate with SC-06.
+5. Single audit: the hoisted check precedes the planner, so the planner's throw is unreachable on the planned path. If it is ever reached (metadata drift, a future planner caller) it is currently outside the audited `try` and would be silent. See SC-03.
+6. Hash chain: the two keys are additional members of the existing `details_json` string covered by the v2 HMAC. No DDL, no verifier change. Approved, see SC-07.
+7. SIEM §4.al: acceptable if SC-08 holds.
+8. O-2: keep `group_by`. It is caller-supplied request text (not schema data), it lands only in the Required-tier, hashed audit entry, and it already exists for every other deny reason. It must stay out of responses and logs (SC-02). The new keys add no name, so no regression.
+
+### Binding conditions
+- **I405-SC-01** Run `EnsureGroupable` for all resolved group keys as a separate step after `ValidateAndResolveGroupBy`, `ValidateAndResolveAggregates`, `ValidateWhereClause` and `AggregationNegationGuard.Enforce` have succeeded, still inside the audited `try`. Never inside the per-column loop. Any access, mask, unavailable or noise error wins over the type refusal.
+- **I405-SC-02** The family literal and `refusal_reason` go only into the `AGGREGATE_QUERY` details. No log line, `Activity` tag, metric label, exception `Message`/`Data` or ProblemDetails member may carry the family, a column name or a type text (O-4 stays: no counter). `Family` is not part of `ToString()`.
+- **I405-SC-03** Every refusal audits exactly once. The planner's defense-in-depth throw must be audited by a narrow `catch (AggregationGroupKeyNotSupportedException)` around the planner call that records the same deny entry and rethrows, and must be guarded so that a throw already audited in validation cannot be audited again (validation throws exit the method before the planner is reached).
+- **I405-SC-04** `AggregationGroupKeyNotSupportedException` is `sealed`, has a fixed `Reason = Construct` and the exact pre-#405 message. No constructor takes a type text or column name.
+- **I405-SC-05** `Classify` is total and fail-closed: null, blank, unknown, malformed or oversized input maps to `Unknown`, never throws, and the type text is never stored. Input is length-capped before parsing. `Unknown` is still a refusal whenever `IsGroupableType` is false; the classifier never decides refusal.
+- **I405-SC-06** An architecture test asserts that `SqlCompileNotSupportedException` has exactly one derived type in the solution, and that no code outside the three known mappers dispatches on its exact `GetType()`.
+- **I405-SC-07** `details_json` for the refusal is built from the same serializer path as today, with a fixed key set and order (`is_allowed`, `reasons`, `group_by`, `filter`, `refusal_reason`, `group_key_type_family`). No other event type, decision literal or migration step.
+- **I405-SC-08** §4.al documents the closed set, both key names, that `group_by` holds caller-supplied names, and that the family is audit-only and never appears in responses. It lists no per-dialect type names and gives no guidance that would let a caller derive the type from a response.
+- **I405-SC-09** The non-SQL (in-memory) path and SQLite behave exactly as before: no refusal, no new keys.
+
+### Mandatory tests (all `[Trait("Category","Security")]`, in addition to I405_T_01..13)
+- **I405-T-S01** `RefusedKey_AccessErrorsWinOverTypeRefusal`: xml key at position 1 plus a masked key at position 2 gives the masked refusal; xml key plus an unavailable key gives unavailable; xml key plus a masked measure or denied WHERE column gives that error. None of the audit entries has a family key (replaces/extends T_09; covers SC-01).
+- **I405-T-S02** `PlannerSecondLine_Throw_AuditedOnce`: force validation to pass and the planner to throw the typed exception; exactly one deny entry; the validation-path refusal yields exactly one entry too (SC-03).
+- **I405-T-S03** `NoFamilyOrName_InLogsActivityMetricsOrBody` (extends T_07 to Activity tags and meters; SC-02).
+- **I405-T-S04** `Classify_OversizedOrMalformedInput_IsUnknown_NoThrow` (SC-05).
+- **I405-T-S05** `Architecture_SingleSubclass_NoExactTypeDispatch` (SC-06).
+- **I405-T-S06** `DenyEntry_WithFamily_HashChainVerifies_AndTamperingFamilyBreaksChain` (SC-07).
+- **I405-T-S07** `DetailsKeyOrder_IsFixed_ForRefusal` (SC-07).
