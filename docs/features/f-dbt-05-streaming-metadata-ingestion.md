@@ -30,6 +30,31 @@ Large-scale enterprise dbt projects often produce gigabyte-sized `manifest.json`
 
 ---
 
+## Relations and keys on models and sources
+
+The sync imports relations from `relationships` tests, from `relationships_combination` tests and from `foreign_key` constraints (model and column level). Models, seeds, snapshots and sources are indexed by unique id; `ref('m')`, `ref('pkg', 'm')`, `ref('m', v=N)` and `source('s', 't')` resolve to exactly one node:
+
+- Candidates in the test's `depends_on` are used first, then all manifest nodes. An explicit package in `ref` is a filter. There is no preference for the owning package.
+- A reference that matches no node is skipped with `UNKNOWN_MODEL`; one that matches more than one is skipped with `AMBIGUOUS_REFERENCE`. Nothing is picked by order.
+- Without `attached_node`, the child is the single `depends_on` node other than the parent. A self relation is inferred only when `depends_on` holds exactly the parent; any other shape is `AMBIGUOUS_REFERENCE`. With `attached_node`, the node must be in the manifest and in `depends_on`.
+- The importer resolves tables by unique id (database, schema, name); sources are registered under their `name`. A relation without unique ids resolves by name only when exactly one model has that name, otherwise `AMBIGUOUS_MODEL`.
+- `unique` and `unique_combination_of_columns` tests on a source declare a key. Without `attached_node` the test attaches only to its single `model.`, `seed.`, `snapshot.` or `source.` dependency; otherwise the key is skipped with `AMBIGUOUS_ATTACHMENT`.
+
+A multi-column relation is declared with the table-level generic test `relationships_combination` (no namespace, or the project's own package):
+
+```yaml
+data_tests:
+  - relationships_combination:
+      columns: [customer_id, tenant_id]      # child columns, ordered
+      to: source('crm', 'customers')
+      fields: [customer_id, tenant_id]       # parent columns, same order and length
+      relation_name: customer_tenant         # optional
+```
+
+`columns` and `fields` must be arrays of equal length within the key width limit; other forms are skipped with `UNSUPPORTED_FORM`, `COUNT_MISMATCH` or `TOO_WIDE`. Without `relation_name` the default name (the parent table name) applies, so a combination test and a single-column test on the same pair collide and both are skipped with `DUPLICATE_RELATION`. A relation that touches a table outside the caller's tenant is dropped without naming that table.
+
+---
+
 ## CLI & API Usage
 
 ```bash

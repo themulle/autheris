@@ -1,0 +1,30 @@
+name: Governance Schema Immutability
+
+# I388-SC-02: the v1.5.0 governance baseline and the existing migration steps (with their checksum goldens) are frozen.
+# The script compares the pull request against its base branch and the v1.5.0 tag. Make this a required check in the branch protection.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  governance-immutability:
+    name: Governance Schema Immutability
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository (full history and tags)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Check the frozen governance schema
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/check-governance-immutability.sh "origin/${BASE_REF}"
