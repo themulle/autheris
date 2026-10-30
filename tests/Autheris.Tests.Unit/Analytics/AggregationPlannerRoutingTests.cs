@@ -245,4 +245,18 @@ public sealed class AggregationPlannerRoutingTests
         requests.Single().ResultByteBudget.ShouldNotBeNull();
         requests.Single().Sql.ToUpperInvariant().ShouldNotContain("CAST");
     }
+
+    /// <summary>Parity SQLite host crash: Microsoft.Data.Sqlite GetChars on an expression column segfaults natively, so SQLite is read whole.</summary>
+    [Theory]
+    [InlineData("SQLite", false)]
+    [InlineData("PostgreSQL", true)]
+    public async Task Aggregation_ResultByteBudget_ChunkedReadOnlyOffSqlite(string sourceType, bool chunked)
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, requests) = Create([SqlRow("A", 5)], executor, sourceType: sourceType);
+
+        await service.ExecuteAggregationAsync(Principal(), Query());
+
+        requests.Single().ResultByteBudget!.ChunkedStringRead.ShouldBe(chunked);
+    }
 }
