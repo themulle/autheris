@@ -74,7 +74,7 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
         await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
         await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
 
-        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(1);
+        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(2, "baseline and step 0002");
     }
 
     [Fact]

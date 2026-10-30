@@ -155,7 +155,7 @@ public abstract class GovernanceUpgradeTestsBase
     }
 
     /// <summary>A database that holds exactly the v1.5.0 schema (step 1, applied by the real catalogue).</summary>
-    private async Task MigrateBaselineAsync(TestDb db) => await RunAsync(db.ConnectionString, GovernanceMigrationMode.Apply, baselineOnly: true);
+    private async Task MigrateBaselineAsync(TestDb db, bool baselineOnly = false) => await RunAsync(db.ConnectionString, GovernanceMigrationMode.Apply, baselineOnly: baselineOnly);
 
     [Fact]
     public Task I388_T_04_Upgrade_FromV150Baseline_AppliesAllSteps_KeepsData_AuditChainAndAnchorVerify_AndTriggerEnabled() => WithDbAsync(async db =>
@@ -232,7 +232,7 @@ public abstract class GovernanceUpgradeTestsBase
     public Task I388_T_05_Adoption_PreV150Database_WithHistory_FailsUnsupportedBase_AndExecutesNoDdl() => WithDbAsync(async db =>
     {
         var cs = db.ConnectionString;
-        await MigrateBaselineAsync(db);
+        await MigrateBaselineAsync(db, baselineOnly: true);
         await ExecAsync(cs, DropSomeBaselineTableSql); // an older shape that still carries the 0001 history row
         var before = await QueryAsync(cs, FingerprintSql);
         var trace = new List<string>();
@@ -345,7 +345,7 @@ public abstract class GovernanceUpgradeTestsBase
         renamed.Code.ShouldBe(GovernanceMigrationCodes.HistoryRenamed);
         await ExecAsync(cs, "UPDATE autheris_schema_migrations SET name = 'baseline_governance_schema' WHERE version = 1");
 
-        await ExecAsync(cs, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (3, 'x', 'y', 'z', 'w')");
+        await ExecAsync(cs, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (4, 'x', 'y', 'z', 'w')");
         var gap = await Should.ThrowAsync<GovernanceSchemaDriftException>(
             () => RunAsync(cs, GovernanceMigrationMode.Apply, [ProbeStep()], allowNewer: true, trace: trace));
         gap.Code.ShouldBe(GovernanceMigrationCodes.HistoryGap);
@@ -390,7 +390,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Pending);
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(2);
     });
 
     [Fact]
