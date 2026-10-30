@@ -104,3 +104,9 @@ Mandatory tests (all `[Trait("Category","Security")]`):
 - I417-T-SA04 `ProductionEnumerationShield_InvalidDocument_ErrorBytesUnchanged` (golden compare under a non-default multiplier).
 - I417-T-SA05 `LoweredMultiplier_StillBoundedByMaxResponseRowsAndSettlement` (multiplier 1 cannot exceed MaxAllowedComplexity admission or avoid settled row cost).
 - I417-T-SA06 `RootListDescription_UsesConfiguredMaxAllowedOffset_NoOtherConfigLeaks` (values 0, 100, 10000; hidden when introspection is disabled).
+
+## Phase 5 notes WP-A (2026-10-30)
+
+- Accepted test gaps: the "hidden when introspection is disabled" part of I417-SC-A07 relies on the existing HotChocolate introspection policy and is not re-tested; I417-SC-A08 is pinned by a unit test of the price bounds, not by an end-to-end settlement run.
+- Accepted: `QueryCostOptions.RequireValidListMultiplier` can only throw if options change after startup (the startup validator enforces 1..1000); its message is static and `ErrorSanitizingFilter` maps it to a generic error.
+- Accepted: `GatewayStartupValidator.ValidateQueryCostOptions` keeps its now-unused `environment` parameter to avoid churn in the startup golden tests.
