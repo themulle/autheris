@@ -115,7 +115,7 @@ public sealed class SqlErrorSurfacesTests
         root.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
         root.GetProperty("limit").GetString().ShouldBe("BindParameters");
         root.GetProperty("traceId").GetString().ShouldBe("trace-1");
-        root.GetProperty("message").GetString().ShouldNotBeNullOrWhiteSpace();
+        root.GetProperty("detail").GetString().ShouldNotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public sealed class SqlErrorSurfacesTests
         mapped.Message.ShouldNotContain(HostileMarker);
         var root = JsonDocument.Parse(body).RootElement;
         root.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
-        root.GetProperty("message").GetString().ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage("SQL_LIMIT_EXCEEDED"));
+        root.GetProperty("detail").GetString().ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage("SQL_LIMIT_EXCEEDED"));
     }
 
     private sealed class FakeRecursionDbException(string message, int number) : System.Data.Common.DbException(message)

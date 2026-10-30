@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,7 +34,7 @@ public static class SubjectLifecycleEndpoints
         {
             if (string.IsNullOrWhiteSpace(request?.UserKey) || string.IsNullOrWhiteSpace(request?.RealmId))
             {
-                return Results.BadRequest(new { error = "userKey and realmId are required." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "userKey and realmId are required.");
             }
 
             var initiatorSid = httpContext.User.GetUserSid() ?? new Sid("ADMIN");

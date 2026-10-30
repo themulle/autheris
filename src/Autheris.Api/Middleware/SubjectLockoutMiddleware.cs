@@ -1,5 +1,6 @@
 namespace Autheris.Api.Middleware;
 
+using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -41,31 +42,15 @@ public sealed class SubjectLockoutMiddleware
                 {
                     // Fail closed on store failure (AppSec requirement)
                     _logger.LogError(ex, "Failed to verify subject lockout for user {UserKey} in realm {RealmId}. Failing closed.", userKey, realmId);
-                    context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                    context.Response.Headers["Retry-After"] = "5";
-                    context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                    {
-                        type = "store_failure",
-                        title = "Identity lock check failure",
-                        status = StatusCodes.Status503ServiceUnavailable,
-                        detail = "Identity verification service is temporarily unavailable."
-                    }), context.RequestAborted).ConfigureAwait(false);
+                    context.Response.Headers.RetryAfter = "5";
+                    await ApiProblems.WriteAsync(context, StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "Identity verification service is temporarily unavailable.", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
 
                 if (isLocked)
                 {
                     _logger.LogWarning("Subject {UserKey} in realm {RealmId} is locked. Denying request.", userKey, realmId);
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                    {
-                        type = "subject_locked",
-                        title = "Subject deprovisioned or locked",
-                        status = StatusCodes.Status401Unauthorized,
-                        detail = "The subject account has been administratively locked or deprovisioned."
-                    }), context.RequestAborted).ConfigureAwait(false);
+                    await ApiProblems.WriteAsync(context, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "The subject account has been administratively locked or deprovisioned.", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
             }

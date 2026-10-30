@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using System.Text.Json;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
@@ -281,7 +282,16 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         var (status, body) = await Run(await Put("sales.dbo.broken", new SetDatasetKeysDto(PrimaryKey: ["nope"])));
 
         status.ShouldBe(400);
-        body.ShouldBe("{\"error\":\"Invalid table key or index definition.\"}");
+        AssertInvalidDefinition(body);
+    }
+
+    private static void AssertInvalidDefinition(string body)
+    {
+        // NL-T-20/21: governed problem, status and generic text only (no definition echo).
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("BAD_REQUEST");
+        doc.RootElement.GetProperty("detail").GetString().ShouldBe("The table key or index definition is invalid.");
+        doc.RootElement.TryGetProperty("error", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -298,7 +308,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
 
         var (status, body) = await Run(await Put("sales.dbo.orders", new SetDatasetKeysDto(Indexes: [new DatasetIndexDto("ux1", ["a"], IsUnique: true, Unique: false)])));
         status.ShouldBe(400);
-        body.ShouldBe("{\"error\":\"Invalid table key or index definition.\"}");
+        AssertInvalidDefinition(body);
     }
 
     [Fact]
@@ -317,7 +327,7 @@ public sealed class CatalogKeysEndpointTests : IDisposable
         {
             var (status, body) = await Put("sales.dbo.orders", dto).ContinueWith(t => Run(t.Result)).Unwrap();
             status.ShouldBe(400);
-            body.ShouldBe("{\"error\":\"Invalid table key or index definition.\"}");
+            AssertInvalidDefinition(body);
         }
     }
 

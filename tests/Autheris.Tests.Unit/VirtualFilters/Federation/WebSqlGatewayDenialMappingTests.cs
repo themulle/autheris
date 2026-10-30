@@ -39,8 +39,8 @@ public sealed class WebSqlGatewayDenialMappingTests
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         context.Response.Body.Position = 0;
         using var doc = await JsonDocument.ParseAsync(context.Response.Body);
-        doc.RootElement.GetProperty("error").GetString().ShouldBe("Forbidden");
-        doc.RootElement.GetProperty("message").GetString().ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("ACCESS_DENIED");
+        doc.RootElement.GetProperty("title").GetString().ShouldBe("Access denied.");
         doc.RootElement.ToString().ShouldNotContain("secret-detail");
         doc.RootElement.ToString().ShouldNotContain(code);
     }
@@ -111,7 +111,7 @@ public sealed class WebSqlGatewayDenialMappingTests
         (await handler.TryHandleAsync(context, exception, CancellationToken.None)).ShouldBeTrue();
 
         webSqlStatus.ShouldBe(context.Response.StatusCode);
-        body.ShouldNotContain(exception.Message);
+        body.ShouldNotContain("inner");
     }
 
     [Fact]

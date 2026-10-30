@@ -1,5 +1,6 @@
 namespace Autheris.Api.Serialization;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -128,10 +129,10 @@ public static class ParquetResponseWriter
     internal static async Task WriteNotAcceptableAsync(HttpContext context, string error, IReadOnlyList<string> supported, CancellationToken ct)
     {
         var response = context.Response;
-        response.StatusCode = StatusCodes.Status406NotAcceptable;
         response.ContentLength = null;
         response.Headers.Vary = "Accept";
-        await response.WriteAsJsonAsync(new { error, supported }, ct).ConfigureAwait(false);
+        await ApiProblems.WriteAsync(context, StatusCodes.Status406NotAcceptable, ApiErrorCodes.NotAcceptable,
+            error + " Supported media types: " + string.Join(", ", supported) + ".", ct).ConfigureAwait(false);
     }
 
     /// <summary>Reduces a table hint / file name to [A-Za-z0-9_] (no path, quote or CRLF characters).</summary>

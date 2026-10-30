@@ -366,7 +366,7 @@ internal static class DevPortalAssets
                 } else {
                   statusDiv.style.background = '#7f1d1d';
                   statusDiv.style.color = '#f87171';
-                  statusDiv.textContent = '❌ ' + (data.detail || data.error || 'Verification failed');
+                  statusDiv.textContent = '❌ ' + (data.detail || 'Verification failed');
                 }
               } catch (err) {
                 statusDiv.style.display = 'block';
@@ -477,7 +477,7 @@ internal static class DevPortalAssets
                   } else {
                     banner.style.background = '#7f1d1d';
                     banner.style.color = '#f87171';
-                    banner.textContent = `❌ Approval failed: ${data.detail || data.error || 'Invalid code'}`;
+                    banner.textContent = `❌ Approval failed: ${data.detail || 'Invalid code'}`;
                   }
                 } catch (err) {
                   banner.style.display = 'block';

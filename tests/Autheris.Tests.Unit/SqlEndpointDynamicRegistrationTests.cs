@@ -124,6 +124,6 @@ public sealed class SqlEndpointDynamicRegistrationTests
 
         var result = await SqlEndpointRoutes.HandleRegisterEndpoint(request, registry, context);
 
-        result.ShouldBeOfType<BadRequest<object>>();
+        result.ShouldBeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().StatusCode.ShouldBe(400);
     }
 }

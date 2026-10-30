@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -89,13 +90,13 @@ public static class GovernanceClassificationEndpoints
             // The proposal is always loaded server-side; a client-supplied copy is a forgery attempt.
             if (payload.Proposal != null || payload.Request == null)
             {
-                return Results.BadRequest(new { error = "The proposal must not be supplied; it is loaded by ID server-side." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The proposal must not be supplied; it is loaded by ID server-side.", httpContext);
             }
 
             var proposal = await store.GetProposalByIdAsync(payload.Request.ProposalId, ct).ConfigureAwait(false);
             if (proposal == null)
             {
-                return Results.NotFound(new { error = $"Proposal with ID '{payload.Request.ProposalId}' was not found." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
             var identity = ResolveReviewer(httpContext.User, proposal);
@@ -108,13 +109,13 @@ public static class GovernanceClassificationEndpoints
             if (!string.IsNullOrWhiteSpace(payload.Request.ReviewerSid.Value) &&
                 !string.Equals(payload.Request.ReviewerSid.Value, identity.Sid.Value, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.BadRequest(new { error = "ReviewerSid must not be supplied or must match the authenticated principal." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReviewerSid must not be supplied or must match the authenticated principal.", httpContext);
             }
 
             if (!string.IsNullOrWhiteSpace(payload.Request.ReviewerRole) &&
                 !string.Equals(payload.Request.ReviewerRole, identity.Role, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.BadRequest(new { error = "ReviewerRole must not be supplied or must match the role derived from the authenticated principal." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReviewerRole must not be supplied or must match the role derived from the authenticated principal.", httpContext);
             }
 
             var request = payload.Request with
@@ -148,7 +149,7 @@ public static class GovernanceClassificationEndpoints
             CancellationToken ct) =>
         {
             var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
-            return proposal != null ? Results.Ok(proposal) : Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
+            return proposal != null ? Results.Ok(proposal) : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.");
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.ClassificationProposed);
 
         // 5. Submit Human Approval (Stage 1 Data Owner or Stage 2 Compliance Reviewer)
@@ -163,7 +164,7 @@ public static class GovernanceClassificationEndpoints
             var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
             if (proposal == null)
             {
-                return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
             var identity = ResolveReviewer(httpContext.User, proposal);
@@ -174,7 +175,7 @@ public static class GovernanceClassificationEndpoints
 
             if (!ClientIdentityMatches(payload.ReviewerSid, payload.ReviewerRole, identity))
             {
-                return Results.BadRequest(new { error = "ReviewerSid/ReviewerRole are derived from the authenticated principal and must not be supplied." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReviewerSid/ReviewerRole are derived from the authenticated principal and must not be supplied.", httpContext);
             }
 
             var reviewerSid = identity.Sid;
@@ -207,7 +208,7 @@ public static class GovernanceClassificationEndpoints
             var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
             if (proposal == null)
             {
-                return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
             var identity = ResolveReviewer(httpContext.User, proposal);
@@ -218,7 +219,7 @@ public static class GovernanceClassificationEndpoints
 
             if (!ClientIdentityMatches(payload.ReviewerSid, payload.ReviewerRole, identity))
             {
-                return Results.BadRequest(new { error = "ReviewerSid/ReviewerRole are derived from the authenticated principal and must not be supplied." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReviewerSid/ReviewerRole are derived from the authenticated principal and must not be supplied.", httpContext);
             }
 
             var reviewerSid = identity.Sid;

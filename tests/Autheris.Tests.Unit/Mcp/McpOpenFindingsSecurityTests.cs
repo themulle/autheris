@@ -572,10 +572,8 @@ public sealed class McpOpenFindingsSecurityTests
     // ---- 5. Structured tool errors and the catalog search limit ----------------------------------------------------------------
 
     [Theory]
-    [InlineData("""{"error":"InvalidParams","message":"Missing required argument 'query'."}""", "InvalidParams")]
-    [InlineData("""{"error":"Doc search service is not configured."}""", "ERROR")]
     [InlineData("""{"isError":true,"error":{"code":"FORBIDDEN","message":"x"}}""", "FORBIDDEN")]
-    public void TryGetExecutorError_RecognisesBothErrorShapes(string json, string code)
+    public void TryGetExecutorError_RecognisesTheExecutorShape(string json, string code)
     {
         AiDataGuardrailService.TryGetExecutorError(json, out var errorCode).ShouldBeTrue();
         errorCode.ShouldBe(code);

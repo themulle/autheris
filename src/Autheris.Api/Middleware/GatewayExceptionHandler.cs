@@ -91,36 +91,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         }
 
         httpContext.Response.Clear();
-        httpContext.Response.StatusCode = status;
-        if (retryAfter.HasValue)
-        {
-            httpContext.Response.Headers.RetryAfter = retryAfter.Value.ToString(CultureInfo.InvariantCulture);
-        }
-
-        var problem = new ProblemDetails
-        {
-            Status = status,
-            Title = title,
-            Type = $"https://httpwg.org/specs/rfc9110.html#status.{status}"
-        };
-        if (code is not null)
-        {
-            problem.Extensions["code"] = code;
-        }
-
-        if (retryAfter.HasValue)
-        {
-            problem.Extensions["retryAfterSeconds"] = retryAfter.Value;
-        }
-
-        if (limit is not null)
-        {
-            problem.Extensions["limit"] = limit;
-        }
-
-        problem.Extensions["traceId"] = traceId;
-
-        await httpContext.Response.WriteAsJsonAsync(problem, (System.Text.Json.JsonSerializerOptions?)null, "application/problem+json", cancellationToken).ConfigureAwait(false);
+        await GatewayProblemWriter.WriteAsync(httpContext, status, title, code, retryAfter, limit, traceId, cancellationToken).ConfigureAwait(false);
         return true;
     }
 

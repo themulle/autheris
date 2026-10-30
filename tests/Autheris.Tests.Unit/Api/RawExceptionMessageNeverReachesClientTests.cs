@@ -208,6 +208,28 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         c.Body.ShouldNotContain(Sentinel);
     }
 
+    [Theory]
+    [InlineData(400, "BAD_REQUEST")]
+    [InlineData(401, "UNAUTHORIZED")]
+    [InlineData(403, "ACCESS_DENIED")]
+    [InlineData(404, "RESOURCE_NOT_FOUND")]
+    [InlineData(429, "TOO_MANY_REQUESTS")]
+    [InlineData(502, "INTERNAL_ERROR")]
+    [InlineData(504, "GATEWAY_TIMEOUT")]
+    [Trait("Category", "Security")]
+    public async Task Olap_Outcome_Statuses_Keep_Status_And_Carry_Governed_Code_Without_Service_Text(int status, string expectedDefaultCode)
+    {
+        // NL-T-20/21 backfill: the outcome text and detail never reach the body; the code is the outcome's governed code or the status default.
+        var outcome = new OlapStagingOutcome(status, Sentinel, Sentinel, ErrorCode: "NOT_A_GOVERNED_CODE_" + status);
+
+        var (_, c) = await RunOlapAsync(outcome, development: false);
+
+        c.Status.ShouldBe(status);
+        c.Body.ShouldNotContain(Sentinel);
+        c.Json.GetProperty("code").GetString().ShouldBe(expectedDefaultCode);
+        c.Json.TryGetProperty("error", out _).ShouldBeFalse();
+    }
+
     [Fact]
     public async Task OlapError_AfterResponseStarted_DoesNotAppendMessage()
     {
@@ -220,7 +242,8 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     }
 
     [Fact]
-    public async Task PrivacyBudget429_KeepsExtensions_NoMessage()
+    [Trait("Category", "Security")]
+    public async Task PrivacyBudget_429_Keeps_Only_Allowlisted_Typed_Extensions()
     {
         var engine = Substitute.For<IDifferentialPrivacyEngine>();
         engine.PerturbAsync(default!, default).ThrowsAsyncForAnyArgs(new PrivacyBudgetExhaustedException("client-1", 4.5, 5.0));
@@ -230,6 +253,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
 
         AssertGoverned(c, 429, ApiErrorCodes.PrivacyBudgetExhausted);
         c.Headers["X-Privacy-Budget-Exhausted"].ToString().ShouldBe("true");
+        // NL-T-32 / NL-SC-32: the allowlisted typed budget figures are present.
         c.Json.GetProperty("clientId").GetString().ShouldBe("client-1");
         c.Json.GetProperty("consumed").GetDouble().ShouldBe(4.5);
         c.Json.GetProperty("totalBudget").GetDouble().ShouldBe(5.0);
@@ -523,6 +547,9 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         var c = Read(ctx);
         c.Status.ShouldBe(400);
         // The code is an engine constant (never caller data); the human-readable text must be fixed and free of the marker.
-        c.Json.GetProperty("error").GetString()!.ShouldNotContain(Sentinel);
+        c.Json.GetProperty("detail").GetString()!.ShouldNotContain(Sentinel);
+        // NL-SC-27: an ungoverned code is never echoed; the status default is used.
+        c.Json.GetProperty("code").GetString().ShouldBe("BAD_REQUEST");
+        c.Body.ShouldNotContain(Sentinel);
     }
 }

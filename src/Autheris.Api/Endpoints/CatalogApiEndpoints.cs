@@ -58,7 +58,7 @@ public static class CatalogApiEndpoints
         {
             if (!TableIdentifier.TryParse(datasetId.Replace('/', '.'), out var tableId))
             {
-                return Results.BadRequest(new { error = $"Invalid dataset identifier '{datasetId}'." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The dataset identifier is invalid.", httpContext);
             }
 
             var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
@@ -136,13 +136,10 @@ public static class CatalogApiEndpoints
             var scope = CallerScopeResolver.Resolve(httpContext.User, gatewayOptions.Value.Tenancy.EffectiveMode);
             if (scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
             {
-                return Results.Json(
-                    new
-                    {
-                        error = "TENANCY_MODE_CLAIMLESS_ADMIN",
-                        message = "The principal has no tenant claim and Gateway:Tenancy:Mode is Multi; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
-                    },
-                    statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(
+                    ApiErrorCodes.TenancyModeClaimlessAdmin,
+                    "The principal has no tenant claim and Gateway:Tenancy:Mode is Multi; single-tenant deployments must set Gateway:Tenancy:Mode=Single.",
+                    httpContext);
             }
 
             var context = CreateRequestContext(httpContext);
@@ -209,7 +206,7 @@ public static class CatalogApiEndpoints
         {
             if (string.IsNullOrWhiteSpace(q))
             {
-                return Results.BadRequest(new { error = "Query parameter 'q' is required." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The query parameter is required.", httpContext);
             }
 
             var context = CreateRequestContext(httpContext);
@@ -229,7 +226,7 @@ public static class CatalogApiEndpoints
         {
             if (string.IsNullOrWhiteSpace(id) || !DatasourceTestingService.IsValidDatasourceId(id))
             {
-                return Results.BadRequest(new { error = "Invalid datasource identifier format." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The datasource identifier is invalid.", httpContext);
             }
             try
             {
@@ -239,7 +236,7 @@ public static class CatalogApiEndpoints
             }
             catch (System.Collections.Generic.KeyNotFoundException)
             {
-                return Results.NotFound(new { error = "Datasource was not found in catalog or configuration." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The datasource was not found.", httpContext);
             }
         })
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
@@ -312,7 +309,7 @@ public static class CatalogApiEndpoints
             var updated = await relationRepo.SetRelationCrossDataSourceOptInAsync(relationId, request.AllowCrossDataSource, ct);
             if (!updated)
             {
-                return Results.NotFound(new { error = $"Relation '{relationId}' not found." });
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The relation was not found.");
             }
             return Results.Ok(new { relationId, allowCrossDataSource = request.AllowCrossDataSource });
         })
@@ -401,23 +398,23 @@ public static class CatalogApiEndpoints
                     settings.Visibility.ToString(),
                     result.TierEffective));
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Forbidden:
-                return Results.Json(new { error = "FORBIDDEN" }, statusCode: StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Access to the dataset is denied.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidTag:
-                return Results.Json(new { error = "INVALID_TAG" }, statusCode: StatusCodes.Status400BadRequest);
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidTag, "The tag is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.TagLimitExceeded:
-                return Results.Json(new { error = "TAG_LIMIT_EXCEEDED" }, statusCode: StatusCodes.Status400BadRequest);
+                return ApiProblems.BadRequest(ApiErrorCodes.TagLimitExceeded, "The tag limit is exceeded.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility:
-                return Results.Json(new { error = "INVALID_VISIBILITY" }, statusCode: StatusCodes.Status400BadRequest);
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidVisibility, "The visibility is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest:
-                return Results.Json(new { error = "INVALID_REQUEST" }, statusCode: StatusCodes.Status400BadRequest);
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The request is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable:
-                return Results.Json(new { error = "UNAVAILABLE" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+                return ApiProblems.ServiceUnavailable();
             default:
-                return Results.Json(new { error = "NOT_FOUND" }, statusCode: StatusCodes.Status404NotFound);
+                return ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The dataset was not found.");
         }
     }
 
-    private static IResult DatasetKeysNotFound() => Results.NotFound(new { error = "Dataset was not found." });
+    private static IResult DatasetKeysNotFound() => ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The dataset was not found.");
 
     /// <summary>Resolves an active dataset by table id or domain.schema.table (shared with the row filter strategy endpoints).</summary>
     private static Task<TableIdentifier?> ResolveActiveDatasetAsync(
@@ -442,7 +439,7 @@ public static class CatalogApiEndpoints
 
         if (request == null)
         {
-            return Results.BadRequest(new { error = "Key definition payload is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The key definition payload is required.", httpContext);
         }
 
         var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
@@ -455,7 +452,7 @@ public static class CatalogApiEndpoints
         if (request.Indexes != null && System.Linq.Enumerable.Any(request.Indexes, i => i is { Unique: not null, IsUnique: not null } && i.Unique != i.IsUnique))
         {
             // `unique` is canonical, `isUnique` an accepted alias; contradicting values are refused with the generic message.
-            return Results.BadRequest(new { error = "Invalid table key or index definition." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The table key or index definition is invalid.", httpContext);
         }
 
         var indexes = request.Indexes != null
@@ -475,7 +472,7 @@ public static class CatalogApiEndpoints
         }
         catch (TableDefinitionException)
         {
-            return Results.BadRequest(new { error = "Invalid table key or index definition." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The table key or index definition is invalid.", httpContext);
         }
 
         if (change is null)
@@ -556,7 +553,7 @@ public static class CatalogApiEndpoints
         {
             if (!colNames.Contains(c))
             {
-                return Results.BadRequest(new { error = $"Column '{c}' does not exist on table '{tableId.Value}'." });
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "A referenced column does not exist on the table.", httpContext);
             }
         }
         foreach (var group in reqGroups)
@@ -565,7 +562,7 @@ public static class CatalogApiEndpoints
             {
                 if (!colNames.Contains(c))
                 {
-                    return Results.BadRequest(new { error = $"Column '{c}' does not exist on table '{tableId.Value}'." });
+                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "A referenced column does not exist on the table.", httpContext);
                 }
             }
         }
@@ -624,7 +621,7 @@ public static class CatalogApiEndpoints
 
         if (samples.Count > Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator.MaxPredefinedSampleRows)
         {
-            return Results.BadRequest(new { error = $"Maximum allowed synthetic sample rows is {Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator.MaxPredefinedSampleRows}." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The number of synthetic sample rows exceeds the allowed maximum.", httpContext);
         }
 
         generator.RegisterSyntheticSamples(tableId.Value, samples);
@@ -710,7 +707,7 @@ public static class CatalogApiEndpoints
     {
         if (request == null || string.IsNullOrWhiteSpace(request.State))
         {
-            return Results.BadRequest(new { error = "State is required." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The state is required.", httpContext);
         }
 
         var adminSid = httpContext.User.GetUserSid()?.Value ?? httpContext.User.Identity?.Name ?? "system-admin";
@@ -718,7 +715,7 @@ public static class CatalogApiEndpoints
         var result = await accessPlanningService.SetDatasetStateAsync(planningRequest, adminSid, EndpointSecurity.GetRequestTenant(httpContext).Value, ct);
         if (!result.Success)
         {
-            return Results.NotFound(new { error = result.Message });
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The dataset was not found.", httpContext);
         }
 
         return Results.Ok(result);
@@ -732,7 +729,7 @@ public static class CatalogApiEndpoints
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Domain))
         {
-            return Results.BadRequest(new { error = "Name and Domain are required fields." });
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The name and the domain are required.", httpContext);
         }
 
         var context = CreateRequestContext(httpContext);
