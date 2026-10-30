@@ -25,8 +25,47 @@ public enum DefaultOrderingKind
     None = 6
 }
 
-/// <summary>The columns to order by (catalog spelling) and the rule that chose them.</summary>
-public sealed record DefaultOrdering(IReadOnlyList<string> Columns, DefaultOrderingKind Kind);
+/// <summary>One ORDER BY term of a default ordering (issue #390): the column in catalog spelling and whether it sorts descending.</summary>
+public readonly record struct OrderingColumn(string Name, bool Descending);
+
+/// <summary>
+/// The terms to order by (catalog spelling, with the declared direction of a key or index column) and the rule that chose them.
+/// <see cref="Columns"/> lists the names only, for callers that do not care about the direction (row identity, diagnostics).
+/// </summary>
+public sealed record DefaultOrdering(IReadOnlyList<OrderingColumn> Terms, DefaultOrderingKind Kind)
+{
+    public DefaultOrdering(IReadOnlyList<string> columns, DefaultOrderingKind kind)
+        : this(ToAscendingTerms(columns), kind)
+    {
+    }
+
+    /// <summary>The column names of <see cref="Terms"/> in order.</summary>
+    public IReadOnlyList<string> Columns
+    {
+        get
+        {
+            var names = new string[Terms.Count];
+            for (var i = 0; i < names.Length; i++)
+            {
+                names[i] = Terms[i].Name;
+            }
+
+            return names;
+        }
+    }
+
+    private static OrderingColumn[] ToAscendingTerms(IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        var terms = new OrderingColumn[columns.Count];
+        for (var i = 0; i < terms.Length; i++)
+        {
+            terms[i] = new OrderingColumn(columns[i], false);
+        }
+
+        return terms;
+    }
+}
 
 /// <summary>
 /// Issue #94 (D-10, SD-1, SD-2): the single default ordering rule of every read path (table-read planner, GraphQL tree
@@ -46,7 +85,7 @@ public static class DefaultReadOrdering
 
         var clear = (TableColumn c) => decision.GetEffectiveColumnAccess(c.ColumnName, metadata) == ColumnAccessLevel.Clear;
 
-        if (TryKey(metadata, clear, out var key, out var kind))
+        if (TryKeyTerms(metadata, clear, out var key, out var kind))
         {
             return new DefaultOrdering(key, kind);
         }
@@ -66,8 +105,19 @@ public static class DefaultReadOrdering
     /// </summary>
     internal static bool TryKey(TableMetadata metadata, Func<TableColumn, bool> usable, out List<string> key, out DefaultOrderingKind kind)
     {
+        var found = TryKeyTerms(metadata, usable, out var terms, out kind);
+        key = terms.ConvertAll(t => t.Name);
+        return found;
+    }
+
+    /// <summary>
+    /// <see cref="TryKey"/> with the declared directions (issue #390). The candidate choice (precedence, all-or-nothing rule, fewest columns) is
+    /// independent of the direction, so hidden-column behaviour is identical to an ascending key; markers and the convention stay ascending.
+    /// </summary>
+    internal static bool TryKeyTerms(TableMetadata metadata, Func<TableColumn, bool> usable, out List<OrderingColumn> key, out DefaultOrderingKind kind)
+    {
         kind = DefaultOrderingKind.PrimaryKey;
-        if (TryAllUsable(metadata.PrimaryKeyColumns, metadata, usable, out key))
+        if (TryAllUsable(metadata.PrimaryKeyColumns, metadata.PrimaryKeyDirections, metadata, usable, out key))
         {
             return true;
         }
@@ -77,7 +127,7 @@ public static class DefaultReadOrdering
                      .Where(i => i is { IsUnique: true, Columns.Count: > 0 })
                      .OrderBy(i => i.Columns.Count))
         {
-            if (TryAllUsable(index.Columns, metadata, usable, out key))
+            if (TryAllUsable(index.Columns, index.Directions, metadata, usable, out key))
             {
                 return true;
             }
@@ -87,42 +137,47 @@ public static class DefaultReadOrdering
         kind = DefaultOrderingKind.MetaMarkerKey;
         if (metadata.PrimaryKeyColumns.Count == 0 &&
             TableKeyMarkers.Parse(metadata.Columns) is { IsValid: true, Columns.Count: > 0 } markers &&
-            TryAllUsable(markers.Columns, metadata, usable, out key))
+            TryAllUsable(markers.Columns, null, metadata, usable, out key))
         {
             return true;
         }
 
         // H1: the (client_id, ts) convention needs both columns; client_id alone is never a key.
         kind = DefaultOrderingKind.ConventionKey;
-        if (TryAllUsable(["client_id", "ts"], metadata, usable, out key))
+        if (TryAllUsable(["client_id", "ts"], null, metadata, usable, out key))
         {
             return true;
         }
 
-        key = new List<string>();
+        key = new List<OrderingColumn>();
         return false;
     }
 
-    private static bool TryAllUsable(IReadOnlyList<string> candidates, TableMetadata metadata, Func<TableColumn, bool> usable, out List<string> key)
+    private static bool TryAllUsable(
+        IReadOnlyList<string> candidates,
+        IReadOnlyList<KeyColumnDirection>? directions,
+        TableMetadata metadata,
+        Func<TableColumn, bool> usable,
+        out List<OrderingColumn> key)
     {
-        key = new List<string>(candidates.Count);
+        key = new List<OrderingColumn>(candidates.Count);
         if (candidates.Count == 0)
         {
             return false;
         }
 
-        foreach (var candidate in candidates)
+        for (var i = 0; i < candidates.Count; i++)
         {
-            var col = metadata.GetColumn(candidate);
+            var col = metadata.GetColumn(candidates[i]);
             if (col == null || !usable(col))
             {
-                key = new List<string>();
+                key = new List<OrderingColumn>();
                 return false;
             }
 
-            if (!key.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+            if (!key.Exists(t => string.Equals(t.Name, col.ColumnName, StringComparison.OrdinalIgnoreCase)))
             {
-                key.Add(col.ColumnName);
+                key.Add(new OrderingColumn(col.ColumnName, KeyDirections.IsDescending(directions, i)));
             }
         }
 

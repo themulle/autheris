@@ -488,11 +488,12 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                 items.Add(item.Descending ? quoted + " DESC" : quoted);
             }
 
-            foreach (var column in defaultOrdering.Columns)
+            // The caller's direction wins for a named key column; the other key columns are appended with their declared direction (issue #390).
+            foreach (var term in defaultOrdering.Terms)
             {
-                if (named.Add(column))
+                if (named.Add(term.Name))
                 {
-                    items.Add(DataApiFilterTranslator.QuoteIdentifier(column));
+                    items.Add(OrderItem(term));
                 }
             }
 
@@ -504,8 +505,14 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             throw new UnorderedPagingException(nameof(intent));
         }
 
-        items.AddRange(defaultOrdering.Columns.Select(DataApiFilterTranslator.QuoteIdentifier));
+        items.AddRange(defaultOrdering.Terms.Select(OrderItem));
         return (items, defaultOrdering.Kind);
+    }
+
+    private static string OrderItem(OrderingColumn term)
+    {
+        var quoted = DataApiFilterTranslator.QuoteIdentifier(term.Name);
+        return term.Descending ? quoted + " DESC" : quoted;
     }
 
     /// <summary>One text for an unknown column and for a column the caller may not see, so the message is no existence oracle.</summary>
