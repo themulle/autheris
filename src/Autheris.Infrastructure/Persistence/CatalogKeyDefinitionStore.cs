@@ -612,7 +612,7 @@ internal static class CatalogKeyDefinitionStore
             return true;
         }
 
-        foreach (var table in new[] { PrimaryKeyTable, IndexTable, IndexColumnTable })
+        foreach (var table in new[] { PrimaryKeyTable, IndexTable, IndexColumnTable, CatalogPhysicalIndexStore.IndexTable, CatalogPhysicalIndexStore.ColumnTable })
         {
             await using var cmd = conn.CreateCommand();
             Enlist(cmd, tx);
@@ -641,7 +641,7 @@ internal static class CatalogKeyDefinitionStore
             : throw new TableDefinitionException("The key or index definition references a column that does not exist.");
 
     // Microsoft.Data.Sqlite treats an explicitly assigned null as "no transaction" even inside a snapshot scope: assign only when set.
-    private static void Enlist(DbCommand cmd, DbTransaction? tx)
+    internal static void Enlist(DbCommand cmd, DbTransaction? tx)
     {
         if (tx is not null)
         {
@@ -649,7 +649,7 @@ internal static class CatalogKeyDefinitionStore
         }
     }
 
-    private static void AddParameter(DbCommand cmd, string name, object value)
+    internal static void AddParameter(DbCommand cmd, string name, object value)
     {
         var parameter = cmd.CreateParameter();
         parameter.ParameterName = name;
@@ -657,7 +657,7 @@ internal static class CatalogKeyDefinitionStore
         cmd.Parameters.Add(parameter);
     }
 
-    private static async Task ExecAsync(DbConnection conn, DbTransaction tx, string sql, CancellationToken ct, params (string Name, object Value)[] parameters)
+    internal static async Task ExecAsync(DbConnection conn, DbTransaction tx, string sql, CancellationToken ct, params (string Name, object Value)[] parameters)
     {
         await using var cmd = conn.CreateCommand();
         Enlist(cmd, tx);

@@ -134,6 +134,7 @@ public static partial class GatewayGovernanceServiceExtensions
             IConsentApprovalRepository,
             IDataOwnershipRepository,
             IDataOwnerAssignmentRepository,
+            IPhysicalIndexRepository,
             ITableRelationRepository,
             IItsmOutboxRepository,
             IWebhookOutbox,
@@ -176,6 +177,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // PLAN-GOV-158-INC1 (same validating decorator instance as IConsentRepository)
         services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam
+        services.AddSingleton<IPhysicalIndexRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #404: physical non-unique index write seam
         services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());

@@ -229,6 +229,9 @@ public partial class SqliteGovernanceRepository
                 throw;
             }
 
+            var physicalIndexes = await CatalogPhysicalIndexStore.ReadAsync(
+                conn, null, CatalogKeyDefinitionStore.Sqlite, tableId.Value, columns, ct).ConfigureAwait(false);
+
             var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
                 conn, null, CatalogKeyDefinitionStore.Sqlite, tableId.Value, ct).ConfigureAwait(false);
 
@@ -241,6 +244,7 @@ public partial class SqliteGovernanceRepository
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
+                PhysicalIndexes = physicalIndexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
             result.ValidateRequiredFilterColumns();
@@ -422,6 +426,9 @@ public partial class SqliteGovernanceRepository
             var prefetched = keyTablesPresent
                 ? await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, tableRows.Select(r => r.id).ToList(), ct).ConfigureAwait(false)
                 : null;
+            var prefetchedPhysical = keyTablesPresent
+                ? await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, tableRows.Select(r => r.id).ToList(), ct).ConfigureAwait(false)
+                : null;
             foreach (var (id, domain, name, table) in tableRows)
             {
                 TableIdentifier identifier;
@@ -470,7 +477,8 @@ public partial class SqliteGovernanceRepository
                     ColumnMaskingRules = maskingRules,
                     PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
-                    Indexes = indexes
+                    Indexes = indexes,
+                    PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(id, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>()
                 };
                 try
                 {

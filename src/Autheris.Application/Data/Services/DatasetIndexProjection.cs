@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Domain.Model;
 
-/// <summary>The primary key and declared indexes a caller may see (I404-SC-L1..L6).</summary>
+/// <summary>The primary key, declared indexes and physical non-unique indexes a caller may see (I404-SC-L1..L6).</summary>
 public sealed record DatasetKeyProjection(
     IReadOnlyList<string> PrimaryKeyColumns,
     IReadOnlyList<KeyColumnDirection> PrimaryKeyDirections,
@@ -59,30 +59,53 @@ public static class DatasetIndexProjection
             : [];
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenShape = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var indexes = new List<DatasetIndexInfo>();
-        foreach (var index in table.Indexes)
+
+        // Order: declared unique, declared non-unique, then physical non-unique (issue #404). An omitted index never takes a slot.
+        for (var pass = 0; pass < 2 && indexes.Count < MaxIndexesPerTable; pass++)
         {
-            if (!Readable(table, index.Columns, clearColumns))
+            foreach (var index in table.Indexes)
             {
-                continue;
-            }
+                if (index.IsUnique != (pass == 0) || !Readable(table, index.Columns, clearColumns))
+                {
+                    continue;
+                }
 
-            var directions = KeyDirections.Canonical(index.Directions)?.ToArray();
-            var key = (index.IsUnique ? "U:" : "N:") + string.Join('\u0001', index.Columns) + "|" + (directions == null ? "" : string.Join(',', directions));
-            if (!seen.Add(key))
-            {
-                continue;
-            }
+                var directions = KeyDirections.Canonical(index.Directions)?.ToArray();
+                if (!seen.Add((index.IsUnique ? "U:" : "N:") + Shape(index.Columns, directions)))
+                {
+                    continue;
+                }
 
-            indexes.Add(new DatasetIndexInfo(index.Columns.ToArray(), index.IsUnique, directions));
+                seenShape.Add(Shape(index.Columns, directions));
+                indexes.Add(new DatasetIndexInfo(index.Columns.ToArray(), index.IsUnique, directions));
+                if (indexes.Count == MaxIndexesPerTable)
+                {
+                    break;
+                }
+            }
+        }
+
+        foreach (var physical in table.PhysicalIndexes)
+        {
             if (indexes.Count == MaxIndexesPerTable)
             {
                 break;
+            }
+
+            var directions = KeyDirections.Canonical(physical.Directions)?.ToArray();
+            if (Readable(table, physical.Columns, clearColumns) && seenShape.Add(Shape(physical.Columns, directions)))
+            {
+                indexes.Add(new DatasetIndexInfo(physical.Columns.ToArray(), false, directions));
             }
         }
 
         return new DatasetKeyProjection(primaryKey, primaryKeyDirections, indexes);
     }
+
+    private static string Shape(IReadOnlyList<string> columns, KeyColumnDirection[]? directions) =>
+        string.Join('\u0001', columns) + "|" + (directions == null ? "" : string.Join(',', directions));
 
     // Every name must be a real column of the table (a stale name never resolves) and Clear for the caller; no allocation.
     private static bool Readable(TableMetadata table, IReadOnlyList<string> names, IReadOnlySet<string> clear)

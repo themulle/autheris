@@ -29,6 +29,11 @@ public static class TableKeyVisibility
             .Where(i => i.Columns.Count > 0 && AllVisible(i.Columns, visible))
             .ToList();
 
+        // Issue #404 (defence in depth): physical non-unique indexes survive only as a whole, like the declared ones.
+        var physicalIndexes = metadata.PhysicalIndexes
+            .Where(i => AllVisible(i.Columns, visible))
+            .ToList();
+
         var columns = visibleColumns;
         // Markers are a declaration channel only while no declared primary key rows exist (declared rows win). They stay on the
         // visible columns only when they still form a complete, valid key there; otherwise the remaining markers would read as
@@ -45,7 +50,7 @@ public static class TableKeyVisibility
             columns = visibleColumns.Select(StripMarkers).ToList();
         }
 
-        return metadata with { Columns = columns, PrimaryKeyColumns = primaryKey, PrimaryKeyDirections = primaryKeyDirections, Indexes = indexes, ReplaceKeyDefinition = false };
+        return metadata with { Columns = columns, PrimaryKeyColumns = primaryKey, PrimaryKeyDirections = primaryKeyDirections, Indexes = indexes, PhysicalIndexes = physicalIndexes, ReplaceKeyDefinition = false };
     }
 
     private static bool AllVisible(IReadOnlyList<string> names, HashSet<string> visible) =>

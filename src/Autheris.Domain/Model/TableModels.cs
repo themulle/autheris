@@ -324,6 +324,35 @@ public sealed record TableIndexDefinition(
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<KeyColumnDirection>? Directions = null);
 
+/// <summary>
+/// Issue #404: a physical (source-observed), non-unique index. Advisory metadata refreshed by the catalog sync; never an operator
+/// declaration and never an input to read ordering, keysets or policy. It carries no name (I404-SC-01). <see cref="Directions"/> is empty
+/// (canonical) when every column is ascending, otherwise one entry per column.
+/// </summary>
+public sealed record PhysicalIndexDefinition(IReadOnlyList<string> Columns, IReadOnlyList<KeyColumnDirection> Directions)
+{
+    /// <summary>True when both lists describe the same ordered columns (ignoring case) and directions.</summary>
+    public bool Matches(PhysicalIndexDefinition other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        if (Columns.Count != other.Columns.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < Columns.Count; i++)
+        {
+            if (!string.Equals(Columns[i], other.Columns[i], StringComparison.OrdinalIgnoreCase)
+                || KeyDirections.IsDescending(Directions, i) != KeyDirections.IsDescending(other.Directions, i))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 /// <summary>The declared key definition of a table: ordered primary key (with optional directions) and indexes (identifiers only, no data).</summary>
 public sealed record TableKeyDefinition(
     IReadOnlyList<string> PrimaryKey,
@@ -360,6 +389,9 @@ public sealed record TableMetadata
 
     /// <summary>Declared secondary and unique indexes (used for default ordering). Empty when none was declared.</summary>
     public IReadOnlyList<TableIndexDefinition> Indexes { get; init; } = Array.Empty<TableIndexDefinition>();
+
+    /// <summary>Issue #404: physical non-unique indexes observed on the source (advisory, name-less). Empty when none are known; never a policy input.</summary>
+    public IReadOnlyList<PhysicalIndexDefinition> PhysicalIndexes { get; init; } = Array.Empty<PhysicalIndexDefinition>();
 
     /// <summary>Issue #107: object-level row filter evaluation settings (loaded from TABLE_ROW_FILTER_STRATEGIES, never written by the metadata upsert). Null = inherit global.</summary>
     public RowFilterEvaluationSettings? RowFilterEvaluation { get; init; }

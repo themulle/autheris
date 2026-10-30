@@ -106,10 +106,10 @@ public sealed class GovernanceSqliteUpgradeTests
         consents.ShouldBe(1);
         audit.ShouldBeGreaterThanOrEqualTo(25);
 
-        var step = ProbeStep(4);
+        var step = ProbeStep(5);
         await new SqliteGovernanceMigrationRunner(repository, options) { AdditionalSteps = [step] }.RunAsync();
 
-        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 5 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('CONSENTS') WHERE name = 'probe_388'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM CONSENTS").ShouldBe(consents);
         Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);
@@ -291,10 +291,80 @@ public sealed class GovernanceSqliteUpgradeTests
         var options = Opts(cs);
         using var repository = NewUnmigrated(options);
         await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
-        Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version = 3");
+        Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version >= 3");
 
         await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
 
         Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3").ShouldBe(1);
+    }
+
+    private const string PhysicalIndexStepName = "physical_nonunique_indexes";
+
+    [Fact]
+    [Trait("SecurityCondition", "I404-SC-10")]
+    public async Task I404_Step0004_UpgradeFromV150_WithData_PreservesRowsAndAuditChain()
+    {
+        var cs = $"Data Source=up0004_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Opts(cs);
+        using var repository = NewUnmigrated(options);
+        await BaselineRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'TABLE_PHYSICAL_INDEX%'").ShouldBe(0, "the baseline is exactly v1.5.0");
+        await SeedV150KeysAndAuditAsync(repository);
+        var keyRows = Scalar(repository, "SELECT COUNT(*) FROM TABLE_PRIMARY_KEY_COLUMNS");
+        var audit = Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES");
+        var hashes = Text(repository, "SELECT group_concat(entry_hash, ',') FROM (SELECT entry_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq)");
+
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+
+        var checksum = SqlMigrationStep.LoadEmbedded("sqlite").Single(s => s.Version == 4).Checksum;
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4 AND name = '{PhysicalIndexStepName}' AND checksum = '{checksum}'").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('TABLE_PHYSICAL_INDEXES', 'TABLE_PHYSICAL_INDEX_COLUMNS')").ShouldBe(2);
+        Scalar(repository, "SELECT COUNT(*) FROM TABLE_PRIMARY_KEY_COLUMNS").ShouldBe(keyRows);
+        Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);
+        Text(repository, "SELECT group_concat(entry_hash, ',') FROM (SELECT entry_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq)").ShouldBe(hashes);
+        (await repository.VerifyAuditHashChainAsync()).ShouldBeTrue("the audit hash chain and anchor verify after step 0004");
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "I404-SC-10")]
+    public async Task Step0004_Rerun_IsIdempotent_GuardSkips()
+    {
+        var cs = $"Data Source=up0004i_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Opts(cs);
+        using var repository = NewUnmigrated(options);
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+        Exec(repository, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)");
+        Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i1', 't', 1)");
+        Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version = 4");
+
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+
+        Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4").ShouldBe(1);
+        Scalar(repository, "SELECT COUNT(*) FROM TABLE_PHYSICAL_INDEXES").ShouldBe(1, "the guard skipped the statements, no data loss");
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "I404-SC-10")]
+    public async Task Step0004_CheckConstraints_RejectInvalidOrdinalAndDirection()
+    {
+        var cs = $"Data Source=up0004c_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var options = Opts(cs);
+        using var repository = NewUnmigrated(options);
+        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+
+        Exec(repository, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)");
+        Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i', 't', 1)");
+        Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i0', 't', 0)"));
+        Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('ix', 'no-such-table', 2)"), "the foreign key refuses an unknown table");
+        Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i', 0, 'c')"));
+        Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id, is_descending) VALUES ('i', 1, 'c', 2)"));
+        Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i', 1, 'c')");
+        Scalar(repository, "SELECT is_descending FROM TABLE_PHYSICAL_INDEX_COLUMNS WHERE index_id = 'i'").ShouldBe(0);
+        Should.Throw<Exception>(() => Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEX_COLUMNS (index_id, column_ordinal, table_column_id) VALUES ('i', 2, 'c')"), "a column is listed once per index");
+
+        Exec(repository, "DELETE FROM TABLES WHERE id = 't'");
+        Scalar(repository, "SELECT COUNT(*) FROM TABLE_PHYSICAL_INDEXES").ShouldBe(0, "the cascade removes the physical rows with the table");
+        Scalar(repository, "SELECT COUNT(*) FROM TABLE_PHYSICAL_INDEX_COLUMNS").ShouldBe(0);
     }
 }

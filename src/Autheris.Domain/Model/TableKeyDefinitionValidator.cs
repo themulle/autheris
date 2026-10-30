@@ -8,6 +8,9 @@ public static partial class TableKeyDefinitionValidator
     public const int MaxColumnsPerKey = 32;
     public const int MaxIndexesPerTable = 64;
 
+    /// <summary>Issue #404 (I404-SC-06): upper bound of physical non-unique indexes stored per table.</summary>
+    public const int MaxPhysicalIndexesPerTable = 32;
+
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}\z")]
     private static partial Regex IndexNameRegex();
 

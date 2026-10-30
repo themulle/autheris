@@ -273,7 +273,7 @@ public sealed class DatasetIndexVisibilityLeakTests
     {
         var view = await RestAsUserAsync(ColumnAccessLevel.Clear);
 
-        view.Indexes.ShouldBe("amount|id");
+        view.Indexes.ShouldBe("id|amount");
         view.PrimaryKeys.ShouldBe(2);
     }
 
@@ -322,5 +322,99 @@ public sealed class DatasetIndexVisibilityLeakTests
             x != null && y != null && x.Unique == y.Unique && x.Columns.SequenceEqual(y.Columns);
 
         public int GetHashCode(DatasetIndexInfo obj) => obj.Columns.Count;
+    }
+
+    private static TableMetadata WithPhysical(TableMetadata table) => table with
+    {
+        PhysicalIndexes =
+        [
+            new PhysicalIndexDefinition(["email"], []),
+            new PhysicalIndexDefinition(["amount"], [KeyColumnDirection.Descending]),
+            new PhysicalIndexDefinition(["id", "email"], []),
+            new PhysicalIndexDefinition(["id", "amount"], [])   // equals the declared ix_visible: de-duplicated
+        ]
+    };
+
+    [Fact]
+    [Trait("SecurityCondition", "I404-SC-13")]
+    public async Task I404_T_S01_PhysicalIndex_OverMaskedColumn_NotDescribed_Mcp_Rest_GraphQl()
+    {
+        var mcp = await Mcp(WithPhysical(Table())).DescribeDatasetAsync(User(), "sales.public.orders");
+        var rest = await Rest(WithPhysical(Table())).GetDatasetDetailAsync(Orders, Admin());
+
+        // GraphQL MCP describe answers through the same DescribeDatasetAsync path (T-32 parity by construction).
+        Columns(mcp.Indexes).ShouldBe("id,amount|amount");
+        Columns(rest!.Indexes).ShouldBe("id,amount|amount");
+        mcp.Indexes!.Last().Unique.ShouldBeFalse();
+        mcp.Indexes!.Last().Directions.ShouldBe([KeyColumnDirection.Descending]);
+        mcp.Indexes!.ShouldAllBe(x => !x.Columns.Contains("email"));
+    }
+
+    [Fact]
+    public async Task I404_T_34_Describe_JsonHasNoIndexName()
+    {
+        var mcp = await Mcp(WithPhysical(Table())).DescribeDatasetAsync(User(), "sales.public.orders");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(mcp.Indexes);
+
+        json.ShouldNotContain("ix_");
+        json.ShouldNotContain("ux_");
+        json.ShouldNotContain("\"name\"", Case.Insensitive);
+    }
+
+    [Fact]
+    public void I404_T_S11_S12_DedupAndCap_AfterVisibility_NoCountSideChannel_AndNoCrossCallerState()
+    {
+        var table = WithPhysical(Table());
+        var all = new HashSet<string>(["id", "amount", "email"], StringComparer.OrdinalIgnoreCase);
+        var noEmail = new HashSet<string>(["id", "amount"], StringComparer.OrdinalIgnoreCase);
+
+        var visibleToPrivileged = DatasetIndexProjection.Project(table, all);
+        var visibleToOther = DatasetIndexProjection.Project(table, noEmail);
+        var again = DatasetIndexProjection.Project(table, noEmail);
+
+        visibleToPrivileged.Indexes.Count.ShouldBeGreaterThan(visibleToOther.Indexes.Count);
+        Columns(visibleToOther.Indexes).ShouldBe("id,amount|amount");
+        Columns(again.Indexes).ShouldBe(Columns(visibleToOther.Indexes), "the projection is a pure function of table and clear set");
+
+        // Hidden physical indexes do not consume cap slots.
+        var many = Enumerable.Range(0, 40).Select(n => new PhysicalIndexDefinition(["email", "c" + n], [])).ToList();
+        var capped = table with { PhysicalIndexes = [.. many, new PhysicalIndexDefinition(["amount"], [])] };
+        Columns(DatasetIndexProjection.Project(capped, noEmail).Indexes).ShouldBe("id,amount|amount");
+    }
+
+    [Fact]
+    public void I404_T_28_DeclaredAndPhysical_OrderedUniqueFirst_DedupedAndCapped()
+    {
+        var names = Enumerable.Range(0, 40).Select(i => $"c{i}").ToArray();
+        var table = new TableMetadata
+        {
+            Identifier = Orders,
+            Table = new Table { TableName = "orders", SchemaName = "public" },
+            Columns = names.Select(n => new TableColumn { ColumnName = n, DataType = "int" }).ToList(),
+            Indexes = [new TableIndexDefinition("n1", ["c1"], false), new TableIndexDefinition("u2", ["c2"], true)],
+            PhysicalIndexes = names.Select(n => new PhysicalIndexDefinition([n], [])).ToList()
+        };
+        var clear = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+
+        var projected = DatasetIndexProjection.Project(table, clear);
+
+        projected.Indexes.Count.ShouldBe(32);
+        projected.Indexes[0].Columns.ShouldBe(["c2"]);
+        projected.Indexes[0].Unique.ShouldBeTrue();
+        projected.Indexes[1].Columns.ShouldBe(["c1"]);
+        projected.Indexes.Skip(2).ShouldAllBe(x => !x.Unique);
+        projected.Indexes.Select(x => string.Join(",", x.Columns)).Distinct().Count().ShouldBe(32);
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "I404-SC-13")]
+    public void I404_T_33_Restrict_FiltersPhysicalIndexesAllOrNothing()
+    {
+        var table = WithPhysical(Table());
+
+        var restricted = TableKeyVisibility.Restrict(table, table.Columns.Where(c => c.ColumnName != "email").ToList());
+
+        restricted.PhysicalIndexes.Select(i => string.Join(",", i.Columns)).ToArray().ShouldBe(["amount", "id,amount"]);
     }
 }
