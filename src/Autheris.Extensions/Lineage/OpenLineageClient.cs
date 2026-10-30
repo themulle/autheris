@@ -58,8 +58,9 @@ public sealed class OpenLineageClient : IOpenLineageClient
         var rootNamespace = tenant.Value;
 
         // SEC SR-L-19: only this tenant's nodes are pushed. Nodes without a tenant are legacy (single-tenant) data and are
-        // pushed only for the legacy tenant (fail-closed).
-        var tenantNodes = _graphStore.GetAllNodes().Where(node => BelongsToTenant(node, tenant)).ToList();
+        // pushed only for the default tenant (fail-closed; none without a default tenant).
+        var defaultTenant = Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy);
+        var tenantNodes = _graphStore.GetAllNodes().Where(node => BelongsToTenant(node, tenant, defaultTenant)).ToList();
         var tenantNodeIds = new HashSet<string>(tenantNodes.Select(n => n.Id), StringComparer.Ordinal);
 
         foreach (var node in tenantNodes)
@@ -102,9 +103,10 @@ public sealed class OpenLineageClient : IOpenLineageClient
         return await PushLineageEventAsync(runEvent, ct).ConfigureAwait(false);
     }
 
-    private static bool BelongsToTenant(LineageNode node, TenantId tenant)
+    // DT-A-7: a node without tenant belongs to the default tenant (when one is configured), in every deployment shape.
+    private static bool BelongsToTenant(LineageNode node, TenantId tenant, TenantId? defaultTenant)
         => string.IsNullOrWhiteSpace(node.TenantId)
-            ? tenant == TenantId.LegacySingleTenant
+            ? Autheris.Application.Catalog.Services.CallerScopeResolver.IsOwner(tenant, defaultTenant)
             : string.Equals(node.TenantId, tenant.Value, StringComparison.OrdinalIgnoreCase);
 
     public async Task<bool> PushLineageEventAsync(OpenLineageRunEvent runEvent, CancellationToken ct = default)

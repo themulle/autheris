@@ -29,7 +29,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
 
     private static ClaimsPrincipal User(params Claim[] extra) =>
         new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), .. extra],
+            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), .. extra],
             "test"));
 
     private static TableMetadata Meta(DatasetVisibility visibility = DatasetVisibility.Hidden) => new()
@@ -65,7 +65,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(owner);
 
-        return new Fixture(new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership, Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } })), ownership, resolution);
+        return new Fixture(new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership, Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } })), ownership, resolution);
     }
 
     private static TableAccessDecision DeniedDecision() => TableAccessDecision.Denied(Denied, "No active allow consent.");
@@ -112,7 +112,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
         var visibilityConsent = new Consent
         {
             TableIdentifier = Denied,
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Effect = ConsentEffect.Allow,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
@@ -125,7 +125,10 @@ public sealed class Issue117AccessExplanationDisclosureTests
                 Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
             .Returns(DeniedDecision());
 
-        var service = new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution);
+        // The principal has no tenant claim: it belongs to the default tenant (the legacy tenant of the Mode=Single bridge).
+        var service = new EffectiveAccessExplanationService(
+            tableRepo, consentRepo, resolution, gatewayOptions: Microsoft.Extensions.Options.Options.Create(
+                new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } }));
         var result = await service.ExplainMyAccessAsync(User(), Denied);
 
         result.Decision.ShouldBe("DENIED");

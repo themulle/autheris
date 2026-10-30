@@ -13,6 +13,7 @@ using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -22,6 +23,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
@@ -34,6 +36,8 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
     public const string TenantUnknownCode = "TENANT_UNKNOWN";
     public const string TenantRegistryUnavailableCode = "TENANT_REGISTRY_UNAVAILABLE";
     public const string TenantRegistrationRateLimitedCode = "TENANT_REGISTRATION_RATE_LIMITED";
+    public const string TenantUnresolvedCode = TenantUnresolvedException.Code;
+    public const string TenantClaimInvalidCode = TenantClaimInvalidException.Code;
 
     // Cached per options instance: a configuration reload yields a new instance, which rebuilds the guard.
     // CR-ADG-40: one immutable reference, so a reader can never pair new options with an old guard (a value tuple is copied non-atomically).
@@ -206,14 +210,35 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             return;
         }
 
-        if (await DenyCollidingTenantAsync(context, securityContext).ConfigureAwait(false))
+        // DT-A-4 / DT-SC-10: the tenant gate runs before the collision guard and the registry. Anonymous endpoints (endpoint metadata only)
+        // never read the tenant: they skip the gate. A ClusterAdmin without tenant passes (global operations); a tenant-scoped operation
+        // then needs X-Tenant-ID and otherwise throws TENANT_UNRESOLVED at the tenant read.
+        if (securityContext.IsAuthenticated && context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is null)
         {
-            return;
+            if (securityContext.TenantClaimInvalid)
+            {
+                await WriteJsonAsync(context, StatusCodes.Status403Forbidden, "The tenant claim of the caller is invalid.", TenantClaimInvalidCode).ConfigureAwait(false);
+                return;
+            }
+
+            if (securityContext.ResolvedTenant is null && !securityContext.IsClusterAdmin)
+            {
+                await WriteJsonAsync(context, StatusCodes.Status403Forbidden, "The caller has no resolvable tenant.", TenantUnresolvedCode).ConfigureAwait(false);
+                return;
+            }
         }
 
-        if (await DenyByRegistryAsync(context, securityContext).ConfigureAwait(false))
+        if (securityContext.ResolvedTenant is not null)
         {
-            return;
+            if (await DenyCollidingTenantAsync(context, securityContext).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            if (await DenyByRegistryAsync(context, securityContext).ConfigureAwait(false))
+            {
+                return;
+            }
         }
 
         // Extension Point 1A: Role & Group SID Enrichment
@@ -268,18 +293,30 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             }
         }
 
-        // Populate both canonical context and legacy item key for zero-downtime migration
         context.Items[SecurityPrincipalContext.ItemKey] = securityContext;
-        context.Items[TenantResolutionMiddleware.TenantIdItemKey] = securityContext.TenantId;
-
-        using (TelemetryTenantContext.Enter(securityContext.TenantId))
+        if (securityContext.ResolvedTenant is { } resolvedTenant)
         {
-            if (System.Diagnostics.Activity.Current != null && System.Diagnostics.Activity.Current.IsAllDataRequested)
+            context.Items[SecurityPrincipalContext.TenantIdItemKey] = resolvedTenant;
+        }
+
+        using (securityContext.ResolvedTenant is { } telemetryTenant ? TelemetryTenantContext.Enter(telemetryTenant) : NoopScope.Instance)
+        {
+            if (securityContext.ResolvedTenant is { } tagTenant &&
+                System.Diagnostics.Activity.Current != null && System.Diagnostics.Activity.Current.IsAllDataRequested)
             {
-                System.Diagnostics.Activity.Current.SetTag(TelemetryAttributes.AutherisTenantId, securityContext.TenantId.Value);
+                System.Diagnostics.Activity.Current.SetTag(TelemetryAttributes.AutherisTenantId, tagTenant.Value);
             }
 
             await next(context).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class NoopScope : IDisposable
+    {
+        public static readonly NoopScope Instance = new();
+
+        public void Dispose()
+        {
         }
     }
 }

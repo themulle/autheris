@@ -70,7 +70,7 @@ public sealed class GovernancePolicyFactoryKeySetTests
             DependentTable = new TableIdentifier("default", "public", "customers"), DependentTableAlias = "c",
             ForeignKeyColumn = "client_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
         };
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!;
+        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!;
         var decision = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer()));
         if (drifted)
@@ -103,7 +103,7 @@ public sealed class GovernancePolicyFactoryKeySetTests
     {
         var (input, _, repo, _) = Setup();
         var simple = new TypedRowFilterBuilder().BuildCombined(
-            [new Consent { Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { FilterGroup = 0, ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" }] }], [], Orders)!;
+            [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { FilterGroup = 0, ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" }] }], [], Orders)!;
         var decision = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(new PolicyPredicateRowPolicy(simple, TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer()));
         var options = Options.Create(StageHarness.Gateway(true, RowFilterEvaluationStrategy.KeySetCache, provider: "PostgreSql", dataSource: "default"));

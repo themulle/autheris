@@ -88,7 +88,7 @@ public sealed class AuthFailureAggregator : IAuthFailureAggregator
 
             await SafeRecordAuditAsync(new AuditLogEntry
             {
-                TenantId = new TenantId(tenantId ?? TenantId.LegacySingleTenant.Value),
+                TenantId = AuditTenant(tenantId),
                 EventType = AuditEventTypes.AuthFailed,
                 ActorSid = new Sid(principal != null ? "S-1-5-21-UNCHECKED" : "S-1-0-0"),
                 Decision = "DENY",
@@ -109,7 +109,7 @@ public sealed class AuthFailureAggregator : IAuthFailureAggregator
 
             await SafeRecordAuditAsync(new AuditLogEntry
             {
-                TenantId = new TenantId(tenantId ?? TenantId.LegacySingleTenant.Value),
+                TenantId = AuditTenant(tenantId),
                 EventType = AuditEventTypes.AuthBruteForceDetected,
                 ActorSid = new Sid("S-1-0-0"),
                 Decision = "DENY",
@@ -158,7 +158,7 @@ public sealed class AuthFailureAggregator : IAuthFailureAggregator
 
             await SafeRecordAuditAsync(new AuditLogEntry
             {
-                TenantId = new TenantId(tenantId ?? TenantId.LegacySingleTenant.Value),
+                TenantId = AuditTenant(tenantId),
                 EventType = AuditEventTypes.RateLimitExceeded,
                 ActorSid = new Sid(sid ?? "S-1-0-0"),
                 Decision = "DENY",
@@ -168,6 +168,9 @@ public sealed class AuthFailureAggregator : IAuthFailureAggregator
             }, ct).ConfigureAwait(false);
         }
     }
+
+    // DT-A-6: tenant-less (or unusable) failures are platform records; an unparsable tenant claim never becomes a tenant.
+    private static TenantId AuditTenant(string? tenantId) => TenantId.TryParse(tenantId, out var tenant) ? tenant : TenantId.Platform;
 
     public async Task FlushAsync(CancellationToken ct = default)
     {
@@ -188,7 +191,7 @@ public sealed class AuthFailureAggregator : IAuthFailureAggregator
 
                 await SafeRecordAuditAsync(new AuditLogEntry
                 {
-                    TenantId = new TenantId(bucket.TenantId ?? TenantId.LegacySingleTenant.Value),
+                    TenantId = AuditTenant(bucket.TenantId),
                     EventType = AuditEventTypes.AuthFailed,
                     ActorSid = new Sid("S-1-0-0"),
                     Decision = "DENY",

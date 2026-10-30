@@ -76,6 +76,8 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:Rebac:Enabled", "false");
+            // The seeded table is owned by the shared test default tenant; claim-less test principals are assigned it.
+            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:WebSql:CrossSource:Enabled", crossSourceEnabled ? "true" : "false");
             if (crossSourceEnabled && restTransportAllowed)
             {
@@ -177,6 +179,7 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         await repo.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = saved.Table.Id,
             TableIdentifier = TableId,
             Effect = ConsentEffect.Allow,
@@ -220,6 +223,7 @@ public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableT
             var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
             await repo.CreateConsentAsync(new Consent
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = saved.Table.Id,
                 TableIdentifier = TableId,
                 Effect = ConsentEffect.Allow,
@@ -300,6 +304,7 @@ public sealed class RestDatasetHttpTableCrossSourceDisabledIntegrationTests : Re
             var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
             await repo.CreateConsentAsync(new Consent
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = saved.Table.Id,
                 TableIdentifier = TableId,
                 Effect = ConsentEffect.Allow,

@@ -40,6 +40,7 @@
     <Compile Include="..\Autheris.Tests.Unit\Governance\RowFilterEvaluationRepositoryContractTestsBase.cs" Link="RowFilterEvaluationRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\CatalogSettingsRepositoryContractTestsBase.cs" Link="CatalogSettingsRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\RelationRepositoryContractTestsBase.cs" Link="RelationRepositoryContractTestsBase.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Dbt\DbtSyncTestExtensions.cs" Link="DbtSyncTestExtensions.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\DataOwnerAssignmentRepositoryContractTestsBase.cs" Link="DataOwnerAssignmentRepositoryContractTestsBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Governance\ConsentDescriptionRepositoryContractBase.cs" Link="ConsentDescriptionRepositoryContractBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\RuntimeSkip.cs" Link="TestDoubles\RuntimeSkip.cs" />

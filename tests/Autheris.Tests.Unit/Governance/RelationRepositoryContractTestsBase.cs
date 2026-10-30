@@ -453,7 +453,7 @@ public abstract class RelationRepositoryContractTestsBase : IAsyncLifetime
         var (parent, child) = await SeedPairAsync();
 
         using var manifest = DbtManifest(parent, child, ["d", "c"], ["a", "b"]);
-        var result = await NewDbtService().IngestManifestStreamAsync(manifest);
+        var result = await NewDbtService().IngestManifestStreamAsClusterAdminAsync(manifest);
 
         result.Success.ShouldBeTrue();
         result.ImportedRelationsCount.ShouldBe(1);
@@ -473,11 +473,11 @@ public abstract class RelationRepositoryContractTestsBase : IAsyncLifetime
         var (parent, child) = await SeedPairAsync();
 
         using var first = DbtManifest(parent, child, ["d", "c"], ["a", "b"]);
-        await NewDbtService().IngestManifestStreamAsync(first);
+        await NewDbtService().IngestManifestStreamAsClusterAdminAsync(first);
         var id = (await Repo.GetRelationsForTableAsync(parent)).ShouldHaveSingleItem().Id;
 
         using var second = DbtManifest(parent, child, ["d", "c"], ["a", "b"]);
-        var result = await NewDbtService().IngestManifestStreamAsync(second);
+        var result = await NewDbtService().IngestManifestStreamAsClusterAdminAsync(second);
 
         result.ImportedRelationsCount.ShouldBe(1);
         RelationCount().ShouldBe(1);

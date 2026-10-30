@@ -671,18 +671,19 @@ public sealed class AggregationPrivacyHardeningTests
         (await catalog.GetMetricAsync("a_metric", tenantB)).ShouldBeNull();
         (await catalog.ListSemanticModelsAsync(tenantB)).ShouldBeEmpty();
         // SEC-112-13: the legacy tenant id is not reachable in Multi (unset mode is Multi).
-        (await catalog.ListMetricsAsync(null, TenantId.LegacySingleTenant)).ShouldBeEmpty();
+        (await catalog.ListMetricsAsync(null, Autheris.Tests.Common.TestTenants.Default)).ShouldBeEmpty();
         (await catalog.ListMetricsAsync(null, tenantA)).Count.ShouldBe(1);
     }
 
     [Fact]
-    public async Task InMemorySemanticCatalog_SingleTenancy_AllTenantsShareTheLegacyPartition()
+    public async Task InMemorySemanticCatalog_SingleTenancy_TenantsAreIsolated_DefaultTenantIncluded()
     {
-        var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } });
+        var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
         var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(options);
-        await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"), TenantId.LegacySingleTenant);
+        await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"), Autheris.Tests.Common.TestTenants.Default);
 
-        (await catalog.GetMetricAsync("legacy_metric", new TenantId("tenant-b"))).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("legacy_metric", Autheris.Tests.Common.TestTenants.Default)).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("legacy_metric", new TenantId("tenant-b"))).ShouldBeNull();
     }
 
     [Fact]

@@ -56,9 +56,9 @@ public sealed class GovernanceStoreReadinessTests
         "GetConsentRequest" => repository.GetConsentRequestAsync(Guid.NewGuid()),
         "ApproveConsentRequestStep" => repository.ApproveConsentRequestStepAsync(Guid.NewGuid(), new Sid("S-1-5-21-APPROVER")),
         "LoadSnapshot" => repository.LoadSnapshotAsync(),
-        "TenantTryGet" => repository.TryGetAsync(TenantId.LegacySingleTenant, CancellationToken.None).AsTask(),
-        "RecordAuditTierA" => repository.RecordAuditEventAsync(new AuditLogEntry { EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
-        "RecordAuditTierB" => repository.RecordAuditEventAsync(new AuditLogEntry { EventType = AuditEventTypes.TableQuery, ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
+        "TenantTryGet" => repository.TryGetAsync(Autheris.Tests.Common.TestTenants.Default, CancellationToken.None).AsTask(),
+        "RecordAuditTierA" => repository.RecordAuditEventAsync(new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
+        "RecordAuditTierB" => repository.RecordAuditEventAsync(new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = AuditEventTypes.TableQuery, ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
         "WebhookOutboxClaim" => ((Autheris.Application.Webhooks.IWebhookOutbox)repository).ClaimBatchAsync(5, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), "worker"),
         "WebhookOutboxCount" => ((Autheris.Application.Webhooks.IWebhookOutbox)repository).CountPendingAsync(),
         "CdcWatermarkGet" => ((ICdcWatermarkRepository)repository).GetAsync("cdc", "d", "s", "t"),
@@ -151,5 +151,5 @@ public sealed class GovernanceStoreReadinessTests
     }
 
     private static Task Invoke2(IGovernanceRepository repository) =>
-        repository.RecordAuditEventAsync(new AuditLogEntry { EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" });
+        repository.RecordAuditEventAsync(new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" });
 }

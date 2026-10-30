@@ -224,6 +224,7 @@ public class ScaleCatalogBenchmark
 
             var consent = new Consent
             {
+                TenantId = new Autheris.Domain.Common.TenantId("bench-tenant"),
                 TableIdentifier = table,
                 Effect = ConsentEffect.Allow,
                 GranteeType = granteeType,

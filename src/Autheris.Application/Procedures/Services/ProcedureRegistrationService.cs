@@ -120,7 +120,7 @@ public sealed class ProcedureRegistrationService : BackgroundService
                             await audit.RecordAuditEventAsync(
                                 new AuditLogEntry
                                 {
-                                    TenantId = TenantId.LegacySingleTenant,
+                                    TenantId = TenantId.Platform, // startup validation audit (DT-A-6)
                                     EventType = "PROCEDURE_DISABLED",
                                     ActorSid = new Sid("system:procedure-validator"),
                                     TargetTable = entry.Definition.ProcedureName,
@@ -209,7 +209,7 @@ public sealed class ProcedureRegistrationService : BackgroundService
                 await audit.RecordAuditEventAsync(
                     new AuditLogEntry
                     {
-                        TenantId = TenantId.LegacySingleTenant,
+                        TenantId = TenantId.Platform, // startup validation audit (DT-A-6)
                         EventType = "PROCEDURE_DISABLED",
                         ActorSid = new Sid("system:procedure-validator"),
                         TargetTable = entry.Definition.ProcedureName,

@@ -150,9 +150,15 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         consent.TableIdentifier.ShouldBe(Table);
 
         using var conn2 = DialectKit.Sqlite.NewConnection();
-        conn2.EnqueueReader(ConsentRows(Now.AddDays(-10), Now.AddDays(-1), null));
+        conn2.EnqueueReader(ConsentRows(Now.AddDays(-10), Now.AddDays(-1), "tenant-a"));
         (await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
             conn2, SqliteGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None)).ShouldBeEmpty();
+
+        // DT-SC-16: a NULL stored tenant is an integrity error, never the legacy tenant
+        using var conn3 = DialectKit.Sqlite.NewConnection();
+        conn3.EnqueueReader(ConsentRows(Now.AddDays(-1), Now.AddDays(5), null));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.StoredTenantIntegrityException>(() => ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
+            conn3, SqliteGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None));
     }
 
     [Theory]

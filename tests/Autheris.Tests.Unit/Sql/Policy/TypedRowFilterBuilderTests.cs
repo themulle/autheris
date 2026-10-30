@@ -128,8 +128,8 @@ public sealed class TypedRowFilterBuilderTests
     public void UserAttribute_FailsClosed_WithPolarity()
     {
         var userAttribute = new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueJson = "\"x\"", ValueSource = "USER_ATTRIBUTE" };
-        var a = new Consent { Effect = ConsentEffect.Allow, RowFilters = [userAttribute] };
-        var d = new Consent { Effect = ConsentEffect.Deny, RowFilters = [userAttribute] };
+        var a = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [userAttribute] };
+        var d = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = [userAttribute] };
 
         _renderer.Render(_builder.BuildCombined([a], [], Orders)!, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldBe("1 = 0");
         _renderer.Render(_builder.BuildCombined([], [d], Orders)!, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldBe("NOT (1 = 1)");
@@ -159,7 +159,7 @@ public sealed class TypedRowFilterBuilderTests
     public void RowFilterSqlBuilder_Parameterized_RendersFromTheTypedPredicate()
     {
         var sut = new RowFilterSqlBuilder();
-        var a = new Consent { Effect = ConsentEffect.Allow, RowFilters = [Filter("region", "IN", "[\"EU\",\"US\"]"), Filter("amount", "GT", "5")] };
+        var a = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [Filter("region", "IN", "[\"EU\",\"US\"]"), Filter("amount", "GT", "5")] };
 
         var typed = _builder.BuildCombined([a], [], Orders)!;
         var rendered = _renderer.Render(typed, TargetSqlDialect.SqlServer, RowFilterAliases.Target);
@@ -172,8 +172,8 @@ public sealed class TypedRowFilterBuilderTests
     [Fact]
     public void RenderedString_EqualsLegacyString_Semantically()
     {
-        var a1 = new Consent { Effect = ConsentEffect.Allow, RowFilters = [Filter("region", "IN", "[\"EU\",\"US\"]", 0), Filter("amount", "GTE", "100", 0), Filter("region", "EQ", "\"APAC\"", 1)] };
-        var d1 = new Consent { Effect = ConsentEffect.Deny, RowFilters = [Filter("secret", "EQ", "true")] };
+        var a1 = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [Filter("region", "IN", "[\"EU\",\"US\"]", 0), Filter("amount", "GTE", "100", 0), Filter("region", "EQ", "\"APAC\"", 1)] };
+        var d1 = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = [Filter("secret", "EQ", "true")] };
         var sut = new RowFilterSqlBuilder();
 
         var typed = _builder.BuildCombined([a1], [d1], Orders)!;

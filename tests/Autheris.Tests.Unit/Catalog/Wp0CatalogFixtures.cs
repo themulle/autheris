@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -25,9 +26,12 @@ internal static class Wp0
     public static readonly TenantId TenantA = new("tenant-a");
     public static readonly TenantId TenantB = new("tenant-b");
 
-    public static GatewayOptions Options(TenancyMode? mode = null, params string[] sharedTables) => new()
+    /// <summary>The tenant claim of a Single-mode caller (DT-A-3: the claims transformation stamps it; the catalog services read claims only).</summary>
+    public const string SingleTenantClaim = "default-tenant";
+
+    public static GatewayOptions Options(TenancyShape? mode = null, params string[] sharedTables) => new()
     {
-        Tenancy = new TenancyOptions { Mode = mode?.ToString() },
+        Tenancy = (mode ?? TenancyShape.Multi).Options(),
         Catalog = new DataCatalogOptions { SharedTables = sharedTables }
     };
 
@@ -45,7 +49,7 @@ internal static class Wp0
     }
 
     public static RequestContext Context(ClaimsPrincipal user)
-        => new(user, user.FindFirst("tenant_id") is { } c ? new TenantId(c.Value) : TenantId.LegacySingleTenant);
+        => new(user, user.FindFirst("tenant_id") is { } c ? new TenantId(c.Value) : Autheris.Tests.Common.TestTenants.Default);
 
     public static TableMetadata Table(
         string domain,
@@ -121,8 +125,8 @@ internal static class Wp0
         => new(
             tables,
             Substitute.For<IAuditLogRepository>(),
-            Microsoft.Extensions.Options.Options.Create(options ?? Options(TenancyMode.Multi)),
-            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options ?? Options(TenancyMode.Multi), rebac),
+            Microsoft.Extensions.Options.Options.Create(options ?? Options(TenancyShape.Multi)),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options ?? Options(TenancyShape.Multi), rebac),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             searchEngine,

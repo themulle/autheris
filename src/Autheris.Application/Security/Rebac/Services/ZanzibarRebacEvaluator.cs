@@ -128,9 +128,13 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
     }
 
+    /// <summary>DT-A-9: a ReBAC operation without a tenant fails closed; there is no implicit tenant.</summary>
+    private static string RequireTenant(string? tenantId) =>
+        string.IsNullOrWhiteSpace(tenantId) ? throw new Autheris.Domain.Exceptions.TenantUnresolvedException() : tenantId.Trim();
+
     private string InvalidateLocal(string? tenantId)
     {
-        var tenant = string.IsNullOrWhiteSpace(tenantId) ? "default" : tenantId.Trim();
+        var tenant = RequireTenant(tenantId);
         _tenantGenerationCache.TryRemove(tenant, out _);
         if (_cache.TryRemove(tenant, out _))
         {
@@ -188,6 +192,12 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             return RebacCheckResult.Denied;
         }
 
+        // DT-A-9: a check without a tenant is denied; there is no implicit tenant.
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            return RebacCheckResult.Denied;
+        }
+
         // EP-08: Canonicalize request.User; invalid subject forms fail-closed to Denied.
         var parsedUser = RebacSubject.Parse(request.User);
         if (!parsedUser.IsValid)
@@ -196,7 +206,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
         var canonicalUser = parsedUser.Canonical;
 
-        var tenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
+        var tenant = request.TenantId.Trim();
         var cacheKey = $"{canonicalUser}#{request.Relation}@{request.Object}";
 
         var isDegraded = _degradedTenants.ContainsKey(tenant);
@@ -305,14 +315,24 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     {
         ArgumentNullException.ThrowIfNull(request);
         var results = new Dictionary<RebacCheckRequest, bool>(request.Checks.Count);
-        var batchTenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
+        var batchTenant = request.TenantId?.Trim() ?? string.Empty;
+        if (batchTenant.Length == 0)
+        {
+            // DT-A-9: a batch without a tenant is denied as a whole.
+            foreach (var check in request.Checks)
+            {
+                results[check] = false;
+            }
+
+            return new RebacBatchCheckResult(results);
+        }
 
         foreach (var check in request.Checks)
         {
             if (ct.IsCancellationRequested) break;
 
             // Review E-3: defense in depth, an item from another tenant is denied instead of evaluated.
-            var itemTenant = string.IsNullOrWhiteSpace(check.TenantId) ? "default" : check.TenantId.Trim();
+            var itemTenant = check.TenantId?.Trim() ?? string.Empty;
             if (!string.Equals(itemTenant, batchTenant, StringComparison.OrdinalIgnoreCase))
             {
                 results[check] = false;

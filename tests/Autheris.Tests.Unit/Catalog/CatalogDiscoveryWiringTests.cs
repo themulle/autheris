@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -29,7 +30,7 @@ public sealed class CatalogDiscoveryWiringTests
             Wp0.Table("sales", "orders_a", "Orders", ["id"]),
             Wp0.Table("sales", "invoices_b", "Invoices", ["id"])));
         services.AddSingleton(Substitute.For<IAuditLogRepository>());
-        services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options ?? Wp0.Options(TenancyMode.Multi)));
+        services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options ?? Wp0.Options(TenancyShape.Multi)));
         if (withConsentRepository)
         {
             services.AddSingleton(Wp0.Consents(Wp0.Allow(new Autheris.Domain.Common.TableIdentifier("sales", "dbo", "orders_a"), "S-A-USER", Wp0.TenantA)));

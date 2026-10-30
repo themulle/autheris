@@ -151,8 +151,8 @@ public sealed class WebSqlCoLocatedDataSourcesTests
                 Arg.Any<CancellationToken>())
             .Returns(
             [
-                new Consent { TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
-                new Consent { TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
             ]);
 
         var gatewayOptions = new GatewayOptions
@@ -180,7 +180,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
             consentRepo,
             gatewayOptions: Options.Create(gatewayOptions));
 
-        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
 
         var result = await service.AnalyzeQueriesAsync(
             [
@@ -219,8 +219,8 @@ public sealed class WebSqlCoLocatedDataSourcesTests
                 Arg.Any<CancellationToken>())
             .Returns(
             [
-                new Consent { TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
-                new Consent { TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
             ]);
 
         var gatewayOptions = new GatewayOptions
@@ -248,7 +248,7 @@ public sealed class WebSqlCoLocatedDataSourcesTests
             consentRepo,
             gatewayOptions: Options.Create(gatewayOptions));
 
-        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1")], "TestAuth"));
 
         var result = await service.AnalyzeQueriesAsync(
             [

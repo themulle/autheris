@@ -132,7 +132,7 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
             ["customer_id"] = ColumnAccessLevel.Clear,
             ["amount"] = ColumnAccessLevel.Clear
         };
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TEST")], "Test"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TEST")], "Test"));
         var context = new DataSourceExecutionContext(
             SourceName: "erp",
             Metadata: metadata,

@@ -24,8 +24,7 @@ public static class IcebergRestCatalogEndpoints
             HttpContext context,
             IIcebergRestCatalogFederationService catalogService) =>
         {
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId)) tenantId = "default";
+            var tenantId = RequireTenant(context);
 
             var namespaces = await catalogService.ListNamespacesAsync(tenantId, context.User, context.RequestAborted);
             var response = new IcebergListNamespacesResponse(namespaces.Select(ns => (IReadOnlyList<string>)new[] { ns }).ToList());
@@ -39,8 +38,7 @@ public static class IcebergRestCatalogEndpoints
             HttpContext context,
             IIcebergRestCatalogFederationService catalogService) =>
         {
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId)) tenantId = "default";
+            var tenantId = RequireTenant(context);
 
             var tables = await catalogService.ListTablesAsync(tenantId, @namespace, context.User, context.RequestAborted);
             var response = new IcebergListTablesResponse(
@@ -56,8 +54,7 @@ public static class IcebergRestCatalogEndpoints
             HttpContext context,
             IIcebergRestCatalogFederationService catalogService) =>
         {
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId)) tenantId = "default";
+            var tenantId = RequireTenant(context);
 
             try
             {
@@ -79,8 +76,7 @@ public static class IcebergRestCatalogEndpoints
             HttpContext context,
             IIcebergRestCatalogFederationService catalogService) =>
         {
-            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
-            if (string.IsNullOrWhiteSpace(tenantId)) tenantId = "default";
+            var tenantId = RequireTenant(context);
 
             try
             {
@@ -112,5 +108,14 @@ public static class IcebergRestCatalogEndpoints
         };
         ApiProblems.LogFailure(context, ex, code);
         return Results.Json(new { error = new { message, type = code, code = status } }, statusCode: status);
+    }
+
+    // DT-A-9: no literal tenant fallback; a request without a resolvable tenant is refused with 403 TENANT_UNRESOLVED.
+    internal static string RequireTenant(HttpContext context)
+    {
+        var tenant = EndpointSecurity.GetRequestTenant(context);
+        return string.IsNullOrWhiteSpace(tenant.Value)
+            ? throw new Autheris.Domain.Exceptions.TenantUnresolvedException()
+            : tenant.Value;
     }
 }

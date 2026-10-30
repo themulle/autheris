@@ -24,6 +24,7 @@ public sealed class Pol8ScheduledDenyConsentTests
 
         var activeAllow = new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             TableId = Guid.NewGuid(),
             TableIdentifier = table,
@@ -34,6 +35,7 @@ public sealed class Pol8ScheduledDenyConsentTests
 
         var upcomingDeny = new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             TableId = activeAllow.TableId,
             TableIdentifier = table,

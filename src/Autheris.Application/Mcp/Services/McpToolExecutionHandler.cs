@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -51,7 +52,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Analytics.ISemanticMetricQueryService? _metricQueryService;
-    private readonly TenancyMode _tenancyMode;
+    private readonly TenantId? _catalogOwner;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
 
@@ -68,7 +69,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
     {
-        _tenancyMode = gatewayOptions?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi;
+        _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
         _dataQueryService = dataQueryService ?? throw new ArgumentNullException(nameof(dataQueryService));
         _catalogDiscoveryService = catalogDiscoveryService ?? throw new ArgumentNullException(nameof(catalogDiscoveryService));
@@ -344,16 +345,14 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         if (string.Equals(tool.Name, McpDatasetTools.ListDatasources, StringComparison.OrdinalIgnoreCase))
         {
             // Data sources disclose endpoint URLs and authentication state: administrator view only (canonical caller class).
-            var datasourceScope = CallerScopeResolver.Resolve(userPrincipal, _tenancyMode);
+            var datasourceScope = CallerScopeResolver.Resolve(userPrincipal, _catalogOwner);
             if (!CallerScopeResolver.IsAdminView(datasourceScope))
             {
                 return CreateMcpError(
                     sessionContext.TenantId,
                     tool.Name,
                     ForbiddenCode,
-                    datasourceScope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(userPrincipal)
-                        ? "Listing data sources requires an administrator with a tenant claim; single-tenant deployments must set Gateway:Tenancy:Mode=Single."
-                        : "Listing data sources requires a governance administrator.");
+                    CallerScopeResolver.DatasourceListingDenial(userPrincipal, datasourceScope));
             }
 
             var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() : null;
@@ -443,7 +442,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             return await McpSemanticTools.ExecuteListMetricsAsync(
                 _semanticCatalog ?? new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(),
                 userPrincipal,
-                new Autheris.Application.Dbt.Services.SemanticTenancy(_tenancyMode),
+                new Autheris.Application.Dbt.Services.SemanticTenancy(_catalogOwner),
                 argumentsJson,
                 ct).ConfigureAwait(false);
         }
@@ -453,7 +452,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             return await McpSemanticTools.ExecuteDescribeMetricAsync(
                 _semanticCatalog ?? new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(),
                 userPrincipal,
-                new Autheris.Application.Dbt.Services.SemanticTenancy(_tenancyMode),
+                new Autheris.Application.Dbt.Services.SemanticTenancy(_catalogOwner),
                 argumentsJson,
                 ct).ConfigureAwait(false);
         }

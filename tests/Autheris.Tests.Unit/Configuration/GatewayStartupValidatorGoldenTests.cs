@@ -123,7 +123,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("BasicAuthUsers_MissingPassword", user(string.Empty)),
 
             // 14 ForwardAuth
-            Prod("ForwardAuth_InvalidDefaultTenant", ("Authentication:ForwardAuth:Enabled", "true"), ("Authentication:ForwardAuth:DefaultTenantId", "not a tenant!")),
             Prod("ForwardAuth_BasicAuthWithKerberosOnly", ("Authentication:BasicAuth:Enabled", "true"), ("Authentication:RequireKerberosOnly", "true")),
             Prod("ForwardAuth_SecretMissing", ("Authentication:ForwardAuth:Enabled", "true")),
             Prod("ForwardAuth_SecretTooShort", ("Authentication:ForwardAuth:Enabled", "true"), ("Authentication:ForwardAuth:SharedSecret", "short")),
@@ -187,7 +186,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
         Dev("Warnings_DevelopmentRecursiveCte", ("WebSql:AllowRecursiveCte", "true")),
         Dev("Warnings_DevelopmentWebSqlBypassFlag", ("Insecure:danger_bypass_websql_governance", "true")),
         Dev("Warnings_DevelopmentDangerBypassBanner", ("Insecure:danger_disable_column_masking", "true")),
-        Dev("Warnings_DevelopmentTenancyExplicitSingle", ("Tenancy:Mode", "Single")),
+        Dev("Warnings_DevelopmentDefaultTenantConfigured", ("Tenancy:DefaultTenantId", "default-tenant")),
         Dev("Warnings_DevelopmentCatalogDiscoveryDeprecated", ("Catalog:AllowAuthenticatedCatalogDiscovery", "true")),
         Prod("Warnings_ProductionDefault"),
         Prod("Warnings_ProductionWarnFlags", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true"), ("VirtualFilters:RequireApproval", "false")),

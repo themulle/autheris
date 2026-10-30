@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -728,8 +729,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     /// <summary>Value of <see cref="McpDatasetDescription.View"/> for the allow-listed summary.</summary>
     public const string SummaryView = "summary";
 
-    private TenancyMode TenancyMode => options?.Value.Tenancy.EffectiveMode ?? Autheris.Domain.Options.TenancyMode.Multi;
-
     internal static CatalogOutputShape Shape(bool isAdminView, TableMetadata table) =>
         CatalogViewShaping.Resolve(isAdminView, table.CatalogView);
 
@@ -898,8 +897,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
         var roles = principal.GetUserRoles();
-        // The caller class comes from the canonical resolver; a claim-less GovernanceAdmin in Multi mode is no administrator.
-        var scope = CallerScopeResolver.Resolve(principal, options?.Value.Tenancy.EffectiveMode ?? TenancyMode.Multi);
+        // The caller class comes from the canonical resolver; a GovernanceAdmin without a resolvable tenant is no administrator.
+        var scope = CallerScopeResolver.Resolve(principal, TenantResolver.EffectiveDefaultOf(options?.Value.Tenancy));
         if (logger != null)
         {
             CallerScopeDiagnostics.ReportIfClaimlessAdmin(logger, principal, scope);

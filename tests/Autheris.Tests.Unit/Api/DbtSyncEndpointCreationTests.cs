@@ -24,7 +24,7 @@ public sealed class DbtSyncEndpointCreationTests
     private static DefaultHttpContext Context(string role)
     {
         var claims = new List<Claim> { new(ClaimTypes.Name, "u-" + role), new(ClaimTypes.Role, role), new(ClaimTypes.PrimarySid, "S-1-5-21-" + role) };
-        var ctx = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")) };
+        var ctx = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth")) };
         ctx.RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider();
         ctx.Response.Body = new MemoryStream();
         ctx.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("{}"));

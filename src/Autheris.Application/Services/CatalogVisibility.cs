@@ -11,7 +11,7 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Autheris.Domain.Options;
+using Autheris.Domain.Tenancy;
 
 /// <summary>
 /// F-CONS-04 / MCP-1: which catalog tables and columns a non-admin subject may discover. Shared by the GraphQL
@@ -63,8 +63,8 @@ public static class CatalogVisibility
     /// Tables a non-admin subject may discover. A table with an active Allow consent (and no unconditional Deny) takes the consent path
     /// (<see cref="CatalogView.Granted"/>, columns per consent). Issue #111: persisted tiers apply only on <see cref="CatalogSurface.Discovery"/>
     /// (the default <see cref="CatalogSurface.DataAccess"/> never executes the tier switch: a table without Allow consent is dropped), and only
-    /// for the tables <paramref name="sharedTables"/> names in <see cref="TenancyMode.Multi"/> (null or empty: tiers off; a claim-less tenant never
-    /// gets tiers; consents never extend the set) or for every table in <see cref="TenancyMode.Single"/>. Every returned row carries an explicit
+    /// for the tables <paramref name="sharedTables"/> names (null or empty: tiers off; consents never extend the set) or, for the catalog owner
+    /// (<paramref name="catalogOwner"/>, the default tenant), for every table. Every returned row carries an explicit
     /// <see cref="CatalogView"/>; <c>Summary</c> never carries columns, <c>Full</c> carries the columns minus every DENY-masked column.
     /// </summary>
     public static IReadOnlyList<TableMetadata> FilterForSubject(
@@ -74,24 +74,24 @@ public static class CatalogVisibility
         IReadOnlySet<string>? callerScopes = null,
         CatalogSurface surface = CatalogSurface.DataAccess,
         IEnumerable<string>? sharedTables = null,
-        TenancyMode tenancyMode = TenancyMode.Multi)
+        TenantId? catalogOwner = null)
     {
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(activeConsents);
 
         // #112 A1-13 (defence in depth): a foreign tenant's virtual table is dropped before any consent or tier is looked at.
-        allTables = DropForeignVirtualTables(allTables, tenantId, tenancyMode);
+        allTables = DropForeignVirtualTables(allTables, tenantId);
 
         var tiersApply = surface == CatalogSurface.Discovery;
         HashSet<TableIdentifier>? tierTables = null;
         var allTablesTiered = false;
         if (tiersApply)
         {
-            if (tenancyMode == TenancyMode.Single)
+            if (CallerScopeResolver.IsOwner(tenantId, catalogOwner))
             {
                 allTablesTiered = true;
             }
-            else if (tenantId != TenantId.LegacySingleTenant)
+            else
             {
                 tierTables = ParseSharedTables(sharedTables);
             }
@@ -211,19 +211,14 @@ public static class CatalogVisibility
     }
 
     /// <summary>
-    /// #112 A1-13 (SEC-112-15, -22, -23): in <see cref="TenancyMode.Multi"/> a table of the semantic catalog domain (the virtual tables a
-    /// manifest import creates) stays only when it lives in the <c>t_&lt;hash&gt;</c> schema of <paramref name="tenantId"/>; every other one,
-    /// including a malformed or empty schema, is dropped. <see cref="TenancyMode.Single"/> has no foreign tenant, so the rule is skipped by
-    /// mode (never by tenant string). The one place that recognises a virtual table is <see cref="SemanticVirtualTables"/>.
+    /// #112 A1-13 (SEC-112-15, -22, -23): a table of the semantic catalog domain (the virtual tables a manifest import creates) stays only
+    /// when it lives in the <c>t_&lt;hash&gt;</c> schema of <paramref name="tenantId"/>; every other one, including a malformed or empty
+    /// schema, is dropped. The rule applies to every tenant, the default tenant (catalog owner) included (DT-SC-08: virtual tables are
+    /// tenant-scoped objects, only physical metadata is widened). The one place that recognises a virtual table is <see cref="SemanticVirtualTables"/>.
     /// </summary>
-    internal static IReadOnlyList<TableMetadata> DropForeignVirtualTables(IEnumerable<TableMetadata> tables, TenantId tenantId, TenancyMode tenancyMode)
+    public static IReadOnlyList<TableMetadata> DropForeignVirtualTables(IEnumerable<TableMetadata> tables, TenantId tenantId)
     {
         ArgumentNullException.ThrowIfNull(tables);
-        if (tenancyMode == TenancyMode.Single)
-        {
-            return tables as IReadOnlyList<TableMetadata> ?? tables.ToList();
-        }
-
         return tables
             .Where(t => !SemanticVirtualTables.IsInSemanticDomain(t.Identifier) || SemanticVirtualTables.BelongsToTenant(t, tenantId))
             .ToList();
@@ -234,21 +229,21 @@ public static class CatalogVisibility
     /// <c>TableMetadata</c> has no owner tenant, so ownership is derived from consents: a table is tenant-visible when the
     /// tenant holds at least one consent record on it (<paramref name="tenantConsentTables"/>, Allow or Deny) or when it is
     /// listed in <paramref name="sharedTables"/> (<c>Gateway:Catalog:SharedTables</c>, entries <c>domain.schema.table</c>).
-    /// The single-tenant deployment (<see cref="TenantId.LegacySingleTenant"/>) is not restricted.
+    /// The catalog owner (<paramref name="catalogOwner"/>, the default tenant) is not restricted (physical metadata only).
     /// </summary>
     public static IReadOnlyList<TableMetadata> FilterToTenant(
         IEnumerable<TableMetadata> tables,
         TenantId tenantId,
         IEnumerable<TableIdentifier>? tenantConsentTables,
         IEnumerable<string>? sharedTables,
-        TenancyMode tenancyMode = TenancyMode.Multi)
+        TenantId? catalogOwner = null)
     {
         ArgumentNullException.ThrowIfNull(tables);
 
         // #112 A1-13 (defence in depth): consents and SharedTables never re-admit a foreign tenant's virtual table.
-        tables = DropForeignVirtualTables(tables, tenantId, tenancyMode);
+        tables = DropForeignVirtualTables(tables, tenantId);
 
-        if (tenantId == TenantId.LegacySingleTenant)
+        if (CallerScopeResolver.IsOwner(tenantId, catalogOwner))
         {
             return tables.ToList();
         }
@@ -306,11 +301,12 @@ public static class CatalogVisibility
 
     /// <summary>
     /// Tables <paramref name="principal"/> may discover within <paramref name="tenantId"/>. The caller class comes from
-    /// <see cref="CallerScopeResolver"/>: the canonical ClusterAdmin (and, in <see cref="TenancyMode.Single"/>, a claim-less
-    /// GovernanceAdmin) sees every table, a GovernanceAdmin with a tenant claim only its tenant (<see cref="FilterToTenant"/>),
-    /// everybody else only tables passing <see cref="FilterForSubject"/>. Without a SID or without a consent repository nothing
-    /// is visible (fail-closed). Slices results by <paramref name="contract"/> if specified. These overloads that do not pass a
-    /// tenancy mode use <see cref="TenancyMode.Multi"/> (the confined view).
+    /// <see cref="CallerScopeResolver"/>: the canonical ClusterAdmin sees every table, the GovernanceAdmin of the catalog owner
+    /// (<c>catalogOwner</c>, the default tenant) every physical table of its own tenant view (foreign virtual tables dropped), a
+    /// GovernanceAdmin of another tenant only its tenant (<see cref="FilterToTenant"/>), everybody else only tables passing
+    /// <see cref="FilterForSubject"/>. A principal whose tenant is unresolved sees nothing. Without a SID or without a consent repository
+    /// nothing is visible (fail-closed). Slices results by <paramref name="contract"/> if specified. The overloads that do not pass a
+    /// catalog owner have none (the confined view).
     /// </summary>
     public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
@@ -318,7 +314,7 @@ public static class CatalogVisibility
         TenantId tenantId,
         IConsentRepository? consentRepository,
         CancellationToken ct = default)
-        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract: null, TenancyMode.Multi, sharedTables: null, ct);
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract: null, catalogOwner: null, sharedTables: null, ct);
 
     public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
@@ -327,7 +323,7 @@ public static class CatalogVisibility
         IConsentRepository? consentRepository,
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
         CancellationToken ct = default)
-        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, TenancyMode.Multi, sharedTables: null, ct);
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, catalogOwner: null, sharedTables: null, ct);
 
     /// <summary>
     /// Fail-closed default: this overload (and every overload without a surface) is <see cref="CatalogSurface.DataAccess"/>, never
@@ -339,10 +335,10 @@ public static class CatalogVisibility
         TenantId tenantId,
         IConsentRepository? consentRepository,
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
-        TenancyMode tenancyMode,
+        TenantId? catalogOwner,
         IEnumerable<string>? sharedTables,
         CancellationToken ct = default)
-        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, tenancyMode, sharedTables, CatalogSurface.DataAccess, ct);
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, catalogOwner, sharedTables, CatalogSurface.DataAccess, ct);
 
     /// <summary>Issue #111: as above for an explicit <paramref name="surface"/>; only the discovery call sites pass <see cref="CatalogSurface.Discovery"/>.</summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
@@ -351,7 +347,7 @@ public static class CatalogVisibility
         TenantId tenantId,
         IConsentRepository? consentRepository,
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
-        TenancyMode tenancyMode,
+        TenantId? catalogOwner,
         IEnumerable<string>? sharedTables,
         CatalogSurface surface,
         CancellationToken ct = default)
@@ -359,14 +355,17 @@ public static class CatalogVisibility
         ArgumentNullException.ThrowIfNull(allTables);
         ArgumentNullException.ThrowIfNull(principal);
 
-        var scope = CallerScopeResolver.Resolve(principal, tenancyMode);
+        var resolution = CallerScopeResolver.ResolutionOf(principal, catalogOwner);
+        var scope = CallerScopeResolver.Resolve(principal, resolution, catalogOwner);
         switch (scope)
         {
             case CallerScope.None:
                 return Array.Empty<TableMetadata>();
             case CallerScope.Global:
-            case CallerScope.Unrestricted:
                 return FilterByContract(allTables, contract);
+            case CallerScope.CatalogOwner:
+                // DT-A-7 / DT-SC-08: the whole physical catalog; the tenant's own virtual tables only (foreign ones dropped, also for the owner).
+                return FilterByContract(DropForeignVirtualTables(allTables, resolution.RequireTenant()), contract);
             case CallerScope.Tenant:
             {
                 if (consentRepository == null)
@@ -376,16 +375,16 @@ public static class CatalogVisibility
 
                 // Same confinement rule as the GraphQL catalog (consent-derived ownership plus Gateway:Catalog:SharedTables).
                 // #112 A1-13 (SEC-112-22/-23): the foreign virtual-table drop runs on the full list first, with the claim tenant.
-                var claimTenant = principal.GetTenantId();
-                var ownVirtual = DropForeignVirtualTables(allTables, claimTenant, tenancyMode);
+                var claimTenant = resolution.RequireTenant();
+                var ownVirtual = DropForeignVirtualTables(allTables, claimTenant);
                 var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(claimTenant, ct).ConfigureAwait(false);
-                var confined = FilterToTenant(ownVirtual, claimTenant, tenantConsentTables, sharedTables, tenancyMode);
+                var confined = FilterToTenant(ownVirtual, claimTenant, tenantConsentTables, sharedTables, catalogOwner);
                 return FilterByContract(confined, contract);
             }
         }
 
-        // Subject and Claimless: the drop uses the tenant the consent query below uses, before any consent is evaluated.
-        allTables = DropForeignVirtualTables(allTables, tenantId, tenancyMode);
+        // Subject: the drop uses the tenant the consent query below uses, before any consent is evaluated.
+        allTables = DropForeignVirtualTables(allTables, tenantId);
 
         var roles = principal.GetUserRoles();
         var userSid = principal.GetUserSid() ?? (!string.IsNullOrWhiteSpace(principal.Identity?.Name) ? new Sid(principal.Identity.Name) : (Sid?)null);
@@ -399,11 +398,9 @@ public static class CatalogVisibility
             subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
 
         // Scopes from the claims overload, as the data path (TableAccessPolicy) reads them.
-        // A claim-less principal (Multi) never gets tiers: no shared set is passed for it.
-        var tierSharedTables = scope == CallerScope.Claimless ? null : sharedTables;
         var visible = FilterForSubject(
             allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims),
-            surface, tierSharedTables, tenancyMode);
+            surface, sharedTables, catalogOwner);
         return FilterByContract(visible, contract);
     }
 }

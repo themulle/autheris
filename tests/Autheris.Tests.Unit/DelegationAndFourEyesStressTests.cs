@@ -142,6 +142,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -179,6 +180,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -212,6 +214,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = new Sid(owner.Email),
@@ -239,6 +242,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = ownerRequesterSid,
@@ -273,6 +277,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,
@@ -320,6 +325,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             RequesterSid = requesterSid,

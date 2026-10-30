@@ -56,7 +56,9 @@ public class DataPathSecurityTests : IDisposable
             gatewayOptions,
             dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
         _query = new Query();
-        _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_repository, _repository);
+        _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
+            _repository, _repository,
+            new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" }, Rebac = new Autheris.Domain.Options.RebacOptions { Enabled = false } });
     }
 
     public void Dispose()
@@ -93,7 +95,7 @@ public class DataPathSecurityTests : IDisposable
             }
         }
 
-        var identity = new ClaimsIdentity(claims, "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role);
         var principal = new ClaimsPrincipal(identity);
         var context = new DefaultHttpContext { User = principal };
         return new IsolatedHttpContextAccessor(context);
@@ -109,6 +111,7 @@ public class DataPathSecurityTests : IDisposable
 
         await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -213,6 +216,7 @@ public class DataPathSecurityTests : IDisposable
         // Allow table consent
         await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -226,6 +230,7 @@ public class DataPathSecurityTests : IDisposable
         var emailCol = meta.Columns.First(c => c.ColumnName == "email");
         await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Deny,
@@ -297,7 +302,7 @@ public class DataPathSecurityTests : IDisposable
         {
             new(ClaimTypes.Name, "unidentified_user")
         };
-        var identity = new ClaimsIdentity(claims, "TestAuth");
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth");
         var principal = new ClaimsPrincipal(identity);
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>
@@ -350,6 +355,7 @@ public class DataPathSecurityTests : IDisposable
         // Consent with row filter: id = 1
         await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -394,6 +400,7 @@ public class DataPathSecurityTests : IDisposable
         // Consent specifies ONLY id (Clear). All other columns (amount, name, etc.) are unlisted.
         await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -442,6 +449,7 @@ public class DataPathSecurityTests : IDisposable
         // Consent specifies ONLY id (Clear).
         await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
@@ -486,7 +494,7 @@ public class DataPathSecurityTests : IDisposable
             rowFilterSql: "(id, name) IN ((1, 'Sample finance_table_1 Record #1'), (2, 'Sample finance_table_1 Record #2'))",
             hasUnconstrainedColumnAllow: true);
 
-        await _cacheService.SetCachedDecisionAsync(userSid, table, decision, TimeSpan.FromMinutes(5));
+        await _cacheService.SetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, userSid, table, decision, TimeSpan.FromMinutes(5));
 
         var accessor = CreateAccessor(userSid);
         var (rows, returnedDecision) = await _executionService.ExecuteTableQueryAsync(accessor.HttpContext?.User, table, first: 10);
@@ -513,7 +521,7 @@ public class DataPathSecurityTests : IDisposable
             rowFilterSql: "EXISTS (SELECT 1 FROM some_secret_table WHERE some_secret_table.id = finance_table_1.id)",
             hasUnconstrainedColumnAllow: true);
 
-        await _cacheService.SetCachedDecisionAsync(userSid, table, decision, TimeSpan.FromMinutes(5));
+        await _cacheService.SetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, userSid, table, decision, TimeSpan.FromMinutes(5));
 
         var accessor = CreateAccessor(userSid);
         var (rows, returnedDecision) = await _executionService.ExecuteTableQueryAsync(accessor.HttpContext?.User, table, first: 10);

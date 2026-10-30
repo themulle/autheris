@@ -24,6 +24,8 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
     protected override string AddProbeColumnSql => "ALTER TABLE consents ADD COLUMN IF NOT EXISTS probe_388 TEXT NULL";
     protected override string ProbeColumnCountSql => "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'consents' AND column_name = 'probe_388'";
     protected override string TriggerCountSql => "SELECT COUNT(*) FROM pg_trigger WHERE tgrelid = 'audit_log_entries'::regclass AND NOT tgisinternal AND tgenabled = 'O'";
+    protected override string TenantDefaultCountSql(string table) => $"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{table}' AND column_name = 'tenant_id' AND column_default IS NOT NULL";
+    protected override string RequestTenantNullableSql => "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'consent_requests' AND column_name = 'tenant_id' AND is_nullable = 'YES'";
     protected override string AuditHashesSql => "SELECT md5(string_agg(entry_hash, ',' ORDER BY seq)) FROM audit_log_entries";
     protected override string HistoryTableCountSql => "SELECT COUNT(*) FROM pg_class WHERE relname = 'autheris_schema_migrations'";
     protected override string DropSomeBaselineTableSql => "DROP TABLE consumer_app_daily";
@@ -87,7 +89,8 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
         bool requireLeastPrivilege = false,
         List<string>? log = null,
         List<string>? trace = null,
-        bool baselineOnly = false)
+        bool baselineOnly = false,
+        int? stepVersionCap = null)
     {
         var options = Opts(connectionString, mode, allowNewer, lockTimeoutSeconds, requireLeastPrivilege);
         using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
@@ -95,7 +98,7 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
             repository, options, log is null ? null : new CaptureLogger<PostgreSqlGovernanceMigrationRunner>(log))
         {
             AdditionalSteps = extra ?? [],
-            StepVersionCapOverride = baselineOnly ? 1 : null,
+            StepVersionCapOverride = stepVersionCap ?? (baselineOnly ? 1 : null),
             Trace = trace is null ? null : s => { lock (trace) { trace.Add(s); } }
         };
         await runner.RunAsync();
@@ -118,6 +121,7 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
         {
             await repository.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
             {
+                TenantId = "tenant-390",
                 EventType = "UPGRADE_390",
                 ActorSid = new Autheris.Domain.Common.Sid("S-1-390-" + i),
                 TargetTable = "dbo.t",

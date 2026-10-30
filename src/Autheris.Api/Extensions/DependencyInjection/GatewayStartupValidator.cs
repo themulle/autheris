@@ -82,15 +82,11 @@ public static class GatewayStartupValidator
     {
         ArgumentNullException.ThrowIfNull(options);
         var tenancy = options.Tenancy;
-        if (!tenancy.IsExplicit)
+        if (string.IsNullOrWhiteSpace(tenancy.DefaultTenantId))
         {
             Report(logger, LogLevel.Warning,
-                "Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; " +
-                "in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.");
-        }
-        else if (tenancy.IsValid)
-        {
-            Report(logger, LogLevel.Information, $"Gateway:Tenancy:Mode is {tenancy.EffectiveMode}.");
+                "Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). " +
+                "Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.");
         }
 
         if (options.Catalog.AllowAuthenticatedCatalogDiscovery)

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Dbt;
 
+using Autheris.Tests.Common;
 using System;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Dbt.Services;
@@ -17,7 +18,7 @@ public sealed class SemanticCatalogRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(Options.Create(new SemanticOptions { PersistManifest = persist }));
-        services.AddSingleton(SemanticCatalogTestKit.Mode(TenancyMode.Multi));
+        services.AddSingleton(SemanticCatalogTestKit.Mode(TenancyShape.Multi));
         if (withStore)
         {
             services.AddSingleton<ISemanticManifestStore, FakeSemanticManifestStore>();

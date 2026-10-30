@@ -173,9 +173,11 @@ public sealed class AccessAuditMiddleware
             detailsBuilder.WithField(k, v);
         }
 
+        // DT-A-6: callers without a resolved tenant (anonymous, invalid claim) are audited in the platform bucket.
+        var auditTenant = auditContext.TenantId.Value is null ? TenantId.Platform : auditContext.TenantId;
         var entry = new AuditLogEntry
         {
-            TenantId = auditContext.TenantId,
+            TenantId = auditTenant,
             EventType = eventType,
             ActorSid = auditContext.ActorSid,
             TargetTable = target,
@@ -192,7 +194,7 @@ public sealed class AccessAuditMiddleware
                 await _authFailureAggregator.RecordRateLimitAsync(
                     auditContext.SourceIp ?? "unknown",
                     auditContext.ActorSid.Value,
-                    auditContext.TenantId.Value).ConfigureAwait(false);
+                    auditTenant.Value).ConfigureAwait(false);
             }
             else
             {
@@ -200,7 +202,7 @@ public sealed class AccessAuditMiddleware
                     auditContext.SourceIp ?? "unknown",
                     auditContext.ReasonCode ?? "AUTH_FAILED",
                     auditContext.ActorSid.Value,
-                    auditContext.TenantId.Value).ConfigureAwait(false);
+                    auditTenant.Value).ConfigureAwait(false);
             }
         }
         else
@@ -258,10 +260,17 @@ public sealed class AccessAuditMiddleware
 
             // Tenant attribution uses the same precedence as the rest of the pipeline: the resolved SecurityPrincipalContext
             // first, then the canonical claim resolution. An invalid claim never fails the audit finalizer (API-7: that
-            // surfaced as a 500); the entry keeps the default tenant, is flagged, and never records the raw claim value.
+            // surfaced as a 500); the entry goes to the platform bucket (DT-A-6), is flagged, and never records the raw claim value.
             if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext principalContext)
             {
-                auditContext.TenantId = principalContext.TenantId;
+                if (principalContext.ResolvedTenant is { } resolvedTenant && resolvedTenant.Value is not null)
+                {
+                    auditContext.TenantId = resolvedTenant;
+                }
+                else if (principalContext.TenantClaimInvalid)
+                {
+                    auditContext.AdditionalDetails["tenantClaim"] = "INVALID";
+                }
             }
             else
             {
@@ -269,7 +278,7 @@ public sealed class AccessAuditMiddleware
                 {
                     auditContext.TenantId = context.User.GetTenantId();
                 }
-                catch (System.Security.SecurityException)
+                catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
                 {
                     auditContext.AdditionalDetails["tenantClaim"] = "INVALID";
                 }

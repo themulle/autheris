@@ -71,8 +71,7 @@ public sealed class RoleResolver : IRoleResolver
         var mergedAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         bool isWorkforceRealm = realm.Kind == IdentityRealmKind.EntraWorkforce ||
-                               string.Equals(realm.Id, "workforce-entra", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(realm.Id, "workforce-entra-legacy", StringComparison.OrdinalIgnoreCase);
+                               string.Equals(realm.Id, "workforce-entra", StringComparison.OrdinalIgnoreCase);
 
         // GOV-08: a provider that failed (or threw) makes the whole resolution degraded: the groups are unknown, not empty.
         var degraded = false;
@@ -96,12 +95,6 @@ public sealed class RoleResolver : IRoleResolver
                         // Namespace isolation: <realmId>|<groupId>
                         var namespacedGroup = $"{realm.Id}|{g}";
                         mergedGroups.Add(namespacedGroup);
-
-                        // Backward compatibility: preserve un-namespaced legacy SIDs for default workforce realm
-                        if (isWorkforceRealm)
-                        {
-                            mergedGroups.Add(g);
-                        }
                     }
 
                     foreach (var role in result.AppRoles)

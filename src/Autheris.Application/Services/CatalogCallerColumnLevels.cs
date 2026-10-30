@@ -49,8 +49,10 @@ internal static class CatalogCallerColumnLevels
             }
             else
             {
-                var tenantId = principal.GetTenantId();
-                var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
+                // DT-A-3: claims only; the explicit MCP auth bypass may carry no tenant (no tenant consent applies), every other caller fails closed.
+                List<Consent> tenantConsents = bypass && Autheris.Domain.Tenancy.TenantClaimReader.Read(principal).Kind != Autheris.Domain.Tenancy.ClaimTenantKind.Valid
+                    ? []
+                    : activeConsents.Where(c => c.TenantId == principal.GetTenantId()).ToList();
                 var groups = principal.GetGroupSids();
                 var roles = principal.GetUserRoles();
                 var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);

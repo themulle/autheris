@@ -249,10 +249,9 @@ public static class BasicAuthPrincipalFactory
             ? user.Sid
             : $"S-1-5-21-BASIC-{user.Username.ToUpperInvariant()}";
 
-    public static string ResolveTenant(BasicAuthUserConfig user) =>
-        !string.IsNullOrWhiteSpace(user.TenantId)
-            ? user.TenantId
-            : TenantId.LegacySingleTenant.Value;
+    /// <summary>The configured tenant of the user, or <c>null</c>: the principal then carries no tenant claim and the resolver assigns the default tenant (DT-A-5).</summary>
+    public static string? ResolveTenant(BasicAuthUserConfig user) =>
+        !string.IsNullOrWhiteSpace(user.TenantId) ? user.TenantId : null;
 
     public static List<Claim> BuildClaims(BasicAuthUserConfig user)
     {
@@ -264,11 +263,15 @@ public static class BasicAuthPrincipalFactory
             new(ClaimTypes.Name, user.Username),
             new(ClaimTypes.NameIdentifier, user.Username),
             new(ClaimTypes.PrimarySid, sid),
-            new("objectSid", sid),
-            new("tenant_id", tenant),
-            new("tenant", tenant),
-            new("tid", tenant)
+            new("objectSid", sid)
         };
+
+        if (tenant is not null)
+        {
+            claims.Add(new Claim("tenant_id", tenant));
+            claims.Add(new Claim("tenant", tenant));
+            claims.Add(new Claim("tid", tenant));
+        }
 
         foreach (var role in user.Roles)
         {

@@ -72,6 +72,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
@@ -173,6 +174,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
             // Grant consent: ALLOW with row filter `region = 'EU'` and masking on `email`
             await repo.CreateConsentAsync(new Consent
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = savedMeta.Table.Id,
                 TableIdentifier = tableId,
                 Effect = ConsentEffect.Allow,
@@ -296,6 +298,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
             // secret_notes is DENIED (not in column rules -> Zero-Trust Deny)
             await repo.CreateConsentAsync(new Consent
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = savedMeta.Table.Id,
                 TableIdentifier = tableId,
                 Effect = ConsentEffect.Allow,

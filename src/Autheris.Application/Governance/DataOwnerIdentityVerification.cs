@@ -30,14 +30,14 @@ public interface IDataOwnerIdentityVerifier
 }
 
 /// <summary>
-/// Verifies a principal against the SCIM identity store of every configured (non implicit-legacy) realm. A configured realm without a store or any
+/// Verifies a principal against the SCIM identity store of every configured realm. A configured realm without a store or any
 /// lookup exception is <see cref="OwnerIdentityStatus.Unavailable"/>; the caller rejects the import then.
 /// </summary>
 public sealed class ScimDataOwnerIdentityVerifier(IIdentityRealmRegistry? realmRegistry = null, IIdentityStoreRepository? store = null) : IDataOwnerIdentityVerifier
 {
     public async Task<OwnerIdentityStatus> VerifyAsync(TenantId tenant, string sid, CancellationToken ct = default)
     {
-        var realms = realmRegistry?.GetAllRealms().Where(r => !r.IsImplicitLegacy).ToList() ?? [];
+        var realms = realmRegistry?.GetAllRealms().ToList() ?? [];
         if (realms.Count == 0)
         {
             return OwnerIdentityStatus.NotConfigured;

@@ -35,7 +35,7 @@ public class DbtHealthCircuitBreakerTests
             ["test.corp_dw.unique_customers_email.def456"] = ["customers"]
         };
         _testTargetMap.Replace(TestTenant, models, tests);
-        _testTargetMap.Replace(TenantId.LegacySingleTenant, models, tests);
+        _testTargetMap.Replace(Autheris.Tests.Common.TestTenants.Default, models, tests);
     }
 
     private const string PassingRunResults = """

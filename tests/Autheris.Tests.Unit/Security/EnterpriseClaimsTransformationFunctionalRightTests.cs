@@ -23,11 +23,13 @@ public sealed class EnterpriseClaimsTransformationFunctionalRightTests
     private static IIdentityRealmRegistry Registry()
     {
         var registry = Substitute.For<IIdentityRealmRegistry>();
-        registry.GetDefaultRealm().Returns(new IdentityRealm(
+        var realm = new IdentityRealm(
             "resolver-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
-            groupSource: RealmGroupSource.Resolver));
+            groupSource: RealmGroupSource.Resolver);
+        registry.GetDefaultRealm().Returns(realm);
+        registry.GetRealm("resolver-realm").Returns(realm); // DT-A-3: the tenant resolver looks the stamped realm up by id
         return registry;
     }
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -41,7 +42,7 @@ public sealed class CatalogDiscoveryTierVisibilityTests
         Tier("hid_t", DatasetVisibility.Hidden)
     ];
 
-    private static GatewayOptions Opts(TenancyMode mode) => Wp0.Options(mode, SharedList);
+    private static GatewayOptions Opts(TenancyShape mode) => Wp0.Options(mode, SharedList);
 
     private static CatalogDiscoveryService Service(GatewayOptions options, TableMetadata[]? tables = null, Autheris.Domain.Interfaces.ICatalogSearchEngine? engine = null) =>
         Wp0.Service(Wp0.Tables(tables ?? Tables), Wp0.Consents(), options, engine);
@@ -51,7 +52,7 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     [Fact]
     public async Task List_ShowsSummaryAndFull_NeverHidden()
     {
-        var list = await Service(Opts(TenancyMode.Multi)).ListDatasetsAsync(Subject());
+        var list = await Service(Opts(TenancyShape.Multi)).ListDatasetsAsync(Subject());
 
         list.Select(d => d.Table).OrderBy(n => n).ShouldBe(["full_t", "sum_t"]);
     }
@@ -59,7 +60,7 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     [Fact]
     public async Task List_AndSearch_SummaryRowsCarryNoSourceType_FullRowsKeepIt()
     {
-        var service = Service(Opts(TenancyMode.Multi));
+        var service = Service(Opts(TenancyShape.Multi));
 
         foreach (var rows in new[] { await service.ListDatasetsAsync(Subject()), await service.SearchCatalogAsync("", null, Subject()), await service.SearchCatalogAsync("t", null, Subject()) })
         {
@@ -71,7 +72,7 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     [Fact]
     public async Task Detail_Summary_HasNoColumnsKeysOrIndexes_Full_HasColumns_Hidden_IsNull()
     {
-        var service = Service(Opts(TenancyMode.Multi));
+        var service = Service(Opts(TenancyShape.Multi));
         var id = (string n) => new TableIdentifier("sales", "dbo", n);
 
         var summary = await service.GetDatasetDetailAsync(id("sum_t"), Subject());
@@ -93,7 +94,7 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     {
         var tables = new[] { Tier("full_t", DatasetVisibility.Full, "secret_col") };
 
-        var full = await Service(Opts(TenancyMode.Multi), tables).GetDatasetDetailAsync(new TableIdentifier("sales", "dbo", "full_t"), Subject());
+        var full = await Service(Opts(TenancyShape.Multi), tables).GetDatasetDetailAsync(new TableIdentifier("sales", "dbo", "full_t"), Subject());
 
         full!.Columns.Select(c => c.Name).ShouldBe(["id"]);
         (full.Indexes ?? []).ShouldBeEmpty();
@@ -104,7 +105,7 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     {
         var engine = new CatalogSearchEngine(new LocalDeterministicEmbeddingGenerator(), Microsoft.Extensions.Options.Options.Create(new CatalogSearchOptions()), NullLogger<CatalogSearchEngine>.Instance);
         await engine.RebuildIndexAsync(Tables);
-        var service = Service(Opts(TenancyMode.Multi), engine: engine);
+        var service = Service(Opts(TenancyShape.Multi), engine: engine);
 
         var byColumn = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("secret_col", Limit: 10, Mode: CatalogSearchMode.KeywordBm25), Subject());
         var byName = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("Short sum_t", Limit: 10, Mode: CatalogSearchMode.KeywordBm25), Subject());
@@ -123,9 +124,9 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     {
         var (mode, principal) = admin switch
         {
-            "global" => (TenancyMode.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
-            "tenant" => (TenancyMode.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
-            _ => (TenancyMode.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
+            "global" => (TenancyShape.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
+            "tenant" => (TenancyShape.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
+            _ => (TenancyShape.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
         };
 
         var detail = await Service(Opts(mode)).GetDatasetDetailAsync(new TableIdentifier("sales", "dbo", "sum_t"), Wp0.Context(principal));
@@ -145,9 +146,9 @@ public sealed class CatalogDiscoveryTierVisibilityTests
         {
             "subject" => Subject(),
             "claimless" => Subject(null),
-            _ => new RequestContext(TenantId.LegacySingleTenant, new Sid("S-USER"), User: Wp0.User("S-USER", "not a valid tenant!"))
+            _ => new RequestContext(Autheris.Tests.Common.TestTenants.Default, new Sid("S-USER"), User: Wp0.User("S-USER", "not a valid tenant!"))
         };
-        var service = Service(Opts(TenancyMode.Multi), hiddenOnly);
+        var service = Service(Opts(TenancyShape.Multi), hiddenOnly);
 
         (await service.ListDatasetsAsync(context)).ShouldBeEmpty();
         (await service.GetDatasetDetailAsync(new TableIdentifier("sales", "dbo", "hid_t"), context)).ShouldBeNull();
@@ -157,16 +158,16 @@ public sealed class CatalogDiscoveryTierVisibilityTests
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
     {
         var context = Wp0.Context(Wp0.User("gov", null, ["GovernanceAdmin"]));
-        var service = Service(Opts(TenancyMode.Multi));
+        var service = Service(Opts(TenancyShape.Multi));
 
         (await service.ListDatasetsAsync(context)).ShouldBeEmpty();
         (await service.GetDatasetDetailAsync(new TableIdentifier("sales", "dbo", "full_t"), context)).ShouldBeNull();
     }
 
     [Theory]
-    [InlineData(TenancyMode.Multi, 0)]
-    [InlineData(TenancyMode.Single, 3)]
-    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyMode mode, int expected)
+    [InlineData(TenancyShape.Multi, 0)]
+    [InlineData(TenancyShape.Single, 3)]
+    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyShape mode, int expected)
     {
         var context = Wp0.Context(Wp0.User("gov", null, ["GovernanceAdmin"]));
         var service = Service(Opts(mode));

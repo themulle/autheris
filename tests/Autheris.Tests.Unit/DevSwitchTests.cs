@@ -184,7 +184,7 @@ public sealed class DevSwitchTests
         user.Username.ShouldBe("custom-analyst");
         user.Password.ShouldBe("s3cret-dev");
         user.Roles.ShouldBeEmpty();
-        user.TenantId.ShouldBe("legacy-single-tenant");
+        user.TenantId.ShouldBeNull(); // DT-A-9: no built-in tenant; the resolver applies the default tenant
         user.TenantId.ShouldNotBe("tenant-b");
     }
 

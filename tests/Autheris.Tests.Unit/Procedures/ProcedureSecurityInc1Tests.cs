@@ -136,7 +136,7 @@ public class ProcedureSecurityInc1Tests
     {
         var claims = new List<Claim> { new(claimType, value) };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "test"));
     }
 
     private static ClaimsPrincipal Anonymous() => new(new ClaimsIdentity());
@@ -588,7 +588,7 @@ public class ProcedureSecurityInc1Tests
     public async Task T_PROC152_07_Lease_PrimarySidWinsOverSub()
     {
         var e = Active();
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1001"), new Claim("sub", "other")], "test"));
+        var user = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1001"), new Claim("sub", "other")], "test"));
         await Run(e, user: user);
         e.Gate.Calls.Single().Key.ShouldBe("tenant-a|s-1-5-21-1001|sales.orders");
     }

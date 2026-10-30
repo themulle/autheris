@@ -23,6 +23,17 @@ internal static class GatewayDenialStatusMapper
     };
 
     /// <summary>
+    /// DT-A-2: the governed code of the two tenant-resolution denials, chosen by exception type only (never from exception data,
+    /// SEC-PG-14). <c>null</c> for every other denial, which keeps the status-derived code.
+    /// </summary>
+    internal static string? SpecificCode(GatewaySecurityException exception) => exception switch
+    {
+        TenantUnresolvedException => Autheris.Api.Errors.ApiErrorCodes.TenantUnresolved,
+        TenantClaimInvalidException => Autheris.Api.Errors.ApiErrorCodes.TenantClaimInvalid,
+        _ => null
+    };
+
+    /// <summary>
     /// The WebSQL response of a denial: the status and fixed title of <see cref="Map"/> in the same problem body the global handler writes
     /// (<see cref="GatewayProblemWriter"/>, NL-T-30). Only the code and the exception type are logged, never the exception object: the
     /// inner exception of a key source failure may quote data values (C-8, SEC-11).
@@ -34,6 +45,6 @@ internal static class GatewayDenialStatusMapper
             "WebSQL denied by the gateway ({ErrorCode}, {ExceptionType}). TraceId={TraceId}",
             denial.ErrorCode, denial.GetType().Name, httpContext.TraceIdentifier);
         var (status, title) = Map(denial);
-        return GatewayProblemWriter.WriteAsync(httpContext, status, title, Autheris.Api.Errors.ApiErrorCodes.StatusDefault(status), null, null, Autheris.Api.Errors.ApiProblems.ResolveTraceId(httpContext), ct);
+        return GatewayProblemWriter.WriteAsync(httpContext, status, title, SpecificCode(denial) ?? Autheris.Api.Errors.ApiErrorCodes.StatusDefault(status), null, null, Autheris.Api.Errors.ApiProblems.ResolveTraceId(httpContext), ct);
     }
 }

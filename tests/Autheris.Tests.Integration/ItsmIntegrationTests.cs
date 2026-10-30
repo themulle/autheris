@@ -440,7 +440,7 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
             RequestedGranteeRef = "S-1-5-21-UNKNOWN-INST-USER",
             BusinessJustification = "Unknown instance test",
             Status = "PENDING_EXTERNAL_APPROVAL",
-            TenantId = TenantId.LegacySingleTenant, // Even if tenant is LegacySingleTenant, unknown instance must be rejected!
+            TenantId = Autheris.Tests.Common.TestTenants.Default, // Even if the tenant is the default tenant, unknown instance must be rejected!
             ItsmTicketId = ticketId,
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         };

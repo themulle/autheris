@@ -13,8 +13,42 @@ public sealed record SecurityPrincipalContext
 {
     public const string ItemKey = "SecurityPrincipalContext";
 
+    /// <summary>The one item key of the resolved request tenant (set only when a tenant is resolved).</summary>
+    public const string TenantIdItemKey = "TenantId";
+
     public required Sid UserSid { get; init; }
-    public required TenantId TenantId { get; init; }
+
+    /// <summary>
+    /// DT-A-4: the request tenant; unresolved is representable. A caller that needs a tenant reads <see cref="TenantId"/>, which throws
+    /// <see cref="Autheris.Domain.Exceptions.TenantUnresolvedException"/> (or <see cref="Autheris.Domain.Exceptions.TenantClaimInvalidException"/>
+    /// for an invalid claim) instead of handing out a sentinel.
+    /// </summary>
+    public TenantId? ResolvedTenant { get; init; }
+
+    /// <summary>DT-A-4: the tenant claim of the principal is invalid, reserved or conflicting (S2/S5); the request is rejected by the middleware gate.</summary>
+    public bool TenantClaimInvalid { get; init; }
+
+    /// <summary>DT-SC-05: informational only (telemetry): <c>claim|realm|default|header</c>, null when unresolved. Never read by a decision.</summary>
+    public string? TenantSource { get; init; }
+
+    public TenantId TenantId
+    {
+        get => ResolvedTenant is { } tenant && tenant.Value is not null
+            ? tenant
+            : TenantClaimInvalid
+                ? throw new Autheris.Domain.Exceptions.TenantClaimInvalidException()
+                : throw new Autheris.Domain.Exceptions.TenantUnresolvedException();
+        init => ResolvedTenant = value;
+    }
+
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        // The generated printer would read TenantId (which throws when unresolved) and the claims; print safe members only.
+        builder.Append("UserSid = ").Append(UserSid).Append(", Resolved = ").Append(ResolvedTenant is not null)
+            .Append(", Scheme = ").Append(AuthenticationScheme);
+        return true;
+    }
+
     public required IReadOnlySet<Sid> GroupSids { get; init; }
     public required IReadOnlySet<string> TenantRoles { get; init; }
     public required IReadOnlySet<string> ClusterRoles { get; init; }
@@ -114,11 +148,10 @@ public sealed record SecurityPrincipalContext
         return false;
     }
 
-    /// <summary>Creates an anonymous security context with LegacySingleTenant and empty permissions.</summary>
-    public static SecurityPrincipalContext Anonymous(TenantId? tenantId = null, CallerContext? caller = null) => new()
+    /// <summary>Creates an anonymous security context: no tenant (an unauthenticated principal never selects one) and empty permissions.</summary>
+    public static SecurityPrincipalContext Anonymous(CallerContext? caller = null) => new()
     {
         UserSid = new Sid("ANONYMOUS"),
-        TenantId = tenantId ?? TenantId.LegacySingleTenant,
         GroupSids = new HashSet<Sid>(),
         TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
         ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
@@ -162,12 +195,16 @@ public sealed record SecurityPrincipalContext
             }
         }
 
-        var tenantId = overrideTenant ?? principal.GetTenantId();
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        var claimInvalid = overrideTenant is null && claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid;
+        TenantId? tenantId = overrideTenant ?? (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? (TenantId?)claim.Tenant : null);
 
         return new SecurityPrincipalContext
         {
             UserSid = userSid,
-            TenantId = tenantId,
+            ResolvedTenant = tenantId,
+            TenantClaimInvalid = claimInvalid,
+            TenantSource = tenantId is null ? null : principal.FindFirst(Autheris.Domain.Tenancy.TenantSourceClaim.ClaimType)?.Value,
             GroupSids = groupSids,
             TenantRoles = tenantRoles,
             ClusterRoles = clusterRoles,

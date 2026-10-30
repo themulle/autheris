@@ -10,8 +10,12 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Application.Governance.Rights;
 using Autheris.Domain.Interfaces;
+using Autheris.Application.Tenancy;
+using Autheris.Domain.Options;
+using Autheris.Domain.Tenancy;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 {
@@ -24,17 +28,23 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
     private readonly IRoleResolver? _roleResolver;
     private readonly IFunctionalRightMapper? _functionalRightMapper;
     private readonly ILogger<EnterpriseClaimsTransformation>? _logger;
+    private readonly ITenantResolver _tenantResolver;
+
+    // A transformation built without the DI resolver (unit tests) resolves realm bindings and claims but assigns no default tenant.
+    private static readonly TenancyOptions NoDefaultTenancy = new();
 
     public EnterpriseClaimsTransformation(
         IIdentityRealmRegistry? realmRegistry = null,
         IRoleResolver? roleResolver = null,
         IFunctionalRightMapper? functionalRightMapper = null,
-        ILogger<EnterpriseClaimsTransformation>? logger = null)
+        ILogger<EnterpriseClaimsTransformation>? logger = null,
+        ITenantResolver? tenantResolver = null)
     {
         _logger = logger;
         _realmRegistry = realmRegistry;
         _roleResolver = roleResolver;
         _functionalRightMapper = functionalRightMapper;
+        _tenantResolver = tenantResolver ?? new TenantResolver(static () => NoDefaultTenancy, realmRegistry, NullLogger<TenantResolver>.Instance);
     }
 
     public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
@@ -64,7 +74,27 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
         }
 
         var realmId = realm?.RealmId ?? "workforce-entra";
-        identity.AddClaim(new Claim("autheris:realm", realmId));
+
+        // Test host only (compile-gated): a TestAuth principal is not an identity-provider token, so its tenant claims are the tenant statement
+        // (the realm binding does not replace them); the realm claim is stamped after the tenant decision, like for a realm-less principal.
+#if AUTHERIS_TEST_AUTH
+        var tenantByClaims = identity.AuthenticationType == TestAuthHandler.SchemeName;
+#else
+        const bool tenantByClaims = false;
+#endif
+        if (realm != null && !tenantByClaims)
+        {
+            // An unregistered fallback id is not stamped: the tenant resolver treats a non-blank realm claim as an authoritative realm.
+            identity.AddClaim(new Claim("autheris:realm", realmId));
+        }
+
+        // DT-A-3 / DT-SC-05: the one tenant decision of the ingress. Inbound tenant_source claims are removed, the resolved tenant is stamped.
+        var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null && !tenantByClaims);
+        if (realm == null || tenantByClaims)
+        {
+            // The unregistered fallback id is stamped after the tenant decision (the resolver must not treat it as a realm); route-realm guards read it.
+            identity.AddClaim(new Claim("autheris:realm", realmId));
+        }
 
         // 3. Resolve groups/roles if resolver mode
         if (realm != null && realm.GroupSource == RealmGroupSource.Resolver && _roleResolver != null)
@@ -82,7 +112,14 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
                 return ClaimsNormalizer.Normalize(principal);
             }
 
-            var tenantId = principal.GetTenantId();
+            // The tenant of the role/right lookup is the resolved one; without a tenant (S6, ClusterAdmin only passes the gate later) the
+            // lookup is skipped and the request is marked degraded (fail closed: data access is denied).
+            if (resolution.Tenant is not { } tenantId || tenantId.Value is null)
+            {
+                MarkDegraded(identity, realmId, "tenant unresolved");
+                return ClaimsNormalizer.Normalize(principal);
+            }
+
             var upn = identity.FindFirst("upn")?.Value ?? identity.FindFirst(ClaimTypes.Upn)?.Value;
             var name = identity.FindFirst("name")?.Value ?? identity.FindFirst(ClaimTypes.Name)?.Value;
             var email = identity.FindFirst("email")?.Value ?? identity.FindFirst(ClaimTypes.Email)?.Value;

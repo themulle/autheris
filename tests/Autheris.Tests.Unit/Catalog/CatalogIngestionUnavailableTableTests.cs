@@ -146,7 +146,7 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifest));
-        var result = await service.IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Success.ShouldBeTrue();
         result.Warnings.ShouldContain(w => w.Contains("unavailable"));

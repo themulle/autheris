@@ -36,7 +36,7 @@ public sealed class DeclarativeConsentApplyActorTests
         var audit = Substitute.For<IAuditLogRepository>();
         var tables = Tables();
         var svc = new DeclarativeConsentApplyService(tables, repo, audit);
-        var noSid = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")], "test"));
+        var noSid = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN"), new Claim("tenant_id", "tenant-a")], "test"));
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => svc.ApplyManifestAsync(noSid, Manifest()));
 
@@ -55,7 +55,7 @@ public sealed class DeclarativeConsentApplyActorTests
         var repo = new FakeConsentRepository();
         var svc = new DeclarativeConsentApplyService(Tables(), repo, Substitute.For<IAuditLogRepository>());
         var caller = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-SUPPLIED"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")], "test"));
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-SUPPLIED"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN"), new Claim("tenant_id", "tenant-a")], "test"));
 
         await svc.ApplyManifestAsync(caller, Manifest());
 

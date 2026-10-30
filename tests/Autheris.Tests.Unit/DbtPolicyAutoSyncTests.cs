@@ -90,7 +90,7 @@ public sealed class DbtPolicyAutoSyncTests
         );
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(PolicyManifestJson));
-        var syncResult = await ingestionService.IngestManifestStreamAsync(stream, dryRun: false);
+        var syncResult = await ingestionService.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         syncResult.Success.ShouldBeTrue();
         syncResult.ParsedModelsCount.ShouldBe(1);
@@ -158,14 +158,14 @@ public sealed class DbtPolicyAutoSyncTests
         // Dry-run should NOT seed ReBAC tuples
         using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(PolicyManifestJson)))
         {
-            await ingestionService.IngestManifestStreamAsync(stream, dryRun: true);
+            await ingestionService.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: true);
             await rebacStore.DidNotReceive().AddTuplesAsync(Arg.Any<IEnumerable<RebacTuple>>(), Arg.Any<CancellationToken>());
         }
 
         // Actual run should seed structure tuples
         using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(PolicyManifestJson)))
         {
-            await ingestionService.IngestManifestStreamAsync(stream, dryRun: false);
+            await ingestionService.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
             await rebacStore.Received(1).AddTuplesAsync(
                 Arg.Is<IEnumerable<RebacTuple>>(tuples =>
                     tuples.Any(t => t.TenantId == "corp_dw" && t.User == "schema:corp_dw.finance" && t.Relation == "parent" && t.Object == "table:corp_dw.finance.finance_orders") &&

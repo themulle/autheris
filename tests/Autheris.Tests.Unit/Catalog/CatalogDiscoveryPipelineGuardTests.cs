@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Tests.Unit.TestSupport;
@@ -24,7 +25,7 @@ public sealed class CatalogDiscoveryPipelineGuardTests
     {
         var tables = Wp0.Tables(engineOutput);
         var consents = Wp0.Consents();
-        var options = Wp0.Options(TenancyMode.Multi, []);
+        var options = Wp0.Options(TenancyShape.Multi, []);
         // The real service with the engine-output seam: the shape step inside the service is what these tests guard.
         var visibility = CatalogVisibilityTestFactory.Create(
             tables, consents, options, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));

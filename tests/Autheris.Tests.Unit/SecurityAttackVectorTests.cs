@@ -298,7 +298,7 @@ public sealed class SecurityAttackVectorTests
         var decision = TableAccessDecision.Allowed(metadata.Identifier, columnAccess, null, hasUnconstrainedColumnAllow: false);
 
         var principal = new System.Security.Claims.ClaimsPrincipal(
-            new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-malicious-user")], "Test"));
+            new System.Security.Claims.ClaimsIdentity([DefaultTenantCaller.Claim, new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-malicious-user")], "Test"));
 
         var context = new DataSourceExecutionContext(
             SourceName: metadata.Table.SourceName,
@@ -369,6 +369,7 @@ public sealed class SecurityAttackVectorTests
         // Insert valid consecutive audit records
         var entry1 = new AuditLogEntry
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-5),
             ActorSid = new Sid("S-1-5-21-admin"),
@@ -383,6 +384,7 @@ public sealed class SecurityAttackVectorTests
 
         var entry2 = new AuditLogEntry
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-4),
             ActorSid = new Sid("S-1-5-21-analyst"),

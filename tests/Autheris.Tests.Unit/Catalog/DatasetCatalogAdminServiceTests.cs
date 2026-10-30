@@ -73,7 +73,7 @@ public sealed class DatasetCatalogAdminServiceTests
         => new(_tables, owners ?? _owners, _audit,
             new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
             {
-                Tenancy = new TenancyOptions { Mode = mode },
+                Tenancy = new TenancyOptions { DefaultTenantId = string.Equals(mode, "Single", StringComparison.Ordinal) ? "default-tenant" : null },
                 Catalog = new DataCatalogOptions { MaxTagsPerDataset = maxTags, SharedTables = shared ?? [] }
             }),
             _time);
@@ -101,6 +101,19 @@ public sealed class DatasetCatalogAdminServiceTests
             && e.DetailsJson.Contains("\"after\":{\"visibility\":\"Full\"")
             && e.DetailsJson.Contains("\"source\":\"admin\"")
             && e.DetailsJson.Contains("\"authType\":\"Bearer\"")), CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DT_SC_02_ClusterAdmin_With_Invalid_Tenant_Claim_Is_Denied()
+    {
+        // A malformed tenant claim denies every caller class, ClusterAdmin included; it is never mapped to the platform bucket.
+        var invalid = Wp0.User("S-1-5-21-root", "bad tenant!!", ["ClusterAdmin"]);
+
+        var result = await Create().ApplyAsync(invalid, "sales.dbo.orders", Vis("Full"), "admin", default);
+
+        result.Outcome.ShouldBe(DatasetCatalogOutcome.NotFound);
+        await _audit.DidNotReceive().RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

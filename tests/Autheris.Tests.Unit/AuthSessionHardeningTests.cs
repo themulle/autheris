@@ -93,7 +93,12 @@ public sealed class AuthSessionHardeningTests
                 "Bearer"))
         };
 
-        Should.Throw<SecurityException>(() => SecurityContextFactory.CreateFromHttpContext(context));
+        // DT-A-4: the factory flags the invalid claim (the middleware gate answers 403 TENANT_CLAIM_INVALID); reading the tenant fails closed.
+        var ctx = SecurityContextFactory.CreateFromHttpContext(context);
+
+        ctx.TenantClaimInvalid.ShouldBeTrue();
+        ctx.ResolvedTenant.ShouldBeNull();
+        Should.Throw<Autheris.Domain.Exceptions.TenantClaimInvalidException>(() => ctx.TenantId);
     }
 
     [Fact]

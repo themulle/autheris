@@ -30,8 +30,7 @@ public interface ITokenRevocationService
 }
 
 /// <summary>
-/// SR-L-10: the revocation status of a token could not be determined (for example Redis is unreachable) while the
-/// fail-closed policy (<c>Caching:Redis:FailClosedOnRevocationLookupError</c>) is active.
+/// SR-L-10: the revocation status of a token could not be determined (for example Redis is unreachable) (the lookup always fails closed, DT-A-13).
 /// </summary>
 public sealed class TokenRevocationUnavailableException : Exception
 {
@@ -115,7 +114,7 @@ public static class TokenRevocationKeys
         {
             tenant = principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             tenant = null; // malformed tenant claim: such tokens are rejected by the tenant resolution anyway
         }

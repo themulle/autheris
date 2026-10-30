@@ -35,8 +35,7 @@ public sealed class IdentityRealmOptionsValidator : IValidateOptions<IdentityRea
                 if (config.FixedTenantId != null)
                 {
                     var fixedTenant = new TenantId(config.FixedTenantId);
-                    if (fixedTenant == TenantId.LegacySingleTenant ||
-                        (workforceCorporateTenantId.HasValue && fixedTenant == workforceCorporateTenantId.Value))
+                    if (workforceCorporateTenantId.HasValue && fixedTenant == workforceCorporateTenantId.Value)
                     {
                         throw new ValidationException(
                             $"Customer Realm '{realmId}' (Kind: {config.Kind}) cannot be configured with TenantBinding targeting the workforce tenant '{fixedTenant.Value}' (SEC-SC-21).");
@@ -55,8 +54,7 @@ public sealed class IdentityRealmOptionsValidator : IValidateOptions<IdentityRea
             if (realm.TenantBinding.Kind == TenantBindingKind.Fixed && realm.TenantBinding.FixedTenantId.HasValue)
             {
                 var fixedTenant = realm.TenantBinding.FixedTenantId.Value;
-                if (fixedTenant == TenantId.LegacySingleTenant ||
-                    (workforceCorporateTenantId.HasValue && fixedTenant == workforceCorporateTenantId.Value))
+                if (workforceCorporateTenantId.HasValue && fixedTenant == workforceCorporateTenantId.Value)
                 {
                     throw new ValidationException(
                         $"Customer Realm '{realm.RealmId}' (Kind: {realm.Kind}) cannot be configured with TenantBinding targeting the workforce tenant '{fixedTenant.Value}' (SEC-SC-21).");

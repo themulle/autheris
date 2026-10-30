@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public static class DevEndpoints
 {
-    public sealed record Persona(string Username, string Sid, string Tenant, IReadOnlyList<string> Roles, string LoginUrl);
+    public sealed record Persona(string Username, string Sid, string? Tenant, IReadOnlyList<string> Roles, string LoginUrl);
 
     public static IEndpointRouteBuilder MapDevEndpoints(this IEndpointRouteBuilder app, GatewayOptions options)
     {

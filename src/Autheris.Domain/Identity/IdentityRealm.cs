@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Security;
 using System.Security.Claims;
+using Autheris.Domain.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
 
@@ -38,7 +39,10 @@ public enum RealmProvisioningMode
 public enum TenantBindingKind
 {
     Fixed = 1,
-    ClaimMapped = 2
+    ClaimMapped = 2,
+
+    /// <summary>DT-A-5: the realm names no tenant; token tenant claims are ignored and the configured default tenant applies.</summary>
+    Unbound = 3
 }
 
 public sealed record TenantBindingSpecification(
@@ -53,26 +57,51 @@ public sealed record TenantBindingSpecification(
     public static TenantBindingSpecification ClaimMapped(string claimName, IReadOnlyDictionary<string, TenantId> mapping) =>
         new(TenantBindingKind.ClaimMapped, ClaimName: claimName, Mapping: mapping);
 
-    public TenantId ResolveTenant(ClaimsPrincipal principal)
+    public static TenantBindingSpecification Unbound() => new(TenantBindingKind.Unbound);
+
+    /// <summary>
+    /// DT-A-5: the realm's tenant statement as a <see cref="ClaimTenant"/>. <c>Unbound</c> and a ClaimMapped realm whose claim is absent
+    /// say nothing (Absent: the default tenant applies); a present but unmapped claim, a reserved tenant and a malformed binding are
+    /// Invalid (fail closed, no value echo). The one tenant statement of a realm binding.
+    /// </summary>
+    public ClaimTenant ResolveClaim(ClaimsPrincipal principal)
     {
         ArgumentNullException.ThrowIfNull(principal);
 
-        if (Kind == TenantBindingKind.Fixed && FixedTenantId.HasValue)
+        switch (Kind)
         {
-            return FixedTenantId.Value;
-        }
+            case TenantBindingKind.Unbound:
+                return ClaimTenant.Absent;
+            case TenantBindingKind.Fixed:
+                return FixedTenantId is { } fixedTenant && !TenantId.IsReserved(fixedTenant)
+                    ? ClaimTenant.Valid(fixedTenant)
+                    : ClaimTenant.Invalid;
+            case TenantBindingKind.ClaimMapped when !string.IsNullOrWhiteSpace(ClaimName) && Mapping is not null:
+                // Same rule as DT-SC-02: several distinct values of the mapping claim are Invalid, never first-wins.
+                string? raw = null;
+                foreach (var claim in principal.FindAll(ClaimName))
+                {
+                    if (raw is null)
+                    {
+                        raw = claim.Value ?? string.Empty;
+                    }
+                    else if (!string.Equals(raw, claim.Value, StringComparison.Ordinal))
+                    {
+                        return ClaimTenant.Invalid;
+                    }
+                }
 
-        if (Kind == TenantBindingKind.ClaimMapped && !string.IsNullOrWhiteSpace(ClaimName) && Mapping != null)
-        {
-            var val = principal.FindFirst(ClaimName)?.Value;
-            if (val != null && Mapping.TryGetValue(val, out var matchedTenant))
-            {
-                return matchedTenant;
-            }
-            throw new SecurityException($"Claim '{ClaimName}' value '{val}' not authorized in realm tenant mapping.");
-        }
+                if (raw is null)
+                {
+                    return ClaimTenant.Absent;
+                }
 
-        return TenantId.LegacySingleTenant;
+                return Mapping.TryGetValue(raw, out var mapped) && mapped.Value is not null && !TenantId.IsReserved(mapped)
+                    ? ClaimTenant.Valid(mapped)
+                    : ClaimTenant.Invalid;
+            default:
+                return ClaimTenant.Invalid;
+        }
     }
 }
 
@@ -90,8 +119,7 @@ public sealed record IdentityRealm(
     IReadOnlyList<string> ResolverChain,
     RealmProvisioningMode Provisioning,
     IReadOnlySet<GatewayRole> AllowedGatewayRoles,
-    bool Delegable = false,
-    bool IsImplicitLegacy = false
+    bool Delegable = false
 )
 {
     public string RealmId => Id;
@@ -110,8 +138,7 @@ public sealed record IdentityRealm(
         string upnClaim = "upn",
         IReadOnlyList<string>? resolverChain = null,
         IReadOnlySet<GatewayRole>? allowedGatewayRoles = null,
-        bool delegable = false,
-        bool isImplicitLegacy = false)
+        bool delegable = false)
         : this(
             id,
             kind,
@@ -126,8 +153,7 @@ public sealed record IdentityRealm(
             resolverChain ?? ["scim-store"],
             provisioning,
             allowedGatewayRoles ?? new HashSet<GatewayRole>(),
-            delegable,
-            isImplicitLegacy)
+            delegable)
     {
     }
 }

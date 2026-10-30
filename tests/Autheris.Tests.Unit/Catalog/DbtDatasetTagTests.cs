@@ -56,7 +56,7 @@ public sealed class DbtDatasetTagTests
     public async Task ModelTags_AreImportedAfterTheUpsert_ColumnTagsAreNot()
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
-        await Service().IngestManifestStreamAsync(stream, dryRun: false);
+        await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         _order.ShouldBe(["upsert", "tags"]);
         await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("db", "dbo", "orders"),
@@ -67,7 +67,7 @@ public sealed class DbtDatasetTagTests
     public async Task DryRun_ImportsNothing()
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
-        await Service().IngestManifestStreamAsync(stream, dryRun: true);
+        await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: true);
 
         _tags.ReceivedCalls().ShouldBeEmpty();
     }
@@ -79,7 +79,7 @@ public sealed class DbtDatasetTagTests
             .Returns(new DatasetTagImportResult(false, 1, 2, Failed: true));
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
 
-        var result = await Service().IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Warnings.ShouldContain(w => w.Contains("'db.dbo.orders'") && w.Contains("tags"));
     }
@@ -91,7 +91,7 @@ public sealed class DbtDatasetTagTests
             .Returns(new DatasetTagImportResult(true, 1, 2, false));
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(Manifest));
 
-        var result = await Service().IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await Service().IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Warnings.ShouldContain(w => w.Contains("1 invalid") && w.Contains("2 over the cap"));
         result.Warnings.ShouldNotContain(w => w.Contains("PII"));
@@ -106,15 +106,15 @@ public sealed class DbtDatasetTagTests
             .Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
         var service = new DbtSemanticManifestIngestionService(
             Substitute.For<ISemanticCatalogService>(), NullLogger<DbtSemanticManifestIngestionService>.Instance, tableRepo, _tags,
-            gatewayOptions: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } }));
+            gatewayOptions: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } }));
 
         await service.ParseAndIngestAsync("""
         { "semantic_models": [ { "name": "orders", "description": "d", "node_relation": { "relation_name": "a.b.orders" },
             "entities": [ { "name": "order_id", "type": "primary" } ], "dimensions": [], "measures": [] } ], "metrics": [] }
-        """, TenantId.LegacySingleTenant);
+        """, Autheris.Tests.Common.TestTenants.Default);
 
         captured!.Table.Tags.ShouldBeEmpty();
-        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", "semantic", "orders"),
+        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"),
             Arg.Is<IEnumerable<string?>>(t => t.SequenceEqual(new string?[] { "dbt", "semantic-model" })), Arg.Any<CancellationToken>());
     }
 }

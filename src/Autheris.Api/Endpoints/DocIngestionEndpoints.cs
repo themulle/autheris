@@ -313,7 +313,7 @@ internal static class DocEndpointAccess
             tenantId = tenant.Trim();
             return true;
         }
-        catch (SecurityException)
+        catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             // A malformed tenant claim or a rejected cross-tenant request fails closed.
             authorSid = null;
@@ -329,7 +329,7 @@ internal static class DocEndpointAccess
         {
             return DocAccessScope.ForTenant(EndpointSecurity.GetRequestTenant(httpContext).Value);
         }
-        catch (SecurityException)
+        catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             return DocAccessScope.OfficialOnly;
         }

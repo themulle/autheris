@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -42,9 +43,9 @@ public sealed class CatalogTierShapingTests
         Tier("hid_t", DatasetVisibility.Hidden, "internal")
     ];
 
-    private static GatewayOptions Opts(TenancyMode mode, bool openSchema = false) => new()
+    private static GatewayOptions Opts(TenancyShape mode, bool openSchema = false) => new()
     {
-        Tenancy = new TenancyOptions { Mode = mode.ToString() },
+        Tenancy = mode.Options(),
         Catalog = new DataCatalogOptions { SharedTables = Shared, OpenSchema = openSchema }
     };
 
@@ -65,7 +66,7 @@ public sealed class CatalogTierShapingTests
     [Fact]
     public async Task Summary_HasNoColumns_Full_HasColumns_Hidden_Absent_TagsFromCatalogTags()
     {
-        var result = await Catalog(Subject(), Opts(TenancyMode.Multi));
+        var result = await Catalog(Subject(), Opts(TenancyShape.Multi));
 
         result.Select(r => r.TableName).OrderBy(n => n).ShouldBe(["full_t", "sum_t"]);
         var summary = result.Single(r => r.TableName == "sum_t");
@@ -73,13 +74,13 @@ public sealed class CatalogTierShapingTests
         summary.Description.ShouldBe("Short sum_t");
         summary.Tags.ShouldBe(["finance"]);
         result.Single(r => r.TableName == "full_t").Columns.ShouldBe(["id", "secret_col"]);
-        (await Catalog(Subject(), Opts(TenancyMode.Multi), tag: "FINANCE")).Select(r => r.TableName).ShouldBe(["sum_t"]);
+        (await Catalog(Subject(), Opts(TenancyShape.Multi), tag: "FINANCE")).Select(r => r.TableName).ShouldBe(["sum_t"]);
     }
 
     [Fact]
     public async Task Summary_Search_NeverMatchesAColumn()
     {
-        var result = await Catalog(Subject(), Opts(TenancyMode.Multi), search: "secret_col");
+        var result = await Catalog(Subject(), Opts(TenancyShape.Multi), search: "secret_col");
 
         result.Select(r => r.TableName).ShouldBe(["full_t"]);
     }
@@ -92,9 +93,9 @@ public sealed class CatalogTierShapingTests
     {
         var (mode, principal) = admin switch
         {
-            "global" => (TenancyMode.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
-            "tenant" => (TenancyMode.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
-            _ => (TenancyMode.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
+            "global" => (TenancyShape.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
+            "tenant" => (TenancyShape.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
+            _ => (TenancyShape.Single, Wp0.User("gov", Wp0.SingleTenantClaim, ["GovernanceAdmin"]))
         };
 
         var result = await Catalog(principal, Opts(mode));
@@ -115,11 +116,18 @@ public sealed class CatalogTierShapingTests
 
         var hiddenTables = Wp0.Tables(hiddenOnly);
         var hiddenConsents = Wp0.Consents();
-        var hiddenOptions = Opts(TenancyMode.Multi);
-        var result = await new Query().GetCatalogAsync(null, null, null, null, null, hiddenTables, hiddenConsents, null, null, accessor, Options.Create(hiddenOptions),
+        var hiddenOptions = Opts(TenancyShape.Multi);
+        var run = () => new Query().GetCatalogAsync(null, null, null, null, null, hiddenTables, hiddenConsents, null, null, accessor, Options.Create(hiddenOptions),
             CatalogVisibilityTestFactory.Create(hiddenTables, hiddenConsents, hiddenOptions));
 
-        result.ShouldBeEmpty();
+        if (caller == "claimless")
+        {
+            // DT-A-3: no tenant claim, no default tenant: refused, nothing leaks.
+            (await Should.ThrowAsync<HotChocolate.GraphQLException>(run)).Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
+            return;
+        }
+
+        (await run()).ShouldBeEmpty();
     }
 
     [Fact]
@@ -142,7 +150,7 @@ public sealed class CatalogTierShapingTests
         // An invalid tenant claim resolves to the None class and is refused outright.
         var none = Wp0.User("S-USER", "not a valid tenant!");
 
-        await Should.ThrowAsync<GraphQLException>(() => Catalog(none, Opts(TenancyMode.Multi)));
+        await Should.ThrowAsync<GraphQLException>(() => Catalog(none, Opts(TenancyShape.Multi)));
     }
 
     [Fact]
@@ -159,17 +167,17 @@ public sealed class CatalogTierShapingTests
     [Fact]
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
     {
-        var result = await Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(TenancyMode.Multi));
+        // DT-A-3: a claimless caller has no tenant; the GraphQL catalog refuses it (UNAUTHORIZED), never a default tenant or a full output.
+        var ex = await Should.ThrowAsync<HotChocolate.GraphQLException>(() => Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(TenancyShape.Multi)));
 
-        result.ShouldBeEmpty();
+        ex.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
     }
 
     [Theory]
-    [InlineData(TenancyMode.Multi, 0)]
-    [InlineData(TenancyMode.Single, 3)]
-    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyMode mode, int expected)
+    [InlineData(TenancyShape.Single, 3)]
+    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyShape mode, int expected)
     {
-        var result = await Catalog(Wp0.User("gov", null, ["GovernanceAdmin"]), Opts(mode));
+        var result = await Catalog(Wp0.User("gov", Wp0.SingleTenantClaim, ["GovernanceAdmin"]), Opts(mode));
 
         result.Count.ShouldBe(expected);
         result.ShouldAllBe(r => r.Columns.Count == 2);
@@ -179,7 +187,7 @@ public sealed class CatalogTierShapingTests
     public async Task OpenSchema_Branch_NotAffectedByTierShaping()
     {
         // The operator opt-in lists every table, Summary and Hidden included, with columns (bypasses tiers and consents by design).
-        var result = await Catalog(Subject(), Opts(TenancyMode.Multi, openSchema: true));
+        var result = await Catalog(Subject(), Opts(TenancyShape.Multi, openSchema: true));
 
         result.Count.ShouldBe(3);
         result.ShouldAllBe(r => r.Columns.Count == 2);

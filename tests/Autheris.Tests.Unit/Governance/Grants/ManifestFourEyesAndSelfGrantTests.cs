@@ -18,7 +18,7 @@ namespace Autheris.Tests.Unit.Governance.Grants;
 public sealed class ManifestFourEyesAndSelfGrantTests
 {
     private static ClaimsPrincipal Caller(params Claim[] extra) => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN"), .. extra], "test"));
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN"), .. extra], "test"));
 
     private static ITableMetadataRepository Tables(string sensitivity = "NORMAL")
     {
@@ -240,7 +240,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         var context = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-ADMIN"),
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             GroupSids = new HashSet<Sid> { new("S-1-5-21-GRP-ENRICHED") },
             TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "EnrichedRole" },
             ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),

@@ -19,6 +19,10 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> ForbiddenRequestsCounter =
         Meter.CreateCounter<long>("autheris_forbidden_requests_total", description: "Total number of rejected requests (403/Forbidden)");
 
+    /// <summary>DT-A-8 / DT-SC-11: a claim-less principal was assigned the configured default tenant. No tenant tag (bounded cardinality).</summary>
+    public static readonly Counter<long> TenantDefaultAssignmentsCounter =
+        Meter.CreateCounter<long>("autheris_tenant_default_assignments_total", description: "Principals without tenant claim that were assigned the configured default tenant");
+
     /// <summary>R-3: a Redis event-bus publish failed (tag <c>message_type</c> only: channel names can carry tenant ids).</summary>
     public static readonly Counter<long> EventBusPublishFailedCounter =
         Meter.CreateCounter<long>("autheris_event_bus_publish_failed_total", description: "Redis event bus publishes that failed and were rethrown");

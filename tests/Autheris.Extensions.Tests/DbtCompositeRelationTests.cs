@@ -265,7 +265,7 @@ public sealed partial class DbtCompositeRelationTests
     {
         var h = new Harness();
         using var stream = OneChild(["a"], ["x"], [Fk("ghost", ["x"], ["a"])]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.Warnings.ShouldContain("Relation 'ghost' (fct_lines -> ghost) skipped: UNKNOWN_MODEL");
         result.ImportedRelationsCount.ShouldBe(0);
         h.Written.ShouldBeEmpty();
@@ -276,7 +276,7 @@ public sealed partial class DbtCompositeRelationTests
     {
         var h = new Harness();
         using var stream = Composite(["x", "y"], ["a", "b"], parentModelCols: ["a"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.Warnings.ShouldContain("Relation 'dim_orders' (fct_lines -> dim_orders) skipped: UNKNOWN_COLUMN");
         h.Written.ShouldBeEmpty();
     }
@@ -287,7 +287,7 @@ public sealed partial class DbtCompositeRelationTests
         var h = new Harness();
         h.Stored("dim_orders", ["a"]);
         using var stream = Composite(["x", "y"], ["a", "b"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.Warnings.ShouldContain(w => w.EndsWith("skipped: UNKNOWN_COLUMN", StringComparison.Ordinal));
         h.Written.ShouldBeEmpty();
     }
@@ -299,7 +299,7 @@ public sealed partial class DbtCompositeRelationTests
         h.Stored("dim_orders", ["Order_Id", "Line_No"], primaryKey: ["Order_Id", "Line_No"]);
         h.Stored("fct_lines", ["Ord", "Ln"]);
         using var stream = Composite(["ord", "LN"], ["order_id", "line_no"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.ImportedRelationsCount.ShouldBe(1);
         var rel = h.Written.ShouldHaveSingleItem();
         rel.JoinKeysParent.ShouldBe(["Order_Id", "Line_No"]);
@@ -313,7 +313,7 @@ public sealed partial class DbtCompositeRelationTests
         var h = new Harness();
         h.Stored("dim_orders", ["a", "b"], primaryKey: ["a"]);
         using var stream = Composite(["x", "y"], ["a", "b"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.ImportedRelationsCount.ShouldBe(1);
         h.Written.ShouldHaveSingleItem();
         result.Warnings.ShouldHaveSingleItem().ShouldBe("Relation 'dim_orders' (fct_lines -> dim_orders) imported with warning: PARENT_KEY_NOT_UNIQUE");
@@ -325,7 +325,7 @@ public sealed partial class DbtCompositeRelationTests
         var h = new Harness();
         h.Stored("dim_orders", ["a", "b"], indexes: [new TableIndexDefinition("ux", ["b", "a"], true)]);
         using var stream = Composite(["x", "y"], ["a", "b"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.Warnings.ShouldBeEmpty();
         h.Written.ShouldHaveSingleItem();
     }
@@ -337,7 +337,7 @@ public sealed partial class DbtCompositeRelationTests
         h.Relations.CreateRelationAsync(Arg.Any<TableRelation>(), Arg.Any<CancellationToken>())
             .Returns<Task<RelationWriteResult>>(_ => throw new InvalidRelationException(RelationKeyViolation.CountMismatch, "boom: sensitive detail"));
         using var stream = Composite(["x"], ["a"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.Success.ShouldBeTrue();
         result.ImportedRelationsCount.ShouldBe(0);
         var w = result.Warnings.ShouldHaveSingleItem();
@@ -362,11 +362,11 @@ public sealed partial class DbtCompositeRelationTests
 
         var live = new Harness();
         using var s1 = Build();
-        var liveResult = await live.Service.IngestManifestStreamAsync(s1, dryRun: false);
+        var liveResult = await live.Service.IngestManifestStreamAsClusterAdminAsync(s1, dryRun: false);
 
         var dry = new Harness();
         using var s2 = Build();
-        var dryResult = await dry.Service.IngestManifestStreamAsync(s2, dryRun: true);
+        var dryResult = await dry.Service.IngestManifestStreamAsClusterAdminAsync(s2, dryRun: true);
 
         dryResult.Warnings.ShouldBe(liveResult.Warnings);
         dryResult.ImportedRelationsCount.ShouldBe(liveResult.ImportedRelationsCount);
@@ -390,7 +390,7 @@ public sealed partial class DbtCompositeRelationTests
             ])
         });
 
-        var forward = await h.Service.IngestManifestStreamAsync(stream);
+        var forward = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         h.Written.ShouldBeEmpty();
         forward.ImportedRelationsCount.ShouldBe(0);
         forward.Warnings.Count(w => w.EndsWith("skipped: DUPLICATE_RELATION", StringComparison.Ordinal)).ShouldBe(1);
@@ -406,7 +406,7 @@ public sealed partial class DbtCompositeRelationTests
                 Fk("dim_users", ["created_by"], ["id"])
             ])
         });
-        await h2.Service.IngestManifestStreamAsync(reversed);
+        await h2.Service.IngestManifestStreamAsClusterAdminAsync(reversed);
         h2.Written.ShouldBeEmpty();
     }
 
@@ -415,7 +415,7 @@ public sealed partial class DbtCompositeRelationTests
     {
         var h = new Harness();
         using var stream = OneChild(["a"], ["x"], [Fk("dim_orders", ["x"], ["a"]), Fk("dim_orders", ["X"], ["A"])]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         h.Written.ShouldHaveSingleItem();
         result.ImportedRelationsCount.ShouldBe(1);
         result.Warnings.ShouldNotContain(w => w.Contains("DUPLICATE_RELATION"));
@@ -431,7 +431,7 @@ public sealed partial class DbtCompositeRelationTests
         foreach (var name in evil)
         {
             using var stream = OneChild(["a"], ["x"], [Fk("dim_orders", [name], ["a"])]);
-            var result = await h.Service.IngestManifestStreamAsync(stream);
+            var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
             result.Warnings.ShouldNotBeEmpty();
             result.Warnings.ShouldAllBe(w => w.Length < 300 && !w.Any(char.IsControl));
             result.Warnings.ShouldNotContain(w => w.Contains("DROP TABLE") || w.Contains("qqqq"));
@@ -446,7 +446,7 @@ public sealed partial class DbtCompositeRelationTests
             ["model.p.dim_orders"] = Node("dim_orders", ["a"]),
             ["model.p.fct_lines"] = Node("fct_lines", ["x"], [Fk(evilModel, ["x"], ["a"])])
         });
-        var r2 = await h.Service.IngestManifestStreamAsync(s2);
+        var r2 = await h.Service.IngestManifestStreamAsClusterAdminAsync(s2);
         r2.Warnings.ShouldAllBe(w => w.Length < 400 && !w.Any(char.IsControl));
         h.Written.ShouldBeEmpty();
     }
@@ -459,7 +459,7 @@ public sealed partial class DbtCompositeRelationTests
         // sources stays non-executable. (The persisted allow_cross_data_source column arrives with I-18.)
         var h = new Harness();
         using var stream = Composite(["x", "y"], ["a", "b"]);
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
         result.ImportedRelationsCount.ShouldBe(1);
         var rel = h.Written.ShouldHaveSingleItem();
         rel.IsComposite.ShouldBeTrue();

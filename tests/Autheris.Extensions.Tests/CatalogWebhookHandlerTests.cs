@@ -36,6 +36,7 @@ public sealed class CatalogWebhookHandlerTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "default-tenant",
                 WebhookSecret = secret
             }
         });
@@ -89,6 +90,7 @@ public sealed class CatalogWebhookHandlerTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "default-tenant",
                 WebhookSecret = "correct-secret"
             }
         });
@@ -123,6 +125,7 @@ public sealed class CatalogWebhookHandlerTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "default-tenant",
                 WebhookSecret = "secret"
             }
         });
@@ -157,6 +160,7 @@ public sealed class CatalogWebhookHandlerTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "default-tenant",
                 WebhookSecret = secret
             }
         });
@@ -201,7 +205,7 @@ public sealed class CatalogWebhookHandlerTests
     private static async Task<(CatalogWebhookResult Result, IPolicyEpochRepository Repo)> SendPurviewAsync(string payload)
     {
         const string secret = "purview-secret";
-        var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { WebhookSecret = secret } });
+        var options = Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", WebhookSecret = secret } });
         var epochRepo = Substitute.For<IPolicyEpochRepository>();
         var syncService = Substitute.For<IDataCatalogSyncService>();
         var handler = new CatalogWebhookHandler(options, epochRepo, syncService, NullLogger<CatalogWebhookHandler>.Instance);

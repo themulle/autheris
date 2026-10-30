@@ -40,10 +40,10 @@ public sealed class TypedRowFilterBuilderAttributeTests
     private string Render(PolicyPredicate predicate) => _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql;
 
     private PolicyPredicate Allow(CallerAttributeSet? set, params ConsentRowFilter[] filters) =>
-        _builder.BuildCombined([new Consent { Effect = ConsentEffect.Allow, RowFilters = filters }], [], Orders, null, set)!;
+        _builder.BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters }], [], Orders, null, set)!;
 
     private PolicyPredicate Deny(CallerAttributeSet? set, params ConsentRowFilter[] filters) =>
-        _builder.BuildCombined([], [new Consent { Effect = ConsentEffect.Deny, RowFilters = filters }], Orders, null, set)!;
+        _builder.BuildCombined([], [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters }], Orders, null, set)!;
 
     [Fact]
     public void Allow_Eq_BindsTheScalarAttribute()
@@ -82,7 +82,7 @@ public sealed class TypedRowFilterBuilderAttributeTests
     [Fact]
     public void Padding_CanBeSwitchedOff()
     {
-        var predicate = _builder.BuildCombined([new Consent { Effect = ConsentEffect.Allow, RowFilters = [Attr(op: "IN")] }], [], Orders, null,
+        var predicate = _builder.BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [Attr(op: "IN")] }], [], Orders, null,
             Set("cost_center", "a", "b", "c"), new CallerAttributePadding(false, 256))!;
         predicate.Parameters.Count.ShouldBe(3);
     }
@@ -231,7 +231,7 @@ public sealed class TypedRowFilterBuilderAttributeTests
     public void NoSetSupplied_KeepsTodaysConstants_ForBothBuilders()
     {
         var filter = new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueJson = "\"x\"", ValueSource = "USER_ATTRIBUTE" };
-        Render(_builder.BuildCombined([new Consent { Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!).ShouldBe("1 = 0");
-        Render(_builder.BuildCombined([], [new Consent { Effect = ConsentEffect.Deny, RowFilters = [filter] }], Orders)!).ShouldBe("NOT (1 = 1)");
+        Render(_builder.BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!).ShouldBe("1 = 0");
+        Render(_builder.BuildCombined([], [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = [filter] }], Orders)!).ShouldBe("NOT (1 = 1)");
     }
 }

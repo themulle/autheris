@@ -1,3 +1,4 @@
+using Autheris.Domain.Security;
 using System.Security.Claims;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
@@ -51,10 +52,10 @@ public sealed class PagingTests
     [Fact]
     public void SEC_SC_16_PageSize_IsClamped()
     {
-        new AuditLogPageQuery(TenantId.LegacySingleTenant, PageSize: 0).EffectivePageSize.ShouldBe(1);
-        new AuditLogPageQuery(TenantId.LegacySingleTenant, PageSize: 100000).EffectivePageSize.ShouldBe(AuditLogPageQuery.MaxPageSize);
-        new ConsentPageQuery(TenantId.LegacySingleTenant, PageSize: -3).EffectivePageSize.ShouldBe(1);
-        new ConsentPageQuery(TenantId.LegacySingleTenant, PageSize: 100000).EffectivePageSize.ShouldBe(ConsentPageQuery.MaxPageSize);
+        new AuditLogPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: 0).EffectivePageSize.ShouldBe(1);
+        new AuditLogPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: 100000).EffectivePageSize.ShouldBe(AuditLogPageQuery.MaxPageSize);
+        new ConsentPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: -3).EffectivePageSize.ShouldBe(1);
+        new ConsentPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: 100000).EffectivePageSize.ShouldBe(ConsentPageQuery.MaxPageSize);
     }
 
     // ---- consent reader --------------------------------------------------------------------------------------------------------
@@ -169,7 +170,7 @@ public sealed class PagingTests
         if (owners != null) services.AddSingleton(owners);
         var ctx = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, role), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ME")], "test"));
-        ctx.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId(tenant);
+        ctx.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId(tenant);
         return ctx;
     }
 
@@ -245,6 +246,28 @@ public sealed class PagingTests
 
         StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "t2")).ShouldBe(200);
         seen!.Tenant.ShouldBe(new TenantId("t2"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Platform_Audit_Visible_To_ClusterAdmin_Only()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        AuditLogPageQuery? seen = null;
+        repo.QueryAuditLogPageAsync(Arg.Do<AuditLogPageQuery>(q => seen = q), Arg.Any<CancellationToken>()).Returns(new AuditLogPage([], null));
+
+        // DT-A-6: a tenant administrator can never reach the platform bucket.
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, null, null, null, null, null, "_platform")).ShouldBe(403);
+        await repo.DidNotReceiveWithAnyArgs().QueryAuditLogPageAsync(default!, default);
+
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "_platform")).ShouldBe(200);
+        seen!.Tenant.ShouldBe(TenantId.Platform);
+
+        // every other reserved value stays rejected, also for ClusterAdmin
+        repo.ClearReceivedCalls();
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "_other")).ShouldBe(403);
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("ClusterAdmin"), repo, null, null, null, null, null, "_PLATFORM")).ShouldBe(403);
+        await repo.DidNotReceiveWithAnyArgs().QueryAuditLogPageAsync(default!, default);
     }
 
     [Fact]

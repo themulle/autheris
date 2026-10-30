@@ -308,7 +308,7 @@ public sealed class SecurityReviewRemediationCoverageTests
     }
 
     [Fact]
-    public async Task API_4_FinOpsBudgetMiddleware_InvalidTenantClaim_DoesNotThrow_AndSkipsAccounting()
+    public async Task API_4_FinOpsBudgetMiddleware_InvalidTenantClaim_FailsClosed_NeverSkipsAccounting()
     {
         var accountingService = Substitute.For<IFinOpsAccountingService>();
         accountingService.IsEnabled.Returns(true);
@@ -327,9 +327,10 @@ public sealed class SecurityReviewRemediationCoverageTests
         var identity = new ClaimsIdentity([new Claim("tenant_id", "invalid!tenant@name#bad")], "Bearer");
         context.User = new ClaimsPrincipal(identity);
 
-        await middleware.InvokeAsync(context, accountingService);
+        // DT-SC-03: an authenticated caller with an invalid tenant claim is rejected, the budget check is never skipped.
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TenantClaimInvalidException>(() => middleware.InvokeAsync(context, accountingService));
 
-        nextCalled.ShouldBeTrue();
+        nextCalled.ShouldBeFalse();
         await accountingService.DidNotReceiveWithAnyArgs().CheckBudgetAsync(default!, default);
     }
 

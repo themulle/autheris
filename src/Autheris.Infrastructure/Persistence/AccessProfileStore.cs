@@ -457,6 +457,7 @@ internal sealed class AccessProfileStore(
 
     private static void AddParam(DbCommand cmd, string name, object? value)
     {
+        SqlCoreBinding.GuardTenantParameter(name, value);
         var p = cmd.CreateParameter();
         p.ParameterName = name;
         p.Value = value ?? DBNull.Value;

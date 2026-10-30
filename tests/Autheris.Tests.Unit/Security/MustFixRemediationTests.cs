@@ -56,7 +56,7 @@ public sealed class MustFixRemediationTests
         var context = new DataSourceExecutionContext(
             SourceName: "test_db",
             Metadata: metadata,
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user1")])),
+            Principal: new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("sub", "user1")])),
             AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>
             {
                 ["id"] = ColumnAccessLevel.Clear,

@@ -47,7 +47,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
         meta.ShouldNotBeNull();
         return await _repository.CreateConsentAsync(new Consent
         {
-            TableId = meta.Table.Id, TableIdentifier = tableId, TenantId = tenant ?? TenantId.LegacySingleTenant,
+            TableId = meta.Table.Id, TableIdentifier = tableId, TenantId = tenant ?? Autheris.Tests.Common.TestTenants.Default,
             GranteeType = GranteeType.User, GranteeSid = Alice, Description = description,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(validDays), CreatedBySid = Alice
         });

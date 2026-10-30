@@ -32,7 +32,7 @@ public sealed class McpCatalogPipelineGuardTests
     {
         var tables = Wp0.Tables(engineOutput);
         var consents = Wp0.Consents();
-        var gateway = new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Multi" } };
+        var gateway = new GatewayOptions { Tenancy = new TenancyOptions() };
         // The real service with the engine-output seam: the shape step inside the service is what these tests guard.
         var visibility = CatalogVisibilityTestFactory.Create(
             tables, consents, gateway, engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>(engineOutput));

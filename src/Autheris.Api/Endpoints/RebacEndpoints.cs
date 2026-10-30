@@ -46,6 +46,9 @@ public static class RebacEndpoints
         }, CancellationToken.None).ConfigureAwait(false);   // post-commit: a client disconnect must not drop the record
     }
 
+    private const string RoleDenied =
+        "ReBAC tuple administration requires the global ClusterAdmin role; a tenant-scoped GovernanceAdmin does not satisfy it.";
+
     /// <summary>DEF-SC-13: a tuple tenant must be a valid tenant id before the tuple is stored, removed or audited.</summary>
     private static bool InvalidTupleTenant(string tenantId) => !TenantId.TryParse(tenantId, out _);
 
@@ -78,7 +81,7 @@ public static class RebacEndpoints
         var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
         if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
         {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return ApiProblems.Forbidden(detail: RoleDenied, httpContext: request.HttpContext);
         }
 
         // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
@@ -102,16 +105,16 @@ public static class RebacEndpoints
 
         if (!secContext.IsClusterAdmin)
         {
-            if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
+            if (string.IsNullOrWhiteSpace(secContext.TenantId.Value))
             {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(httpContext: request.HttpContext);
             }
 
             foreach (var t in tuples)
             {
                 if (!string.Equals(secContext.TenantId.Value, t.TenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                    return ApiProblems.Forbidden(httpContext: request.HttpContext);
                 }
             }
         }
@@ -173,7 +176,7 @@ public static class RebacEndpoints
         var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
         if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
         {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return ApiProblems.Forbidden(detail: RoleDenied, httpContext: request.HttpContext);
         }
 
         // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
@@ -201,10 +204,10 @@ public static class RebacEndpoints
 
         if (!secContext.IsClusterAdmin)
         {
-            if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+            if (string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
                 !string.Equals(secContext.TenantId.Value, canonicalTuple.TenantId, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
+                return ApiProblems.Forbidden(httpContext: request.HttpContext);
             }
         }
 
@@ -221,6 +224,45 @@ public static class RebacEndpoints
         await AuditTupleChangeAsync(auditWriter, request.HttpContext, AuditEventTypes.RebacTupleRemoved, removed ? "REVOKED" : "NOOP", canonicalTuple).ConfigureAwait(false);
 
         return Results.Ok(new { removed });
+    }
+
+    /// <summary>GET /api/v1/rebac/tuples: queries tuples of the caller tenant (a ClusterAdmin may select a tenant).</summary>
+    internal static async Task<IResult> GetTuplesAsync(HttpRequest request, IRebacStore store)
+    {
+        var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
+        if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
+        {
+            return ApiProblems.Forbidden(detail: RoleDenied, httpContext: request.HttpContext);
+        }
+
+        var requestedTenant = request.Query["tenantId"].ToString();
+
+        string tenant;
+        if (secContext.IsClusterAdmin && !string.IsNullOrWhiteSpace(requestedTenant))
+        {
+            tenant = requestedTenant;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(secContext.TenantId.Value))
+            {
+                return ApiProblems.Forbidden(httpContext: request.HttpContext);
+            }
+            tenant = secContext.TenantId.Value;
+        }
+
+        var userFilter = request.Query["user"].ToString();
+        var relationFilter = request.Query["relation"].ToString();
+        var objectFilter = request.Query["object"].ToString();
+
+        var tuples = await store.GetTuplesAsync(
+            tenant,
+            string.IsNullOrWhiteSpace(userFilter) ? null : userFilter,
+            string.IsNullOrWhiteSpace(relationFilter) ? null : relationFilter,
+            string.IsNullOrWhiteSpace(objectFilter) ? null : objectFilter,
+            request.HttpContext.RequestAborted).ConfigureAwait(false);
+
+        return Results.Ok(tuples);
     }
 
     public static IEndpointRouteBuilder MapRebacEndpoints(this IEndpointRouteBuilder app)
@@ -247,45 +289,7 @@ public static class RebacEndpoints
             IAuditWriter auditWriter) => RemoveTupleAsync(tuple, request, store, evaluator, auditWriter));
 
         // GET /api/v1/rebac/tuples - Query tuples (restricted to governance admins)
-        group.MapGet("/tuples", async (
-            HttpRequest request,
-            IRebacStore store) =>
-        {
-            var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
-            if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var requestedTenant = request.Query["tenantId"].ToString();
-
-            string tenant;
-            if (secContext.IsClusterAdmin && !string.IsNullOrWhiteSpace(requestedTenant))
-            {
-                tenant = requestedTenant;
-            }
-            else
-            {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-                tenant = secContext.TenantId.Value;
-            }
-
-            var userFilter = request.Query["user"].ToString();
-            var relationFilter = request.Query["relation"].ToString();
-            var objectFilter = request.Query["object"].ToString();
-
-            var tuples = await store.GetTuplesAsync(
-                tenant,
-                string.IsNullOrWhiteSpace(userFilter) ? null : userFilter,
-                string.IsNullOrWhiteSpace(relationFilter) ? null : relationFilter,
-                string.IsNullOrWhiteSpace(objectFilter) ? null : objectFilter,
-                request.HttpContext.RequestAborted).ConfigureAwait(false);
-
-            return Results.Ok(tuples);
-        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        group.MapGet("/tuples", (HttpRequest request, IRebacStore store) => GetTuplesAsync(request, store)).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // POST /api/v1/rebac/check - Single tuple evaluation
         group.MapPost("/check", async (
@@ -307,10 +311,10 @@ public static class RebacEndpoints
 
             if (!secContext.IsClusterAdmin)
             {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+                if (string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
                     !string.Equals(secContext.TenantId.Value, check.TenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                    return ApiProblems.Forbidden(httpContext: request.HttpContext);
                 }
 
                 // Prevent third-party authorization probing by non-admins
@@ -318,7 +322,7 @@ public static class RebacEndpoints
                 {
                     if (!string.Equals(secContext.UserSid.Value, check.User, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Results.StatusCode(StatusCodes.Status403Forbidden);
+                        return ApiProblems.Forbidden(httpContext: request.HttpContext);
                     }
                 }
             }
@@ -360,10 +364,10 @@ public static class RebacEndpoints
 
             if (!secContext.IsClusterAdmin)
             {
-                if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
+                if (string.IsNullOrWhiteSpace(secContext.TenantId.Value) ||
                     !string.Equals(secContext.TenantId.Value, batchCheck.TenantId, StringComparison.OrdinalIgnoreCase))
                 {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                    return ApiProblems.Forbidden(httpContext: request.HttpContext);
                 }
 
                 if (!secContext.HasRole(GatewayRole.GovernanceAdmin))
@@ -372,7 +376,7 @@ public static class RebacEndpoints
                     {
                         if (!string.Equals(secContext.UserSid.Value, c.User, StringComparison.OrdinalIgnoreCase))
                         {
-                            return Results.StatusCode(StatusCodes.Status403Forbidden);
+                            return ApiProblems.Forbidden(httpContext: request.HttpContext);
                         }
                     }
                 }

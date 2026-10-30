@@ -37,7 +37,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             claims.Add(new Claim("role", role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth"));
     }
 
     private static TableMetadata CreateCatalogTable(
@@ -125,6 +125,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = ordersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("user-1"),
@@ -238,6 +239,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = customersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("analyst-1"),
@@ -322,6 +324,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = usersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("dev-1"),
@@ -330,6 +333,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 },
                 new Consent
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = auditTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("dev-1"),
@@ -493,6 +497,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                     {
                         new Consent
                         {
+                            TenantId = Autheris.Tests.Common.TestTenants.Default,
                             TableIdentifier = ordersTable.Identifier,
                             Effect = ConsentEffect.Allow,
                             GranteeSid = new Sid("member-granted"),
@@ -803,12 +808,12 @@ public sealed class QueryAnalysisAndValueProfilingTests
             metadataRepo,
             consentRepo,
             executionService,
-            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
+            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
             profileService: profileService,
             syntheticRowGenerator: syntheticGenerator,
             auditLogRepository: auditRepo,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
-                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }));
+                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }));
 
         var viewer = CreatePrincipal("catalog-viewer-1");
 
@@ -828,7 +833,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
         // Issue #111 (A-4): the consent-less branch is open only for a tier-Full row explicitly released to catalog viewers (this table); an
         // administrator view or an active consent may always sample.
         (await catalog.SampleRowsAsync(viewer, "crm.public.contacts", count: 5, synthetic: true)).IsSynthetic.Should().BeTrue();
-        var administrator = Autheris.Tests.Unit.Catalog.Wp0.User("catalog-admin-1", null, ["GovernanceAdmin"]);
+        var administrator = Autheris.Tests.Unit.Catalog.Wp0.User("catalog-admin-1", Autheris.Tests.Unit.Catalog.Wp0.SingleTenantClaim, ["GovernanceAdmin"]);
         var sample = await catalog.SampleRowsAsync(administrator, "crm.public.contacts", count: 5, synthetic: true);
         sample.IsSynthetic.Should().BeTrue();
         sample.RowCount.Should().Be(5);

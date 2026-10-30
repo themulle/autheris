@@ -71,12 +71,13 @@ public sealed class DataCatalogConnectorTests
             OpenMetadata = new OpenMetadataOptions
             {
                 ServerUrl = "https://openmetadata.corp.internal/api/v1",
-                AuthToken = "test-token"
+                AuthToken = "test-token",
+                DefaultTenantId = "default-tenant"
             }
         });
 
         var omClient = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance, null, DevEnv());
-        var client = new OpenMetadataCatalogAdapter(omClient, NullLogger<OpenMetadataCatalogAdapter>.Instance);
+        var client = new OpenMetadataCatalogAdapter(omClient, NullLogger<OpenMetadataCatalogAdapter>.Instance, Options.Create(new GatewayOptions { OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant" } }));
 
         client.ProviderType.ShouldBe(DataCatalogProviderType.OpenMetadata);
         var tables = await client.GetTablesAsync();

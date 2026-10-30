@@ -25,6 +25,8 @@ public static class ApiErrorCodes
     public const string Unauthorized = "UNAUTHORIZED";
     public const string AccessDenied = "ACCESS_DENIED";
     public const string CrossTenantAccessForbidden = "CROSS_TENANT_ACCESS_FORBIDDEN";
+    public const string TenantUnresolved = "TENANT_UNRESOLVED";
+    public const string TenantClaimInvalid = "TENANT_CLAIM_INVALID";
     public const string ConsentTenantInvalid = "CONSENT_TENANT_INVALID";
     public const string ReadOnlyToken = "READ_ONLY_TOKEN";
     public const string CsrfValidationFailed = "CSRF_VALIDATION_FAILED";
@@ -67,7 +69,6 @@ public static class ApiErrorCodes
 
     // O-5b step 2 (WP-0): codes of the migrated bare error bodies. Registered here once so no later work package touches this file.
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
-    public const string TenancyModeClaimlessAdmin = "TENANCY_MODE_CLAIMLESS_ADMIN";
     public const string InvalidTag = "INVALID_TAG";
     public const string InvalidVisibility = "INVALID_VISIBILITY";
     public const string TagLimitExceeded = "TAG_LIMIT_EXCEEDED";

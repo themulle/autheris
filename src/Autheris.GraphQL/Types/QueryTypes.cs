@@ -415,7 +415,7 @@ public sealed class Query
         {
             tenantId = principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
@@ -433,7 +433,7 @@ public sealed class Query
         var visible = await visibilityService
             .GetVisibleAsync(new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, tenantId, Autheris.Application.Catalog.Interfaces.CatalogChannel.GraphQl), contractDef, ct)
             .ConfigureAwait(false);
-        var isAdmin = visible.Scope is CallerScope.Global or CallerScope.Unrestricted or CallerScope.Tenant;
+        var isAdmin = visible.Scope is CallerScope.Global or CallerScope.CatalogOwner or CallerScope.Tenant;
 
         // SEC-CAT138-19: consents and pending requests are loaded only to compute AccessStatus; they never add or remove a row.
         IReadOnlyList<Consent> activeConsents = Array.Empty<Consent>();
@@ -571,14 +571,7 @@ public sealed class Query
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken ct = default)
     {
-        var callerContext = GetCallerSecurityContext(httpContextAccessor);
-        if (callerContext.UserSid.Value == "S-1-5-21-ANONYMOUS" || httpContextAccessor?.HttpContext?.User?.Identity?.IsAuthenticated != true)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentication is required for lineage and impact analyses.")
-                .Build());
-        }
+        var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for lineage and impact analyses.");
 
         try
         {
@@ -610,14 +603,7 @@ public sealed class Query
         [Service] IDataOwnershipRepository? ownershipRepository = null,
         CancellationToken ct = default)
     {
-        var callerContext = GetCallerSecurityContext(httpContextAccessor);
-        if (callerContext.UserSid.Value == "S-1-5-21-ANONYMOUS" || httpContextAccessor?.HttpContext?.User?.Identity?.IsAuthenticated != true)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentication is required for consumer analyses.")
-                .Build());
-        }
+        var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for consumer analyses.");
 
         if (!TableIdentifier.TryCreate(domain, schema, tableName, out var tableId))
         {
@@ -671,14 +657,7 @@ public sealed class Query
         [Service] IHttpContextAccessor httpContextAccessor = null!,
         CancellationToken ct = default)
     {
-        var callerContext = GetCallerSecurityContext(httpContextAccessor);
-        if (callerContext.UserSid.Value == "S-1-5-21-ANONYMOUS" || httpContextAccessor?.HttpContext?.User?.Identity?.IsAuthenticated != true)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentication is required for GDPR access reports.")
-                .Build());
-        }
+        var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for GDPR access reports.");
 
         TableIdentifier? tableId = null;
         if (!string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(schema) && !string.IsNullOrWhiteSpace(tableName))
@@ -740,22 +719,43 @@ public sealed class Query
     }
 
 
-    private static CallerSecurityContext GetCallerSecurityContext(IHttpContextAccessor httpContextAccessor)
+    /// <summary>
+    /// The caller context of an authenticated principal. An unauthenticated or SID-less caller is refused first (UNAUTHORIZED with
+    /// <paramref name="authenticationRequiredMessage"/>), then a caller without a valid tenant (never a default tenant, DT-A-3).
+    /// </summary>
+    private static CallerSecurityContext GetCallerSecurityContext(IHttpContextAccessor httpContextAccessor, string authenticationRequiredMessage)
     {
         var httpContext = httpContextAccessor?.HttpContext;
         var principal = httpContext?.User ?? new ClaimsPrincipal();
-        var userSid = principal.GetUserSid() ?? new Sid("S-1-5-21-ANONYMOUS");
+        if (principal.Identity?.IsAuthenticated != true || principal.GetUserSid() is not { } userSid || userSid.Value == "S-1-5-21-ANONYMOUS")
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage(authenticationRequiredMessage)
+                .Build());
+        }
+
         var groupSids = principal.GetGroupSids().ToList();
         var roles = principal.GetUserRoles().ToList();
 
-        var tenantId = TenantId.LegacySingleTenant;
+        TenantId tenantId;
         if (httpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
         {
             tenantId = tid;
         }
         else
         {
-            tenantId = principal.GetTenantId();
+            try
+            {
+                tenantId = principal.GetTenantId();
+            }
+            catch (Autheris.Domain.Exceptions.GatewaySecurityException)
+            {
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode("UNAUTHORIZED")
+                    .SetMessage("No valid tenant in the authentication token.")
+                    .Build());
+            }
         }
 
         bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);

@@ -84,6 +84,7 @@ public class GatewayLoadBenchmark : IDisposable
             {
                 var consent = new Consent
                 {
+                    TenantId = new Autheris.Domain.Common.TenantId("bench-tenant"),
                     TableId = meta.Table.Id,
                     TableIdentifier = meta.Identifier,
                     Effect = ConsentEffect.Allow,

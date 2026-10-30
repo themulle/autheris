@@ -16,7 +16,7 @@ public sealed class DeclarativeConsentApplyAtomicTests
     private static readonly TableIdentifier Items = new("default", "sales", "items");
 
     private static ClaimsPrincipal Admin() => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")], "test"));
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")], "test"));
 
     private static ITableMetadataRepository Tables()
     {

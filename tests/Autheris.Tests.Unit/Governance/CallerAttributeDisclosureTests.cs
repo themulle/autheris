@@ -39,7 +39,7 @@ public sealed class CallerAttributeDisclosureTests
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(owner);
         return new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership,
-            Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } }));
+            Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } }));
     }
 
     private static TableAccessDecision WithAttribute(string text = "1 = 0") =>
@@ -50,7 +50,7 @@ public sealed class CallerAttributeDisclosureTests
                 [[new ConsentRowFilter { ColumnName = "cost_center", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "secret_attribute_name" }]], [])
         };
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "test"));
+    private static ClaimsPrincipal User() => new(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "test"));
 
     [Theory]
     [InlineData(false)]

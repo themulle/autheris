@@ -97,11 +97,13 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
         }
     }
 
-    public void Initialize(GatewayOptions gatewayOptions, IdentityRealmsOptions? realmsOptions = null)
+    /// <summary>
+    /// Registers the explicit realms of <c>Authentication:Realms</c> (DT-A-11). No realm is ever synthesized from the enabled schemes;
+    /// a scheme without a realm fails startup (<see cref="Validators.IdentityRealmSchemeValidator"/>).
+    /// </summary>
+    public void Initialize(IdentityRealmsOptions? realmsOptions)
     {
-        ArgumentNullException.ThrowIfNull(gatewayOptions);
-
-        // 1. Register explicit realms from configuration if provided
+        // Register explicit realms from configuration if provided
         if (realmsOptions?.Realms != null)
         {
             foreach (var (realmId, config) in realmsOptions.Realms)
@@ -110,7 +112,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                     ? TenantBindingSpecification.Fixed(new TenantId(config.FixedTenantId))
                     : (config.TenantClaimName != null && config.TenantClaimMapping != null
                         ? TenantBindingSpecification.ClaimMapped(config.TenantClaimName, config.TenantClaimMapping.ToDictionary(k => k.Key, v => new TenantId(v.Value)))
-                        : TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant));
+                        : TenantBindingSpecification.Unbound());
 
                 var allowedRoles = new HashSet<GatewayRole>();
                 foreach (var r in config.AllowedGatewayRoles)
@@ -135,146 +137,11 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                     ResolverChain: config.ResolverChain,
                     Provisioning: config.Provisioning,
                     AllowedGatewayRoles: allowedRoles,
-                    Delegable: config.Delegable,
-                    IsImplicitLegacy: false
+                    Delegable: config.Delegable
                 );
 
                 RegisterRealm(realm);
             }
-        }
-
-        // 2. Synthesize implicit legacy realms (R-SC13-03)
-        var auth = gatewayOptions.Authentication;
-        if (auth.EntraId.Enabled && !_realmsById.ContainsKey("workforce-entra-legacy") && !_realmsById.ContainsKey("workforce-entra"))
-        {
-            var entraIssuers = new List<string>();
-            if (!string.IsNullOrWhiteSpace(auth.EntraId.Authority))
-            {
-                entraIssuers.Add(auth.EntraId.Authority);
-                var tenant = auth.EntraId.TenantId;
-                if (!string.IsNullOrWhiteSpace(tenant))
-                {
-                    entraIssuers.Add($"https://login.microsoftonline.com/{tenant}/v2.0");
-                    entraIssuers.Add($"https://sts.windows.net/{tenant}/");
-                }
-            }
-
-            var audiences = new List<string>();
-            if (!string.IsNullOrWhiteSpace(auth.EntraId.Audience)) audiences.Add(auth.EntraId.Audience);
-            if (!string.IsNullOrWhiteSpace(auth.EntraId.ClientId)) audiences.Add(auth.EntraId.ClientId);
-
-            var legacyEntraRealm = new IdentityRealm(
-                Id: "workforce-entra-legacy",
-                Kind: IdentityRealmKind.EntraWorkforce,
-                Issuers: entraIssuers,
-                MetadataAddress: auth.EntraId.MetadataAddress,
-                Audiences: audiences,
-                AllowedClientIds: null,
-                UserKeyClaim: "oid",
-                UpnClaim: "upn",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
-                GroupSource: RealmGroupSource.Token,
-                ResolverChain: ["scim-store", "entra-app-roles"],
-                Provisioning: RealmProvisioningMode.None,
-                AllowedGatewayRoles: Enum.GetValues<GatewayRole>().ToHashSet(),
-                Delegable: true,
-                IsImplicitLegacy: true
-            );
-            RegisterRealm(legacyEntraRealm);
-        }
-
-        if (auth.Adfs.Enabled && !_realmsById.ContainsKey("corp-adfs-legacy"))
-        {
-            var adfsIssuers = new List<string>();
-            if (!string.IsNullOrWhiteSpace(auth.Adfs.Authority))
-            {
-                adfsIssuers.Add(auth.Adfs.Authority);
-            }
-
-            var legacyAdfsRealm = new IdentityRealm(
-                Id: "corp-adfs-legacy",
-                Kind: IdentityRealmKind.Adfs,
-                Issuers: adfsIssuers,
-                MetadataAddress: auth.Adfs.MetadataAddress,
-                Audiences: string.IsNullOrWhiteSpace(auth.Adfs.Audience) ? [] : [auth.Adfs.Audience],
-                AllowedClientIds: null,
-                UserKeyClaim: "sub",
-                UpnClaim: "upn",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
-                GroupSource: RealmGroupSource.Token,
-                ResolverChain: ["static-mapping"],
-                Provisioning: RealmProvisioningMode.None,
-                AllowedGatewayRoles: Enum.GetValues<GatewayRole>().ToHashSet(),
-                Delegable: false,
-                IsImplicitLegacy: true
-            );
-            RegisterRealm(legacyAdfsRealm);
-        }
-
-        if (auth.BasicAuth.Enabled && !_realmsById.ContainsKey("legacy-basic"))
-        {
-            var legacyBasicRealm = new IdentityRealm(
-                Id: "legacy-basic",
-                Kind: IdentityRealmKind.Basic,
-                Issuers: ["autheris:basic"],
-                MetadataAddress: null,
-                Audiences: ["autheris:gateway"],
-                AllowedClientIds: null,
-                UserKeyClaim: "sub",
-                UpnClaim: "name",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
-                GroupSource: RealmGroupSource.Token,
-                ResolverChain: ["static-mapping"],
-                Provisioning: RealmProvisioningMode.None,
-                AllowedGatewayRoles: Enum.GetValues<GatewayRole>().ToHashSet(),
-                Delegable: false,
-                IsImplicitLegacy: true
-            );
-            RegisterRealm(legacyBasicRealm);
-        }
-
-        if (auth.ForwardAuth.Enabled && !_realmsById.ContainsKey("legacy-forwardauth"))
-        {
-            var legacyForwardAuthRealm = new IdentityRealm(
-                Id: "legacy-forwardauth",
-                Kind: IdentityRealmKind.ForwardAuth,
-                Issuers: ["autheris:forwardauth"],
-                MetadataAddress: null,
-                Audiences: ["autheris:gateway"],
-                AllowedClientIds: null,
-                UserKeyClaim: "sub",
-                UpnClaim: "name",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
-                GroupSource: RealmGroupSource.Token,
-                ResolverChain: ["static-mapping"],
-                Provisioning: RealmProvisioningMode.None,
-                AllowedGatewayRoles: Enum.GetValues<GatewayRole>().ToHashSet(),
-                Delegable: false,
-                IsImplicitLegacy: true
-            );
-            RegisterRealm(legacyForwardAuthRealm);
-        }
-
-        if (auth.IsKerberosConfigured && !_realmsById.ContainsKey("legacy-kerberos"))
-        {
-            var legacyKerberosRealm = new IdentityRealm(
-                Id: "legacy-kerberos",
-                Kind: IdentityRealmKind.Kerberos,
-                Issuers: ["autheris:kerberos"],
-                MetadataAddress: null,
-                Audiences: ["autheris:gateway"],
-                AllowedClientIds: null,
-                UserKeyClaim: "sub",
-                UpnClaim: "upn",
-                TenantBinding: TenantBindingSpecification.Fixed(TenantId.LegacySingleTenant),
-                GroupSource: RealmGroupSource.Token,
-                ResolverChain: ["static-mapping"],
-                Provisioning: RealmProvisioningMode.None,
-                AllowedGatewayRoles: Enum.GetValues<GatewayRole>().ToHashSet(),
-                Delegable: false,
-                IsImplicitLegacy: true
-            );
-            RegisterRealm(legacyKerberosRealm);
         }
     }
 

@@ -13,4 +13,3 @@ Autheris.Domain.Options.DevToolingOptions.Introspection|DevConfiguration
 Autheris.Domain.Options.EnvoyExtAuthzOptions.TrustedPeers|IsTrustedPeer
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassAllowedRoles|GetEffectiveBreakGlassAllowedRoles
 Autheris.Domain.Options.GatewayOptions.Insecure|IsMcpAuthBypassed
-Autheris.Domain.Options.RedisOptions.FailClosedOnRevocationLookupError|ResolveFailClosedOnRevocationLookupError

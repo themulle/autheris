@@ -49,7 +49,7 @@ public class LineageTraversalTests
             Id = consentId,
             TableId = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("finance", "dbo", "table_a"),
-            TenantId = new TenantId("tenant-a"), // SEC M-15: keine LegacySingleTenant-Ausnahme mehr
+            TenantId = new TenantId("tenant-a"), // SEC M-15: no tenant exception; the caller tenant is always explicit
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-USER-1"),
@@ -91,7 +91,7 @@ public class LineageTraversalTests
             Id = consentId,
             TableId = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("sales", "dbo", "orders"),
-            TenantId = new TenantId("tenant-a"), // SEC M-15: keine LegacySingleTenant-Ausnahme mehr
+            TenantId = new TenantId("tenant-a"), // SEC M-15: no tenant exception; the caller tenant is always explicit
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-ANALYST"),
@@ -138,7 +138,7 @@ public class LineageTraversalTests
             Id = consentId,
             TableId = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("sales", "dbo", "orders"),
-            TenantId = new TenantId("tenant-a"), // SEC M-15: keine LegacySingleTenant-Ausnahme mehr
+            TenantId = new TenantId("tenant-a"), // SEC M-15: no tenant exception; the caller tenant is always explicit
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-ADMIN"),
@@ -182,7 +182,7 @@ public class LineageTraversalTests
             Id = consentId,
             TableId = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("core", "dbo", "source"),
-            TenantId = new TenantId("tenant-a"), // SEC M-15: keine LegacySingleTenant-Ausnahme mehr
+            TenantId = new TenantId("tenant-a"), // SEC M-15: no tenant exception; the caller tenant is always explicit
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-USER"),
@@ -236,7 +236,7 @@ public class LineageTraversalTests
             Id = consentId,
             TableId = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("perf", "dbo", "root"),
-            TenantId = new TenantId("perf-tenant"), // SEC M-15: keine LegacySingleTenant-Ausnahme mehr
+            TenantId = new TenantId("perf-tenant"), // SEC M-15: no tenant exception; the caller tenant is always explicit
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-PERF-USER"),

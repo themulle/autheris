@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -314,7 +315,7 @@ public sealed class McpDatasetCatalogScopeLevelTests
     {
         var table = CreateTable(DatasetVisibility.Full, releaseProfileToCatalogViewers: true);
         var catalog = CreateCatalog(table, [DenyEffect(Rule("grade", ColumnAccessLevel.Deny))],
-            gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Domain.Options.TenancyMode.Multi, "sales.public.orders"));
+            gatewayOptions: Autheris.Tests.Unit.Catalog.Wp0.Options(Autheris.Tests.Common.TenancyShape.Multi, "sales.public.orders"));
 
         var forwardAuth = Principal(authenticationType: "ForwardAuth", roles: ["ClusterAdmin"]);
         Grade(await DescribeAsync(catalog, forwardAuth))!.ValueProfile.ShouldBeNull();

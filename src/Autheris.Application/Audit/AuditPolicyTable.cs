@@ -20,6 +20,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.TokenRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TokenRevokedHit] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TenantCollisionDenied] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.TenancyDefaultTenantConfigured] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.TenantCollisionResolved] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogRead] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.MetadataExport] = AuditFailurePolicy.BestEffort,

@@ -53,6 +53,7 @@ public sealed class AuditWormExportTests
             {
                 new AuditLogEntry
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     OccurredAt = now.AddHours(-2),
                     EventType = "QUERY_EXECUTION",
                     ActorSid = new Sid("S-1-5-21-999"),
@@ -65,6 +66,7 @@ public sealed class AuditWormExportTests
                 },
                 new AuditLogEntry
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     OccurredAt = now.AddHours(-1),
                     EventType = "CONSENT_APPROVED",
                     ActorSid = new Sid("S-1-5-21-888"),
@@ -163,6 +165,7 @@ public sealed class AuditWormExportTests
         {
             new AuditLogEntry
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 OccurredAt = now.AddHours(-1),
                 EventType = "QUERY_EXECUTION",
                 ActorSid = new Sid("S-1-5-21-999"),

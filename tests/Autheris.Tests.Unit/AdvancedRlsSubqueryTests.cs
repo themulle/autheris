@@ -194,6 +194,7 @@ public class AdvancedRlsSubqueryTests
 
         var consent = new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -459,6 +460,7 @@ public class AdvancedRlsSubqueryTests
 
         var consent = new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,

@@ -24,7 +24,7 @@ public sealed partial class DbtCompositeRelationTests
         var h = new Harness();
         using var stream = SourcesOnly();
 
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
 
         result.Success.ShouldBeTrue();
         result.ImportedRelationsCount.ShouldBe(2);
@@ -45,8 +45,8 @@ public sealed partial class DbtCompositeRelationTests
         using var first = SourcesOnly();
         using var second = SourcesOnly();
 
-        await h.Service.IngestManifestStreamAsync(first);
-        await h.Service.IngestManifestStreamAsync(second);
+        await h.Service.IngestManifestStreamAsClusterAdminAsync(first);
+        await h.Service.IngestManifestStreamAsClusterAdminAsync(second);
 
         // The natural key (parent, child, name) and the pairs are identical, so the repository upsert finds the same rows.
         h.Written.Count.ShouldBe(4);
@@ -98,7 +98,7 @@ public sealed partial class DbtCompositeRelationTests
             ["model.p.fct_lines"] = Node("fct_lines", ["x"], [Fk("dim_orders", ["x"], ["a"])])
         });
 
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
 
         h.Written.ShouldBeEmpty();
         result.ImportedRelationsCount.ShouldBe(0);
@@ -169,7 +169,7 @@ public sealed partial class DbtCompositeRelationTests
         });
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
 
-        var result = await h.Service.IngestManifestStreamAsync(stream);
+        var result = await h.Service.IngestManifestStreamAsClusterAdminAsync(stream);
 
         h.Written.ShouldBeEmpty();
         result.Warnings.ShouldContain(w => w.EndsWith("skipped: DUPLICATE_RELATION", StringComparison.Ordinal));

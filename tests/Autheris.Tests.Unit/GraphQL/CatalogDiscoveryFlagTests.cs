@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -25,7 +26,7 @@ public sealed class CatalogDiscoveryFlagTests
     private static readonly TableMetadata Orders = Wp0.Table("sales", "orders", columns: ["id", "amount", "secret_note"]);
     private static readonly TableMetadata Invoices = Wp0.Table("fin", "invoices", columns: ["id"]);
 
-    private static Task<IReadOnlyList<TableMetadataDto>> CatalogAsync(ClaimsPrincipal user, bool flag, TenancyMode mode = TenancyMode.Multi, params Consent[] consents)
+    private static Task<IReadOnlyList<TableMetadataDto>> CatalogAsync(ClaimsPrincipal user, bool flag, TenancyShape mode = TenancyShape.Multi, params Consent[] consents)
     {
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
@@ -58,12 +59,13 @@ public sealed class CatalogDiscoveryFlagTests
 
     [Fact]
     public async Task FlagOn_ClaimlessGovernanceAdmin_Multi_IsNotAnAdministrator()
-        => (await CatalogAsync(Wp0.User("S-ADM", null, ["GovernanceAdmin"]), flag: true)).ShouldBeEmpty();
+        => (await Should.ThrowAsync<HotChocolate.GraphQLException>(() => CatalogAsync(Wp0.User("S-ADM", null, ["GovernanceAdmin"]), flag: true)))
+            .Errors.ShouldContain(e => e.Code == "UNAUTHORIZED"); // DT-A-3: no tenant claim, no default tenant
 
     [Fact]
     public async Task FlagOn_SingleModeGovernanceAdminAndClusterAdmin_Unchanged()
     {
-        (await CatalogAsync(Wp0.User("S-ADM", null, ["GovernanceAdmin"]), flag: true, TenancyMode.Single)).Count.ShouldBe(2);
+        (await CatalogAsync(Wp0.User("S-ADM", Wp0.SingleTenantClaim, ["GovernanceAdmin"]), flag: true, TenancyShape.Single)).Count.ShouldBe(2);
         (await CatalogAsync(Wp0.User("root", "tenant-a", ["ClusterAdmin"]), flag: true)).Count.ShouldBe(2);
     }
 }

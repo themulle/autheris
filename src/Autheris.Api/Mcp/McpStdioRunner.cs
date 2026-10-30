@@ -13,7 +13,8 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class McpStdioRunner(
     IMcpProtocolHandler protocolHandler,
-    ILogger<McpStdioRunner>? logger = null) : IMcpStdioRunner
+    ILogger<McpStdioRunner>? logger = null,
+    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null) : IMcpStdioRunner
 {
     private readonly IMcpProtocolHandler _protocolHandler = protocolHandler ?? throw new ArgumentNullException(nameof(protocolHandler));
     private readonly ILogger<McpStdioRunner>? _logger = logger;
@@ -22,13 +23,20 @@ public sealed class McpStdioRunner(
         TextReader input,
         TextWriter output,
         string servicePrincipalId = "cli-developer",
-        string tenantId = "legacy-single-tenant",
+        string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
 
-        var session = _protocolHandler.CreateSession(servicePrincipalId, tenantId);
+        // DT-A-9: the session tenant is the explicit --tenant, else the configured default tenant; there is no built-in tenant.
+        var sessionTenant = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : tenantResolver?.DefaultTenant?.Value;
+        if (string.IsNullOrWhiteSpace(sessionTenant))
+        {
+            throw new InvalidOperationException("The MCP stdio session has no tenant: pass one or configure Gateway:Tenancy:DefaultTenantId.");
+        }
+
+        var session = _protocolHandler.CreateSession(servicePrincipalId, sessionTenant);
         _logger?.LogInformation("Started MCP Stdio session '{SessionId}' for principal '{Principal}'.", session.SessionId, servicePrincipalId);
 
         try

@@ -45,45 +45,16 @@ public sealed class IdentityRealmRegistryTests
     }
 
     [Fact]
-    public void IdentityRealmRegistry_SynthesizesLegacyRealms_WhenNotConfigured()
-    {
-        var registry = new IdentityRealmRegistry();
-        var emptyOptions = new IdentityRealmsOptions();
-        var legacyOptions = new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions
-            {
-                EntraId = new EntraIdAuthOptions
-                {
-                    Enabled = true,
-                    TenantId = "legacy-tenant",
-                    Instance = "https://login.microsoftonline.com"
-                }
-            }
-        };
-
-        registry.Initialize(legacyOptions, emptyOptions);
-
-        var defaultRealm = registry.GetDefaultRealm();
-        defaultRealm.ShouldNotBeNull();
-        defaultRealm.RealmId.ShouldBe("workforce-entra-legacy");
-
-        var resolved = registry.ResolveByIssuer("https://login.microsoftonline.com/legacy-tenant");
-        resolved.ShouldNotBeNull();
-        resolved.RealmId.ShouldBe("workforce-entra-legacy");
-    }
-
-    [Fact]
     public void IdentityRealmOptionsValidator_CustomerRealmBoundToCorporateTenant_FailsValidation()
     {
         var options = new IdentityRealmsOptions();
         options.Realms["customer-realm"] = new IdentityRealmConfigOptions
         {
             Kind = IdentityRealmKind.EntraExternalId,
-            FixedTenantId = TenantId.LegacySingleTenant.Value
+            FixedTenantId = Autheris.Tests.Common.TestTenants.Default.Value
         };
 
-        var act = () => IdentityRealmOptionsValidator.Validate(options, TenantId.LegacySingleTenant);
+        var act = () => IdentityRealmOptionsValidator.Validate(options, Autheris.Tests.Common.TestTenants.Default);
 
         act.ShouldThrow<ValidationException>();
     }
@@ -142,47 +113,12 @@ public sealed class IdentityRealmRegistryTests
             Issuers = ["https://custom.issuer.com"]
         };
 
-        registry.Initialize(new GatewayOptions(), realmsOptions);
+        registry.Initialize(realmsOptions);
 
         var realm = registry.GetRealm("custom-realm-42");
         realm.ShouldNotBeNull();
         realm.Id.ShouldBe("custom-realm-42");
         realm.Kind.ShouldBe(IdentityRealmKind.GenericOidc);
-    }
-
-    [Fact]
-    public void IdentityRealmRegistry_ExistingWorkforceEntra_SuppressesLegacySynthesis()
-    {
-        var registry = new IdentityRealmRegistry();
-        var realmsOptions = new IdentityRealmsOptions();
-        realmsOptions.Realms["workforce-entra"] = new IdentityRealmConfigOptions
-        {
-            Kind = IdentityRealmKind.EntraWorkforce,
-            FixedTenantId = "tenant-primary",
-            Issuers = ["https://explicit-entra.microsoft.com"]
-        };
-
-        var gatewayOptions = new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions
-            {
-                EntraId = new EntraIdAuthOptions
-                {
-                    Enabled = true,
-                    TenantId = "legacy-tenant",
-                    Instance = "https://legacy-authority.example.com"
-                }
-            }
-        };
-
-        registry.Initialize(gatewayOptions, realmsOptions);
-
-        var explicitRealm = registry.GetRealm("workforce-entra");
-        explicitRealm.ShouldNotBeNull();
-        explicitRealm.IsImplicitLegacy.ShouldBeFalse();
-
-        // Must NOT synthesize workforce-entra-legacy when workforce-entra exists
-        registry.GetAllRealms().ShouldNotContain(r => r.Id == "workforce-entra-legacy");
     }
 
     [Theory]
@@ -225,7 +161,7 @@ public sealed class IdentityRealmRegistryTests
     }
 
     [Fact]
-    public void IdentityRealmRegistry_Initialize_WithClaimMappedTenantAndAdfsBasic_SynthesizesCorrectly()
+    public void IdentityRealmRegistry_Initialize_WithClaimMappedTenant_MapsRolesAndBinding()
     {
         var registry = new IdentityRealmRegistry();
         var realmsOptions = new IdentityRealmsOptions();
@@ -237,88 +173,13 @@ public sealed class IdentityRealmRegistryTests
             AllowedGatewayRoles = ["Consumer", "InvalidRoleName"]
         };
 
-        var gatewayOptions = new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions
-            {
-                Adfs = new AdfsAuthOptions
-                {
-                    Enabled = true,
-                    Authority = "https://adfs.company.com/adfs",
-                    Audience = "urn:autheris:adfs"
-                },
-                BasicAuth = new BasicAuthOptions
-                {
-                    Enabled = true
-                }
-            }
-        };
-
-        registry.Initialize(gatewayOptions, realmsOptions);
+        registry.Initialize(realmsOptions);
 
         var claimRealm = registry.GetRealm("claim-mapped-realm");
         claimRealm.ShouldNotBeNull();
         claimRealm.TenantBinding.Kind.ShouldBe(TenantBindingKind.ClaimMapped);
         claimRealm.AllowedGatewayRoles.ShouldContain(GatewayRole.Consumer);
-
-        var adfsRealm = registry.GetRealm("corp-adfs-legacy");
-        adfsRealm.ShouldNotBeNull();
-        adfsRealm.Kind.ShouldBe(IdentityRealmKind.Adfs);
-        adfsRealm.Issuers.ShouldContain("https://adfs.company.com/adfs");
-
-        var basicRealm = registry.GetRealm("legacy-basic");
-        basicRealm.ShouldNotBeNull();
-        basicRealm.Kind.ShouldBe(IdentityRealmKind.Basic);
-
-        registry.GetAllRealms().Count.ShouldBeGreaterThanOrEqualTo(3);
-    }
-
-    [Fact]
-    public void IdentityRealmRegistry_Initialize_DisabledLegacyOptions_DoNotSynthesizeRealms()
-    {
-        var registry = new IdentityRealmRegistry();
-        var gatewayOptions = new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions
-            {
-                EntraId = new EntraIdAuthOptions { Enabled = false },
-                Adfs = new AdfsAuthOptions { Enabled = false },
-                BasicAuth = new BasicAuthOptions { Enabled = false },
-                EnableKerberos = false
-            }
-        };
-
-        registry.Initialize(gatewayOptions);
-
-        registry.GetRealm("workforce-entra-legacy").ShouldBeNull();
-        registry.GetRealm("corp-adfs-legacy").ShouldBeNull();
-        registry.GetRealm("legacy-basic").ShouldBeNull();
-        registry.GetRealm("legacy-kerberos").ShouldBeNull();
-    }
-
-    [Fact]
-    public void IdentityRealmRegistry_Initialize_EntraLegacy_PopulatesTenantIssuers()
-    {
-        var registry = new IdentityRealmRegistry();
-        var gatewayOptions = new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions
-            {
-                EntraId = new EntraIdAuthOptions
-                {
-                    Enabled = true,
-                    TenantId = "tenant-guid",
-                    Audience = "api://autheris"
-                }
-            }
-        };
-
-        registry.Initialize(gatewayOptions);
-
-        var entraRealm = registry.GetRealm("workforce-entra-legacy");
-        entraRealm.ShouldNotBeNull();
-        entraRealm.Issuers.ShouldContain("https://login.microsoftonline.com/tenant-guid/v2.0");
-        entraRealm.Issuers.ShouldContain("https://sts.windows.net/tenant-guid/");
+        claimRealm.AllowedGatewayRoles.Count.ShouldBe(1);
     }
 
     [Fact]
@@ -367,7 +228,7 @@ public sealed class IdentityRealmRegistryTests
     }
 
     [Fact]
-    public void IdentityRealmRegistry_Initialize_WithPartialClaimMapping_FallsBackToFixedLegacy()
+    public void IdentityRealmRegistry_Initialize_WithPartialClaimMapping_IsUnbound()
     {
         var registry = new IdentityRealmRegistry();
         var realmsOptions = new IdentityRealmsOptions();
@@ -378,35 +239,12 @@ public sealed class IdentityRealmRegistryTests
             TenantClaimMapping = null
         };
 
-        var gatewayOptions = new GatewayOptions();
-        registry.Initialize(gatewayOptions, realmsOptions);
+        registry.Initialize(realmsOptions);
 
         var realm = registry.GetRealm("partial-claim");
         realm.ShouldNotBeNull();
-        realm.TenantBinding.Kind.ShouldBe(TenantBindingKind.Fixed);
+        // DT-A-11/DT-A-3: a partial mapping binds nothing (token tenant claims are ignored, the configured default fills); never a legacy tenant.
+        realm.TenantBinding.Kind.ShouldBe(TenantBindingKind.Unbound);
     }
 
-    [Fact]
-    public void IdentityRealmRegistry_Initialize_WithForwardAuthAndKerberos_SynthesizesCorrectly()
-    {
-        var registry = new IdentityRealmRegistry();
-        var gatewayOptions = new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions
-            {
-                ForwardAuth = new ForwardAuthOptions { Enabled = true },
-                EnableKerberos = true
-            }
-        };
-
-        registry.Initialize(gatewayOptions);
-
-        var forwardAuth = registry.GetRealm("legacy-forwardauth");
-        forwardAuth.ShouldNotBeNull();
-        forwardAuth.Kind.ShouldBe(IdentityRealmKind.ForwardAuth);
-
-        var kerberos = registry.GetRealm("legacy-kerberos");
-        kerberos.ShouldNotBeNull();
-        kerberos.Kind.ShouldBe(IdentityRealmKind.Kerberos);
-    }
 }

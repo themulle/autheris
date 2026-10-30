@@ -28,7 +28,7 @@ public sealed partial class AiDataGuardrailService
             var actorSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
                 ? new Sid(sessionContext.UserSid)
                 : new Sid(sessionContext.ServicePrincipalId);
-            var tenantId = TenantId.TryParse(sessionContext.TenantId, out var tid) ? tid : TenantId.LegacySingleTenant;
+            var tenantId = TenantId.TryParse(sessionContext.TenantId, out var tid) ? tid : TenantId.Platform;
             var entry = new AuditLogEntry
             {
                 TenantId = tenantId,

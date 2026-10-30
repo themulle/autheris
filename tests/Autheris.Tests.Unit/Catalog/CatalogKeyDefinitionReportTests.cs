@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -48,7 +49,7 @@ public sealed class CatalogKeyDefinitionReportTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Id, Arg.Any<CancellationToken>()).Returns(Table());
         var consents = Substitute.For<IConsentRepository>();
-        var options = Wp0.Options(Autheris.Domain.Options.TenancyMode.Single);
+        var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         var service = new CatalogDiscoveryService(
             repo,
             Substitute.For<IAuditLogRepository>(),

@@ -157,8 +157,9 @@ public sealed class InMemoryRebacStore : IRebacStore
         return ValueTask.CompletedTask;
     }
 
+    // DT-A-9: a store operation without a tenant fails closed; there is no implicit tenant.
     private static string NormalizeTenant(string? tenantId) =>
-        string.IsNullOrWhiteSpace(tenantId) ? "default" : tenantId.Trim();
+        string.IsNullOrWhiteSpace(tenantId) ? throw new Autheris.Domain.Exceptions.TenantUnresolvedException() : tenantId.Trim();
 
     private static string BuildKey(string user, string relation, string obj) =>
         $"{user}#{relation}@{obj}";

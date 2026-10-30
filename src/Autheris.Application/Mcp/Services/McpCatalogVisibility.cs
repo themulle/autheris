@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,8 +31,8 @@ internal static class McpCatalogVisibility
         => VisibleTablesAsync(allTables, principal, consentRepo, options: null, ct);
 
     /// <summary>
-    /// Same rule with the deployment tenancy setting: <paramref name="options"/> supplies <c>Gateway:Tenancy:Mode</c> and
-    /// <c>Gateway:Catalog:SharedTables</c>. Without options the mode is <see cref="TenancyMode.Multi"/> (confined view).
+    /// Same rule with the deployment tenancy setting: <paramref name="options"/> supplies <c>Gateway:Tenancy:DefaultTenantId</c> and
+    /// <c>Gateway:Catalog:SharedTables</c>. Without options there is no catalog owner (confined view).
     /// </summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
@@ -59,7 +60,7 @@ internal static class McpCatalogVisibility
             SafeTenantId(principal),
             consentRepo,
             contract: null,
-            options?.Tenancy.EffectiveMode ?? TenancyMode.Multi,
+            TenantResolver.EffectiveDefaultOf(options?.Tenancy),
             options?.Catalog.SharedTables,
             CatalogSurface.DataAccess,
             ct).ConfigureAwait(false);
@@ -96,16 +97,16 @@ internal static class McpCatalogVisibility
         return tables.Where(t => visible.Contains(t.Identifier)).ToList();
     }
 
-    // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup never sees it.
+    // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup sees the reserved platform tenant, which holds no consents (fail closed).
     internal static TenantId SafeTenantId(ClaimsPrincipal principal)
     {
         try
         {
             return principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            return TenantId.LegacySingleTenant;
+            return TenantId.Platform;
         }
     }
 }

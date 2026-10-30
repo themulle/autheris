@@ -41,7 +41,7 @@ public sealed class QueryAnalysisSimulationPrivilegeTests
             claims.Add(new Claim("role", role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth"));
     }
 
     private static QueryAnalysisService CreateService()
@@ -132,7 +132,7 @@ public sealed class QueryAnalysisSimulationPrivilegeTests
     public async Task Service_AdminCallerSimulatingItsOwnSid_HasNoAdminSemantics()
     {
         var admin = CreatePrincipal("admin-1", "GovernanceAdmin");
-        var target = QueryAnalysisService.CreateSimulatedTargetPrincipal("admin-1", ["GovernanceAdmin"]);
+        var target = QueryAnalysisService.CreateSimulatedTargetPrincipal("admin-1", ["GovernanceAdmin"], DefaultTenantCaller.Claim.Value);
 
         var result = await CreateService().AnalyzeQueriesAsync(Queries, admin, target);
 

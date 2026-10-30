@@ -1,6 +1,7 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using Autheris.Application.Audit;
+using Autheris.Application.Tenancy;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.DataCatalog.Services;
@@ -113,6 +114,7 @@ public static partial class GatewayGovernanceServiceExtensions
 
         // Governance Data Classification Engine & Workflows
         services.AddAutherisDataClassification();
+        services.AddAutherisTenancy();
 
         // DataHub & Data Contract Engine (REQ-DATAHUB-01)
         services.AddSingleton<IDataContractEngine, InMemoryDataContractEngine>();

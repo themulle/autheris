@@ -52,7 +52,6 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_dbFile}");
-            b.UseSetting("Gateway:Tenancy:Mode", "Multi");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:SystemMetrics:Enabled", systemMetricsEnabled ? "true" : "false");
         });
@@ -89,6 +88,7 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-ADMIN");
         client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-a"); // DT-A-3: a tenant-less caller is refused at the gate (Multi, no default)
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         return client;
     }

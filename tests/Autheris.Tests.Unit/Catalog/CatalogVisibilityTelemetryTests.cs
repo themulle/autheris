@@ -78,13 +78,13 @@ public sealed class CatalogVisibilityTelemetryTests
     private CatalogGovernanceHostedService Create(DatasetVisibility defaultVisibility = DatasetVisibility.Hidden, string? mode = null, StaticOptionsMonitor<GatewayOptions>? monitor = null)
         => new(_audit, monitor ?? new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
-            Tenancy = new TenancyOptions { Mode = mode },
+            Tenancy = new TenancyOptions { DefaultTenantId = string.Equals(mode, "Single", StringComparison.Ordinal) ? "default-tenant" : null },
             Catalog = new DataCatalogOptions { DefaultVisibility = defaultVisibility }
         }), new CatalogVisibilityMetrics(_tables, NullLogger<CatalogVisibilityMetrics>.Instance), NullLogger<CatalogGovernanceHostedService>.Instance);
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task SEC_111_12_Startup_AuditsTheEffectiveDefaultVisibilityAndTenancyMode()
+    public async Task SEC_111_12_Startup_AuditsTheEffectiveDefaultVisibilityAndDefaultTenant()
     {
         _tables.GetDatasetVisibilityCountsAsync(Arg.Any<CancellationToken>()).Returns(new DatasetVisibilityCounts(0, 0, 0));
 
@@ -94,18 +94,18 @@ public sealed class CatalogVisibilityTelemetryTests
             e.EventType == AuditEventTypes.CatalogVisibilityChanged
             && e.DetailsJson.Contains("\"source\":\"startup\"")
             && e.DetailsJson.Contains("\"defaultVisibility\":\"Summary\"")
-            && e.DetailsJson.Contains("\"tenancyMode\":\"Single\"")), Arg.Any<CancellationToken>());
+            && e.DetailsJson.Contains("\"defaultTenant\":\"Configured\"")), Arg.Any<CancellationToken>());
     }
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task SEC_111_12_Startup_DefaultedTenancyMode_IsAuditedAsMulti()
+    public async Task SEC_111_12_Startup_NoDefaultTenant_IsAuditedAsNone()
     {
         _tables.GetDatasetVisibilityCountsAsync(Arg.Any<CancellationToken>()).Returns(new DatasetVisibilityCounts(0, 0, 0));
 
         await Create().StartAsync(default);
 
-        await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e => e.DetailsJson.Contains("\"tenancyMode\":\"Multi\"")), Arg.Any<CancellationToken>());
+        await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e => e.DetailsJson.Contains("\"defaultTenant\":\"None\"")), Arg.Any<CancellationToken>());
     }
 
     [Trait("Category", "Security")]

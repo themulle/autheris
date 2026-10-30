@@ -19,6 +19,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Catalog;
 using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -97,7 +98,7 @@ public sealed class DatasetIndexVisibilityLeakTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(table);
         var consents = Substitute.For<IConsentRepository>();
-        var options = Wp0.Options(TenancyMode.Single);
+        var options = Wp0.Options(TenancyShape.Single);
         return new CatalogDiscoveryService(
             repo,
             Substitute.For<IAuditLogRepository>(),
@@ -247,7 +248,7 @@ public sealed class DatasetIndexVisibilityLeakTests
         };
         var tables = Wp0.Tables(PlainTable());
         var consents = Wp0.Consents(consent);
-        var options = Wp0.Options(TenancyMode.Multi);
+        var options = Wp0.Options(TenancyShape.Multi);
         var service = new CatalogDiscoveryService(
             tables,
             Substitute.For<IAuditLogRepository>(),

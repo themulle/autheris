@@ -289,7 +289,7 @@ public sealed class Issue112SecurityConditionsTests
         var tenantB = new TenantId("tenant-b");
         var validTable = new TableMetadata
         {
-            Identifier = SemanticVirtualTables.IdentifierFor(tenantA, TenancyMode.Multi, "model1"),
+            Identifier = SemanticVirtualTables.IdentifierFor(tenantA, "model1"),
             Table = new Table { DocumentationSource = "dbt", SchemaName = SemanticVirtualTables.TenantSchema(tenantA) }
         };
         SemanticVirtualTables.BelongsToTenant(validTable, tenantA).ShouldBeTrue();

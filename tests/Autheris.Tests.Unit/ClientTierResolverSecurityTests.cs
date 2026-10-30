@@ -85,12 +85,12 @@ public sealed class ClientTierResolverSecurityTests
             new Claim(ClaimTypes.NameIdentifier, "user-42"),
             new Claim("tier", "Enterprise")
         };
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "Bearer"));
 
         var context = await _resolver.ResolveAsync(principal, null, "127.0.0.1");
 
         context.Tier.ShouldBe(ClientTier.Enterprise);
         // SEC M-16: Subjekt = Tenant + Benutzer-SID
-        context.SubjectId.ShouldBe($"user:{TenantId.LegacySingleTenant.Value}:user-42");
+        context.SubjectId.ShouldBe($"user:{Autheris.Tests.Common.TestTenants.Default.Value}:user-42");
     }
 }

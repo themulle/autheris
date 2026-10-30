@@ -102,7 +102,7 @@ public sealed class SecurityReviewMcpHighTests
     // W0-C2: the administrator shortcut before the Four-Eyes gate comes from the canonical caller class, never from session role strings.
     [Theory]
     [InlineData("tenant-a", "GovernanceAdmin", "not accessible")]
-    [InlineData("legacy-single-tenant", "GovernanceAdmin", "not accessible")]
+    [InlineData("default-tenant", "GovernanceAdmin", "not accessible")]
     [InlineData("tenant-a", "tenant:ClusterAdmin", "not accessible")]
     [InlineData("tenant-a", "ClusterAdmin", "Four-Eyes")]
     public async Task QuerySql_CatalogVisibilityShortcut_FollowsTheCanonicalCallerClass(string tenant, string role, string expectedDenial)

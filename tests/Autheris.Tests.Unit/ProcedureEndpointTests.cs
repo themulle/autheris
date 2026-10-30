@@ -204,7 +204,7 @@ public class ProcedureEndpointTests
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-1-5-21-1001") };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "test"));
     }
 
     private static TableMetadata OrdersTable() => new()

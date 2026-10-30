@@ -276,6 +276,7 @@ public sealed class Wave3CatalogOwnershipTests
 
         var pendingReq = new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = Customers,
             Status = "PENDING",
             RequesterSid = new Sid("S-1-USER")

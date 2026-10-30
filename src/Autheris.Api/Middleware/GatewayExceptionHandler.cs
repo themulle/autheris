@@ -72,7 +72,9 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         else
         {
             (status, title, retryAfter) = Map(exception);
-            code = CodeForStatus(status);
+            code = (exception as GatewaySecurityException) is { } denied
+                ? GatewayDenialStatusMapper.SpecificCode(denied) ?? CodeForStatus(status)
+                : CodeForStatus(status);
 
             // DEF-02: a data-integrity refusal of a consent is a deliberate deny (403, fixed title); the governed code tells operators which one.
             if (exception is ConsentTenantIntegrityException)

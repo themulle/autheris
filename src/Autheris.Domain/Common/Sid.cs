@@ -171,36 +171,19 @@ public static class ClaimsPrincipalExtensions
 
     public static Func<string, Autheris.Domain.Identity.IdentityRealm?>? RealmLookup { get; set; }
 
+    /// <summary>
+    /// DT-A-3: the tenant of the principal, read from its claims only (the claims transformation stamped the resolved tenant: claim, realm
+    /// binding or the configured default tenant). Never returns a sentinel: an absent tenant throws <see cref="Autheris.Domain.Exceptions.TenantUnresolvedException"/>,
+    /// an invalid, reserved or conflicting one <see cref="Autheris.Domain.Exceptions.TenantClaimInvalidException"/> (fixed messages, no value echo).
+    /// </summary>
     public static TenantId GetTenantId(this System.Security.Claims.ClaimsPrincipal? principal)
     {
-        if (principal == null) return TenantId.LegacySingleTenant;
-
-        var realmId = principal.FindFirst("autheris:realm")?.Value;
-        if (!string.IsNullOrWhiteSpace(realmId) && RealmLookup != null)
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        return claim.Kind switch
         {
-            var realm = RealmLookup(realmId);
-            if (realm != null)
-            {
-                return realm.TenantBinding.ResolveTenant(principal);
-            }
-        }
-
-        var val = principal.FindFirst("tenant_id")?.Value
-            ?? principal.FindFirst("tid")?.Value
-            ?? principal.FindFirst("tenant")?.Value
-            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        if (string.IsNullOrWhiteSpace(val))
-        {
-            return TenantId.LegacySingleTenant;
-        }
-
-        if (TenantId.TryParse(val, out var parsed))
-        {
-            return parsed;
-        }
-
-        // API-7 / D-6: the raw claim value is never echoed (it reaches logs and, via the security context middleware, clients).
-        throw new System.Security.SecurityException("Invalid tenant claim value. The tenant identifier contains illegal characters or does not meet format requirements.");
+            Autheris.Domain.Tenancy.ClaimTenantKind.Valid => claim.Tenant,
+            Autheris.Domain.Tenancy.ClaimTenantKind.Invalid => throw new Autheris.Domain.Exceptions.TenantClaimInvalidException(),
+            _ => throw new Autheris.Domain.Exceptions.TenantUnresolvedException()
+        };
     }
 }

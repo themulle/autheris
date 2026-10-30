@@ -162,6 +162,46 @@ Gateway__Authentication__ForwardAuth__TrustedNetworks__{{ $i }}: {{ $n | quote }
 Gateway__Authentication__ForwardAuth__SharedSecretKeyVaultRef: {{ . | quote }}
 {{- end }}
 {{- end }}
+{{- /* DT-A-11 / DT-SC-14: identity realms are explicit; an enabled scheme needs a realm of the matching kind. */}}
+{{- $realms := $auth.realms | default dict }}
+{{- $kindOf := dict "entraId" "EntraWorkforce" "adfs" "Adfs" "forwardAuth" "ForwardAuth" "kerberos" "Kerberos" }}
+{{- range $name := $enabled }}
+{{- $kind := index $kindOf $name }}
+{{- $found := false }}
+{{- range $id, $r := $realms }}
+{{- if eq $r.kind $kind }}
+{{- $found = true }}
+{{- end }}
+{{- end }}
+{{- if not $found }}
+{{- fail (printf "gateway.authentication.realms needs a realm of kind %s when gateway.authentication.%s is enabled (no implicit realm exists)" $kind $name) }}
+{{- end }}
+{{- end }}
+{{- range $id, $r := $realms }}
+Authentication__Realms__Realms__{{ $id }}__Kind: {{ required (printf "gateway.authentication.realms.%s.kind is required" $id) $r.kind | quote }}
+{{- if $r.fixedTenantId }}
+Authentication__Realms__Realms__{{ $id }}__FixedTenantId: {{ $r.fixedTenantId | quote }}
+{{- end }}
+Authentication__Realms__Realms__{{ $id }}__Provisioning: {{ $r.provisioning | default "None" | quote }}
+{{- range $key := list "userKeyClaim" "upnClaim" "groupSource" "metadataAddress" }}
+{{- if index $r $key }}
+Authentication__Realms__Realms__{{ $id }}__{{ $key | title }}: {{ index $r $key | quote }}
+{{- end }}
+{{- end }}
+{{- range $list := list "issuers" "audiences" "resolverChain" }}
+{{- range $i, $v := index $r $list }}
+Authentication__Realms__Realms__{{ $id }}__{{ $list | title }}__{{ $i }}: {{ $v | quote }}
+{{- end }}
+{{- end }}
+{{- range $i, $role := $r.allowedGatewayRoles }}
+Authentication__Realms__Realms__{{ $id }}__AllowedGatewayRoles__{{ $i }}: {{ $role | quote }}
+{{- end }}
+{{- end }}
+{{- with .Values.gateway.tenancy }}
+{{- if .defaultTenantId }}
+Gateway__Tenancy__DefaultTenantId: {{ .defaultTenantId | quote }}
+{{- end }}
+{{- end }}
 {{- $ds := .Values.gateway.dataSources }}
 {{- if and $enforce (not $ds.requireTenantColumn) (not $ds.requireTenantColumnExemption) }}
 {{- fail "gateway.dataSources.requireTenantColumn must be true when gateway.production.enforceRequiredSettings is true (or set gateway.dataSources.requireTenantColumnExemption=true to accept shared, tenant-less tables explicitly)" }}
@@ -204,8 +244,7 @@ Rendered as the entries of a container "env" list.
 - name: Gateway__Caching__Redis__InstanceName
   value: {{ .Values.gateway.redis.instanceName | quote }}
 {{- if hasKey .Values.gateway.redis "failClosedOnRevocationLookupError" }}
-- name: Gateway__Caching__Redis__FailClosedOnRevocationLookupError
-  value: {{ .Values.gateway.redis.failClosedOnRevocationLookupError | quote }}
+{{- fail "gateway.redis.failClosedOnRevocationLookupError was removed: the token revocation lookup always fails closed (DT-A-13); delete the key." }}
 {{- end }}
 - name: Gateway__Caching__Redis__RevocationLookupGraceSeconds
   value: {{ .Values.gateway.redis.revocationLookupGraceSeconds | default 60 | quote }}

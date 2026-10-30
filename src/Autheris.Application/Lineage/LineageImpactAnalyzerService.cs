@@ -66,7 +66,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
         var consent = await _consentRepo.GetConsentByIdAsync(consentId, ct).ConfigureAwait(false);
         // BOLA / Cross-tenant protection: reject if consent belongs to a different tenant
-        // SEC M-15: Keine Ausnahme mehr für LegacySingleTenant-Consents (waren mandantenübergreifend sichtbar).
+        // SEC M-15: Keine Ausnahme mehr für Consents ohne Mandant (waren mandantenübergreifend sichtbar).
         if (consent == null ||
             (consent.TenantId != tenant &&
              !callerContext.IsClusterAdmin))
@@ -356,11 +356,11 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         IReadOnlyList<CallingApplicationUsage>? applicationUsages = null;
         bool suppressedSmallGroups = false;
 
-        if (_consumerAggregationRepo != null)
+        if (_consumerAggregationRepo != null && callerContext is not null)
         {
             var window = Math.Clamp(timeWindowDays, 1, 400);
             var since = DateTimeOffset.UtcNow.AddDays(-window);
-            var tenantId = callerContext?.TenantId ?? new TenantId("default");
+            var tenantId = callerContext.TenantId;
 
             var summaries = await _consumerAggregationRepo.QueryConsumerAppDailyAsync(
                 table, tenantId, since, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);

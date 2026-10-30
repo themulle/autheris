@@ -162,7 +162,7 @@ public sealed class RowFilterKeySetSqlServerTests : IClassFixture<RowFilterKeySe
             DependentTable = new TableIdentifier("default", "dbo", "customers"), DependentTableAlias = "c",
             ForeignKeyColumn = "client_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
         };
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], orders)!;
+        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], orders)!;
         var node = predicate.Expression switch
         {
             TrinoSqlEngine.Ast.Nodes.ExistsExpression e => e,

@@ -2,60 +2,49 @@ namespace Autheris.Application.Dbt.Services;
 
 using System.Security.Claims;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Tenancy rules of the persisted semantic catalog (#112 A1-3, SEC-112-13). The mode is read once at construction from
-/// <c>Gateway:Tenancy:EffectiveMode</c>; every value other than <c>Single</c> (unset and unknown included) is Multi behaviour.
+/// Tenancy rules of the persisted semantic catalog (#112 A1-3, SEC-112-13). The catalog is always keyed by tenant (DT-A-7); the default
+/// tenant is the catalog owner and is only different in that its importer sees every physical table (metadata only, DT-SC-08).
 /// </summary>
 public sealed class SemanticTenancy
 {
-    private readonly TenancyMode _mode;
+    private readonly TenantId? _catalogOwner;
 
-    public SemanticTenancy(TenancyMode mode) => _mode = mode;
+    public SemanticTenancy(TenantId? catalogOwner) => _catalogOwner = catalogOwner;
 
     public static SemanticTenancy FromOptions(IOptions<GatewayOptions>? options) =>
-        new(options?.Value.Tenancy.EffectiveMode == TenancyMode.Single ? TenancyMode.Single : TenancyMode.Multi);
+        new(TenantResolver.EffectiveDefaultOf(options?.Value.Tenancy));
 
-    public TenancyMode Mode => _mode;
+    /// <summary>The catalog owner (the default tenant); <c>null</c> when no default tenant is configured.</summary>
+    public TenantId? CatalogOwner => _catalogOwner;
 
-    /// <summary>
-    /// Maps the caller's tenant to the store key. Single: every caller shares the legacy row. Multi: the tenant itself; the legacy tenant
-    /// id is never reachable (a claim-less caller, or a claim that resolves to it, gets no key).
-    /// </summary>
+    /// <summary>True when <paramref name="tenant"/> is the catalog owner.</summary>
+    public bool IsCatalogOwner(TenantId tenant) => CallerScopeResolver.IsOwner(tenant, _catalogOwner);
+
+    /// <summary>Maps the caller's tenant to the store key: the tenant itself; an unset tenant gets no key.</summary>
     public bool TryMapKey(TenantId tenant, out TenantId key)
     {
-        if (_mode == TenancyMode.Single)
-        {
-            key = TenantId.LegacySingleTenant;
-            return true;
-        }
-
         key = tenant;
-        return tenant != TenantId.LegacySingleTenant;
+        return tenant.Value is not null;
     }
 
     /// <summary>
-    /// The tenant a caller may use for the semantic catalog, or <c>null</c> when the caller has no catalog standing: no SID (#138 rule,
-    /// both modes) and, in Multi, no tenant claim. The result is still mapped by <see cref="TryMapKey"/> in the catalog.
+    /// The tenant a caller may use for the semantic catalog, or <c>null</c> when the caller has no catalog standing: no SID (#138 rule)
+    /// or no resolvable tenant (no claim and no default tenant, invalid claim). The result is still mapped by <see cref="TryMapKey"/>.
     /// </summary>
     public TenantId? ResolveCallerTenant(ClaimsPrincipal? principal)
     {
-        var scope = CallerScopeResolver.Resolve(principal, _mode);
-        if (scope is CallerScope.None or CallerScope.Claimless)
+        var resolution = CallerScopeResolver.ResolutionOf(principal, _catalogOwner);
+        if (CallerScopeResolver.Resolve(principal, resolution, _catalogOwner) == CallerScope.None)
         {
             return null;
         }
 
-        try
-        {
-            return principal!.GetTenantId();
-        }
-        catch (System.Security.SecurityException)
-        {
-            return null;
-        }
+        return resolution.Tenant;
     }
 }

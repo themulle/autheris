@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Domain.Security;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -314,7 +315,7 @@ public sealed class McpOpenFindingsSecurityTests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-USER"), new Claim("tenant_id", "tenant-a")], "Bearer"))
         };
-        http.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(http);
 
@@ -380,7 +381,7 @@ public sealed class McpOpenFindingsSecurityTests
                 [new Claim("client_id", "shared-app"), new Claim("appid", "shared-app"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-GROUP"), new Claim("tenant_id", "tenant-a")],
                 "Bearer"))
         };
-        http.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
 
         var caller = McpEndpoints.ResolveCaller(http, allowOpenMcp: false);
 
@@ -397,7 +398,7 @@ public sealed class McpOpenFindingsSecurityTests
                 [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CAROL"), new Claim("client_id", "shared-spa"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-GROUP"), new Claim("tenant_id", "tenant-a")],
                 "Bearer"))
         };
-        http.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("tenant-a");
+        http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
 
         var caller = McpEndpoints.ResolveCaller(http, allowOpenMcp: false);
 

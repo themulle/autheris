@@ -20,6 +20,28 @@ public class GatewaySecurityException : Exception
     }
 }
 
+/// <summary>DT-A-2: the principal has no resolvable tenant (S6). Fixed message, never a tenant or claim value (DT-SC-02).</summary>
+public sealed class TenantUnresolvedException : GatewaySecurityException
+{
+    public const string Code = "TENANT_UNRESOLVED";
+
+    public TenantUnresolvedException()
+        : base("The caller has no resolvable tenant.", Code)
+    {
+    }
+}
+
+/// <summary>DT-A-2: the tenant claim is invalid, reserved or conflicting (S2/S5). Fixed message, never the claim value (DT-SC-02).</summary>
+public sealed class TenantClaimInvalidException : GatewaySecurityException
+{
+    public const string Code = "TENANT_CLAIM_INVALID";
+
+    public TenantClaimInvalidException()
+        : base("The tenant claim of the caller is invalid.", Code)
+    {
+    }
+}
+
 public sealed class GatewayUnauthorizedException : GatewaySecurityException
 {
     public GatewayUnauthorizedException(string message = "Authentication is required to query tables.")

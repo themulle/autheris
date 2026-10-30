@@ -20,10 +20,19 @@ using Microsoft.Extensions.Logging;
 public sealed class GatewayRoleRightAssignmentReport(
     IFunctionalRightRepository repository,
     IIdentityRealmRegistry realmRegistry,
-    ILogger<GatewayRoleRightAssignmentReport> logger) : IHostedService
+    ILogger<GatewayRoleRightAssignmentReport> logger,
+    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null) : IHostedService
 {
     /// <summary>The most role names listed in one log line; the total count is always logged.</summary>
     internal const int MaxListedRoles = 50;
+
+    private static IEnumerable<TenantId> TenantsOf(Autheris.Domain.Identity.IdentityRealm realm, TenantId? defaultTenant) => realm.TenantBinding.Kind switch
+    {
+        Autheris.Domain.Identity.TenantBindingKind.Fixed when realm.TenantBinding.FixedTenantId is { } fixedTenant => [fixedTenant],
+        Autheris.Domain.Identity.TenantBindingKind.ClaimMapped when realm.TenantBinding.Mapping is { } map => map.Values.Distinct(),
+        Autheris.Domain.Identity.TenantBindingKind.Unbound when defaultTenant is { } d => [d],
+        _ => []
+    };
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -32,10 +41,14 @@ public sealed class GatewayRoleRightAssignmentReport(
             var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var realm in realmRegistry.GetAllRealms())
             {
-                var mappings = await repository.GetMappingsAsync(TenantId.LegacySingleTenant, realm.RealmId, cancellationToken).ConfigureAwait(false);
-                foreach (var mapping in mappings.Where(m => m.IsApproved))
+                // DT-A-9: the realm's own tenants (fixed binding, claim mapping values) or the configured default tenant; none means nothing to read.
+                foreach (var tenant in TenantsOf(realm, tenantResolver?.DefaultTenant))
                 {
-                    assigned.Add(mapping.GroupOrRole);
+                    var mappings = await repository.GetMappingsAsync(tenant, realm.RealmId, cancellationToken).ConfigureAwait(false);
+                    foreach (var mapping in mappings.Where(m => m.IsApproved))
+                    {
+                        assigned.Add(mapping.GroupOrRole);
+                    }
                 }
             }
 

@@ -14,6 +14,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -54,7 +55,16 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-CatalogParity-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            b.UseSetting("Gateway:Tenancy:Mode", tenancyMode);
+            if (tenancyMode == "Single")
+            {
+                b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default-tenant");
+            }
+            else
+            {
+                // appsettings.Development.json configures D; a Multi host has none (an empty value is rejected, so the key is nulled).
+                b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
+            }
+
             b.UseSetting("Gateway:Rebac:Enabled", rebac ? "true" : "false");
         });
 
@@ -150,13 +160,18 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
-    public async Task Datasources_AdminOnly_NonAdmin403_ClaimlessAdmin403WithCode_TenantAdminConfined_ClusterAdminSeesAll()
+    public async Task Datasources_AdminOnly_NonAdmin403_LegacyIdTenantAdminConfined_TenantAdminConfined_ClusterAdminSeesAll()
     {
         (await (await ClientAsync("S-A-USER", TenantA, "Reader")).GetAsync("/api/v1/catalog/datasources")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
-        var claimless = await (await ClientAsync("S-ADM", null, "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources");
-        claimless.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        (await BodyAsync(claimless)).ShouldContain("TENANCY_MODE_CLAIMLESS_ADMIN");
+        // WP-DT-4: a truly tenant-less principal (Multi, no default tenant) is refused at the gate (S6); the legacy id carried as an explicit
+        // tenant claim is an ordinary tenant, so its GovernanceAdmin is a confined tenant administrator.
+        (await (await ClientAsync("S-ADM", null, "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var legacyTenantAdmin = await (await ClientAsync("S-ADM", "default-tenant", "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources");
+        legacyTenantAdmin.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var legacyBody = await BodyAsync(legacyTenantAdmin);
+        legacyBody.ShouldNotContain("dom_a");
+        legacyBody.ShouldNotContain("dom_b");
 
         var tenantAdmin = await BodyAsync(await (await ClientAsync("S-B-ADM", TenantB, "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources"));
         tenantAdmin.ShouldContain("dom_b");
@@ -215,7 +230,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
-    public async Task SingleMode_GovernanceAdminWithoutTenantClaim_IsTheUnrestrictedAdministrator()
+    public async Task DefaultTenant_GovernanceAdminWithoutTenantClaim_SeesTheWholeCatalog()
     {
         var single = Configure(new WebApplicationFactory<Program>(), "Single");
         await SeedAsync(single);
@@ -379,7 +394,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
-    public async Task Admins_SeeEveryTier_Unnarrowed_ClaimlessAdminInMultiSeesNothingOfTheTiers()
+    public async Task Admins_SeeEveryTier_Unnarrowed_LegacyIdTenantAdminInMultiIsConfined()
     {
         var (factory, _) = await TierFactoryAsync();
         var cluster = await ClientAsync("S-ROOT", TenantB, "ClusterAdmin", factory);
@@ -387,13 +402,20 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
         clusterList.ShouldContain("hid_t");
         (await BodyAsync(await cluster.GetAsync("/api/v1/catalog/datasets/dom_s.main.sum_t"))).ShouldContain("tier_secret_col");
 
-        var claimless = await ClientAsync("S-ADM", null, "GovernanceAdmin", factory);
-        (await BodyAsync(await claimless.GetAsync("/api/v1/catalog/datasets"))).ShouldBe("[]");
-        (await claimless.GetAsync("/api/v1/catalog/datasets/dom_s.main.full_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        // WP-DT-4: a truly tenant-less principal (Multi, no default tenant) is refused at the gate (S6, 403 TENANT_UNRESOLVED) ...
+        var tenantless = await ClientAsync("S-ADM", null, "GovernanceAdmin", factory);
+        (await tenantless.GetAsync("/api/v1/catalog/datasets")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        // ... while the legacy id carried as an explicit tenant claim is an ordinary tenant and confined: no unshared table (a shared table
+        // shows to a tenant administrator in every tier, as for any tenant).
+        var claimless = await ClientAsync("S-ADM", "default-tenant", "GovernanceAdmin", factory);
+        var claimlessList = await BodyAsync(await claimless.GetAsync("/api/v1/catalog/datasets"));
+        claimlessList.ShouldNotContain("unshared_full_t");
+        (await claimless.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
-    public async Task SingleMode_EveryTableIsTierEligible_ClaimlessUserSeesSummaryAndFull()
+    public async Task DefaultTenant_EveryTableIsTierEligible_ClaimlessUserSeesSummaryAndFull()
     {
         var single = Configure(new WebApplicationFactory<Program>(), "Single");
         await SeedTiersAsync(single);

@@ -27,7 +27,7 @@ public sealed class OpenMetadataWebhookRetryExt12Tests
         var options = new GatewayOptions
         {
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
-            OpenMetadata = new OpenMetadataOptions { Enabled = true, WebhookSecret = Secret }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = Secret }
         };
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

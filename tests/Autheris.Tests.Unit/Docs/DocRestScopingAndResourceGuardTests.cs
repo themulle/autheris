@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Docs;
 
+using Autheris.Domain.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -247,7 +248,7 @@ public sealed class DocRestScopingAndResourceGuardTests : IDisposable
     public void Depositor_NonClusterAdminWithoutTenant_IsForbidden()
     {
         var context = Http(null, "GovernanceAdmin");
-        context.Items[TenantResolutionMiddleware.TenantIdItemKey] = default(TenantId);
+        context.Items[SecurityPrincipalContext.TenantIdItemKey] = default(TenantId);
 
         var ok = DocEndpointAccess.TryResolveDepositor(context, "billing-service", out var tenantId, out _, out var denied);
 

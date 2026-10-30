@@ -505,7 +505,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
         handler.HandleMessageAsync("s1", Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns<ValueTask<string>>(_ => throw ex);
 #pragma warning restore CA2012
         var output = new StringWriter();
-        await new McpStdioRunner(handler).RunAsync(new StringReader(string.Join(Environment.NewLine, inputs) + Environment.NewLine), output);
+        await new McpStdioRunner(handler).RunAsync(new StringReader(string.Join(Environment.NewLine, inputs) + Environment.NewLine), output, tenantId: "tenant-a");
         return output.ToString();
     }
 

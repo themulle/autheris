@@ -1,3 +1,4 @@
+using Autheris.Domain.Security;
 using Autheris.Tests.Common;
 namespace Autheris.Tests.Unit;
 
@@ -638,7 +639,7 @@ public class SecurityReview20261002EndpointTests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test", ClaimTypes.Name, ClaimTypes.Role))
         };
-        context.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId(tenant);
+        context.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId(tenant);
         return context;
     }
 

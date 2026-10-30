@@ -275,8 +275,9 @@ public sealed class RedisRebacStore : IRebacStore
         return $"{_prefix}rebac:{tenant}:user:{u.Length}:{u}";
     }
 
+    // DT-A-9: a store operation without a tenant fails closed; there is no implicit tenant.
     private static string NormalizeTenant(string? tenantId) =>
-        string.IsNullOrWhiteSpace(tenantId) ? "default" : tenantId.Trim();
+        string.IsNullOrWhiteSpace(tenantId) ? throw new Autheris.Domain.Exceptions.TenantUnresolvedException() : tenantId.Trim();
 
     // INF-15: Ambiguity-free length-prefixed lower-case field key
     public static string BuildFieldKey(string user, string relation, string obj)

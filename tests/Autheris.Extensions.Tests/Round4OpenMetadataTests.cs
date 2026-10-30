@@ -92,6 +92,7 @@ public sealed class Round4OpenMetadataTests
 
     private static Consent SyncConsent(TableIdentifier table, GranteeType type, string grantee, ConsentEffect effect = ConsentEffect.Allow, DateTimeOffset? validTo = null) => new()
     {
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         Id = Guid.NewGuid(),
         TableIdentifier = table,
         GranteeType = type,
@@ -203,6 +204,7 @@ public sealed class Round4OpenMetadataTests
         bool activateNewTables = true,
         string webhookSecret = "") => new()
     {
+        DefaultTenantId = "default-tenant",
         Enabled = true,
         AutoCreateConsents = autoCreate,
         ServiceFilter = serviceFilter,
@@ -373,6 +375,7 @@ public sealed class Round4OpenMetadataTests
         f.ConsentRepo.GetConsentByIdAsync(existing.Id, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<Consent?>(new Consent
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 Id = existing.Id,
                 TableIdentifier = existing.TableIdentifier,
                 GranteeType = existing.GranteeType,
@@ -803,7 +806,7 @@ public sealed class Round4OpenMetadataTests
             Options.Create(new GatewayOptions
             {
                 Catalog = new DataCatalogOptions { Provider = provider, ActivateNewTables = activateNewTables },
-                OpenMetadata = new OpenMetadataOptions { ActivateNewTables = activateNewTables }
+                OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ActivateNewTables = activateNewTables }
             }),
             Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
@@ -966,7 +969,7 @@ public sealed class Round4OpenMetadataTests
         var logger = new RecordingLogger<OpenMetadataClient>();
         var options = Options.Create(new GatewayOptions
         {
-            OpenMetadata = new OpenMetadataOptions { ServerUrl = "https://om.corp.example/api/v1", AuthToken = "raw-om-token-ABC" }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ServerUrl = "https://om.corp.example/api/v1", AuthToken = "raw-om-token-ABC" }
         });
 
         _ = new OpenMetadataClient(new HttpClient(new StubHandler(_ => Json("{}"))), options, logger, provider, Env(Environments.Development));

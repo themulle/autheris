@@ -68,7 +68,7 @@ public sealed record ManagedBy(string Path, string Commit);
 public sealed record VirtualFilter
 {
     public Guid Id { get; init; } = Guid.NewGuid();
-    public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
+    public TenantId TenantId { get; init; }
     public string Name { get; init; } = string.Empty;
 
     /// <summary>Data source (catalog domain) of every table of the definition.</summary>
@@ -399,7 +399,7 @@ public sealed record FilterBinding
 public sealed record VirtualFilterAccessProfile
 {
     public Guid Id { get; init; } = Guid.NewGuid();
-    public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
+    public TenantId TenantId { get; init; }
     public string Name { get; init; } = string.Empty;
     public GranteeType GranteeType { get; init; } = GranteeType.User;
     public Sid? GranteeSid { get; init; }

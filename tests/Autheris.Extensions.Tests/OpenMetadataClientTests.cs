@@ -58,6 +58,7 @@ public sealed class OpenMetadataClientTests
         {
             OpenMetadata = new OpenMetadataOptions
             {
+                DefaultTenantId = "default-tenant",
                 ServerUrl = "http://openmetadata-test:8585/api/v1",
                 AuthToken = "secret-token-123"
             }
@@ -83,7 +84,7 @@ public sealed class OpenMetadataClientTests
         var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
         var options = Options.Create(new GatewayOptions
         {
-            OpenMetadata = new OpenMetadataOptions { ServerUrl = "http://openmetadata-test:8585/api/v1" }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ServerUrl = "http://openmetadata-test:8585/api/v1" }
         });
 
         var httpClient = new HttpClient(handler);
@@ -114,7 +115,7 @@ public sealed class OpenMetadataClientTests
 
         var options = Options.Create(new GatewayOptions
         {
-            OpenMetadata = new OpenMetadataOptions { ServerUrl = "http://openmetadata-test:8585/api/v1" }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ServerUrl = "http://openmetadata-test:8585/api/v1" }
         });
 
         var httpClient = new HttpClient(handler);
@@ -194,7 +195,7 @@ public sealed class OpenMetadataClientTests
 
         var options = Options.Create(new GatewayOptions
         {
-            OpenMetadata = new OpenMetadataOptions { ServerUrl = "http://openmetadata-test:8585/api/v1" }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ServerUrl = "http://openmetadata-test:8585/api/v1" }
         });
 
         var httpClient = new HttpClient(handler);

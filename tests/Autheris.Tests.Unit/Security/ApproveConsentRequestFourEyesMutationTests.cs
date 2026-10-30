@@ -46,7 +46,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         };
         var context = new DefaultHttpContext
         {
-            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth", ClaimTypes.Name, ClaimTypes.Role)),
+            User = new ClaimsPrincipal(new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestAuth", ClaimTypes.Name, ClaimTypes.Role)),
             RequestServices = services.BuildServiceProvider()
         };
         var accessor = Substitute.For<IHttpContextAccessor>();
@@ -89,7 +89,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         BusinessJustification = "Quarterly reporting",
         RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
         Status = status,
-        TenantId = TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         RequesterIdentifiers = [Requester.Value]
     };
 

@@ -100,7 +100,7 @@ public partial class SqliteGovernanceRepository
                         ValidFrom = validFrom,
                         ValidTo = validTo,
                         IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
                     };
                 }
             }
@@ -217,7 +217,7 @@ public partial class SqliteGovernanceRepository
                         ValidFrom = validFrom,
                         ValidTo = validTo,
                         IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
                     };
                 }
             }
@@ -292,7 +292,7 @@ public partial class SqliteGovernanceRepository
                         ValidFrom = validFrom,
                         ValidTo = validTo,
                         IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
                     });
                 }
             }
@@ -785,7 +785,7 @@ public partial class SqliteGovernanceRepository
                 RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
                 TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                 ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
-                TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
+                TenantId = StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
                 RequesterIdentifiers = reqIds,
                 ContextJson = reader.IsDBNull(15) ? null : reader.GetString(15)
             };
@@ -845,7 +845,7 @@ public partial class SqliteGovernanceRepository
                     RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
                     TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                     ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
-                    TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
+                    TenantId = StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
                     RequesterIdentifiers = reqIds,
                     ContextJson = reader.IsDBNull(15) ? null : reader.GetString(15)
                 };
@@ -908,7 +908,7 @@ public partial class SqliteGovernanceRepository
                         RequestedAt = DateTimeOffset.Parse(reader.GetString(7)),
                         RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
                         TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-                        TenantId = reader.IsDBNull(12) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(12))
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(12) ? null : reader.GetString(12))
                     };
                 }
             }
@@ -1596,6 +1596,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
     {
+        StoredTenant.RequireWritable(consent.TenantId); // DT-SC-04: fail before any I/O
         consent.Validate();
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
@@ -1633,7 +1634,7 @@ public partial class SqliteGovernanceRepository
         cmd.Parameters.AddWithValue("@roleName", (object?)consent.RoleName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@from", consent.ValidFrom.ToUniversalTime().ToString("O"));
         cmd.Parameters.AddWithValue("@to", consent.ValidTo.ToUniversalTime().ToString("O"));
-        cmd.Parameters.AddWithValue("@tenantId", (object?)consent.TenantId.Value ?? TenantId.LegacySingleTenant.Value);
+        cmd.Parameters.AddWithValue("@tenantId", StoredTenant.RequireWritable(consent.TenantId));
         cmd.Parameters.AddWithValue("@description", (object?)consent.Description ?? DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
@@ -1761,7 +1762,7 @@ public partial class SqliteGovernanceRepository
                         RevokedBySid = reader.IsDBNull(11) ? (Sid?)null : new Sid(reader.GetString(11)),
                         RevokedAt = reader.IsDBNull(12) ? null : DateTimeOffset.Parse(reader.GetString(12)),
                         RevokeReason = reader.IsDBNull(13) ? null : reader.GetString(13),
-                        TenantId = reader.IsDBNull(17) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(17)),
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(17) ? null : reader.GetString(17)),
                         RenewalCount = reader.GetInt32(18)
                     };
                 }
@@ -1813,7 +1814,7 @@ public partial class SqliteGovernanceRepository
                 var validFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture);
                 var validTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture);
                 var isRevoked = reader.GetInt32(10) == 1;
-                var tenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14));
+                var tenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14));
                 var domain = reader.GetString(15);
                 var schema = reader.GetString(16);
                 var tableName = reader.GetString(17);

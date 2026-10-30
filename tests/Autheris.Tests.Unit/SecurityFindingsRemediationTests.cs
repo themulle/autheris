@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Domain.Security;
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
@@ -39,7 +40,7 @@ using Xunit;
 public class SecurityFindingsRemediationTests
 {
     // =========================================================================
-    // Finding 1: Cross-Tenant Bypass Prevention (TenantResolutionMiddleware + Auth Handlers)
+    // Finding 1: Cross-Tenant Bypass Prevention (SecurityContextResolutionMiddleware + Auth Handlers)
     // =========================================================================
 
     [Fact]
@@ -47,12 +48,13 @@ public class SecurityFindingsRemediationTests
     {
         // Arrange
         RequestDelegate next = _ => Task.CompletedTask;
-        var middleware = new TenantResolutionMiddleware(next);
+        var middleware = new SecurityContextResolutionMiddleware(next);
 
         var context = new DefaultHttpContext();
         var claims = new[]
         {
             new Claim("tenant_id", "tenant-alpha"),
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-alice"),
             new Claim(ClaimTypes.Name, "alice")
         };
         var identity = new ClaimsIdentity(claims, "Basic");
@@ -76,15 +78,16 @@ public class SecurityFindingsRemediationTests
     {
         // Arrange: User is authenticated but has NO tenant claim
         RequestDelegate next = _ => Task.CompletedTask;
-        var middleware = new TenantResolutionMiddleware(next);
+        var middleware = new SecurityContextResolutionMiddleware(next);
 
         var context = new DefaultHttpContext();
         var claims = new[]
         {
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-bob"),
             new Claim(ClaimTypes.Name, "bob"),
             new Claim(ClaimTypes.Role, "StandardUser")
         };
-        var identity = new ClaimsIdentity(claims, "TestScheme");
+        var identity = new ClaimsIdentity(claims.Append(DefaultTenantCaller.Claim), "TestScheme");
         context.User = new ClaimsPrincipal(identity);
         context.Request.Headers["X-Tenant-ID"] = "victim-tenant";
         context.Response.Body = new MemoryStream();
@@ -98,37 +101,6 @@ public class SecurityFindingsRemediationTests
         using var reader = new StreamReader(context.Response.Body);
         var responseText = await reader.ReadToEndAsync();
         responseText.ShouldContain("CROSS_TENANT_ACCESS_FORBIDDEN");
-    }
-
-    [Fact]
-    public async Task TenantResolution_GatewayAdmin_CanSwitchTenantViaHeader()
-    {
-        // Arrange: User has GatewayAdmin role
-        bool nextCalled = false;
-        RequestDelegate next = _ =>
-        {
-            nextCalled = true;
-            return Task.CompletedTask;
-        };
-        var middleware = new TenantResolutionMiddleware(next);
-
-        var context = new DefaultHttpContext();
-        var claims = new[]
-        {
-            new Claim(ClaimTypes.Name, "admin"),
-            new Claim(ClaimTypes.Role, "GatewayAdmin"),
-            new Claim("tenant_id", "admin-home-tenant")
-        };
-        var identity = new ClaimsIdentity(claims, "Basic");
-        context.User = new ClaimsPrincipal(identity);
-        context.Request.Headers["X-Tenant-ID"] = "target-tenant";
-
-        // Act
-        await middleware.InvokeAsync(context);
-
-        // Assert
-        nextCalled.ShouldBeTrue();
-        context.Items[TenantResolutionMiddleware.TenantIdItemKey].ShouldBe(new TenantId("target-tenant"));
     }
 
     [Fact]
@@ -1363,7 +1335,7 @@ public class SecurityFindingsRemediationTests
             .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
 
         var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Response.Body = new MemoryStream();
 
         await WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-foreign-tenant", context, statementManager, NullLoggerFactory.Instance);
@@ -1382,7 +1354,7 @@ public class SecurityFindingsRemediationTests
             .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
 
         var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Request.Headers["X-Trino-User"] = "user-1";
 
         await WebSqlEndpoints.HandleTrinoCancelStatementRequest("stmt-foreign-tenant", context, statementManager);

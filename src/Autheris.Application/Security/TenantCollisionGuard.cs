@@ -31,7 +31,6 @@ public sealed class TenantCollisionGuard
     public static IEnumerable<string?> ConfiguredTenantIds(GatewayOptions options)
     {
         var forwardAuth = options.Authentication.ForwardAuth;
-        yield return forwardAuth.DefaultTenantId;
         foreach (var id in forwardAuth.AllowedTenantIds) yield return id;
         foreach (var id in options.WebSql.TenantDataSourceAllowlist.Keys) yield return id;
         yield return options.OpenMetadata.DefaultTenantId;

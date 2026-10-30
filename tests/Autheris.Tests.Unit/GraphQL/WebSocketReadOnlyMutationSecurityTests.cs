@@ -81,7 +81,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
                     isAppOnly ? SubjectType.ServicePrincipal : SubjectType.User,
                     IdentityProviderType.EntraId,
                     "user@example.com",
-                    TenantId.LegacySingleTenant);
+                    Autheris.Tests.Common.TestTenants.Default);
             });
 
         var validator = new JwtSocketTokenValidator(
@@ -166,6 +166,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
     {
         // Setup upgrade user with ReadOnly mode
         var upgradeIdentity = new ClaimsIdentity("Bearer");
+        upgradeIdentity.AddClaim(DefaultTenantCaller.Claim);
         upgradeIdentity.AddClaim(new Claim(ClaimTypes.PrimarySid, "S-1-5-21-user-1"));
         TokenAccessScope.MarkReadOnly(upgradeIdentity);
         var httpUser = new ClaimsPrincipal(upgradeIdentity);
@@ -173,6 +174,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
         var httpContext = new DefaultHttpContext { User = httpUser };
 
         var tokenIdentity = new ClaimsIdentity("Bearer");
+        tokenIdentity.AddClaim(DefaultTenantCaller.Claim);
         tokenIdentity.AddClaim(new Claim(ClaimTypes.PrimarySid, "S-1-5-21-user-1"));
         var tokenPrincipal = new ClaimsPrincipal(tokenIdentity);
         tokenPrincipal.IsReadOnly().ShouldBeFalse(); // Token itself wasn't marked

@@ -450,14 +450,16 @@ public sealed class AccessAuditMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ValidTenantIdWithMalformedTid_AttributesToValidTenant()
+    public async Task InvokeAsync_ValidTenantIdWithConflictingMalformedTid_IsFlaggedInvalid_NeverAttributedToEither()
     {
         var entry = await RunWithClaimsAsync(200, null,
             new Claim("sid", "S-1-5-21-USER1"),
             new Claim("tenant_id", "tenant-a"),
             new Claim("tid", MalformedTenant));
 
-        entry.TenantId.Value.ShouldBe("tenant-a");
+        // DT-SC-02: distinct tenant values on one principal are invalid (never first-wins); the entry is flagged and attributed to neither.
+        entry.TenantId.Value.ShouldNotBe("tenant-a");
+        entry.DetailsJson.ShouldContain("INVALID");
         entry.DetailsJson.ShouldNotContain("evil");
     }
 

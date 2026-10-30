@@ -51,10 +51,8 @@ public static partial class GovernanceEndpoints
         return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, new Sid(sid), context.RequestAborted).ConfigureAwait(false);
     }
 
-    private static TenantId ResolveRequestTenant(HttpContext context) =>
-        context.Items.TryGetValue(TenantResolutionMiddleware.TenantIdItemKey, out var itemTenant) && itemTenant is TenantId resolvedTenant
-            ? resolvedTenant
-            : TenantId.LegacySingleTenant;
+    // DT-A-3: no sentinel; an unresolved request tenant throws TENANT_UNRESOLVED (mapped to 403) at the tenant read.
+    private static TenantId ResolveRequestTenant(HttpContext context) => EndpointSecurity.GetRequestTenant(context);
 
     /// <summary>
     /// WP-SC-10 / SEC-SC-16: keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
@@ -78,12 +76,13 @@ public static partial class GovernanceEndpoints
         var effectiveTenant = ResolveRequestTenant(context);
         if (!string.IsNullOrWhiteSpace(tenant) && !string.Equals(tenant, effectiveTenant.Value, StringComparison.Ordinal))
         {
-            if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin) || !TenantId.TryParse(tenant, out var requested))
+            // DT-A-6: the platform bucket (_platform) is readable by ClusterAdmin only; every other reserved value stays rejected.
+            if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin) || !StoredTenant.IsValidAudit(tenant))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            effectiveTenant = requested;
+            effectiveTenant = StoredTenant.ParseAudit(tenant);
         }
 
         long? before = null;
@@ -363,7 +362,7 @@ public static partial class GovernanceEndpoints
             if (!isCanonicalClusterAdmin || string.IsNullOrWhiteSpace(tenantId))
             {
                 var reqTenant = EndpointSecurity.GetRequestTenant(context);
-                tenantId = !string.IsNullOrWhiteSpace(reqTenant.Value) ? reqTenant.Value : "default";
+                tenantId = !string.IsNullOrWhiteSpace(reqTenant.Value) ? reqTenant.Value : throw new Autheris.Domain.Exceptions.TenantUnresolvedException();
             }
 
             var cert = await exporter.GenerateCertificateAsync(tenantId, context.RequestAborted);

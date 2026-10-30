@@ -315,10 +315,10 @@ public sealed class Mutation
 
     private static TenantId GetContextTenantId(IHttpContextAccessor? httpContextAccessor)
     {
-        var contextTenant = TenantId.LegacySingleTenant;
+        TenantId contextTenant = default; // DT-A-3: no sentinel; unset means "no context tenant" (ResolveTenantId falls back to the claim)
         if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
-            contextTenant = secCtx.TenantId;
+            contextTenant = secCtx.ResolvedTenant ?? default;
         }
         else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
         {
@@ -1041,9 +1041,9 @@ public sealed class Mutation
         {
             reloadTenant = principal.GetTenantId();
         }
-        catch (System.Security.SecurityException)
+        catch (Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            reloadTenant = TenantId.LegacySingleTenant; // cluster admins may have no tenant claim
+            reloadTenant = TenantId.Platform; // cluster admins may have no tenant: audit-only platform record (DT-A-6)
         }
 
         var entry = new AuditLogEntry
@@ -1103,7 +1103,7 @@ public sealed class Mutation
             {
                 restrictToTenant = principal.GetTenantId();
             }
-            catch (System.Security.SecurityException)
+            catch (Autheris.Domain.Exceptions.GatewaySecurityException)
             {
                 throw new GraphQLException(ErrorBuilder.New()
                     .SetCode("UNAUTHORIZED")
@@ -1163,9 +1163,9 @@ public sealed class Mutation
             {
                 denyTenant = principal.GetTenantId();
             }
-            catch (System.Security.SecurityException)
+            catch (Autheris.Domain.Exceptions.GatewaySecurityException)
             {
-                denyTenant = TenantId.LegacySingleTenant;
+                denyTenant = TenantId.Platform; // audit-only platform record (DT-A-6)
             }
 
             var denyEntry = new AuditLogEntry
@@ -1201,11 +1201,11 @@ public sealed class Mutation
             {
                 restrictToTenant = principal.GetTenantId();
             }
-            catch (System.Security.SecurityException)
+            catch (Autheris.Domain.Exceptions.GatewaySecurityException)
             {
                 var denyEntry = new AuditLogEntry
                 {
-                    TenantId = TenantId.LegacySingleTenant,
+                    TenantId = TenantId.Platform,
                     EventType = AuditEventTypes.DataCatalogSync,
                     ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
                     TargetTable = string.Empty,
@@ -1230,7 +1230,7 @@ public sealed class Mutation
             }
         }
 
-        TenantId auditTenant = restrictToTenant ?? TenantId.LegacySingleTenant;
+        TenantId auditTenant = restrictToTenant ?? TenantId.Platform; // cluster-wide record: platform bucket (DT-A-6)
         var writeAheadEntry = new AuditLogEntry
         {
             TenantId = auditTenant,

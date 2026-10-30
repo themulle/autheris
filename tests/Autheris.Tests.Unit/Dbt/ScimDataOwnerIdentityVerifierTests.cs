@@ -15,10 +15,10 @@ public sealed class ScimDataOwnerIdentityVerifierTests
 {
     private static readonly TenantId Tenant = new("sales");
 
-    private static IIdentityRealmRegistry Registry(bool implicitLegacy = false)
+    private static IIdentityRealmRegistry Registry(bool noRealms = false)
     {
         var registry = Substitute.For<IIdentityRealmRegistry>();
-        registry.GetAllRealms().Returns([new IdentityRealm("realm-1", IdentityRealmKind.EntraWorkforce, TenantBindingSpecification.Fixed(Tenant), isImplicitLegacy: implicitLegacy)]);
+        registry.GetAllRealms().Returns(noRealms ? [] : [new IdentityRealm("realm-1", IdentityRealmKind.EntraWorkforce, TenantBindingSpecification.Fixed(Tenant))]);
         return registry;
     }
 
@@ -28,7 +28,7 @@ public sealed class ScimDataOwnerIdentityVerifierTests
     public async Task NoRealm_IsNotConfigured()
     {
         (await new ScimDataOwnerIdentityVerifier().VerifyAsync(Tenant, "alice")).ShouldBe(OwnerIdentityStatus.NotConfigured);
-        (await new ScimDataOwnerIdentityVerifier(Registry(implicitLegacy: true), Substitute.For<IIdentityStoreRepository>()).VerifyAsync(Tenant, "alice"))
+        (await new ScimDataOwnerIdentityVerifier(Registry(noRealms: true), Substitute.For<IIdentityStoreRepository>()).VerifyAsync(Tenant, "alice"))
             .ShouldBe(OwnerIdentityStatus.NotConfigured);
     }
 

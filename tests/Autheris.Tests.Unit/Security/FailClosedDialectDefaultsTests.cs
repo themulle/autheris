@@ -15,7 +15,7 @@ using Xunit;
 /// <summary>PLAN-AST-DIALECT-GEN-16 WP-D4: no fail-open dialect defaults (F-1, SEC-ADG-14).</summary>
 public sealed class FailClosedDialectDefaultsTests
 {
-    private static readonly TenantId Tenant = TenantId.LegacySingleTenant;
+    private static readonly TenantId Tenant = Autheris.Tests.Common.TestTenants.Default;
 
     [Theory]
     [InlineData("mysql")]

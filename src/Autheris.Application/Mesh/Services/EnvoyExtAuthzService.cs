@@ -109,7 +109,18 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             return EnvoyCheckResponse.Deny(403, "Forbidden: caller identity is incomplete.");
         }
 
-        var tenantId = caller.GetTenantId();
+        // DT-A-3: claims only; a caller without a resolvable tenant (or with an invalid claim) is denied, never given a default.
+        TenantId tenantId;
+        try
+        {
+            tenantId = caller.GetTenantId();
+        }
+        catch (Autheris.Domain.Exceptions.GatewaySecurityException ex)
+        {
+            _logger.LogWarning("ext_authz denied: the caller has no valid tenant ({Code}).", ex.ErrorCode);
+            return EnvoyCheckResponse.Deny(403, "Forbidden: tenant unresolved.");
+        }
+
         var tenantStr = tenantId.Value;
         var principal = userSid.Value;
 

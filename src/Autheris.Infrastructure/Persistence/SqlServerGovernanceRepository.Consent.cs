@@ -106,7 +106,7 @@ public partial class SqlServerGovernanceRepository
                         ValidFrom = validFrom,
                         ValidTo = validTo,
                         IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
                     };
                     consents.Add(consent);
                 }
@@ -211,7 +211,7 @@ public partial class SqlServerGovernanceRepository
                         ValidFrom = validFrom,
                         ValidTo = validTo,
                         IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
                     };
                     consents.Add(consent);
                 }
@@ -271,7 +271,7 @@ public partial class SqlServerGovernanceRepository
                     ValidFrom = validFrom,
                     ValidTo = validTo,
                     IsRevoked = reader.GetInt32(10) == 1,
-                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14))
+                    TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14))
                 };
                 consents.Add(consent);
             }
@@ -459,6 +459,7 @@ public partial class SqlServerGovernanceRepository
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
     {
+        StoredTenant.RequireWritable(consent.TenantId); // DT-SC-04: fail before any I/O
         ArgumentNullException.ThrowIfNull(consent);
         consent.Validate(); // Review PG-11: same input validation as SQLite
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -506,7 +507,7 @@ public partial class SqlServerGovernanceRepository
             tableId = Guid.Parse(idObj.ToString()!);
         }
 
-        var tenantIdStr = string.IsNullOrWhiteSpace(consent.TenantId.Value) ? TenantId.LegacySingleTenant.Value : consent.TenantId.Value;
+        var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
 
         await using (var cmd = conn.CreateCommand())
         {
@@ -668,7 +669,7 @@ public partial class SqlServerGovernanceRepository
                     ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
                     ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
                     IsRevoked = reader.GetInt32(10) == 1,
-                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14)),
+                    TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
                     RenewalCount = reader.GetInt32(15)
                 };
             }
@@ -813,7 +814,7 @@ public partial class SqlServerGovernanceRepository
                     ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
                     ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
                     IsRevoked = reader.GetInt32(10) == 1,
-                    TenantId = reader.IsDBNull(14) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(14)),
+                    TenantId = StoredTenant.Parse(reader.IsDBNull(14) ? null : reader.GetString(14)),
                     RenewalCount = reader.GetInt32(15)
                 };
                 consents.Add(consent);
@@ -1059,7 +1060,7 @@ public partial class SqlServerGovernanceRepository
                     RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
                     TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                     ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
-                    TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
+                    TenantId = StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
                     RequesterIdentifiers = reqIds ?? new List<string>(),
                     ContextJson = reader.IsDBNull(15) ? null : reader.GetString(15)
                 };

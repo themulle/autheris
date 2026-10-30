@@ -90,7 +90,7 @@ public class DbtHealthExecutionMiddlewareTests
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
 
         accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
             .Returns(new ResolvedTableAccess(
@@ -131,7 +131,7 @@ public class DbtHealthExecutionMiddlewareTests
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
 
         accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
             .Returns(new ResolvedTableAccess(
@@ -171,7 +171,7 @@ public class DbtHealthExecutionMiddlewareTests
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
 
         // Do not register accessResolver
         var executor = await CreateExecutorAsync(circuitBreaker, tableRepo, accessResolver: null);
@@ -200,7 +200,7 @@ public class DbtHealthExecutionMiddlewareTests
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, status, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
         accessResolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
             .Returns(new ResolvedTableAccess(
                 meta,

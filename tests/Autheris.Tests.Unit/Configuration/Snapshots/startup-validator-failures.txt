@@ -41,7 +41,6 @@ OperationalInvariants_DevOptions [Production]: ValidationException: Gateway:Dev:
 OperationalInvariants_DevOptions [Development]: ValidationException: Gateway:Dev:Preset 'bogus' is invalid. Allowed: Standard, Quickstart, Strict.
 BasicAuthSession_RequiresBasicAuth [Production]: ValidationException: BasicAuth.Session.Enabled=true erfordert BasicAuth.Enabled=true.\nBasicAuth.Session must not be enabled when RequireKerberosOnly=true.\nSecurity violation: BasicAuth.Session is prohibited in the Production environment.
 BasicAuthUsers_MissingPassword [Production]: ValidationException: Security violation: BasicAuth user 'alice' has no password.
-ForwardAuth_InvalidDefaultTenant [Production]: ValidationException: ForwardAuth.DefaultTenantId has an invalid tenant format.
 ForwardAuth_BasicAuthWithKerberosOnly [Production]: ValidationException: Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.
 ForwardAuth_SecretMissing [Production]: ValidationException: Security violation: Outside Development, ForwardAuth requires a configured SharedSecret or SharedSecretKeyVaultRef.
 ForwardAuth_SecretTooShort [Production]: ValidationException: Security violation: Outside the development environment, ForwardAuth.SharedSecret must be at least 32 bytes long.

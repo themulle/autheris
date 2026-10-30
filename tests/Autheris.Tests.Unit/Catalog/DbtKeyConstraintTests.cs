@@ -130,7 +130,7 @@ public sealed class DbtKeyConstraintTests
             NullLogger<DbtMetadataIngestionService>.Instance);
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifest));
-        await service.IngestManifestStreamAsync(stream, dryRun: false);
+        await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
         return _upserts.Single();
     }
 

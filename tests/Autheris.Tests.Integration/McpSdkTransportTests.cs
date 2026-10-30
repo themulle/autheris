@@ -38,6 +38,14 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-McpSdk-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+            // The enabled Adfs scheme needs an explicit realm of its kind (no implicit realm exists).
+            b.ConfigureServices(services => services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>
+                options.Realms["adfs-test"] = new Autheris.Domain.Options.Security.IdentityRealmConfigOptions
+                {
+                    Kind = Autheris.Domain.Identity.IdentityRealmKind.Adfs,
+                    FixedTenantId = "tenant_sdk",
+                    Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None
+                }));
         });
     }
 

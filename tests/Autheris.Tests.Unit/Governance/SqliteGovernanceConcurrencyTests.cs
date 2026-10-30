@@ -54,6 +54,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
 
     private static AuditLogEntry NewAudit(int i) => new()
     {
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         EventType = "CONCURRENT_ADMIN_ACTION",
         ActorSid = new Sid($"S-1-5-21-WRITER-{i % 7}"),
         TargetTable = "finance.dbo.finance_table_1",
@@ -67,6 +68,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
         meta.ShouldNotBeNull();
         return await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = FourEyesTable,
             RequesterSid = new Sid(requester),
@@ -277,6 +279,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
         meta.ShouldNotBeNull();
         var consent = await _repository.CreateConsentAsync(new Consent
         {
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             TableId = meta.Table.Id,
             TableIdentifier = meta.Identifier,
@@ -317,6 +320,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
         {
             await _repository.RecordAuditEventAsync(new AuditLogEntry
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 EventType = AuditEventTypes.TableQuery,
                 ActorSid = new Sid("S-1-5-21-READER"),
                 TargetTable = "finance.dbo.finance_table_1",
@@ -412,6 +416,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
             {
                 await repository.RecordAuditEventAsync(new AuditLogEntry
                 {
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     EventType = AuditEventTypes.TableQuery,
                     ActorSid = new Sid($"S-1-5-21-CHANNEL-{w}"),
                     TargetTable = "finance.dbo.finance_table_1",
@@ -423,6 +428,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
         {
             var request = await repository.CreateConsentRequestAsync(new ConsentRequest
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = meta.Table.Id,
                 TableIdentifier = FourEyesTable,
                 RequesterSid = new Sid($"S-1-5-21-REQ-CHANNEL-{n}"),

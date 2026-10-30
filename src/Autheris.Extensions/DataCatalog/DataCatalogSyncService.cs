@@ -307,7 +307,9 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     {
         try
         {
-            var tenant = existing?.OwnerTenantId is { } owner ? new TenantId(owner) : restrictToTenant ?? TenantId.LegacySingleTenant;
+            // DT-A-6/DT-A-9: the owner tenant, else the sync's tenant, else the catalog owner (default tenant), else the platform bucket.
+            var tenant = existing?.OwnerTenantId is { } owner ? new TenantId(owner)
+                : restrictToTenant ?? Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy) ?? TenantId.Platform;
             await _auditWriter.RecordRequiredAsync(new AuditLogEntry
             {
                 TenantId = tenant,

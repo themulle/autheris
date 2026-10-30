@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Catalog.Interfaces;
@@ -24,7 +25,7 @@ public sealed class CatalogVisibilityServiceHardeningTests
 {
     private static GatewayOptions Opts(bool rebac = false) => new()
     {
-        Tenancy = new TenancyOptions { Mode = nameof(TenancyMode.Multi) },
+        Tenancy = TenancyShape.Multi.Options(),
         Catalog = new DataCatalogOptions { SharedTables = [] },
         Rebac = new RebacOptions { Enabled = rebac }
     };

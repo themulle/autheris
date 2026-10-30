@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Collections;
 using System.Security.Claims;
 using Autheris.Application.Catalog.Services;
@@ -31,9 +32,9 @@ public sealed class CatalogVirtualTableVisibilityTests
     private static readonly TenantId TenantA = Wp0.TenantA;
     private static readonly TenantId TenantB = Wp0.TenantB;
 
-    private static TableMetadata VirtualTable(TenantId tenant, string name = "orders", DatasetVisibility visibility = DatasetVisibility.Hidden, TenancyMode mode = TenancyMode.Multi)
+    private static TableMetadata VirtualTable(TenantId tenant, string name = "orders", DatasetVisibility visibility = DatasetVisibility.Hidden)
     {
-        var id = SemanticVirtualTables.IdentifierFor(tenant, mode, name);
+        var id = SemanticVirtualTables.IdentifierFor(tenant, name);
         return new TableMetadata
         {
             Identifier = id,
@@ -58,10 +59,10 @@ public sealed class CatalogVirtualTableVisibilityTests
 
     private static async Task<List<string>> VisibleAsync(
         ClaimsPrincipal user, TenantId tenant, IEnumerable<TableMetadata> tables, IConsentRepository consents,
-        TenancyMode mode = TenancyMode.Multi, IEnumerable<string>? shared = null, CatalogSurface surface = CatalogSurface.DataAccess)
+        TenancyShape mode = TenancyShape.Multi, IEnumerable<string>? shared = null, CatalogSurface surface = CatalogSurface.DataAccess)
     {
         var visible = await CatalogVisibility.VisibleTablesAsync(
-            tables.ToList(), user, tenant, consents, contract: null, mode, shared, surface);
+            tables.ToList(), user, tenant, consents, contract: null, mode.Owner(), shared, surface);
         return visible.Select(t => t.Identifier.ToString()).Order().ToList();
     }
 
@@ -113,10 +114,10 @@ public sealed class CatalogVirtualTableVisibilityTests
     public async Task VirtualTable_ClaimlessMulti_Hidden()
     {
         var own = VirtualTable(TenantA);
-        var legacyHash = VirtualTable(TenantId.LegacySingleTenant);
-        var consents = Wp0.Consents(Wp0.Allow(own.Identifier, "S-USER", TenantId.LegacySingleTenant, "id"), Wp0.Allow(legacyHash.Identifier, "S-USER", TenantId.LegacySingleTenant, "id"));
+        var legacyHash = VirtualTable(Autheris.Tests.Common.TestTenants.Default);
+        var consents = Wp0.Consents(Wp0.Allow(own.Identifier, "S-USER", Autheris.Tests.Common.TestTenants.Default, "id"), Wp0.Allow(legacyHash.Identifier, "S-USER", Autheris.Tests.Common.TestTenants.Default, "id"));
 
-        (await VisibleAsync(Wp0.User("S-USER", null), TenantId.LegacySingleTenant, [own, legacyHash], consents)).ShouldBeEmpty();
+        (await VisibleAsync(Wp0.User("S-USER", null), Autheris.Tests.Common.TestTenants.Default, [own, legacyHash], consents)).ShouldBeEmpty();
     }
 
     [Theory]
@@ -142,12 +143,12 @@ public sealed class CatalogVirtualTableVisibilityTests
     }
 
     [Fact]
-    public async Task SingleMode_RuleIsSkipped_ByModeNotByTenantString()
+    public async Task DefaultTenant_OwnVirtualTable_IsVisible_ByTenantSchema()
     {
-        var single = VirtualTable(TenantId.LegacySingleTenant, mode: TenancyMode.Single);
-        var consents = Wp0.Consents(Wp0.Allow(single.Identifier, "S-USER", TenantId.LegacySingleTenant, "id"));
+        var single = VirtualTable(Autheris.Tests.Common.TestTenants.Default);
+        var consents = Wp0.Consents(Wp0.Allow(single.Identifier, "S-USER", Autheris.Tests.Common.TestTenants.Default, "id"));
 
-        (await VisibleAsync(Wp0.User("S-USER", null), TenantId.LegacySingleTenant, [single], consents, TenancyMode.Single)).ShouldBe([Id(single)]);
+        (await VisibleAsync(Wp0.User("S-USER", Wp0.SingleTenantClaim), Autheris.Tests.Common.TestTenants.Default, [single], consents, TenancyShape.Single)).ShouldBe([Id(single)]);
     }
 
     [Fact]
@@ -180,8 +181,8 @@ public sealed class CatalogVirtualTableVisibilityTests
         var own = VirtualTable(TenantA);
         var allConsents = new[] { Wp0.Allow(foreign.Identifier, "S-USER", TenantA, "id"), Wp0.Allow(own.Identifier, "S-USER", TenantA, "id") };
 
-        var subject = CatalogVisibility.FilterForSubject([foreign, own], allConsents, TenantA, tenancyMode: TenancyMode.Multi);
-        var tenant = CatalogVisibility.FilterToTenant([foreign, own], TenantA, [foreign.Identifier, own.Identifier], [foreign.Identifier.ToString()], TenancyMode.Multi);
+        var subject = CatalogVisibility.FilterForSubject([foreign, own], allConsents, TenantA);
+        var tenant = CatalogVisibility.FilterToTenant([foreign, own], TenantA, [foreign.Identifier, own.Identifier], [foreign.Identifier.ToString()], TenancyShape.Multi.Owner());
 
         subject.Select(Id).ShouldBe([Id(own)]);
         tenant.Select(Id).ShouldBe([Id(own)]);
@@ -211,7 +212,7 @@ public sealed class CatalogVirtualTableVisibilityTests
             Wp0.Allow(own.Identifier, "S-USER", TenantA, "id"),
             Wp0.Allow(foreign.Identifier, "S-USER", TenantA, "id"));
         var user = Wp0.User("S-USER", "tenant-a");
-        var options = Wp0.Options(TenancyMode.Multi, foreign.Identifier.ToString());
+        var options = Wp0.Options(TenancyShape.Multi, foreign.Identifier.ToString());
 
         foreach (var sql in new[]
         {
@@ -245,7 +246,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         var consents = Wp0.Consents(Wp0.Allow(real.Identifier, "S-USER", TenantA, "id"));
 
         var result = await TrinoMetadataQueryHandler.TryExecuteAsync(
-            "SELECT table_schema, table_name, table_type FROM information_schema.tables", Wp0.User("S-USER", "tenant-a"), TenantA, repo, consents, Wp0.Options(TenancyMode.Multi));
+            "SELECT table_schema, table_name, table_type FROM information_schema.tables", Wp0.User("S-USER", "tenant-a"), TenantA, repo, consents, Wp0.Options(TenancyShape.Multi));
 
         result!.Rows.Single()["table_type"].ShouldBe("BASE TABLE");
     }
@@ -256,7 +257,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         var foreign = VirtualTable(TenantB);
         var consents = Wp0.Consents(Wp0.Allow(foreign.Identifier, "S-USER", TenantA, "id"));
         var repo = Wp0.Tables(foreign);
-        var options = Wp0.Options(TenancyMode.Multi, foreign.Identifier.ToString());
+        var options = Wp0.Options(TenancyShape.Multi, foreign.Identifier.ToString());
         var service = CatalogVisibilityTestFactory.Create(repo, consents, options);
         var mcp = new McpDatasetCatalog(
             repo, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
@@ -293,13 +294,13 @@ public sealed class CatalogVirtualTableVisibilityTests
         var a = VirtualTable(TenantA);
         var b = VirtualTable(TenantB);
         var user = UserOf(caller);
-        var tenant = user.FindFirst("tenant_id") is { } c ? new TenantId(c.Value) : TenantId.LegacySingleTenant;
+        var tenant = user.FindFirst("tenant_id") is { } c ? new TenantId(c.Value) : Autheris.Tests.Common.TestTenants.Default;
         // Every caller holds an Allow consent on both virtual tables in its own tenant: only the schema rule can separate them.
         var consents = Wp0.Consents(
             Wp0.Allow(a.Identifier, "S-USER", tenant, "id"), Wp0.Allow(b.Identifier, "S-USER", tenant, "id"),
             Wp0.Allow(a.Identifier, "S-USER", TenantA, "id"), Wp0.Allow(b.Identifier, "S-USER", TenantB, "id"));
         var tables = Wp0.Tables(a, b);
-        var options = Wp0.Options(TenancyMode.Multi);
+        var options = Wp0.Options(TenancyShape.Multi);
         var service = CatalogVisibilityTestFactory.Create(tables, consents, options);
 
         var rest = new CatalogDiscoveryService(tables, Substitute.For<IAuditLogRepository>(), Options.Create(options), service);
@@ -310,8 +311,19 @@ public sealed class CatalogVirtualTableVisibilityTests
         var mcpNames = (await mcp.ListDatasetsAsync(user)).Datasets.Select(d => d.Id).Order().ToList();
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
-        var graphQl = (await new Query().GetCatalogAsync(null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service))
-            .Select(t => $"{t.Domain}.{t.Schema}.{t.TableName}").Order().ToList();
+        List<string> graphQl;
+        if (caller == Caller.Claimless)
+        {
+            // DT-A-3: GraphQL refuses a caller without a tenant claim (UNAUTHORIZED); REST and MCP show it nothing. Never a default tenant.
+            (await Should.ThrowAsync<HotChocolate.GraphQLException>(() => new Query().GetCatalogAsync(null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service)))
+                .Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
+            graphQl = [];
+        }
+        else
+        {
+            graphQl = (await new Query().GetCatalogAsync(null, null, null, null, null, tables, consents, null, null, accessor, Options.Create(options), service))
+                .Select(t => $"{t.Domain}.{t.Schema}.{t.TableName}").Order().ToList();
+        }
 
         var expected = caller switch
         {

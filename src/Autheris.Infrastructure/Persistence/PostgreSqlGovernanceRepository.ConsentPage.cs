@@ -100,7 +100,7 @@ public partial class PostgreSqlGovernanceRepository
                         ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
                         ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
                         IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(11)),
+                        TenantId = StoredTenant.Parse(reader.IsDBNull(11) ? null : reader.GetString(11)),
                         RenewalCount = reader.GetInt32(12),
                         TableIdentifier = new TableIdentifier(reader.GetString(13), reader.GetString(14), reader.GetString(15))
                     });

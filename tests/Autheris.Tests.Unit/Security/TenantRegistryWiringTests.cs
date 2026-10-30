@@ -64,14 +64,14 @@ public sealed class TenantRegistryWiringTests
         var registry = Substitute.For<ITenantRegistry>();
         var options = new GatewayOptions
         {
-            Authentication = new AuthenticationOptions { ForwardAuth = new ForwardAuthOptions { DefaultTenantId = "default-t", AllowedTenantIds = ["t1", "T1"] } }
+            Authentication = new AuthenticationOptions { ForwardAuth = new ForwardAuthOptions { AllowedTenantIds = ["t1", "T1"] } }
         };
         var service = new TenantRegistryPreseedService(registry, new Monitor(options));
 
         await service.StartAsync(default);
 
         await registry.Received(1).PreseedAsync(
-            Arg.Is<IEnumerable<string>>(ids => ids.Contains("default-t") && ids.Contains("t1") && ids.Contains("T1")), Arg.Any<CancellationToken>());
+            Arg.Is<IEnumerable<string>>(ids => ids.Contains("t1") && ids.Contains("T1")), Arg.Any<CancellationToken>());
     }
 
     [Fact]

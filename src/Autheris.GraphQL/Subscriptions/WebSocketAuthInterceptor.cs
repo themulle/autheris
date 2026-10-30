@@ -128,14 +128,25 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                     }
                 }
 
-                var tokenTenant = validatedPrincipal.GetTenantId();
+                // DT-SC-10: connection_init applies the same tenant gate as HTTP: the claims transformation stamped the resolved tenant; an
+                // invalid claim, or no tenant for a principal that is not a canonical ClusterAdmin, is rejected (both deployment shapes).
+                var tokenClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(validatedPrincipal);
+                TenantId? tokenTenant = tokenClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? (TenantId?)tokenClaim.Tenant : null;
+                if (tokenClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid ||
+                    (tokenTenant is null && !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(validatedPrincipal)))
+                {
+                    _logger.LogWarning("WebSocket connection_init rejected: Token tenant unresolved or invalid.");
+                    return ConnectionStatus.Reject("Token tenant unresolved");
+                }
 
                 if (httpContext != null)
                 {
                     // GQL-1: Prevent mixed identities between upgrade handshake and connection_init token
-                    var upgradeTenant = httpContext.Items.TryGetValue("TenantId", out var tidObj) && tidObj is TenantId tid
+                    TenantId? upgradeTenant = httpContext.Items.TryGetValue("TenantId", out var tidObj) && tidObj is TenantId tid
                         ? tid
-                        : (httpUser != null ? httpUser.GetTenantId() : TenantId.LegacySingleTenant);
+                        : (httpUser != null && Autheris.Domain.Tenancy.TenantClaimReader.Read(httpUser) is { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } upgradeClaim
+                            ? (TenantId?)upgradeClaim.Tenant
+                            : null);
 
                     if (isHttpAuthenticated && upgradeTenant != tokenTenant)
                     {
@@ -143,12 +154,6 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                             "WebSocket connection_init rejected: Token tenant '{TokenTenant}' does not match upgrade tenant '{UpgradeTenant}'.",
                             tokenTenant, upgradeTenant);
                         return ConnectionStatus.Reject("Cross-tenant token mismatch");
-                    }
-
-                    if (!isHttpAuthenticated && tokenTenant == TenantId.LegacySingleTenant && IsMultiTenantConfigured())
-                    {
-                        _logger.LogWarning("WebSocket connection_init rejected: Token tenant unresolved in multi-tenant gateway.");
-                        return ConnectionStatus.Reject("Token tenant unresolved");
                     }
 
                     var upgradeSid = httpUser?.GetUserSid();
@@ -180,7 +185,11 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                     }
 
                     httpContext.User = validatedPrincipal;
-                    httpContext.Items["TenantId"] = tokenTenant;
+                    if (tokenTenant is { } itemTenant)
+                    {
+                        httpContext.Items["TenantId"] = itemTenant;
+                    }
+
                     httpContext.Items[SecurityPrincipalContext.ItemKey] = SecurityPrincipalContext.FromPrincipal(
                         validatedPrincipal,
                         overrideTenant: tokenTenant,
@@ -538,28 +547,6 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         }
 
         return null;
-    }
-
-    private bool IsMultiTenantConfigured()
-    {
-        if (_realmRegistry != null)
-        {
-            var realms = _realmRegistry.GetAllRealms();
-            if (realms.Any(r => !r.IsImplicitLegacy && r.TenantBinding != null && (r.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.ClaimMapped || (r.TenantBinding.Kind == Autheris.Domain.Identity.TenantBindingKind.Fixed && r.TenantBinding.FixedTenantId != TenantId.LegacySingleTenant))))
-            {
-                return true;
-            }
-        }
-
-        if (_realmOptions?.Value?.Realms is { Count: > 0 } configRealms)
-        {
-            if (configRealms.Values.Any(r => (!string.IsNullOrWhiteSpace(r.FixedTenantId) && !string.Equals(r.FixedTenantId, TenantId.LegacySingleTenant.Value, StringComparison.OrdinalIgnoreCase)) || !string.IsNullOrWhiteSpace(r.TenantClaimName)))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public static string? ExtractToken(IReadOnlyDictionary<string, object?> dict)

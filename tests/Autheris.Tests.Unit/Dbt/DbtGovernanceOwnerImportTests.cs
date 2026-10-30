@@ -155,7 +155,7 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         result.Success.ShouldBeTrue();
         result.CreatedDataOwnersCount.ShouldBe(1);
         result.AssignedTableOwnersCount.ShouldBe(1);
-        var gatewayOptions = new GatewayOptions { Tenancy = new TenancyOptions { Mode = TenancyMode.Multi.ToString() } };
+        var gatewayOptions = new GatewayOptions();
         var catalogTables = Wp0.Tables(Wp0.Table(_table.Domain, _table.TableName, "Visible", ["id"]));
         var consents = Wp0.Consents(Wp0.Allow(_table, "S-USER", Wp0.TenantA, "id"));
         var mcp = new Autheris.Application.Mcp.Services.McpDatasetCatalog(

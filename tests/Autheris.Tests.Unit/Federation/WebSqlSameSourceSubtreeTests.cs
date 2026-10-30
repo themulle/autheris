@@ -267,9 +267,9 @@ public sealed class WebSqlSameSourceSubtreeTests
                 Arg.Any<CancellationToken>())
             .Returns(new[]
             {
-                new Consent { TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
-                new Consent { TableIdentifier = itemsTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
-                new Consent { TableIdentifier = stocksTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) }
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = ordersTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = itemsTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) },
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = stocksTable.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(10) }
             });
 
         var analysisService = new QueryAnalysisService(
@@ -277,7 +277,7 @@ public sealed class WebSqlSameSourceSubtreeTests
             consentRepo,
             analysisOptions: new QueryAnalysisOptions());
 
-        var caller = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "user-1"), new Claim("sid", "user-1")], "TestAuth"));
+        var caller = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1"), new Claim("sid", "user-1")], "TestAuth"));
 
         var result = await analysisService.AnalyzeQueriesAsync(
             new[] { QueryAnalysisItem.FromSql(sql, name: "cross_source_subtree_query") },

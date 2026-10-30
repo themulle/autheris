@@ -134,7 +134,7 @@ public sealed class DbtSyncTableCreationTests
     private static Task<DbtSyncResult> Sync(DbtMetadataIngestionService service, string manifest, bool dryRun = false)
     {
         var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifest));
-        return service.IngestManifestStreamAsync(stream, dryRun);
+        return service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun);
     }
 
     private static Item Model(string name = "orders", string db = "warehouse", string schema = "public") => new(db, schema, name);

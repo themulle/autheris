@@ -5,6 +5,7 @@ using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
+using Autheris.Application.Tenancy;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -12,7 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #111 (A-9, rev. 3 b): audits the effective <c>Gateway:Catalog:DefaultVisibility</c> and <c>Gateway:Tenancy:Mode</c> once at startup and on
+/// Issue #111 (A-9, rev. 3 b): audits the effective <c>Gateway:Catalog:DefaultVisibility</c> and <c>Gateway:Tenancy:DefaultTenantId</c> presence once at startup and on
 /// every configuration change, turns the tally of tables created with a non-Hidden default tier into one aggregated audit entry per interval
 /// (count, source; no table names), and keeps the tier gauge fresh. All writes are best effort and never block the host.
 /// </summary>
@@ -75,7 +76,7 @@ public sealed class CatalogGovernanceHostedService : BackgroundService
     private async Task AuditConfigurationAsync(string source, GatewayOptions options, CancellationToken ct, bool onlyWhenChanged = false)
     {
         var defaultVisibility = options.Catalog.DefaultVisibility.ToString();
-        var mode = options.Tenancy.EffectiveMode.ToString();
+        var mode = TenantResolver.EffectiveDefaultOf(options.Tenancy) is null ? "None" : "Configured";
         var state = defaultVisibility + "|" + mode;
         if (onlyWhenChanged && string.Equals(state, _lastAudited, StringComparison.Ordinal))
         {
@@ -83,7 +84,7 @@ public sealed class CatalogGovernanceHostedService : BackgroundService
         }
 
         _lastAudited = state;
-        await WriteAsync(source, new { source, defaultVisibility, tenancyMode = mode }, ct).ConfigureAwait(false);
+        await WriteAsync(source, new { source, defaultVisibility, defaultTenant = mode }, ct).ConfigureAwait(false);
     }
 
     /// <summary>Writes one aggregated entry for the tables created since the last flush with a non-Hidden default tier; nothing when there are none.</summary>
@@ -110,7 +111,7 @@ public sealed class CatalogGovernanceHostedService : BackgroundService
         {
             await _audit.RecordBestEffortAsync(new AuditLogEntry
             {
-                TenantId = TenantId.LegacySingleTenant,
+                TenantId = TenantId.Platform, // tenant-less background audit (DT-A-6)
                 EventType = AuditEventTypes.CatalogVisibilityChanged,
                 ActorSid = new Sid("S-1-5-18"),
                 TargetTable = string.Empty,

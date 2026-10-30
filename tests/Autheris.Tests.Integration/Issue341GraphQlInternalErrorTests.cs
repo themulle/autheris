@@ -221,7 +221,6 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", bypassConsent ? "true" : "false");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:OpenSchema", "true");
-            b.UseSetting("Gateway:Tenancy:Mode", "Multi");
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataFile}");
             b.ConfigureLogging(l => l.AddProvider(_logs));

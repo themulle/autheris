@@ -85,7 +85,6 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_govPath}");
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
-        b.UseSetting("Gateway:Tenancy:Mode", "Multi");
         b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
         b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataPath}");
     });

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Governance.Interfaces;
@@ -41,7 +42,7 @@ public sealed class McpDatasetCatalogAdminToolTests
     [Fact]
     public void SessionOfAClusterAdmin_ResolvesToGlobal_OtherRolesAndReadOnlyAreNoAdminToolUsers()
     {
-        CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(Session), TenancyMode.Multi).ShouldBe(CallerScope.Global);
+        CallerScopeResolver.Resolve(McpProtocolHandler.BuildPrincipalFromSession(Session), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.Global);
         McpAdminTools.CanUseAdminTools(Session with { Roles = ["GovernanceAdmin"] }, authBypassed: false).ShouldBeFalse();
         McpAdminTools.CanUseAdminTools(Session with { IsReadOnly = true }, authBypassed: false).ShouldBeFalse();
     }

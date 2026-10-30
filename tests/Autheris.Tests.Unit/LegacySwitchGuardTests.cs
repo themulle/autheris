@@ -44,6 +44,47 @@ public sealed class LegacySwitchGuardTests
 
     [Trait("Category", "Security")]
     [Theory]
+    [InlineData("Gateway:Tenancy:Mode", "Single", "Gateway:Tenancy:DefaultTenantId")]
+    [InlineData("Gateway:Tenancy:Mode", "Multi", "Gateway:Tenancy:DefaultTenantId")]
+    [InlineData("Gateway:Tenancy:Mode", "", "Gateway:Tenancy:DefaultTenantId")]
+    [InlineData("Gateway:Authentication:ForwardAuth:DefaultTenantId", "tenant-a", "Gateway:Tenancy:DefaultTenantId")]
+    [InlineData("Gateway:Authentication:ForwardAuth:DefaultTenantId", "", "Gateway:Tenancy:DefaultTenantId")]
+    public void DT_SC_13_Removed_Tenancy_Keys_Fail_Startup_On_Presence_Whatever_The_Value(string key, string value, string replacement)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config((key, value))));
+
+        ex.Message.ShouldContain(key);
+        ex.Message.ShouldContain(replacement);
+        if (value.Length > 0)
+        {
+            ex.Message.ShouldNotContain(value);
+        }
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("Gateway__Tenancy__Mode", "Single")]
+    [InlineData("Gateway__Authentication__ForwardAuth__DefaultTenantId", "tenant-a")]
+    public void DT_SC_13_Removed_Tenancy_Keys_Fail_Startup_In_Environment_Spelling(string variable, string value)
+    {
+        // The environment configuration provider maps '__' to ':', so the environment spelling is the same key.
+        var previous = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, value);
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+
+            Should.Throw<InvalidOperationException>(() => LegacySwitchGuard.ThrowIfLegacyKeysSet(configuration))
+                .Message.ShouldContain(variable.Replace("__", ":", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+        }
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
     [InlineData("Quickstart")]
     [InlineData("Strict")]
     public void Gateway_Profile_Key_Fails_Startup(string value)
@@ -78,6 +119,38 @@ public sealed class LegacySwitchGuardTests
 
         ex.Message.ShouldContain("Gateway:Insecure:warn_fallback_default_tenant_for_webhooks");
         ex.Message.ShouldContain("removed");
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("false")]
+    [InlineData("true")]
+    [InlineData("")]
+    public void DT_SC_13_FailClosedOnRevocationLookupError_Key_Fails_Startup_On_Presence(string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(
+            () => LegacySwitchGuard.ThrowIfLegacyKeysSet(Config(("Gateway:Caching:Redis:FailClosedOnRevocationLookupError", value))));
+
+        ex.Message.ShouldContain("Gateway:Caching:Redis:FailClosedOnRevocationLookupError");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void DT_SC_13_FailClosedOnRevocationLookupError_Env_Spelling_Fails_Startup()
+    {
+        const string name = "Gateway__Caching__Redis__FailClosedOnRevocationLookupError";
+        Environment.SetEnvironmentVariable(name, "false");
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+
+            LegacySwitchGuard.FindViolations(configuration)
+                .ShouldContain(m => m.Contains("Caching:Redis:FailClosedOnRevocationLookupError", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
     }
 
     [Fact]

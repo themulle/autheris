@@ -22,6 +22,45 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
         _fileSystem = fileSystem ?? PhysicalFileSystemProbe.Instance;
     }
 
+    /// <summary>
+    /// DT-A-1 / DT-SC-13: <c>Gateway:Tenancy:DefaultTenantId</c>, when present, must be a valid, non-reserved tenant id that does not
+    /// collide case-insensitively with another configured tenant id. Messages never echo the value.
+    /// </summary>
+    private static void ValidateDefaultTenant(GatewayOptions opts, List<string> failures)
+    {
+        var raw = opts.Tenancy.DefaultTenantId;
+        if (raw is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            failures.Add("Gateway:Tenancy:DefaultTenantId must not be empty; remove the key to configure no default tenant.");
+            return;
+        }
+
+        if (Autheris.Domain.Common.TenantId.IsReserved(raw))
+        {
+            failures.Add("Gateway:Tenancy:DefaultTenantId must not use the reserved '_' prefix.");
+            return;
+        }
+
+        if (!Autheris.Domain.Common.TenantId.TryParse(raw, out _))
+        {
+            failures.Add("Gateway:Tenancy:DefaultTenantId is not a valid tenant id (alphanumeric, '_' and '-', at most 64 characters).");
+            return;
+        }
+
+        var others = Autheris.Application.Security.TenantCollisionGuard.ConfiguredTenantIds(opts);
+        var collides = Autheris.Application.Security.TenantCollisionCheck.FindCollisions(others.Append(raw))
+            .Any(c => c.Spellings.Contains(raw, StringComparer.Ordinal));
+        if (collides)
+        {
+            failures.Add("Gateway:Tenancy:DefaultTenantId collides case-insensitively with another configured tenant id.");
+        }
+    }
+
     public ValidateOptionsResult Validate(string? name, GatewayOptions opts)
     {
         ArgumentNullException.ThrowIfNull(opts);
@@ -55,10 +94,7 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             }
         }
 
-        if (!opts.Tenancy.IsValid)
-        {
-            failures.Add("Gateway:Tenancy:Mode must be Single or Multi (empty means Multi).");
-        }
+        ValidateDefaultTenant(opts, failures);
 
         if (opts.Catalog.MaxTagsPerDataset is < 1 or > Autheris.Domain.Model.DatasetTagRules.HardMaxTagsPerDataset)
         {

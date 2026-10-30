@@ -27,17 +27,18 @@ public sealed class ClaimsNormalizerTests : IDisposable
 
         Sid.RealmLookup = r => r == "enterprise-realm" ? realm : null;
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        var identity = new ClaimsIdentity(
         [
             new Claim("autheris:realm", "enterprise-realm"),
             new Claim("tenant_id", "untrusted-idp-tenant-claim"),
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-100")
-        ], "Oidc"));
+        ], "Oidc");
+        // DT-A-3: the realm binding is applied by the tenant stamping of the claims transformation (Normalize no longer rewrites tenants).
+        DefaultTenantCaller.StampRealm(realm, identity);
 
-        var normalized = ClaimsNormalizer.Normalize(principal);
-
-        var tenantClaims = normalized.FindAll("tenant_id");
-        tenantClaims.Count().ShouldBe(1);
+        var tenantClaims = identity.FindAll("tenant_id").ToList();
+        tenantClaims.Count.ShouldBe(1);
         tenantClaims.Single().Value.ShouldBe(boundTenant.Value);
+        identity.FindFirst("autheris:tenant_source")!.Value.ShouldBe("realm");
     }
 }

@@ -52,7 +52,7 @@ public sealed class SecurityReview20261002GraphQLTests
             new(ClaimTypes.PrimarySid, sid),
             new(ClaimTypes.NameIdentifier, sid)
         };
-        if (tenant != null) claims.Add(new Claim("tenant_id", tenant));
+        claims.Add(new Claim("tenant_id", tenant ?? DefaultTenantCaller.Claim.Value));
         if (clientId != null) claims.Add(new Claim("client_id", clientId));
         claims.AddRange(extra);
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
@@ -384,12 +384,12 @@ public sealed class SecurityReview20261002GraphQLTests
     }
 
     [Fact]
-    public async Task M15_ConsentRevocationImpact_LegacySingleTenantConsent_IsNotVisibleToOtherTenant()
+    public async Task M15_ConsentRevocationImpact_DefaultTenantConsent_IsNotVisibleToOtherTenant()
     {
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
         var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, TenantId.LegacySingleTenant));
+        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, Autheris.Tests.Common.TestTenants.Default));
         var sut = CreateLineageService(consentRepo, Substitute.For<IDataOwnershipRepository>(), Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-GOV"), [], ["GovernanceAdmin"], new TenantId("tenant-a"), true, false);

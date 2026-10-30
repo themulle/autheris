@@ -80,10 +80,16 @@ if command -v helm >/dev/null 2>&1; then
     echo "--> Checking Helm production render guards..."
     CHART="${REPO_ROOT}/deploy/helm/autheris"
     BASE=(-f "${CHART}/values.production.yaml" --set image.digest=sha256:0)
+    # O-1: no implicit realm exists; every enabled provider needs an explicit realm of the matching kind, bound by fixedTenantId.
+    REALM_ENTRA=(--set gateway.authentication.realms.workforce.kind=EntraWorkforce --set gateway.authentication.realms.workforce.fixedTenantId=corp)
+    REALM_ADFS=(--set gateway.authentication.realms.adfsrealm.kind=Adfs --set gateway.authentication.realms.adfsrealm.fixedTenantId=corp)
+    REALM_FWD=(--set gateway.authentication.realms.proxy.kind=ForwardAuth --set gateway.authentication.realms.proxy.fixedTenantId=corp)
+    REALM_KRB=(--set gateway.authentication.realms.domain.kind=Kerberos --set gateway.authentication.realms.domain.fixedTenantId=corp)
     ENTRA=(--set gateway.authentication.entraId.enabled=true
            --set gateway.authentication.entraId.tenantId=tenant
            --set gateway.authentication.entraId.clientId=client
-           --set gateway.authentication.entraId.audience=api://autheris)
+           --set gateway.authentication.entraId.audience=api://autheris
+           "${REALM_ENTRA[@]}")
 
     render() { helm template t "${CHART}" "$@" 2>&1; }
     # A negative render must fail for the expected reason (error message pattern), not for an unrelated template error.
@@ -109,7 +115,8 @@ if command -v helm >/dev/null 2>&1; then
     FWD=(--set gateway.authentication.forwardAuth.enabled=true
          --set 'gateway.authentication.forwardAuth.trustedProxies={10.1.2.3}'
          --set 'gateway.authentication.forwardAuth.trustedNetworks={10.1.2.0/24}'
-         --set gateway.authentication.forwardAuth.sharedSecret.existingSecret=fwd-secret)
+         --set gateway.authentication.forwardAuth.sharedSecret.existingSecret=fwd-secret
+         "${REALM_FWD[@]}")
 
     # Positive render: a fully configured production release renders and carries the authenticated ServiceMonitor.
     if ! POSITIVE="$(render "${BASE[@]}" "${ENTRA[@]}")"; then
@@ -125,15 +132,15 @@ if command -v helm >/dev/null 2>&1; then
     expect_failure "no authentication provider" "exactly one of" "${BASE[@]}"
     expect_failure "two authentication providers" "exactly one of" "${BASE[@]}" "${ENTRA[@]}" \
         --set gateway.authentication.adfs.enabled=true --set gateway.authentication.adfs.authority=https://adfs.example/adfs \
-        --set gateway.authentication.adfs.audience=api://autheris
+        --set gateway.authentication.adfs.audience=api://autheris "${REALM_ADFS[@]}"
     for field in tenantId clientId audience; do
         expect_failure "EntraId ${field} missing" "entraId.${field} is required" "${BASE[@]}" "${ENTRA[@]}" --set "gateway.authentication.entraId.${field}="
     done
-    expect_failure "ADFS authority missing" "adfs.authority is required" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+    expect_failure "ADFS authority missing" "adfs.authority is required" "${BASE[@]}" "${REALM_ADFS[@]}" --set gateway.authentication.adfs.enabled=true \
         --set gateway.authentication.adfs.audience=api://autheris
-    expect_failure "ADFS audience missing" "adfs.audience is required" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+    expect_failure "ADFS audience missing" "adfs.audience is required" "${BASE[@]}" "${REALM_ADFS[@]}" --set gateway.authentication.adfs.enabled=true \
         --set gateway.authentication.adfs.authority=https://adfs.example/adfs
-    expect_failure "forwardAuth without trustedProxies" "trustedProxies must list" "${BASE[@]}" --set gateway.authentication.forwardAuth.enabled=true
+    expect_failure "forwardAuth without trustedProxies" "trustedProxies must list" "${BASE[@]}" "${REALM_FWD[@]}" --set gateway.authentication.forwardAuth.enabled=true
     expect_failure "forwardAuth with empty trustedNetworks" "trustedNetworks must be set explicitly" "${BASE[@]}" "${FWD[@]}" \
         --set 'gateway.authentication.forwardAuth.trustedNetworks=null'
     expect_failure "forwardAuth without shared secret" "sharedSecret.existingSecret" "${BASE[@]}" "${FWD[@]}" \
@@ -141,10 +148,20 @@ if command -v helm >/dev/null 2>&1; then
     expect_failure "RequireTenantColumn disabled without exemption" "requireTenantColumn must be true" "${BASE[@]}" "${ENTRA[@]}" \
         --set gateway.dataSources.requireTenantColumn=false
 
+    # O-1: an enabled provider without a realm of its kind fails the render with the explicit message (no implicit realm).
+    expect_failure "EntraId without a realm" "gateway.authentication.realms needs a realm of kind EntraWorkforce when gateway.authentication.entraId is enabled \(no implicit realm exists\)" \
+        "${BASE[@]}" --set gateway.authentication.entraId.enabled=true --set gateway.authentication.entraId.tenantId=tenant \
+        --set gateway.authentication.entraId.clientId=client --set gateway.authentication.entraId.audience=api://autheris
+    expect_failure "Kerberos without a realm" "gateway.authentication.realms needs a realm of kind Kerberos when gateway.authentication.kerberos is enabled \(no implicit realm exists\)" \
+        "${BASE[@]}" --set gateway.authentication.kerberos.enabled=true
+    # DT-A-13: the removed revocation switch must fail the render instead of being ignored.
+    expect_failure "failClosedOnRevocationLookupError set" "gateway.redis.failClosedOnRevocationLookupError was removed" "${BASE[@]}" "${ENTRA[@]}" \
+        --set gateway.redis.failClosedOnRevocationLookupError=true
+
     expect_success "explicit RequireTenantColumn exemption" "${BASE[@]}" "${ENTRA[@]}" --set gateway.dataSources.requireTenantColumn=false \
         --set gateway.dataSources.requireTenantColumnExemption=true
-    expect_success "kerberos only" "${BASE[@]}" --set gateway.authentication.kerberos.enabled=true
-    expect_success "adfs only" "${BASE[@]}" --set gateway.authentication.adfs.enabled=true \
+    expect_success "kerberos only" "${BASE[@]}" "${REALM_KRB[@]}" --set gateway.authentication.kerberos.enabled=true
+    expect_success "adfs only" "${BASE[@]}" "${REALM_ADFS[@]}" --set gateway.authentication.adfs.enabled=true \
         --set gateway.authentication.adfs.authority=https://adfs.example/adfs --set gateway.authentication.adfs.audience=api://autheris
     if ! FWDOUT="$(render "${BASE[@]}" "${FWD[@]}")"; then
         echo "ERROR: forwardAuth with trusted proxies, networks and shared secret must render: ${FWDOUT}" >&2

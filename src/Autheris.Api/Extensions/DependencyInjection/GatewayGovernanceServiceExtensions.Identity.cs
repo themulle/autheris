@@ -38,7 +38,14 @@ public static partial class GatewayGovernanceServiceExtensions
     private static void AddIdentityAndAccessGovernance(IServiceCollection services)
     {
         // Wave 2: Identity & Access Governance
-        services.AddSingleton<Autheris.Application.Identity.IIdentityRealmRegistry, Autheris.Application.Identity.IdentityRealmRegistry>();
+        // The registry is filled from Authentication:Realms once, on first use (DT-A-11); without Initialize no realm is registered
+        // and realm-bound principals resolve Invalid.
+        services.AddSingleton<Autheris.Application.Identity.IIdentityRealmRegistry>(sp =>
+        {
+            var registry = new Autheris.Application.Identity.IdentityRealmRegistry();
+            registry.Initialize(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>>().Value);
+            return registry;
+        });
         services.AddSingleton<Autheris.Application.Identity.Caching.IRoleResolverCache, Autheris.Application.Identity.Caching.RoleResolverCache>();
         services.AddSingleton<Autheris.Application.Identity.IRoleResolver, Autheris.Application.Identity.RoleResolver>();
         services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();

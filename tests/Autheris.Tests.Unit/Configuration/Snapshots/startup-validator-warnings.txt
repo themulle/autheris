@@ -1,14 +1,14 @@
 ## Warnings_DevelopmentDefault [Development]
 outcome: OK
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 ## Warnings_DevelopmentRecursiveCte [Development]
 outcome: OK
 log: Warning: WebSQL WITH RECURSIVE is enabled (MaxRecursionDepth 100, ExecutionTimeoutSeconds 30). The timeout is the work bound; limit temp space on the gateway database roles (PostgreSQL temp_file_limit/work_mem, Oracle temp tablespace quota or profile, SQL Server tempdb limits).
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 ## Warnings_DevelopmentWebSqlBypassFlag [Development]
 outcome: OK
 log: Warning: [DANGER] danger_bypass_websql_governance has no effect since the AST compiler cutover; every WebSQL statement is governed. Remove the setting.
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 console: ================================================================================
 console: ⚠️⚠️⚠️  INSECURE GETTING-STARTED CONFIGURATION DETECTED  ⚠️⚠️⚠️
 console: The following security bypasses are currently ACTIVE:
@@ -17,32 +17,31 @@ console: NEVER USE THESE INSECURE SETTINGS IN PRODUCTION ENVIRONMENTS!
 console: ================================================================================
 ## Warnings_DevelopmentDangerBypassBanner [Development]
 outcome: OK
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 console: ================================================================================
 console: ⚠️⚠️⚠️  INSECURE GETTING-STARTED CONFIGURATION DETECTED  ⚠️⚠️⚠️
 console: The following security bypasses are currently ACTIVE:
 console:   - DANGER:danger_disable_column_masking
 console: NEVER USE THESE INSECURE SETTINGS IN PRODUCTION ENVIRONMENTS!
 console: ================================================================================
-## Warnings_DevelopmentTenancyExplicitSingle [Development]
+## Warnings_DevelopmentDefaultTenantConfigured [Development]
 outcome: OK
-log: Information: Gateway:Tenancy:Mode is Single.
 ## Warnings_DevelopmentCatalogDiscoveryDeprecated [Development]
 outcome: OK
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 log: Warning: Gateway:Catalog:AllowAuthenticatedCatalogDiscovery is deprecated and has no effect: non-administrators see only consented tables in the GraphQL catalog.
 ## Warnings_ProductionDefault [Production]
 outcome: OK
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 console: [Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.
 ## Warnings_ProductionWarnFlags [Production]
 outcome: OK
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 console: [Autheris] WARNING: security-relevant settings are active (permitted, review regularly):
 console:   - WARN:warn_allow_all_cors_origins
 console: [Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.
 ## Warnings_ProductionTenantCollisionLoggedCritical [Production]
 outcome: OK
 log: Critical: Security (B-1): tenant ids that differ only in case are configured (ACME / Acme). Requests of these tenants are denied with 403 TENANT_ID_COLLISION until an operator renames one of them.
-log: Warning: Gateway:Tenancy:Mode is not configured; defaulting to Multi. Single-tenant deployments must set Gateway:Tenancy:Mode=Single; in Multi mode a principal without tenant claim is not treated as an administrator and sees only consented tables.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 console: [Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.

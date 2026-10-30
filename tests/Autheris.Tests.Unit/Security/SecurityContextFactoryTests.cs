@@ -27,7 +27,9 @@ public sealed class SecurityContextFactoryTests
         ctx.ShouldNotBeNull();
         ctx.IsAuthenticated.ShouldBeFalse();
         ctx.UserSid.Value.ShouldBe("ANONYMOUS");
-        ctx.TenantId.ShouldBe(TenantId.LegacySingleTenant);
+        // DT-A-3/DT-A-4: an anonymous context has no tenant (never a default); reading it fails closed.
+        ctx.ResolvedTenant.ShouldBeNull();
+        Should.Throw<Autheris.Domain.Exceptions.TenantUnresolvedException>(() => ctx.TenantId);
     }
 
     [Fact]
@@ -158,8 +160,8 @@ public sealed class SecurityContextFactoryTests
         var secCtx = (SecurityPrincipalContext)httpContext.Items[SecurityPrincipalContext.ItemKey]!;
         secCtx.TenantId.Value.ShouldBe("tenant-gamma");
 
-        httpContext.Items.ContainsKey(TenantResolutionMiddleware.TenantIdItemKey).ShouldBeTrue();
-        var legacyTenant = (TenantId)httpContext.Items[TenantResolutionMiddleware.TenantIdItemKey]!;
+        httpContext.Items.ContainsKey(SecurityPrincipalContext.TenantIdItemKey).ShouldBeTrue();
+        var legacyTenant = (TenantId)httpContext.Items[SecurityPrincipalContext.TenantIdItemKey]!;
         legacyTenant.Value.ShouldBe("tenant-gamma");
     }
 

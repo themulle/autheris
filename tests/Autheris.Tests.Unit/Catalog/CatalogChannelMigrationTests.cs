@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Catalog.Interfaces;
@@ -32,9 +33,9 @@ public sealed class CatalogChannelMigrationTests
     private static readonly TableMetadata Foreign = Wp0.Table("sales", "foreign_t", "Other tenant", ["id"]);
     private static readonly TableMetadata Denied = Wp0.Table("sales", "denied_t", "ReBAC denied", ["id"]);
 
-    private static GatewayOptions Opts(bool rebac, TenancyMode mode = TenancyMode.Multi) => new()
+    private static GatewayOptions Opts(bool rebac, TenancyShape mode = TenancyShape.Multi) => new()
     {
-        Tenancy = new TenancyOptions { Mode = mode.ToString() },
+        Tenancy = mode.Options(),
         Rebac = new RebacOptions { Enabled = rebac }
     };
 

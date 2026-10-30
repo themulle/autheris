@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -107,10 +108,10 @@ public sealed class CatalogVisibilityServiceTests
     private static IConsentRepository ConsentsFor(IEnumerable<TableMetadata> tables, string sid = "S-USER") =>
         Wp0.Consents(tables.Select(t => Wp0.Allow(t.Identifier, sid, Wp0.TenantA, "id")).ToArray());
 
-    private static GatewayOptions Opts(TenancyMode mode = TenancyMode.Multi, bool rebacEnabled = false) =>
+    private static GatewayOptions Opts(TenancyShape mode = TenancyShape.Multi, bool rebacEnabled = false) =>
         new()
         {
-            Tenancy = new TenancyOptions { Mode = mode.ToString() },
+            Tenancy = mode.Options(),
             Catalog = new DataCatalogOptions { SharedTables = [] },
             Rebac = new RebacOptions { Enabled = rebacEnabled }
         };
@@ -191,10 +192,10 @@ public sealed class CatalogVisibilityServiceTests
         var tables = Wp0.Tables(Row(T1));
         var consents = Wp0.Consents();
         var rebac = new FakeRebac { AllowAll = true };
-        var mode = tenant == null ? TenancyMode.Single : TenancyMode.Multi;
+        var mode = tenant == null ? TenancyShape.Single : TenancyShape.Multi;
         var service = Svc(tables, consents, rebac, Opts(mode, rebacEnabled: true));
 
-        CallerScopeResolver.Resolve(principal, mode).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(principal, mode.Owner()).ShouldBe(CallerScope.None);
         (await service.GetVisibleAsync(Caller(principal))).Tables.ShouldBeEmpty();
         (await service.FindVisibleAsync(Caller(principal), T1)).ShouldBeNull();
         (await service.FilterVisibleAsync(Caller(principal), [T1])).ShouldBeEmpty();
@@ -622,36 +623,35 @@ public sealed class CatalogVisibilityServiceTests
         var set = await Svc(Wp0.Tables(row), consents).GetVisibleAsync(Caller(principal));
 
         set.IsAdminView.ShouldBe(admin);
-        set.IsAdminView.ShouldBe(CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(principal, TenancyMode.Multi)));
+        set.IsAdminView.ShouldBe(CallerScopeResolver.IsAdminView(CallerScopeResolver.Resolve(principal, TenancyShape.Multi.Owner())));
         set.Tables.Count.ShouldBe(1);
         set.ShapeOf(T1).ShouldBe(CatalogOutputShape.Full);
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Multi_Mode_NoTenantClaim_NeverUnrestricted_ConsentPathOnly()
+    public async Task Multi_Mode_NoTenantClaim_HasNoCatalogStanding()
     {
         var rows = new[] { Row(T1), Row(T2) };
-        var consents = Wp0.Consents(Wp0.Allow(T1, "S-GOV", TenantId.LegacySingleTenant, "id"));
+        var consents = Wp0.Consents(Wp0.Allow(T1, "S-GOV", Autheris.Tests.Common.TestTenants.Default, "id"));
         var claimless = Wp0.User("S-GOV", null, ["GovernanceAdmin"]);
 
-        var set = await Svc(Wp0.Tables(rows), consents, options: Opts(TenancyMode.Multi)).GetVisibleAsync(Caller(claimless));
+        var set = await Svc(Wp0.Tables(rows), consents, options: Opts(TenancyShape.Multi)).GetVisibleAsync(Caller(claimless));
 
-        set.Scope.ShouldBe(CallerScope.Claimless);
-        set.Scope.ShouldNotBe(CallerScope.Unrestricted);
+        set.Scope.ShouldBe(CallerScope.None);
         set.IsAdminView.ShouldBeFalse();
-        set.Tables.Select(t => t.Identifier).ShouldNotContain(T2);
+        set.Tables.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Single_Mode_GovernanceAdminWithoutTenant_Unrestricted_SeesWholeCatalog()
+    public async Task Single_Mode_GovernanceAdminWithoutTenant_CatalogOwner_SeesWholeCatalog()
     {
         var rows = new[] { Row(T1), Row(T2) };
         var admin = Wp0.User("S-GOV", null, ["GovernanceAdmin"]);
 
-        var set = await Svc(Wp0.Tables(rows), Wp0.Consents(), options: Opts(TenancyMode.Single)).GetVisibleAsync(Caller(admin));
+        var set = await Svc(Wp0.Tables(rows), Wp0.Consents(), options: Opts(TenancyShape.Single)).GetVisibleAsync(Caller(admin));
 
-        set.Scope.ShouldBe(CallerScope.Unrestricted);
+        set.Scope.ShouldBe(CallerScope.CatalogOwner);
         set.Tables.Count.ShouldBe(2);
         set.IsAdminView.ShouldBeTrue();
     }

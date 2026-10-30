@@ -134,7 +134,8 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         (await AuditAsync("CONSENT_REVOKED")).ShouldBeEmpty();
         var refusals = await AuditAsync(AuditEventTypes.ConsentTenantIntegrityRefused);
         var refusal = refusals.ShouldHaveSingleItem();
-        refusal.TenantId.ShouldBe(ConsentTenantRefusalAudit.IntegrityAuditTenant);
+        refusal.TenantId.ShouldBe(TenantId.Platform); // DT-A-6: the refusal audit goes to the platform bucket
+        ConsentTenantRefusalAudit.IntegrityAuditTenant.ShouldBe(TenantId.Platform);
         refusal.Decision.ShouldBe("DENY");
         refusal.ActorSid.ShouldBe(Admin);
         refusal.DetailsJson!.ShouldContain(consent.Id.ToString());

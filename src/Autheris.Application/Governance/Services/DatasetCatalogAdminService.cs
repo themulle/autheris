@@ -1,11 +1,14 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Application.Tenancy;
+using Autheris.Domain.Tenancy;
 using System.Collections.Concurrent;
 using System.Security;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Dbt.Services;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
@@ -87,7 +90,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             var settings = await _tables.GetDatasetCatalogSettingsAsync(gate.Table, strict: true, ct).ConfigureAwait(false);
             return settings is null
                 ? new DatasetCatalogResult(DatasetCatalogOutcome.NotFound)
-                : new DatasetCatalogResult(DatasetCatalogOutcome.Unchanged, gate.Table, settings, IsTierEffective(gate.Table));
+                : new DatasetCatalogResult(DatasetCatalogOutcome.Unchanged, gate.Table, settings, IsTierEffective(gate.Table, gate.Caller!.Value.Tenant));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -172,7 +175,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         if (dryRun)
         {
-            return Simulate(table, before, replace, add, remove, requested);
+            return Simulate(table, actor.Tenant, before, replace, add, remove, requested);
         }
 
         DatasetCatalogChange? tagChange = null;
@@ -237,12 +240,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         return new DatasetCatalogResult(
             tagsChanged || visibilityChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
-            table, after, IsTierEffective(table));
+            table, after, IsTierEffective(table, actor.Tenant));
     }
 
     /// <summary>Dry run (same non-atomic cap semantics as <see cref="ExceedsCap"/>): the state the edit would produce, computed from the strict before-state like the repositories do (admin rows only are touched).</summary>
     private DatasetCatalogResult Simulate(
-        TableIdentifier table, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested)
+        TableIdentifier table, TenantId tenant, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested)
     {
         var admin = new HashSet<string>(before.Tags.Where(t => t.Source == DatasetTagSource.Admin).Select(t => t.Tag), StringComparer.Ordinal);
         if (replace is not null)
@@ -264,7 +267,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             .Concat(before.Tags.Where(t => t.Source == DatasetTagSource.Dbt && !admin.Contains(t.Tag))).ToList();
         var after = new DatasetCatalogSettings(tags, requested ?? before.Visibility);
         var changed = new DatasetCatalogChange(table, before, after).Changed;
-        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, IsTierEffective(table));
+        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, IsTierEffective(table, tenant));
     }
 
     private readonly record struct Gate(DatasetCatalogResult? Failure, Caller? Caller, TableIdentifier Table);
@@ -273,15 +276,16 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     private async Task<Gate> AuthorizeAsync(ClaimsPrincipal? principal, string? datasetId, CancellationToken ct)
     {
         var notFound = new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
-        var mode = _options.CurrentValue.Tenancy.EffectiveMode;
-        var scope = CallerScopeResolver.Resolve(principal, mode);
+        var catalogOwner = TenantResolver.EffectiveDefaultOf(_options.CurrentValue.Tenancy);
+        var resolution = CallerScopeResolver.ResolutionOf(principal, catalogOwner);
+        var scope = CallerScopeResolver.Resolve(principal, resolution, catalogOwner);
         if (scope == CallerScope.None || principal is null)
         {
             return new Gate(notFound, null, default);
         }
 
         var sid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "ANONYMOUS");
-        var caller = new Caller(sid, scope is CallerScope.Global or CallerScope.Unrestricted, TenantOf(principal), principal.Identity?.AuthenticationType ?? string.Empty);
+        var caller = new Caller(sid, scope is CallerScope.Global or CallerScope.CatalogOwner, TenantOf(resolution, principal), principal.Identity?.AuthenticationType ?? string.Empty);
 
         TableIdentifier? parsed;
         try
@@ -329,6 +333,15 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             return new Gate(notFound, caller.IsAdmin ? null : caller, default);
         }
 
+        // DT-SC-08: virtual tables / semantic models are tenant-scoped objects; the catalog-owner widening is physical metadata only. A caller
+        // that is not the global administrator reaches only the semantic tables of its own tenant schema (identical NotFound otherwise).
+        if (scope != CallerScope.Global &&
+            SemanticVirtualTables.IsInSemanticDomain(table) &&
+            !string.Equals(table.Schema, SemanticVirtualTables.TenantSchema(caller.Tenant), StringComparison.Ordinal))
+        {
+            return new Gate(notFound, caller.IsAdmin ? null : caller, default);
+        }
+
         return new Gate(null, caller, table);
     }
 
@@ -347,15 +360,26 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return TableIdentifier.TryParse(id.Replace('/', '.'), out var identifier) ? identifier : null;
     }
 
-    private static TenantId TenantOf(ClaimsPrincipal principal)
+    // The scope is not None here, so the resolution usually carries the tenant; a ClusterAdmin without a resolved tenant is audited under its claim,
+    // and under the platform bucket (TenantId.Platform) when the claim is absent; an invalid claim is rethrown (and denied earlier by CallerScopeResolver). The platform bucket is audit-only, never a request tenant.
+    private static TenantId TenantOf(TenantResolution resolution, ClaimsPrincipal principal)
     {
+        if (resolution.Tenant is { } resolved && resolved.Value is not null)
+        {
+            return resolved;
+        }
+
         try
         {
             return principal.GetTenantId();
         }
-        catch (SecurityException)
+        catch (Autheris.Domain.Exceptions.TenantClaimInvalidException)
         {
-            return TenantId.LegacySingleTenant;
+            throw; // an invalid claim is never mapped to the platform bucket
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+        {
+            return TenantId.Platform;
         }
     }
 
@@ -411,10 +435,10 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return admin.Count > max;
     }
 
-    private bool IsTierEffective(TableIdentifier table)
+    private bool IsTierEffective(TableIdentifier table, TenantId tenant)
     {
         var options = _options.CurrentValue;
-        if (options.Tenancy.EffectiveMode == Autheris.Domain.Options.TenancyMode.Single)
+        if (CallerScopeResolver.IsOwner(tenant, TenantResolver.EffectiveDefaultOf(options.Tenancy)))
         {
             return true;
         }
@@ -573,13 +597,15 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             return;
         }
 
-        var scope = CallerScopeResolver.Resolve(caller, _options.CurrentValue.Tenancy.EffectiveMode);
-        if (scope == CallerScope.None || caller is null || scope is CallerScope.Global or CallerScope.Unrestricted)
+        var catalogOwner = TenantResolver.EffectiveDefaultOf(_options.CurrentValue.Tenancy);
+        var resolution = CallerScopeResolver.ResolutionOf(caller, catalogOwner);
+        var scope = CallerScopeResolver.Resolve(caller, resolution, catalogOwner);
+        if (scope == CallerScope.None || caller is null || scope is CallerScope.Global or CallerScope.CatalogOwner)
         {
             return;
         }
 
         var sid = caller.GetUserSid() ?? new Sid(caller.Identity?.Name ?? "ANONYMOUS");
-        await AuditProbeAsync(new Caller(sid, false, TenantOf(caller), caller.Identity?.AuthenticationType ?? string.Empty), ct, attempts, "manifest").ConfigureAwait(false);
+        await AuditProbeAsync(new Caller(sid, false, TenantOf(resolution, caller), caller.Identity?.AuthenticationType ?? string.Empty), ct, attempts, "manifest").ConfigureAwait(false);
     }
 }

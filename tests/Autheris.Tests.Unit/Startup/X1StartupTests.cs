@@ -151,7 +151,7 @@ public sealed class X1StartupTests
 
     private static AccessProfile Profile(string id, string predicate) => new()
     {
-        ProfileId = id, Name = id, TenantId = TenantId.LegacySingleTenant, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate
+        ProfileId = id, Name = id, TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate
     };
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class X1StartupTests
         profiles.GetAllProfilesAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<AccessProfile>>([Profile("p-bad", $"[name] = '{SecretValue}'")]));
         var log = new CapturingLogger<DeniedTablesStartupReporter>();
-        var reporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), log);
+        var reporter = new DeniedTablesStartupReporter(tables, profiles, null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "tenant-a" } }), log);
 
         await reporter.StartAsync(CancellationToken.None);
         await reporter.ExecuteTask!;   // the listing runs in the background

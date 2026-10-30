@@ -158,7 +158,7 @@ public sealed class DbtTests
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(SampleDbtManifestJson));
-        var result = await service.IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Success.ShouldBeTrue();
         result.ParsedModelsCount.ShouldBe(2);
@@ -195,7 +195,7 @@ public sealed class DbtTests
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(SampleDbtManifestJson));
-        var result = await service.IngestManifestStreamAsync(stream, dryRun: true);
+        var result = await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: true);
 
         result.Success.ShouldBeTrue();
         result.ParsedModelsCount.ShouldBe(2);
@@ -353,7 +353,7 @@ public sealed class DbtTests
         var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(SampleDbtManifestJson));
-        var result = await service.IngestManifestStreamAsync(stream);
+        var result = await service.IngestManifestStreamAsClusterAdminAsync(stream);
 
         result.Success.ShouldBeTrue();
         // email_address was already pending, so only tax_id is generated
@@ -543,7 +543,7 @@ public sealed class DbtTests
         """;
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestJson));
-        var result = await service.IngestManifestStreamAsync(stream, dryRun: false);
+        var result = await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
 
         result.Success.ShouldBeTrue();
         result.ImportedRelationsCount.ShouldBe(1);

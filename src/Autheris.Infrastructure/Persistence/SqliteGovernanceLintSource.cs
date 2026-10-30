@@ -91,7 +91,7 @@ public static class SqliteGovernanceLintSource
             profiles.Add(new AccessProfile
             {
                 ProfileId = reader.GetString(0),
-                TenantId = TenantId.TryParse(reader.GetString(1), out var tenant) ? tenant : TenantId.LegacySingleTenant,
+                TenantId = StoredTenant.Parse(reader.IsDBNull(1) ? null : reader.GetString(1)),
                 Name = reader.GetString(2),
                 TargetTables = targets,
                 RowFilterPredicate = reader.IsDBNull(4) ? null : reader.GetString(4)

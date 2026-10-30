@@ -24,14 +24,15 @@ public sealed class IdentitySubjectResolver : IIdentitySubjectResolver
 
         // 1. Resolve Tenant if present
         TenantId? tenant = null;
-        var tidClaim = principal.FindFirst("tenant_id")?.Value
-            ?? principal.FindFirst("tid")?.Value
-            ?? principal.FindFirst("tenant")?.Value
-            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        if (TenantId.TryParse(tidClaim, out var parsedTenant))
+        // DT-SC-03: the one claim reader. A conflicting or malformed tenant claim denies (never first-wins); an absent one stays null.
+        var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        switch (tenantClaim.Kind)
         {
-            tenant = parsedTenant;
+            case Autheris.Domain.Tenancy.ClaimTenantKind.Valid:
+                tenant = tenantClaim.Tenant;
+                break;
+            case Autheris.Domain.Tenancy.ClaimTenantKind.Invalid:
+                throw new Autheris.Domain.Exceptions.TenantClaimInvalidException();
         }
 
         // 2. Check for mTLS / Client Certificate

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -82,7 +83,7 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         var all = await _repo.GetAllTablesAsync();
         (await McpCatalogVisibility.VisibleTablesAsync(all, user, consents, Shared.Value, CancellationToken.None)).ShouldBeEmpty();
-        (await CatalogVisibility.VisibleTablesAsync(all, user, new TenantId("tenant-a"), consents, null, TenancyMode.Multi, Shared.Value.Catalog.SharedTables)).ShouldBeEmpty();
+        (await CatalogVisibility.VisibleTablesAsync(all, user, new TenantId("tenant-a"), consents, null, TenancyShape.Multi.Owner(), Shared.Value.Catalog.SharedTables)).ShouldBeEmpty();
 
         await _repo.SetDatasetVisibilityAsync(Full, DatasetVisibility.Hidden, Admin);
         (await Catalog().ListDatasetsAsync(user)).Datasets.Select(d => d.Id).ShouldBe([Summary.ToString()]);

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Analytics;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,7 +54,7 @@ public sealed class SemanticMetricQueryServiceP2Tests
     private static async Task<Rig> NewRigAsync(
         IEnumerable<DbtMetric>? metrics = null,
         bool allow = true,
-        TenancyMode mode = TenancyMode.Multi,
+        TenancyShape mode = TenancyShape.Multi,
         IEnumerable<DbtMeasure>? measures = null,
         ISemanticCatalogService? catalogOverride = null)
     {
@@ -219,11 +220,11 @@ public sealed class SemanticMetricQueryServiceP2Tests
 
         var unknown = await Should.ThrowAsync<KeyNotFoundException>(() => granted.Service.QueryMetricsAsync(Principal(), new MetricQueryRequest(["nope"])));
         var foreignTenant = await Should.ThrowAsync<KeyNotFoundException>(() => granted.Service.QueryMetricsAsync(Principal("tenant-b"), new MetricQueryRequest(["revenue"])));
-        var claimless = await Should.ThrowAsync<KeyNotFoundException>(() => granted.Service.QueryMetricsAsync(Principal(tenant: null), new MetricQueryRequest(["nope"])));
+        // DT-A-3: a caller without a tenant claim has no tenant at all (no default): refused before any lookup, so it learns nothing about metrics.
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TenantUnresolvedException>(() => granted.Service.QueryMetricsAsync(Principal(tenant: null), new MetricQueryRequest(["nope"])));
         var noConsent = await Should.ThrowAsync<GatewayForbiddenException>(() => denied.Service.QueryMetricsAsync(Principal(), new MetricQueryRequest(["revenue"])));
 
         foreignTenant.Message.ShouldBe(unknown.Message.Replace("nope", "revenue"));
-        claimless.Message.ShouldBe(unknown.Message);
         noConsent.Message.ShouldBe("Access denied.");
         granted.Captured.ShouldBeNull();
     }

@@ -110,7 +110,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
             .ToList();
 
-        var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, new TenantId(tenantId), _consentRepo, contract: null, _options.Value.Tenancy.EffectiveMode, _options.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
+        var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, new TenantId(tenantId), _consentRepo, contract: null, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy), _options.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
         if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
         {
             var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");

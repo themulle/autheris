@@ -21,7 +21,7 @@ public sealed class DevOptions
     /// <summary>Class A: startup banner with links and personas.</summary>
     public bool Banner { get; init; } = true;
 
-    /// <summary>Class A: print plaintext passwords in the startup banner (default: false).</summary>
+    /// <summary>Class A: point plaintext persona passwords at the configuration source in the startup banner; plaintext is never printed (default: false).</summary>
     public bool ShowPasswords { get; init; } = false;
 
     /// <summary>Class A: diagnostic problem+json for 403 responses and unhandled exceptions.</summary>

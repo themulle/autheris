@@ -30,13 +30,16 @@ public sealed class OpenLineageClientTenantFilterTests
         }
     }
 
-    private static (OpenLineageClient Client, CapturingHandler Handler) Create(params LineageNode[] nodes)
+    private static (OpenLineageClient Client, CapturingHandler Handler) Create(params LineageNode[] nodes) => CreateWithDefault(null, nodes);
+
+    private static (OpenLineageClient Client, CapturingHandler Handler) CreateWithDefault(string? defaultTenant, params LineageNode[] nodes)
     {
         var handler = new CapturingHandler();
         var store = Substitute.For<ILineageGraphStore>();
         store.GetAllNodes().Returns(nodes);
         var options = Options.Create(new GatewayOptions
         {
+            Tenancy = new TenancyOptions { DefaultTenantId = defaultTenant },
             Catalog = new DataCatalogOptions { OpenLineageEndpoint = "http://openlineage.internal/api/v1/lineage" }
         });
         return (new OpenLineageClient(new HttpClient(handler), store, options, NullLogger<OpenLineageClient>.Instance), handler);
@@ -72,13 +75,38 @@ public sealed class OpenLineageClientTenantFilterTests
     [Fact]
     public async Task Push_UntenantedNodes_IncludedForLegacyTenant()
     {
-        var (client, handler) = Create(Node("legacy.table", null), Node("b.table", "tenant-b"));
+        var (client, handler) = CreateWithDefault("default-tenant", Node("legacy.table", null), Node("b.table", "tenant-b"));
 
-        await client.PushLineageGraphAsync(TenantId.LegacySingleTenant);
+        await client.PushLineageGraphAsync(Autheris.Tests.Common.TestTenants.Default);
 
         handler.Body.ShouldNotBeNull();
         handler.Body.ShouldContain("legacy.table");
         handler.Body.ShouldNotContain("b.table");
+    }
+
+    [Fact]
+    public async Task Push_UntenantedNodes_BelongToTheConfiguredDefaultTenantOnly()
+    {
+        var (client, handler) = CreateWithDefault("tenant-d", Node("legacy.table", null), Node("b.table", "tenant-b"));
+
+        await client.PushLineageGraphAsync(new TenantId("tenant-d"));
+        handler.Body.ShouldNotBeNull();
+        handler.Body.ShouldContain("legacy.table");
+        handler.Body.ShouldNotContain("b.table");
+
+        await client.PushLineageGraphAsync(Autheris.Tests.Common.TestTenants.Default);
+        handler.Body.ShouldNotBeNull();
+        handler.Body.ShouldNotContain("legacy.table");
+    }
+
+    [Fact]
+    public async Task Push_UntenantedNodes_ExcludedForEveryTenantWithoutDefaultTenant()
+    {
+        var (client, handler) = Create(Node("legacy.table", null), Node("a.table", "tenant-a"));
+
+        await client.PushLineageGraphAsync(Autheris.Tests.Common.TestTenants.Default);
+        handler.Body.ShouldNotBeNull();
+        handler.Body.ShouldNotContain("legacy.table");
     }
 
     [Fact]

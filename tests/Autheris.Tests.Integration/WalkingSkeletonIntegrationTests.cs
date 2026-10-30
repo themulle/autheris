@@ -23,6 +23,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
@@ -121,6 +122,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
 
             var consent = new Consent
             {
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = meta.Table.Id,
                 TableIdentifier = meta.Identifier,
                 Effect = ConsentEffect.Allow,
@@ -447,6 +449,12 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
             builder.UseSetting("Gateway:Authentication:ForwardAuth:Enabled", "true");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:RequireTrustedProxy", "true");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:TrustedProxies:0", "127.0.0.1");
+            builder.ConfigureServices(services => services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>
+                options.Realms["forward-auth-test"] = new Autheris.Domain.Options.Security.IdentityRealmConfigOptions
+                {
+                    Kind = Autheris.Domain.Identity.IdentityRealmKind.ForwardAuth,
+                    Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None
+                }));
         });
 
         var client = customFactory.CreateClient();

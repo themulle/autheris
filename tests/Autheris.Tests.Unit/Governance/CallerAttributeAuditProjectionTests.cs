@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Domain.Security;
 using System;
 using System.IO;
 using System.Security.Claims;
@@ -34,7 +35,7 @@ public sealed class CallerAttributeAuditProjectionTests
         repo.QueryAuditLogPageAsync(Arg.Any<AuditLogPageQuery>(), Arg.Any<CancellationToken>()).Returns(new AuditLogPage([entry], null));
         var ctx = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
         ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "GovernanceAdmin"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ME")], "test"));
-        ctx.Items[TenantResolutionMiddleware.TenantIdItemKey] = new TenantId("t1");
+        ctx.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("t1");
 
         var result = await GovernanceEndpoints.ListAuditPageAsync(ctx, repo, null, null, null, null, null, null);
         var render = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };

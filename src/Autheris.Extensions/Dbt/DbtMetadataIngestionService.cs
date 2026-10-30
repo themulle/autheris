@@ -225,12 +225,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             return true;
         }
 
-        if (string.Equals(id.Domain, "default", StringComparison.OrdinalIgnoreCase))
-        {
-            return caller.Tenant == TenantId.LegacySingleTenant ||
-                   string.Equals(caller.Tenant.Value, "default", StringComparison.OrdinalIgnoreCase);
-        }
-
         return string.Equals(id.Domain, caller.Tenant.Value, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -284,7 +278,12 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     }
 
     public Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
-        => IngestManifestStreamAsync(manifestStream, new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("system:dbt-sync"), IsSync: true, null), tenant ?? TenantId.LegacySingleTenant, tenant == null), dryRun, ct);
+    {
+        // DT-A-9: a tenant-less sync runs for the configured default tenant; without one it is refused (no legacy fallback).
+        var resolved = tenant ?? Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value.Tenancy)
+            ?? throw new InvalidOperationException("The dbt sync has no tenant: pass one or configure Gateway:Tenancy:DefaultTenantId.");
+        return IngestManifestStreamAsync(manifestStream, new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("system:dbt-sync"), IsSync: true, null), resolved, tenant == null), dryRun, ct);
+    }
 
     public async Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, DbtGovernanceImportCaller caller, bool dryRun = false, CancellationToken ct = default)
     {

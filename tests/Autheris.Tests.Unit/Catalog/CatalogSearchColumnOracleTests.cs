@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -40,13 +41,13 @@ public sealed class CatalogSearchColumnOracleTests
     }
 
     private static async Task<(Autheris.Application.Catalog.Services.CatalogDiscoveryService Service, RequestContext Context)> ArrangeAsync(
-        TenancyMode mode, string sid, params Consent[] consents)
+        TenancyShape mode, string sid, params Consent[] consents)
     {
         var tables = new[] { Customers, Orders };
         var engine = new CatalogSearchEngine(new LocalDeterministicEmbeddingGenerator(), Microsoft.Extensions.Options.Options.Create(new CatalogSearchOptions()), NullLogger<CatalogSearchEngine>.Instance);
         await engine.RebuildIndexAsync(tables);
         var service = Wp0.Service(Wp0.Tables(tables), Wp0.Consents(consents), Wp0.Options(mode), engine);
-        var user = Wp0.User(sid, mode == TenancyMode.Single ? null : "tenant-a", mode == TenancyMode.Single ? ["GovernanceAdmin"] : null);
+        var user = Wp0.User(sid, mode == TenancyShape.Single ? null : "tenant-a", mode == TenancyShape.Single ? ["GovernanceAdmin"] : null);
         return (service, Wp0.Context(user));
     }
 
@@ -65,7 +66,7 @@ public sealed class CatalogSearchColumnOracleTests
     [InlineData(CatalogSearchMode.KeywordBm25)]
     public async Task Search_QueryWithVisibleAndHiddenTerm_LeaksNoTraceOfTheHiddenColumn(CatalogSearchMode mode)
     {
-        var (service, context) = await ArrangeAsync(TenancyMode.Multi, Sid, RestrictedConsents());
+        var (service, context) = await ArrangeAsync(TenancyShape.Multi, Sid, RestrictedConsents());
 
         var hits = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("master ssn_hash", Mode: mode, Limit: 10), context);
 
@@ -82,7 +83,7 @@ public sealed class CatalogSearchColumnOracleTests
     [InlineData(CatalogSearchMode.SemanticVector)]
     public async Task Search_QueryMatchingOnlyAHiddenColumn_DropsTheHit(CatalogSearchMode mode)
     {
-        var (service, context) = await ArrangeAsync(TenancyMode.Multi, Sid, RestrictedConsents());
+        var (service, context) = await ArrangeAsync(TenancyShape.Multi, Sid, RestrictedConsents());
 
         var hits = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("ssn_hash", Mode: mode, Limit: 10), context);
 
@@ -93,7 +94,7 @@ public sealed class CatalogSearchColumnOracleTests
     [Fact]
     public async Task Search_SameHiddenColumnQuery_IsStillFoundForAnUnrestrictedAdministrator()
     {
-        var (service, context) = await ArrangeAsync(TenancyMode.Single, "S-ADMIN");
+        var (service, context) = await ArrangeAsync(TenancyShape.Single, "S-ADMIN");
 
         var hits = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("ssn_hash", Mode: CatalogSearchMode.KeywordBm25, Limit: 10), context);
 
@@ -104,7 +105,7 @@ public sealed class CatalogSearchColumnOracleTests
     [Fact]
     public async Task Search_RelevantColumns_ComeOnlyFromTheCallersVisibleColumns()
     {
-        var (service, context) = await ArrangeAsync(TenancyMode.Multi, Sid, RestrictedConsents());
+        var (service, context) = await ArrangeAsync(TenancyShape.Multi, Sid, RestrictedConsents());
 
         var hits = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("customers name", Mode: CatalogSearchMode.KeywordBm25, Limit: 10), context);
 
@@ -116,7 +117,7 @@ public sealed class CatalogSearchColumnOracleTests
     [Fact]
     public async Task Search_RelatedJoinPaths_AreKeptOnlyOverVisibleColumns()
     {
-        var (service, context) = await ArrangeAsync(TenancyMode.Multi, Sid, RestrictedConsents());
+        var (service, context) = await ArrangeAsync(TenancyShape.Multi, Sid, RestrictedConsents());
 
         var hits = await service.SearchCatalogDetailedAsync(
             new CatalogSearchQuery("order headers", Mode: CatalogSearchMode.KeywordBm25, Limit: 10, ExpandRelations: true), context);
@@ -132,7 +133,7 @@ public sealed class CatalogSearchColumnOracleTests
     [Fact]
     public async Task Search_HitForATableWithoutConsent_NeverAppears_AndIndexDescriptionComesFromTheFilteredRow()
     {
-        var (service, context) = await ArrangeAsync(TenancyMode.Multi, Sid, Wp0.Allow(Customers.Identifier, Sid, Wp0.TenantA));
+        var (service, context) = await ArrangeAsync(TenancyShape.Multi, Sid, Wp0.Allow(Customers.Identifier, Sid, Wp0.TenantA));
 
         var hits = await service.SearchCatalogDetailedAsync(new CatalogSearchQuery("order headers customer", Mode: CatalogSearchMode.KeywordBm25, Limit: 10), context);
 

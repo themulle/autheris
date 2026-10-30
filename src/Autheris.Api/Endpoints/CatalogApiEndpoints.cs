@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -125,7 +126,7 @@ public static class CatalogApiEndpoints
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // Data sources disclose endpoint base URLs and authentication state: administrators only. A tenant-scoped GovernanceAdmin
-        // is further confined to the tables of its tenant by the service. A GovernanceAdmin without tenant claim in Multi mode is
+        // is further confined to the tables of its tenant by the service. A GovernanceAdmin without a resolvable tenant is
         // answered with a stable 403 that names the option instead of a misleading empty list.
         group.MapGet("/datasources", async (
             ICatalogDiscoveryService discoveryService,
@@ -133,13 +134,16 @@ public static class CatalogApiEndpoints
             HttpContext httpContext,
             CancellationToken ct) =>
         {
-            var scope = CallerScopeResolver.Resolve(httpContext.User, gatewayOptions.Value.Tenancy.EffectiveMode);
-            if (scope == CallerScope.Claimless && CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
+            var scope = CallerScopeResolver.Resolve(httpContext.User, TenantResolver.EffectiveDefaultOf(gatewayOptions.Value.Tenancy));
+            if (scope == CallerScope.None && httpContext.User.Identity?.IsAuthenticated == true &&
+                CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
             {
-                return ApiProblems.Forbidden(
-                    ApiErrorCodes.TenancyModeClaimlessAdmin,
-                    "The principal has no tenant claim and Gateway:Tenancy:Mode is Multi; single-tenant deployments must set Gateway:Tenancy:Mode=Single.",
-                    httpContext);
+                return CallerScopeResolver.HasInvalidTenantClaim(httpContext.User)
+                    ? ApiProblems.Forbidden(ApiErrorCodes.TenantClaimInvalid, "The tenant claim of the caller is invalid.", httpContext)
+                    : ApiProblems.Forbidden(
+                        ApiErrorCodes.TenantUnresolved,
+                        "The principal has no resolvable tenant: carry a tenant claim or configure Gateway:Tenancy:DefaultTenantId.",
+                        httpContext);
             }
 
             var context = CreateRequestContext(httpContext);

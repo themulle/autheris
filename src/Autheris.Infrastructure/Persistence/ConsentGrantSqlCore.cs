@@ -69,7 +69,7 @@ internal static class ConsentGrantSqlCore
                 ValidFrom = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
                 ValidTo = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
                 IsRevoked = reader.GetInt32(10) == 1,
-                TenantId = reader.IsDBNull(11) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(11))
+                TenantId = StoredTenant.Parse(reader.IsDBNull(11) ? null : reader.GetString(11))
             };
             if (consent.IsActive(atTime))
             {

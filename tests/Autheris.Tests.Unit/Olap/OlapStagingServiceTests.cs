@@ -72,7 +72,7 @@ public sealed class OlapStagingServiceTests
 
     private static OlapQueryCommand Command(params string[] tables) => new("SELECT 1", tables, null);
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim("user_sid", "S-1-5-21-USER")], "Bearer"));
+    private static ClaimsPrincipal User() => new(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("user_sid", "S-1-5-21-USER")], "Bearer"));
 
     [Fact]
     public async Task CallerWithoutTableAccess_IsDenied_AndNoStagingAuditIsWritten()

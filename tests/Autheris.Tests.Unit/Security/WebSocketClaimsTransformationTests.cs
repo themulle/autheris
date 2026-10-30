@@ -159,6 +159,7 @@ public sealed class WebSocketClaimsTransformationTests
             issuers: new[] { issuer });
 
         realmRegistry.ResolveRealmByIssuer(issuer).Returns(resolverRealm);
+        realmRegistry.GetRealm("resolver-realm").Returns(resolverRealm); // DT-A-3: the tenant resolver looks the stamped realm up by id
 
         var roleResolver = Substitute.For<IRoleResolver>();
         roleResolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>())
@@ -184,7 +185,7 @@ public sealed class WebSocketClaimsTransformationTests
     }
 
     [Fact]
-    public async Task ConnectionInit_TokenLegacyTenant_UpgradeTenantAcme_Rejected()
+    public async Task ConnectionInit_TokenWithoutTenant_UpgradeTenantAcme_Rejected()
     {
         // Arrange: HTTP upgrade was authenticated as Acme tenant
         var httpClaims = new List<Claim>
@@ -194,7 +195,7 @@ public sealed class WebSocketClaimsTransformationTests
         };
         var httpUser = new ClaimsPrincipal(new ClaimsIdentity(httpClaims, "Cookie"));
 
-        // Token resolves to LegacySingleTenant (no tenant claim)
+        // Token carries no tenant (DT-A-3: no legacy fallback; the socket refuses it as unresolved)
         var tokenClaims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-ALICE")
@@ -220,9 +221,9 @@ public sealed class WebSocketClaimsTransformationTests
         // Act
         var result = await interceptor.OnConnectAsync(session, payload);
 
-        // Assert: Strict equality rejects mismatch between LegacySingleTenant and acme
+        // Assert: Strict equality: a token tenant that does not match the claimed tenant is rejected
         result.Accepted.ShouldBeFalse();
-        result.Message.ShouldBe("Cross-tenant token mismatch");
+        result.Message.ShouldBe("Token tenant unresolved");
     }
 
     [Fact]
@@ -231,7 +232,7 @@ public sealed class WebSocketClaimsTransformationTests
         // Arrange: Anonymous HTTP upgrade (no user/tenant on HttpContext)
         var httpContext = new DefaultHttpContext();
 
-        // Token resolves to LegacySingleTenant
+        // Token resolves to the default tenant
         var tokenClaims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-ALICE")

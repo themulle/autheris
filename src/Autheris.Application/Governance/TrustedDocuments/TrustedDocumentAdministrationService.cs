@@ -198,7 +198,7 @@ public sealed class TrustedDocumentAdministrationService
         details["scope"] = actor.Scope;
         return _audit.RecordRequiredAsync(new AuditLogEntry
         {
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = TenantId.Platform, // trusted documents are platform-scoped (DT-A-6)
             EventType = eventType,
             ActorSid = new Sid(actor.SubjectKey),
             TargetTable = $"trusted-documents:{appId}/{version}",
