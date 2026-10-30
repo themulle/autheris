@@ -73,3 +73,34 @@ WP-A now (small, independent). WP-C before WP-B (a cursor removes the main press
 
 ## 6. Out of scope
 Changing the Production enumeration shield; moving the 10,000 `Range` without a per-scope design; multi-table fan-out batching (separate issue if needed).
+
+## Phase 3 rulings WP-A (csharp-security-expert, 2026-10-30)
+
+Combined Phase 2/3 note; the PRD design for WP-A stands. Verdict: APPROVED WITH CONDITIONS.
+
+Verified facts: `QueryCostOptions.DefaultListMultiplier` carries `[Range(1,1000)]`, but `ValidateQueryCostOptions` (GatewayStartupValidator.cs:649) checks only `< 1` and only outside Development, with no upper bound; the validation rule and `HotChocolateGraphQlCostAnalysisEngine` silently fall back on `<= 0`. The error text lists neither the multiplier nor the lookup cost. Admission is capped by `maxResponseRows` (QueryCostAnalyzerRule.cs:618), and settlement charges actual rows, so a lowered multiplier lowers only the pre-execution price, not the final charge.
+
+Rulings:
+- Multiplier abuse: operator-set, not caller-controlled; the worst case is admission price 1 per list, bounded by MaxAllowedComplexity, MaxRootFieldsPerOperation, MaxResponseRows and post-execution settlement. Acceptable once the range is enforced at startup in every environment.
+- Old path `Gateway:Governance:QueryCost`: loud startup failure through the ARCH-MNT-06 guard is wanted (no production yet); silent ignore would leave default costs while the operator believes tuned ones apply.
+- SEC-PG-12: the Production enumeration-shield error must stay byte-identical; WP-A changes only the price, never error text, codes or the shield middleware.
+- Description text: the offset limit is already disclosed by the validation behaviour and is not a secret; it must come from the numeric option only (no table, tenant or principal data) and be gated by the existing introspection policy.
+
+Binding conditions:
+- I417-SC-A01: `ValidateQueryCostOptions` enforces `DefaultListMultiplier` in 1..1000 (and the existing `[Range]` bounds of every field) in ALL environments including Development, throwing `ValidationException` at startup; the message names the field and bounds, not values from other sections.
+- I417-SC-A02: Remove the silent `> 0` fallbacks for the multiplier in QueryCostAnalyzerRule and HotChocolateGraphQlCostAnalysisEngine (or keep them only as unreachable guards); an out-of-range value must never be replaced by 10 silently.
+- I417-SC-A03: The rule gets `gatewayOptions.QueryCost` (never null; a null value fails startup per the existing null check). Admission rule and CostAndQuotaMiddleware read the same instance; no second default path.
+- I417-SC-A04: Remove `Gateway:Governance:QueryCost` from the schema; the unknown-key guard must reject it in every environment, and the error names the key path but never echoes configured values.
+- I417-SC-A05: Set `SectionName = "Gateway:QueryCost"` matching the bound property; no alias or fallback binding to the old path.
+- I417-SC-A06: The Production enumeration-shield response for invalid or too-complex documents is unchanged byte for byte; existing SEC-PG-12 tests must pass unmodified, and no test may be weakened.
+- I417-SC-A07: The description is built only from `GraphQlOptions.MaxAllowedOffset` (integer, culture-invariant formatting, 0 handled as "offset not supported"); no other config value appears in schema text.
+- I417-SC-A08: Settlement is unchanged: actual rows still charged, the same multiplier is not applied to settlement, and the audit/quota record keeps admission cost and settled cost without logging the configured section contents.
+- I417-SC-A09: Docs fix (f-data-11 path) is documentation only; no new default values change the shipped defaults (multiplier stays 10).
+
+Mandatory tests (all `[Trait("Category","Security")]`):
+- I417-T-SA01 `QueryCostValidation_MultiplierOutOfRange_FailsStartupInAllEnvironments` (0, -1, 1001, int.MaxValue, Development and Production).
+- I417-T-SA02 `GovernanceQueryCostLegacyKey_IsRejectedByUnknownKeyGuard` (and the error contains no configured values).
+- I417-T-SA03 `ConfiguredListMultiplier_AdmissionAndMiddleware_UseSamePrice` (same configured value yields identical list price in the validation rule and CostAndQuotaMiddleware).
+- I417-T-SA04 `ProductionEnumerationShield_InvalidDocument_ErrorBytesUnchanged` (golden compare under a non-default multiplier).
+- I417-T-SA05 `LoweredMultiplier_StillBoundedByMaxResponseRowsAndSettlement` (multiplier 1 cannot exceed MaxAllowedComplexity admission or avoid settled row cost).
+- I417-T-SA06 `RootListDescription_UsesConfiguredMaxAllowedOffset_NoOtherConfigLeaks` (values 0, 100, 10000; hidden when introspection is disabled).
