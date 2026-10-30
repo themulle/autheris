@@ -153,6 +153,13 @@ public sealed class DbtOptions
     /// connection of the same name (case-insensitive); there is no wildcard and no default connection.
     /// </summary>
     public Dictionary<string, string> DatabaseMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Issue #393 (part b): the dbt governance import (<c>POST /api/extensions/dbt/governance</c>) may write table data owners, who then
+    /// act as consent approvers. false (default) rejects any payload that carries <c>owner</c> / <c>owners</c>. Configuration only,
+    /// never a request parameter; the manifest sync never writes owners.
+    /// </summary>
+    public bool ImportDataOwners { get; init; }
 }
 
 public sealed class BackstageIntegrationOptions

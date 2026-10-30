@@ -77,6 +77,13 @@ public sealed class UnknownGatewayKeyGuardTests
     }
 
     [Fact]
+    public void GatewayConfigurationSchema_AcceptsDbtImportDataOwners()
+    {
+        Should.NotThrow(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Dbt:ImportDataOwners", "true"))));
+        Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Dbt:ImportDataOwner", "true"))));
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public void ARCH_MNT_06_T_01_UnknownKey_IsNotBypassedByTheLegacyConfigSwitch()
     {
