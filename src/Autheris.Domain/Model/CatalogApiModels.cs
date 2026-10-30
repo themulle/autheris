@@ -36,7 +36,7 @@ public sealed record CatalogDatasetDetail(
     IReadOnlyList<string> PrimaryKeys,
     string Sensitivity,
     bool IsActive,
-    IReadOnlyList<TableIndexDefinition>? Indexes = null,
+    IReadOnlyList<DatasetIndexInfo>? Indexes = null,
     string? DisplayName = null,
     string? Description = null,
     string? LongDescription = null,

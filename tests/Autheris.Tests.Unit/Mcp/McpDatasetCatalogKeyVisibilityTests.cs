@@ -86,6 +86,6 @@ public sealed class McpDatasetCatalogKeyVisibilityTests
 
         result.Columns.Select(c => c.Name).ShouldNotContain("customer_email");
         result.Columns.ShouldAllBe(c => !c.PrimaryKey);
-        result.Indexes.ShouldNotBeNull().Select(i => i.Name).ShouldBe(new[] { "ux_visible" });
+        result.Indexes.ShouldNotBeNull().Select(i => string.Join(",", i.Columns)).ShouldBe(new[] { "id,amount" });
     }
 }
