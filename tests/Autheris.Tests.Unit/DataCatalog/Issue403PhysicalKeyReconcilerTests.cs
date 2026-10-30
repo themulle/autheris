@@ -137,9 +137,9 @@ public sealed class Issue403PhysicalKeyReconcilerTests
     public void AssetDeclaredDirections_Win_DriftReported()
     {
         // I403-T-16
-        var r = PhysicalKeyDirectionReconciler.Reconcile(Incoming(["a"], [A]), null, Known(Key(true, true, ["a"], D)));
-        r.Metadata.PrimaryKeyDirections.ShouldBeEmpty();
-        r.Findings.ShouldBe([PhysicalKeyDirectionReconciler.DriftCode]);
+        // explicit all-ascending equals undeclared (390 canonical form): the physical direction applies
+        PhysicalKeyDirectionReconciler.Reconcile(Incoming(["a"], [A]), null, Known(Key(true, true, ["a"], D)))
+            .Metadata.PrimaryKeyDirections.ShouldBe([D]);
 
         var declared = PhysicalKeyDirectionReconciler.Reconcile(Incoming(["a", "b"], [D, A]), null, Known(Key(true, true, ["a", "b"], A, A)));
         declared.Metadata.PrimaryKeyDirections.ShouldBe([D, A]);
@@ -187,7 +187,8 @@ public sealed class Issue403PhysicalKeyReconcilerTests
             var r = PhysicalKeyDirectionReconciler.Reconcile(incoming, null, snapshot);
 
             r.PhysicalApplied.ShouldBeFalse();
-            r.Metadata.ShouldBeSameAs(incoming);
+            r.Metadata.PrimaryKeyDirections.ShouldBeEmpty();
+            r.Metadata.PrimaryKeyColumns.ShouldBe(incoming.PrimaryKeyColumns);
             r.Findings.ShouldBeEmpty();
         }
     }
@@ -250,16 +251,16 @@ public sealed class Issue403PhysicalKeyReconcilerTests
     public void Precedence_AssetOverStoredOverPhysical_NeverSilentOverride()
     {
         // I403-T-S06: each difference yields exactly one finding
-        var snapshot = Known(Key(true, true, ["a"], A), Key(false, false, ["b"], A), Key(false, false, ["c"], D));
+        var snapshot = Known(Key(true, true, ["a"], A), Key(false, false, ["b"], A), Key(false, false, ["c"], A));
         var stored = Stored(["a"], [D], Unique("uq_1", ["b"], [D]));
-        var incoming = Incoming(["a"], null, Unique("uq_1", ["b"]), Unique("uq_2", ["c"], [A]));
+        var incoming = Incoming(["a"], null, Unique("uq_1", ["b"]), Unique("uq_2", ["c"], [D]));
 
         var r = PhysicalKeyDirectionReconciler.Reconcile(incoming, stored, snapshot);
 
         r.PhysicalApplied.ShouldBeFalse();
         r.Metadata.PrimaryKeyDirections.ShouldBe([D]);                         // stored over physical: conflict
         r.Metadata.Indexes[0].Directions.ShouldBe([D]);                        // stored over physical: conflict
-        r.Metadata.Indexes[1].Directions.ShouldBeNull();                       // asset (ascending) over physical: drift
+        r.Metadata.Indexes[1].Directions.ShouldBe([D]);                        // asset over physical: drift
         r.Findings.ShouldBe([
             PhysicalKeyDirectionReconciler.ConflictCode, PhysicalKeyDirectionReconciler.ConflictCode, PhysicalKeyDirectionReconciler.DriftCode]);
     }
@@ -278,7 +279,8 @@ public sealed class Issue403PhysicalKeyReconcilerTests
 
         var r = PhysicalKeyDirectionReconciler.Reconcile(incoming, null, Known(Key(true, true, ["a"], D)));
 
-        r.Metadata.ShouldBe(incoming with { PrimaryKeyDirections = [D] });
+        r.Metadata.PrimaryKeyDirections.ShouldBe([D]);
+        r.Metadata.CatalogTags.ShouldBe(incoming.CatalogTags);
         r.Metadata.Table.ShouldBeSameAs(incoming.Table);
         r.Metadata.PrimaryKeyColumns.ShouldBe(incoming.PrimaryKeyColumns);
         r.Metadata.ReplaceKeyDefinition.ShouldBeTrue();

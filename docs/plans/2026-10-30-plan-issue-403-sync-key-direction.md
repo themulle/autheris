@@ -100,3 +100,9 @@ Dialect matrix:
 - I403-T-S11 `AdmissionDeniedTable_NoPhysicalRead_NoFinding`.
 - I403-T-S12 `PhysicalDirections_NeverChangeSecurityFlags_RatchetStillApplied`.
 - I403-T-S13 `OrdinalGapDuplicateOrDuplicateColumn_Unavailable`.
+
+## 6. Changelog
+
+- 2026-10-30 (Phase 4): a physical read whose caller token is cancelled rethrows `OperationCanceledException` instead of returning `Unavailable`, so a cancelled run never continues to an upsert; timeouts and every other failure stay `Unavailable` (I403-SC-01, accepted by the lead).
+- 2026-10-30 (Phase 4): for a unique-index key list (not the primary key), a physical primary key with identical columns is accepted as backing index before clustered and other unique indexes; the primary key list itself keeps D-4 (a differing physical primary key is `Mismatch`, no fallback) (accepted by the lead).
+- 2026-10-30 (Phase 4): the physical-key port is `ValueTask<PhysicalKeySnapshot>` with a `readonly record struct` snapshot whose default state is `Unsupported`, so test doubles that return `default` never imply a direction.
