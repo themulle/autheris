@@ -53,7 +53,7 @@ public static class GatewaySections
     public const string FinOps = "Gateway:FinOps";
     public const string Governance = "Gateway:Governance";
     public const string QueryAnalysis = "Gateway:Governance:QueryAnalysis";
-    public const string QueryCost = "Gateway:Governance:QueryCost";
+    public const string QueryCost = "Gateway:QueryCost";
 
     // Storage & Caching
     public const string GovernanceDb = "Gateway:GovernanceDb";

@@ -653,13 +653,19 @@ public static class GatewayStartupValidator
             throw new ValidationException("QueryCostOptions must not be null.");
         }
 
-        if (!environment.IsDevelopment())
+        // I417-SC-A01: the [Range] bounds hold in every environment, Development included.
+        if (queryCost.BaseCost is < 1 or > 1000 ||
+            queryCost.RowCostFactor is < 0 or > 1000 || double.IsNaN(queryCost.RowCostFactor) ||
+            queryCost.NestedCostFactor is < 0 or > 500 ||
+            queryCost.FailureFee is < 1 or > 1000 ||
+            queryCost.CostPerSingleRowLookup is < 1 or > 1000)
         {
-            if (queryCost.BaseCost < 1 || queryCost.RowCostFactor < 0 || queryCost.FailureFee < 1 ||
-                queryCost.CostPerSingleRowLookup < 1 || queryCost.DefaultListMultiplier < 1 || queryCost.NestedCostFactor < 0)
-            {
-                throw new ValidationException("Invalid QueryCost configuration outside Development: BaseCost and FailureFee must be >= 1, RowCostFactor and NestedCostFactor must be >= 0.");
-            }
+            throw new ValidationException("Invalid QueryCost configuration: BaseCost, FailureFee and CostPerSingleRowLookup must be 1..1000, RowCostFactor must be 0..1000, NestedCostFactor must be 0..500.");
+        }
+
+        if (queryCost.DefaultListMultiplier is < 1 or > 1000)
+        {
+            throw new ValidationException("Invalid QueryCost configuration: DefaultListMultiplier must be 1..1000.");
         }
     }
 }
