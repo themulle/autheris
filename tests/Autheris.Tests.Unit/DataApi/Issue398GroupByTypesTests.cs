@@ -235,6 +235,23 @@ public sealed class Issue398GroupByTypesTests
     }
 
     [Fact]
+    public void ResultByteBudget_WholeValueRead_NeverCallsGetChars_AndStillEnforcesBudgets()
+    {
+        var reader = Substitute.For<DbDataReader>();
+        reader.GetFieldType(Arg.Any<int>()).Returns(typeof(string));
+        reader.IsDBNull(Arg.Any<int>()).Returns(false);
+        reader.GetString(0).Returns("2024-05-01");
+        reader.GetString(1).Returns(new string('x', 600));
+
+        var budget = new ResultByteBudget(MaxValueBytes: 1024, MaxTotalBytes: 1_000_000, ChunkedStringRead: false);
+        var total = 0L;
+        budget.ReadValue(reader, 0, ref total).ShouldBe("2024-05-01");
+        total.ShouldBe(20);
+        Should.Throw<AggregationRowCapExceededException>(() => budget.ReadValue(reader, 1, ref total));
+        reader.DidNotReceiveWithAnyArgs().GetChars(default, default, default, default, default);
+    }
+
+    [Fact]
     public void ResultByteBudget_NonStringAndNull_PassThrough()
     {
         var table = new DataTable();
