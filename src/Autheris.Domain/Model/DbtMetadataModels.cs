@@ -162,6 +162,9 @@ public sealed record DbtGovernanceSyncResult(
     IReadOnlyList<string> Warnings,
     string? ErrorMessage = null,
     int RemovedMaskingRulesCount = 0,
-    int RelaxedMaskingRulesCount = 0
+    int RelaxedMaskingRulesCount = 0,
+    int CreatedDataOwnersCount = 0,
+    int AssignedTableOwnersCount = 0,
+    int RemovedTableOwnersCount = 0
 );
 

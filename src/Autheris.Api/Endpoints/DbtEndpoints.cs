@@ -56,7 +56,8 @@ public static class DbtEndpoints
             var caller = new DbtGovernanceImportCaller(
                 new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
                 EndpointSecurity.GetRequestTenant(context),
-                EndpointSecurity.IsCanonicalClusterAdmin(context.User));
+                EndpointSecurity.IsCanonicalClusterAdmin(context.User),
+                IsGovernanceAdmin: EndpointSecurity.IsGlobalGovernanceAdmin(context.User));
 
             const string governanceTooLarge = "Governance file size exceeds maximum allowed size (100 MB).";
             var limitError = EndpointSecurity.TryApplyBodyLimit(context.Request, 100 * 1024 * 1024, governanceTooLarge);

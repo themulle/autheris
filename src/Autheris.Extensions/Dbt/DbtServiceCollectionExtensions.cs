@@ -21,6 +21,7 @@ public static class DbtServiceCollectionExtensions
 
         services.TryAddSingleton<ITelemetryMetricsProvider, InMemoryTelemetryMetricsProvider>();
         services.TryAddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
+        services.TryAddSingleton<Autheris.Application.Governance.IDataOwnerIdentityVerifier, Autheris.Application.Governance.ScimDataOwnerIdentityVerifier>();
         services.AddSemanticCatalog();
         services.TryAddScoped<IDbtSemanticManifestIngestionService, DbtSemanticManifestIngestionService>();
         services.TryAddScoped<IDbtMetadataIngestionService, DbtMetadataIngestionService>();
