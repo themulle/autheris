@@ -209,7 +209,7 @@ public sealed class DevExperienceTests
     }
 
     [Fact]
-    public void Banner_ListsLinksAndPersonas_ShowsPlaintextWhenExplicitlyEnabled()
+    public void Banner_ListsLinksAndPersonas_NeverShowsPlaintextEvenWhenShowPasswordsEnabled()
     {
         var options = CreateOptions();
         options = new GatewayOptions
@@ -221,7 +221,8 @@ public sealed class DevExperienceTests
 
         var banner = DevStartupBanner.Build(["http://localhost:5031", "https://localhost:7214"], options, Env("Development"));
 
-        banner.ShouldContain("s3cret-pw");
+        banner.ShouldNotContain("s3cret-pw");
+        banner.ShouldContain("<see config>");
         banner.ShouldContain("<hashed>");
         banner.ShouldNotContain("pbkdf2");
     }

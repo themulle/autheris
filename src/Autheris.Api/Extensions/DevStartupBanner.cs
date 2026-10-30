@@ -60,14 +60,15 @@ public static class DevStartupBanner
         foreach (var user in basic.Users)
         {
             // Hashes (any recognized format starting with '$', e.g. $pbkdf2$, $argon2id$, bcrypt) are never printed.
-            // Plaintext passwords are masked as <hidden> by default and only printed when ShowPasswords is enabled.
+            // Credentials never reach the banner (CodeQL cs/cleartext-storage): hashes print as <hashed>, plaintext as <hidden>.
+            // Dev:ShowPasswords only changes the hint to point at the configuration source.
             var isHashed = user.Password.StartsWith('$') ||
                            user.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) ||
                            user.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase);
 
             var password = isHashed
                 ? "<hashed>"
-                : (options.Dev.ShowPasswords ? user.Password : "<hidden>");
+                : (options.Dev.ShowPasswords ? "<see config>" : "<hidden>");
 
             var roles = user.Roles.Count == 0 ? "-" : string.Join(",", user.Roles);
             sb.Append($"    {user.Username,-12} pw {password,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user) ?? "(default tenant)"}");

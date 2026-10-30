@@ -185,7 +185,7 @@ public partial class PostgreSqlGovernanceRepository
             }
             catch (TableMetadataUnavailableException)
             {
-                _logger?.LogWarning("Metadata of table {Table} is unavailable: its declared key or index definition is invalid.", table);
+                _logger?.LogWarning("Table metadata is unavailable: a declared key or index definition is invalid (the table is named by the rethrown TableMetadataUnavailableException).");
                 throw;
             }
 

@@ -273,6 +273,22 @@ public abstract class GovernanceUpgradeTestsBase
 
     [Fact]
     [Trait("Category", "Security")]
+    public Task I388_SC_06_DT_SC_16_WPDT2b_Step0003_LostHistoryRow_IsDrift_InApplyAndVerify() => WithDbAsync(async db =>
+    {
+        var cs = db.ConnectionString;
+        await SeedBaselineAsync(cs);
+        await RunAsync(cs, GovernanceMigrationMode.Apply);
+        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 3");
+
+        var apply = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => RunAsync(cs, GovernanceMigrationMode.Apply));
+        var verify = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => RunAsync(cs, GovernanceMigrationMode.Verify));
+
+        apply.Code.ShouldBe(GovernanceMigrationCodes.Drift);
+        verify.Code.ShouldBe(GovernanceMigrationCodes.Pending, "Verify refuses a schema whose step 0003 history row is missing");
+    });
+
+    [Fact]
+    [Trait("Category", "Security")]
     public Task I388_SC_06_DT_SC_16_WPDT2b_Step0003_NullTenantConsentRequest_FailsClosed_AndLeavesTheSchemaAtStep0002() => WithDbAsync(async db =>
     {
         var cs = db.ConnectionString;
