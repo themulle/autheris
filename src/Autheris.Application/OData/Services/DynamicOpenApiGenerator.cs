@@ -79,8 +79,8 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
         var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(allTables.Select(t => t.Identifier));
-        var tenantId = "default";
-        var cacheKey = $"openapi:index:{tenantId}:s{structureVersion}:{visibilityHash}:{baseUrl ?? ""}";
+        var cacheScope = "catalog";
+        var cacheKey = $"openapi:index:{cacheScope}:s{structureVersion}:{visibilityHash}:{baseUrl ?? ""}";
 
         if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out OpenApiIndexDocument? cached) && cached != null)
         {

@@ -61,7 +61,7 @@ public sealed class SqlServerGovernanceContractTests : IAsyncLifetime
 
     private static AuditLogEntry Entry(string type, string actor) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         EventType = type,
         ActorSid = new Sid(actor),
         TargetTable = "dbo.t",

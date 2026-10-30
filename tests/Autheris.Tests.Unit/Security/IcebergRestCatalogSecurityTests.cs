@@ -25,7 +25,7 @@ public sealed class IcebergRestCatalogSecurityTests
 {
     private readonly IIcebergMetadataReader _metadataReader = Substitute.For<IIcebergMetadataReader>();
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IOptions<GatewayOptions> _options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } });
+    private readonly IOptions<GatewayOptions> _options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
 
     private static readonly TableIdentifier OrdersId = new("tenant-1", "raw", "orders");
 
@@ -393,7 +393,7 @@ public sealed class IcebergRestCatalogSecurityTests
     {
         var optionsWithRebac = Options.Create(new GatewayOptions
         {
-            Tenancy = new TenancyOptions { Mode = "Single" },
+            Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" },
             Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true }
         });
 

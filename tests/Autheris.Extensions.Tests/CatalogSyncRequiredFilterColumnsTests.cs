@@ -36,7 +36,7 @@ public sealed class CatalogSyncRequiredFilterColumnsTests
         var options = new GatewayOptions
         {
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
-            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "legacy-single-tenant", Enabled = true, WebhookSecret = "om-test-secret-42" }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = "om-test-secret-42" }
         };
 
         var tables = new List<OpenMetadataTable>

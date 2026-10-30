@@ -177,7 +177,7 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         await repo.CreateConsentAsync(new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = saved.Table.Id,
             TableIdentifier = TableId,
             Effect = ConsentEffect.Allow,
@@ -221,7 +221,7 @@ public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableT
             var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
             await repo.CreateConsentAsync(new Consent
             {
-                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = saved.Table.Id,
                 TableIdentifier = TableId,
                 Effect = ConsentEffect.Allow,
@@ -302,7 +302,7 @@ public sealed class RestDatasetHttpTableCrossSourceDisabledIntegrationTests : Re
             var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
             await repo.CreateConsentAsync(new Consent
             {
-                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = saved.Table.Id,
                 TableIdentifier = TableId,
                 Effect = ConsentEffect.Allow,

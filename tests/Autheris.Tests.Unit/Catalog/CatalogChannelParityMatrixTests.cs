@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
@@ -49,7 +50,7 @@ public sealed class CatalogChannelParityMatrixTests
 
     private static GatewayOptions Opts(bool rebac, CallerClass caller, params TableMetadata[] rows) => new()
     {
-        Tenancy = new TenancyOptions { Mode = (caller == CallerClass.UnrestrictedSingle ? TenancyMode.Single : TenancyMode.Multi).ToString() },
+        Tenancy = (caller == CallerClass.UnrestrictedSingle ? TenancyShape.Single : TenancyShape.Multi).Options(),
         Catalog = new DataCatalogOptions { SharedTables = rows.Select(r => r.Identifier.ToString()).ToArray() },
         Rebac = new RebacOptions { Enabled = rebac }
     };

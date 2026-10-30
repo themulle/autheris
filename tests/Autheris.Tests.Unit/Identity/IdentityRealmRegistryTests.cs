@@ -51,10 +51,10 @@ public sealed class IdentityRealmRegistryTests
         options.Realms["customer-realm"] = new IdentityRealmConfigOptions
         {
             Kind = IdentityRealmKind.EntraExternalId,
-            FixedTenantId = TenantId.LegacySingleTenant.Value
+            FixedTenantId = Autheris.Tests.Common.TestTenants.Default.Value
         };
 
-        var act = () => IdentityRealmOptionsValidator.Validate(options, TenantId.LegacySingleTenant);
+        var act = () => IdentityRealmOptionsValidator.Validate(options, Autheris.Tests.Common.TestTenants.Default);
 
         act.ShouldThrow<ValidationException>();
     }

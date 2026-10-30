@@ -81,7 +81,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
                     isAppOnly ? SubjectType.ServicePrincipal : SubjectType.User,
                     IdentityProviderType.EntraId,
                     "user@example.com",
-                    TenantId.LegacySingleTenant);
+                    Autheris.Tests.Common.TestTenants.Default);
             });
 
         var validator = new JwtSocketTokenValidator(

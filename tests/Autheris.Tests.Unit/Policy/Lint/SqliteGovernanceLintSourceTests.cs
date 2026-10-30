@@ -43,11 +43,11 @@ public sealed class SqliteGovernanceLintSourceTests : IDisposable
             });
             await repo.UpsertProfileAsync(new AccessProfile
             {
-                ProfileId = "p-ok", Name = "ok", TenantId = TenantId.LegacySingleTenant, TargetTables = ["erp.main.orders"], RowFilterPredicate = "region = 'EU'", CreatedBy = "t"
+                ProfileId = "p-ok", Name = "ok", TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = "region = 'EU'", CreatedBy = "t"
             });
             await repo.UpsertProfileAsync(new AccessProfile
             {
-                ProfileId = "p-bad", Name = "bad", TenantId = TenantId.LegacySingleTenant, TargetTables = ["erp.main.*"], RowFilterPredicate = "[region] = 'EU'", CreatedBy = "t"
+                ProfileId = "p-bad", Name = "bad", TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.*"], RowFilterPredicate = "[region] = 'EU'", CreatedBy = "t"
             });
         }
 

@@ -18,7 +18,7 @@ public sealed class AuditWriterTests
 {
     private static AuditLogEntry Entry(string eventType = AuditEventTypes.AuditConfigChanged) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         EventType = eventType,
         ActorSid = new Sid("S-1-5-21-ADMIN"),
         TargetTable = "governance",
@@ -121,7 +121,7 @@ public sealed class AuditWriterTests
             .Returns<ValueTask<RebacCheckResult>>(_ => throw new OperationCanceledException());
 
         await Should.ThrowAsync<OperationCanceledException>(async () =>
-            await RebacTableGate.IsAllowedAsync(evaluator, TenantId.LegacySingleTenant, new Sid("S-1"), new TableIdentifier("d", "s", "t"), CancellationToken.None));
+            await RebacTableGate.IsAllowedAsync(evaluator, Autheris.Tests.Common.TestTenants.Default, new Sid("S-1"), new TableIdentifier("d", "s", "t"), CancellationToken.None));
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public sealed class AuditWriterTests
         evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
             .Returns<ValueTask<RebacCheckResult>>(_ => throw new InvalidOperationException("boom"));
 
-        (await RebacTableGate.IsAllowedAsync(evaluator, TenantId.LegacySingleTenant, new Sid("S-1"), new TableIdentifier("d", "s", "t"), CancellationToken.None))
+        (await RebacTableGate.IsAllowedAsync(evaluator, Autheris.Tests.Common.TestTenants.Default, new Sid("S-1"), new TableIdentifier("d", "s", "t"), CancellationToken.None))
             .ShouldBeFalse();
     }
 }

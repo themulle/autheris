@@ -89,7 +89,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         BusinessJustification = "Quarterly reporting",
         RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
         Status = status,
-        TenantId = TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         RequesterIdentifiers = [Requester.Value]
     };
 

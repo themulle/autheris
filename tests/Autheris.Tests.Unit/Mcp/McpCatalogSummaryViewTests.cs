@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -42,9 +43,9 @@ public sealed class McpCatalogSummaryViewTests
         };
     }
 
-    private static GatewayOptions Opts(TenancyMode mode, params string[] shared) => new()
+    private static GatewayOptions Opts(TenancyShape mode, params string[] shared) => new()
     {
-        Tenancy = new TenancyOptions { Mode = mode.ToString() },
+        Tenancy = mode.Options(),
         Catalog = new DataCatalogOptions { SharedTables = shared.Length == 0 ? SharedList : shared }
     };
 
@@ -75,7 +76,7 @@ public sealed class McpCatalogSummaryViewTests
             new DataOwner { DisplayName = "Dan Delegate", Email = "dan@corp.example", AdAccount = "CORP\\dan" },
             new DataOwner { DisplayName = "", Email = "nameless@corp.example", AdAccount = "CORP\\nameless" }
         ]));
-        var catalog = Catalog(Opts(TenancyMode.Multi), [Tier("shared_t", DatasetVisibility.Summary, release: true, "finance", "pii")], owners);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, release: true, "finance", "pii")], owners);
 
         var d = await catalog.DescribeDatasetAsync(Subject(), SharedId);
 
@@ -117,7 +118,7 @@ public sealed class McpCatalogSummaryViewTests
     [Fact]
     public async Task Summary_List_ReportsNoColumnsAndNoGraphQlField_AndTagsComeFromCatalogTags()
     {
-        var catalog = Catalog(Opts(TenancyMode.Multi), [Tier("shared_t", DatasetVisibility.Summary, false, "finance")]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary, false, "finance")]);
 
         var list = await catalog.ListDatasetsAsync(Subject());
 
@@ -132,7 +133,7 @@ public sealed class McpCatalogSummaryViewTests
     [Fact]
     public async Task Summary_Search_NeverMatchesAColumnName_FullDoes()
     {
-        var catalog = Catalog(Opts(TenancyMode.Multi, SharedId, "sales.dbo.full_t"),
+        var catalog = Catalog(Opts(TenancyShape.Multi, SharedId, "sales.dbo.full_t"),
             [Tier("shared_t", DatasetVisibility.Summary), Tier("full_t", DatasetVisibility.Full)]);
 
         var hits = await catalog.ListDatasetsAsync(Subject(), search: "secret_col");
@@ -143,7 +144,7 @@ public sealed class McpCatalogSummaryViewTests
     [Fact]
     public async Task Full_DescribeHasColumns_AndNoSummaryMarker()
     {
-        var catalog = Catalog(Opts(TenancyMode.Multi), [Tier("shared_t", DatasetVisibility.Full)]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Full)]);
 
         var d = await catalog.DescribeDatasetAsync(Subject(), SharedId);
 
@@ -162,9 +163,9 @@ public sealed class McpCatalogSummaryViewTests
     {
         var (mode, principal) = admin switch
         {
-            "global" => (TenancyMode.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
-            "tenant" => (TenancyMode.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
-            _ => (TenancyMode.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
+            "global" => (TenancyShape.Multi, Wp0.User("root", "tenant-a", ["ClusterAdmin"])),
+            "tenant" => (TenancyShape.Multi, Wp0.User("gov", "tenant-a", ["GovernanceAdmin"])),
+            _ => (TenancyShape.Single, Wp0.User("gov", null, ["GovernanceAdmin"]))
         };
         // The persisted tier is Summary, but an administrator view is never narrowed (accepted behaviour, pinned).
         var catalog = Catalog(Opts(mode), [Tier("shared_t", DatasetVisibility.Summary)], consents: Wp0.Allow(new TableIdentifier("sales", "dbo", "shared_t"), "x", Wp0.TenantA));
@@ -190,7 +191,7 @@ public sealed class McpCatalogSummaryViewTests
             "claimless" => Wp0.User("S-USER", null),
             _ => new ClaimsPrincipal(new ClaimsIdentity())
         };
-        var catalog = Catalog(Opts(TenancyMode.Multi), [Tier("shared_t", DatasetVisibility.Hidden)]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Hidden)]);
 
         (await catalog.ListDatasetsAsync(principal)).Datasets.ShouldBeEmpty();
         await Should.ThrowAsync<TableNotFoundException>(() => catalog.DescribeDatasetAsync(principal, SharedId));
@@ -210,7 +211,7 @@ public sealed class McpCatalogSummaryViewTests
     public async Task Claimless_GovernanceAdmin_Multi_NeverFullOutput()
     {
         var claimless = Wp0.User("gov", null, ["GovernanceAdmin"]);
-        var catalog = Catalog(Opts(TenancyMode.Multi), [Tier("shared_t", DatasetVisibility.Summary), Tier("other_t", DatasetVisibility.Full)]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", DatasetVisibility.Summary), Tier("other_t", DatasetVisibility.Full)]);
 
         // No tier for a claim-less caller in Multi, no administrator view: nothing at all.
         (await catalog.ListDatasetsAsync(claimless)).Datasets.ShouldBeEmpty();
@@ -218,9 +219,9 @@ public sealed class McpCatalogSummaryViewTests
     }
 
     [Theory]
-    [InlineData(TenancyMode.Multi, false)]
-    [InlineData(TenancyMode.Single, true)]
-    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyMode mode, bool expectFull)
+    [InlineData(TenancyShape.Multi, false)]
+    [InlineData(TenancyShape.Single, true)]
+    public async Task Shaping_IsAdmin_ComesFromSameResolverAsListFilter(TenancyShape mode, bool expectFull)
     {
         // The same principal (claim-less GovernanceAdmin) is Claimless in Multi and Unrestricted in Single; list and shaping agree.
         var principal = Wp0.User("gov", null, ["GovernanceAdmin"]);
@@ -247,7 +248,7 @@ public sealed class McpCatalogSummaryViewTests
     [InlineData(DatasetVisibility.Summary, true, false)]
     public async Task SampleRows_Synthetic_NoConsent_AllowedOnlyForFullWithRelease(DatasetVisibility tier, bool release, bool allowed)
     {
-        var catalog = Catalog(Opts(TenancyMode.Multi), [Tier("shared_t", tier, release)]);
+        var catalog = Catalog(Opts(TenancyShape.Multi), [Tier("shared_t", tier, release)]);
 
         if (allowed)
         {

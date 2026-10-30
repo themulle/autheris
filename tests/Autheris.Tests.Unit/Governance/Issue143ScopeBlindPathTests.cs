@@ -95,7 +95,7 @@ public sealed class Issue143ScopeBlindPathTests
             });
         return new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metadataRepo,
-            Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
+            Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, recording, repo);
     }

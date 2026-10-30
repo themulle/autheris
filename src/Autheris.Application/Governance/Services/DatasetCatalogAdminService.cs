@@ -374,7 +374,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            return TenantId.LegacySingleTenant;
+            return TenantId.Platform;
         }
     }
 

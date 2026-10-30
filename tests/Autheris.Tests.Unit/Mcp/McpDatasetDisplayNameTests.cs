@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -52,7 +53,7 @@ public sealed class McpDatasetDisplayNameTests
 
     private static GatewayOptions Opts(bool rebac, params TableMetadata[] rows) => new()
     {
-        Tenancy = new TenancyOptions { Mode = nameof(TenancyMode.Multi) },
+        Tenancy = TenancyShape.Multi.Options(),
         Catalog = new DataCatalogOptions { SharedTables = rows.Select(r => r.Identifier.ToString()).ToArray() },
         Rebac = new RebacOptions { Enabled = rebac }
     };

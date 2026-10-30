@@ -59,9 +59,9 @@ public sealed class RowFilterKeySetStageTests : IDisposable
 
     private static ConsentRowFilter Simple() => new() { FilterGroup = 0, ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" };
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters };
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters };
 
     private static PolicyPredicate Predicate(TableIdentity table, params ConsentRowFilter[] filters) =>
         new TypedRowFilterBuilder().BuildCombined([Allow(filters)], [], table)!;

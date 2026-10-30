@@ -27,7 +27,7 @@ public class ConsentResolutionBenchmark
     {
         var c1 = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = new Autheris.Domain.Common.TenantId("bench-tenant"),
             TableIdentifier = _table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -49,7 +49,7 @@ public class ConsentResolutionBenchmark
 
         var c2 = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = new Autheris.Domain.Common.TenantId("bench-tenant"),
             TableIdentifier = _table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -70,7 +70,7 @@ public class ConsentResolutionBenchmark
 
         var c3 = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = new Autheris.Domain.Common.TenantId("bench-tenant"),
             TableIdentifier = _table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Role,

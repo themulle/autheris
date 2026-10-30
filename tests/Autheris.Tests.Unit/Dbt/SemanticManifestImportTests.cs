@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Dbt;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -42,7 +43,7 @@ public sealed class SemanticManifestImportTests
         public DbtSemanticManifestIngestionService Service { get; init; } = null!;
     }
 
-    private static Rig NewRig(TenancyMode mode, bool tenantsHoldConsent = true, ISemanticCatalogService? catalog = null)
+    private static Rig NewRig(TenancyShape mode, bool tenantsHoldConsent = true, ISemanticCatalogService? catalog = null)
     {
         var options = SemanticCatalogTestKit.Mode(mode);
         catalog ??= new InMemorySemanticCatalog(options);
@@ -73,13 +74,13 @@ public sealed class SemanticManifestImportTests
     [Fact]
     public async Task Import_StoresManifestAndWritesVirtualTableInTenantSchema_ForTheDefaultTenant()
     {
-        var rig = NewRig(TenancyMode.Single);
+        var rig = NewRig(TenancyShape.Single);
 
-        await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantId.LegacySingleTenant, "admin");
+        await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), Autheris.Tests.Common.TestTenants.Default, "admin");
 
-        (await rig.Catalog.GetMetricAsync("revenue", TenantId.LegacySingleTenant)).ShouldNotBeNull();
+        (await rig.Catalog.GetMetricAsync("revenue", Autheris.Tests.Common.TestTenants.Default)).ShouldNotBeNull();
         var table = rig.Upserts.Single();
-        table.Identifier.ShouldBe(new TableIdentifier("semantic", SemanticVirtualTables.TenantSchema(TenantId.LegacySingleTenant), "orders"));
+        table.Identifier.ShouldBe(new TableIdentifier("semantic", SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"));
         SemanticVirtualTables.IsVirtualTable(table).ShouldBeTrue();
     }
 
@@ -87,7 +88,7 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public async Task VirtualTableSchema_DerivedFromTenantIdOnly()
     {
-        var rig = NewRig(TenancyMode.Multi);
+        var rig = NewRig(TenancyShape.Multi);
 
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantA);
 
@@ -103,7 +104,7 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public async Task ManifestImport_MultiMode_TenantBCannotOverwriteTenantAVirtualTable()
     {
-        var rig = NewRig(TenancyMode.Multi);
+        var rig = NewRig(TenancyShape.Multi);
 
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantA);
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'y'"), TenantB);
@@ -118,7 +119,7 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public async Task Import_UnsetTenant_IsForbidden_BeforeAnySideEffect()
     {
-        var rig = NewRig(TenancyMode.Multi);
+        var rig = NewRig(TenancyShape.Multi);
 
         await Should.ThrowAsync<GatewayForbiddenException>(() =>
             rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), default));
@@ -130,7 +131,7 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public async Task ManifestImport_OneInvalidTemplate_NothingPersisted()
     {
-        var rig = NewRig(TenancyMode.Multi);
+        var rig = NewRig(TenancyShape.Multi);
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'old'"), TenantA);
         rig.Upserts.Clear();
 
@@ -147,7 +148,7 @@ public sealed class SemanticManifestImportTests
     public async Task ManifestImport_UnresolvedOrForeignBaseTable_GenericErrorNoNameEcho()
     {
         // The tenant holds no consent on the base table (and it is not shared): the importer's scope cannot see it.
-        var rig = NewRig(TenancyMode.Multi, tenantsHoldConsent: false);
+        var rig = NewRig(TenancyShape.Multi, tenantsHoldConsent: false);
 
         var ex = await Should.ThrowAsync<SemanticManifestInvalidException>(() =>
             rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantA));
@@ -163,7 +164,7 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public async Task ManifestImport_MultiMode_VirtualTableIsNeverTheBaseTable()
     {
-        var rig = NewRig(TenancyMode.Multi);
+        var rig = NewRig(TenancyShape.Multi);
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantA);
         var virtualTable = rig.Upserts.Single();
         // Only the tenant's own virtual table is in the repository now; a second import must not resolve it as the base table.
@@ -179,7 +180,7 @@ public sealed class SemanticManifestImportTests
     [Fact]
     public async Task VirtualTableUpsertFailure_AfterSwap_IsPartial_ManifestStaysStored_ReImportRepairs()
     {
-        var rig = NewRig(TenancyMode.Multi);
+        var rig = NewRig(TenancyShape.Multi);
         var calls = 0;
         rig.Repository.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
             .Returns(ci => ++calls == 1 ? throw new InvalidOperationException("boom") : Task.FromResult(ci.Arg<TableMetadata>()));
@@ -196,11 +197,11 @@ public sealed class SemanticManifestImportTests
     public async Task Import_PassesTheImporterToTheCatalog()
     {
         var catalog = Substitute.For<ISemanticCatalogService>();
-        var rig = NewRig(TenancyMode.Single, catalog: catalog);
+        var rig = NewRig(TenancyShape.Single, catalog: catalog);
 
-        await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantId.LegacySingleTenant, "alice");
+        await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), Autheris.Tests.Common.TestTenants.Default, "alice");
 
-        await catalog.Received(1).RegisterManifestAsync(Arg.Any<DbtSemanticManifest>(), TenantId.LegacySingleTenant, "alice", Arg.Any<CancellationToken>());
+        await catalog.Received(1).RegisterManifestAsync(Arg.Any<DbtSemanticManifest>(), Autheris.Tests.Common.TestTenants.Default, "alice", Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -210,10 +211,10 @@ public sealed class SemanticManifestImportTests
     [Trait("Category", "Security")]
     public async Task ManifestImport_ModelNameWithDotOrQuote_Rejected_NothingPersisted(string name)
     {
-        var rig = NewRig(TenancyMode.Single);
+        var rig = NewRig(TenancyShape.Single);
         var json = Manifest("status = 'x'").Replace("\"name\": \"orders\"", $"\"name\": \"{name.Replace("\"", "\\\"")}\"");
 
-        await Should.ThrowAsync<SemanticManifestInvalidException>(() => rig.Service.ParseAndIngestAsync(json, TenantId.LegacySingleTenant));
+        await Should.ThrowAsync<SemanticManifestInvalidException>(() => rig.Service.ParseAndIngestAsync(json, Autheris.Tests.Common.TestTenants.Default));
 
         rig.Upserts.ShouldBeEmpty();
     }
@@ -250,10 +251,10 @@ public sealed class SemanticManifestImportTests
     }
 
     [Theory]
-    [InlineData(TenancyMode.Single)]
-    [InlineData(TenancyMode.Multi)]
+    [InlineData(TenancyShape.Single)]
+    [InlineData(TenancyShape.Multi)]
     [Trait("Category", "Security")]
-    public void SemanticStore_NoSid_EmptyInBothModes(TenancyMode mode)
+    public void SemanticStore_NoSid_EmptyInBothModes(TenancyShape mode)
     {
         new SemanticTenancy(mode.Owner()).ResolveCallerTenant(Principal(withSid: false, tenant: "tenant-a")).ShouldBeNull();
         new SemanticTenancy(mode.Owner()).ResolveCallerTenant(null).ShouldBeNull();
@@ -262,18 +263,18 @@ public sealed class SemanticManifestImportTests
     [Fact]
     [Trait("Category", "Security")]
     public void SemanticStore_NoSid_Multi_NoAccess() =>
-        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(false, "tenant-a", "GovernanceAdmin")).ShouldBeNull();
+        new SemanticTenancy(TenancyShape.Multi.Owner()).ResolveCallerTenant(Principal(false, "tenant-a", "GovernanceAdmin")).ShouldBeNull();
 
     [Fact]
     [Trait("Category", "Security")]
     public void SemanticStore_MultiMode_ClaimlessImport_403()
     {
-        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(true, null)).ShouldBeNull();
-        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(true, null, "GovernanceAdmin")).ShouldBeNull();
-        new SemanticTenancy(TenancyMode.Multi.Owner()).ResolveCallerTenant(Principal(true, "tenant-a")).ShouldBe(TenantA);
+        new SemanticTenancy(TenancyShape.Multi.Owner()).ResolveCallerTenant(Principal(true, null)).ShouldBeNull();
+        new SemanticTenancy(TenancyShape.Multi.Owner()).ResolveCallerTenant(Principal(true, null, "GovernanceAdmin")).ShouldBeNull();
+        new SemanticTenancy(TenancyShape.Multi.Owner()).ResolveCallerTenant(Principal(true, "tenant-a")).ShouldBe(TenantA);
     }
 
     [Fact]
-    public void SemanticStore_SingleMode_ClaimlessCallerHasStanding() =>
-        new SemanticTenancy(TenancyMode.Single.Owner()).ResolveCallerTenant(Principal(true, null)).ShouldBe(TenantId.LegacySingleTenant);
+    public void SemanticStore_DefaultTenant_ClaimlessCallerHasStanding() =>
+        new SemanticTenancy(TenancyShape.Single.Owner()).ResolveCallerTenant(Principal(true, null)).ShouldBe(Autheris.Tests.Common.TestTenants.Default);
 }

@@ -558,7 +558,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
 
     private static AuditLogEntry CreateAuditEntry(int sequence, string eventType) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         EventType = eventType,
         ActorSid = new Sid($"S-1-5-21-ACTOR-{sequence}"),
         TargetTable = "finance.accounts",

@@ -14,8 +14,7 @@ public interface ITenantResolver
     TenantId? DefaultTenant { get; }
 
     /// <summary>
-    /// D exactly as configured by <c>Gateway:Tenancy:DefaultTenantId</c> (without the transitional <c>Mode=Single</c> shim of
-    /// WP-DT-1..5), for the start-up audit; <c>null</c> when unset or unusable.
+    /// D exactly as configured by <c>Gateway:Tenancy:DefaultTenantId</c>, for the start-up audit; <c>null</c> when unset or unusable.
     /// </summary>
     TenantId? ConfiguredDefaultTenant { get; }
 

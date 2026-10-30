@@ -37,7 +37,10 @@ public static class LegacySwitchGuard
             ["WebSql:warn_allow_dml"] = "WebSql:AllowDml",
             ["Insecure:warn_allow_websql_dml"] = "WebSql:AllowDml",
             ["WebSql:danger_bypass_sql_governance"] = "Insecure:danger_bypass_websql_governance",
-            ["Profile"] = "Dev:Preset"
+            ["Profile"] = "Dev:Preset",
+            // DT-SC-13: the tenancy mode switch and the forward-auth default tenant are replaced by the one default tenant.
+            ["Tenancy:Mode"] = "Tenancy:DefaultTenantId",
+            ["Authentication:ForwardAuth:DefaultTenantId"] = "Tenancy:DefaultTenantId"
         };
 
     /// <summary>Removed keys (relative to <c>Gateway:</c>) without a replacement: the behaviour they enabled no longer exists.</summary>

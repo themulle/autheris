@@ -91,6 +91,6 @@ public sealed class ClientTierResolverSecurityTests
 
         context.Tier.ShouldBe(ClientTier.Enterprise);
         // SEC M-16: Subjekt = Tenant + Benutzer-SID
-        context.SubjectId.ShouldBe($"user:{TenantId.LegacySingleTenant.Value}:user-42");
+        context.SubjectId.ShouldBe($"user:{Autheris.Tests.Common.TestTenants.Default.Value}:user-42");
     }
 }

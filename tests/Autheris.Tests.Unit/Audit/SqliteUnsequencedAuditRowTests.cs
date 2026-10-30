@@ -76,7 +76,7 @@ public sealed class SqliteUnsequencedAuditRowTests : IDisposable
 
     private static AuditLogEntry NewEntry(int i) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         EventType = $"EVENT_{i}",
         ActorSid = new Sid($"S-1-5-21-ACTOR-{i}"),
         TargetTable = "hr.dbo.salaries",
@@ -119,7 +119,7 @@ public sealed class SqliteUnsequencedAuditRowTests : IDisposable
         repo.IsAuditPipelineFaulted.ShouldBeTrue("Startup must latch a violation for unsequenced rows.");
         await Should.ThrowAsync<AuditUnavailableException>(() => repo.RecordAuditEventAsync(new AuditLogEntry
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             EventType = "TABLE_QUERY",
             ActorSid = new Sid("S-1-5-21-USER"),
             TargetTable = "hr.dbo.salaries",

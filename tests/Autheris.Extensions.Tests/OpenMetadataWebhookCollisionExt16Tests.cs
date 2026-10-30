@@ -42,7 +42,7 @@ public sealed class OpenMetadataWebhookCollisionExt16Tests
         var options = new GatewayOptions
         {
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
-            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "legacy-single-tenant", Enabled = true, WebhookSecret = Secret }
+            OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", Enabled = true, WebhookSecret = Secret }
         };
         var service = new OpenMetadataSyncService(
             client, metadataRepo, Substitute.For<IConsentRepository>(), epochRepo,

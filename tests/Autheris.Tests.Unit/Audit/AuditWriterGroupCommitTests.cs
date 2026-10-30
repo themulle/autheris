@@ -18,7 +18,7 @@ public sealed class AuditWriterGroupCommitTests
 {
     private static AuditLogEntry Entry(int i) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         EventType = AuditEventTypes.AuditConfigChanged,
         ActorSid = new Sid($"S-1-5-21-ADMIN-{i}"),
         TargetTable = "governance",

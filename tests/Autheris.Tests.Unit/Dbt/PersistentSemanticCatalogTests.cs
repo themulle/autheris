@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Dbt;
 
+using Autheris.Tests.Common;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -22,7 +23,7 @@ public sealed class PersistentSemanticCatalogTests
 
     private static PersistentSemanticCatalog Create(
         FakeSemanticManifestStore store,
-        TenancyMode? mode = TenancyMode.Multi,
+        TenancyShape? mode = TenancyShape.Multi,
         int cacheSeconds = 30,
         TimeProvider? time = null,
         ILogger<PersistentSemanticCatalog>? logger = null) =>
@@ -170,27 +171,27 @@ public sealed class PersistentSemanticCatalogTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_SingleMode_TenantsAreIsolated_DefaultTenantIncluded()
+    public async Task SemanticStore_DefaultTenant_TenantsAreIsolated_DefaultTenantIncluded()
     {
         var store = new FakeSemanticManifestStore();
-        var catalog = Create(store, TenancyMode.Single);
+        var catalog = Create(store, TenancyShape.Single);
 
-        await catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), TenantId.LegacySingleTenant);
+        await catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v1", "m1"), Autheris.Tests.Common.TestTenants.Default);
 
-        store.Peek(TenantId.LegacySingleTenant).ShouldNotBeNull();
-        (await catalog.GetMetricAsync("m1", TenantId.LegacySingleTenant)).ShouldNotBeNull();
+        store.Peek(Autheris.Tests.Common.TestTenants.Default).ShouldNotBeNull();
+        (await catalog.GetMetricAsync("m1", Autheris.Tests.Common.TestTenants.Default)).ShouldNotBeNull();
         (await catalog.GetMetricAsync("m1", TenantA)).ShouldBeNull();
         (await catalog.GetMetricAsync("m1", TenantB)).ShouldBeNull();
         await catalog.RegisterManifestAsync(SemanticCatalogTestKit.Manifest("v2", "m2"), TenantA);
         store.Peek(TenantA).ShouldNotBeNull();
-        (await catalog.GetMetricAsync("m2", TenantId.LegacySingleTenant)).ShouldBeNull();
+        (await catalog.GetMetricAsync("m2", Autheris.Tests.Common.TestTenants.Default)).ShouldBeNull();
     }
 
     [Theory]
     [InlineData(null)]
-    [InlineData(TenancyMode.Multi)]
+    [InlineData(TenancyShape.Multi)]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_UnsetOrUnknownMode_UnsetTenantIsRejected(TenancyMode? mode)
+    public async Task SemanticStore_UnsetOrUnknownMode_UnsetTenantIsRejected(TenancyShape? mode)
     {
         var catalog = Create(new FakeSemanticManifestStore(), mode);
 
@@ -201,9 +202,9 @@ public sealed class PersistentSemanticCatalogTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_UnknownModeText_UnsetTenantIsRejected()
+    public async Task SemanticStore_NoDefaultTenant_UnsetTenantIsRejected()
     {
-        var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Banana" } });
+        var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions() });
         var catalog = new PersistentSemanticCatalog(new FakeSemanticManifestStore(), Options.Create(new SemanticOptions()), options);
 
         await Should.ThrowAsync<GatewayForbiddenException>(() =>
@@ -215,7 +216,7 @@ public sealed class PersistentSemanticCatalogTests
     public async Task SemanticStore_MultiMode_UnsetTenant_Rejected()
     {
         var store = new FakeSemanticManifestStore();
-        store.Put(new StoredSemanticManifest(TenantId.LegacySingleTenant, "v1", new string('a', 64), 1, 0, 1, "{}", "x", DateTimeOffset.UtcNow));
+        store.Put(new StoredSemanticManifest(Autheris.Tests.Common.TestTenants.Default, "v1", new string('a', 64), 1, 0, 1, "{}", "x", DateTimeOffset.UtcNow));
         var catalog = Create(store);
 
         (await catalog.ListMetricsAsync(null, default)).ShouldBeEmpty();

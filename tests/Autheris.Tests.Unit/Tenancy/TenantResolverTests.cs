@@ -31,9 +31,9 @@ public sealed class TenantResolverTests
         return new ClaimsPrincipal(new ClaimsIdentity(list, "Test"));
     }
 
-    private static TenantResolver Sut(string? defaultTenant, IdentityRealm? realm = null, string? mode = null)
+    private static TenantResolver Sut(string? defaultTenant, IdentityRealm? realm = null)
     {
-        var tenancy = new TenancyOptions { DefaultTenantId = defaultTenant, Mode = mode };
+        var tenancy = new TenancyOptions { DefaultTenantId = defaultTenant };
         var realms = Substitute.For<IIdentityRealmRegistry>();
         if (realm is not null)
         {
@@ -243,18 +243,16 @@ public sealed class TenantResolverTests
     }
 
     [Fact]
-    public void Single_Mode_Shim_Supplies_Legacy_Default_Only_Until_WpDt6()
+    public void NoDefaultTenantConfigured_ThereIsNoImplicitDefault()
     {
-        var shim = Sut(null, mode: "Single");
-        shim.DefaultTenant!.Value.Value.ShouldBe("legacy-single-tenant");
-        shim.ConfiguredDefaultTenant.ShouldBeNull();
-        shim.Resolve(Principal(("sub", "x"))).Outcome.ShouldBe(TenantResolutionOutcome.DefaultAssigned);
+        var none = Sut(null);
+        none.DefaultTenant.ShouldBeNull();
+        none.ConfiguredDefaultTenant.ShouldBeNull();
+        none.Resolve(Principal(("sub", "x"))).Outcome.ShouldBe(TenantResolutionOutcome.Unresolved);
 
-        var explicitDefault = Sut(Default, mode: "Single");
-        explicitDefault.DefaultTenant!.Value.Value.ShouldBe(Default);
-        explicitDefault.ConfiguredDefaultTenant!.Value.Value.ShouldBe(Default);
-
-        Sut(null, mode: "Multi").DefaultTenant.ShouldBeNull();
+        var configured = Sut(Default);
+        configured.DefaultTenant!.Value.Value.ShouldBe(Default);
+        configured.ConfiguredDefaultTenant!.Value.Value.ShouldBe(Default);
     }
 
     [Fact]

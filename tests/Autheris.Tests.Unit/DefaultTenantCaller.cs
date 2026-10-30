@@ -9,7 +9,7 @@ namespace Autheris.Tests.Unit;
 /// </summary>
 internal static class DefaultTenantCaller
 {
-    public static Claim Claim => new("tenant_id", TenantId.LegacySingleTenant.Value);
+    public static Claim Claim => new("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value);
 
     public static ClaimsPrincipal Principal() => new(new ClaimsIdentity([Claim]));
 

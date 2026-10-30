@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -32,7 +33,7 @@ public sealed class CatalogDiscoveryServiceTests
     {
         // Single-tenant deployment: a GovernanceAdmin without tenant claim is the unrestricted administrator view; ReBAC still intersects.
         var consents = Substitute.For<IConsentRepository>();
-        var options = Wp0.Options(Autheris.Domain.Options.TenancyMode.Single);
+        var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         return new CatalogDiscoveryService(
             _metadataRepository,
             _auditLogRepository,

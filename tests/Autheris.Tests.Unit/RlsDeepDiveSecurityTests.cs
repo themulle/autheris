@@ -36,7 +36,7 @@ public sealed class RlsDeepDiveSecurityTests
         var now = DateTimeOffset.UtcNow;
         var consentA = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -53,7 +53,7 @@ public sealed class RlsDeepDiveSecurityTests
 
         var consentB = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -268,7 +268,7 @@ public sealed class RlsDeepDiveSecurityTests
         var now = DateTimeOffset.UtcNow;
         var soonExpiringConsent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,

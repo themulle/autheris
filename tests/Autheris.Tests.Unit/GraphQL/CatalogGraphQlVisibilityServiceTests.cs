@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
@@ -29,9 +30,9 @@ public sealed class CatalogGraphQlVisibilityServiceTests
 
     private static TableMetadata Full(string name) => Wp0.Table("sales", name, "d " + name, ["id", "secret"]) with { CatalogView = CatalogView.Granted };
 
-    private static GatewayOptions Opts(TenancyMode mode) => new()
+    private static GatewayOptions Opts(TenancyShape mode) => new()
     {
-        Tenancy = new TenancyOptions { Mode = mode.ToString() },
+        Tenancy = mode.Options(),
         Rebac = new RebacOptions { Enabled = false }
     };
 
@@ -59,7 +60,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
         var admin = Wp0.User("S-GOV", Wp0.SingleTenantClaim, ["GovernanceAdmin"]);
         var tables = Wp0.Tables(Orders, Invoices);
         var consents = Wp0.Consents();
-        var options = Opts(TenancyMode.Single);
+        var options = Opts(TenancyShape.Single);
         var service = CatalogVisibilityTestFactory.Create(tables, consents, options);
 
         var graphQl = await Catalog(admin, tables, consents, options, service: service);
@@ -77,7 +78,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
         var user = Wp0.User("S-USER", "tenant-a");
         var tables = Wp0.Tables(Orders, Invoices);
         var serviceConsents = Wp0.Consents(Wp0.Allow(Orders.Identifier, "S-USER", Wp0.TenantA, "id"));
-        var options = Opts(TenancyMode.Multi);
+        var options = Opts(TenancyShape.Multi);
 
         // The status load sees different consents than the service: it must not add or remove rows.
         var broader = Wp0.Consents(
@@ -98,7 +99,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
         service.GetVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<Autheris.Application.Governance.Contracts.SchemaContractDefinition?>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<CatalogVisibleSet>(new CatalogVisibleSet([unmarked], CallerScope.Subject, isAdminView: false)));
 
-        var result = await Catalog(admin, Wp0.Tables(unmarked), Wp0.Consents(), Opts(TenancyMode.Multi), service: service);
+        var result = await Catalog(admin, Wp0.Tables(unmarked), Wp0.Consents(), Opts(TenancyShape.Multi), service: service);
 
         result.Single().Columns.ShouldBeEmpty();
     }
@@ -112,7 +113,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
 
         var result = await new Query().GetCatalogAsync(
             null, null, null, null, null, Wp0.Tables(Orders), Wp0.Consents(Wp0.Allow(Orders.Identifier, "S-USER", Wp0.TenantA, "id")),
-            null, null, accessor, Options.Create(Opts(TenancyMode.Multi)));
+            null, null, accessor, Options.Create(Opts(TenancyShape.Multi)));
 
         result.ShouldBeEmpty();
     }
@@ -128,7 +129,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
         var nameOnly = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.Name, "alice"), new Claim(ClaimTypes.Role, role), new Claim("tenant_id", "tenant-a")], "Bearer"));
 
-        var ex = await Should.ThrowAsync<GraphQLException>(() => Catalog(nameOnly, tables, consents, Opts(TenancyMode.Multi)));
+        var ex = await Should.ThrowAsync<GraphQLException>(() => Catalog(nameOnly, tables, consents, Opts(TenancyShape.Multi)));
 
         ex.Errors[0].Code.ShouldBe("UNAUTHORIZED");
         await tables.DidNotReceiveWithAnyArgs().GetAllTablesAsync(default);
@@ -144,6 +145,6 @@ public sealed class CatalogGraphQlVisibilityServiceTests
         service.GetVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<Autheris.Application.Governance.Contracts.SchemaContractDefinition?>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<CatalogVisibleSet>(new CatalogVisibleSet([unmarked], CallerScope.Subject, isAdminView: false)));
 
-        (await Catalog(user, Wp0.Tables(unmarked), Wp0.Consents(), Opts(TenancyMode.Multi), service: service)).ShouldBeEmpty();
+        (await Catalog(user, Wp0.Tables(unmarked), Wp0.Consents(), Opts(TenancyShape.Multi), service: service)).ShouldBeEmpty();
     }
 }

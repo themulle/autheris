@@ -73,7 +73,7 @@ public sealed class ConvertTimeZonePolicyTests
         {
             ProfileId = "p-tz",
             Name = "p-tz",
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TargetTables = ["erp.main.events"],
             RowFilterPredicate = Predicate
         };

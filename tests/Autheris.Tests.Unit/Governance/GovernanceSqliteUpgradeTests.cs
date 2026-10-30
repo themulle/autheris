@@ -90,6 +90,7 @@ public sealed class GovernanceSqliteUpgradeTests
         {
             await repository.RecordAuditEventAsync(new AuditLogEntry
             {
+                TenantId = "tenant-388",
                 EventType = "UPGRADE_388",
                 ActorSid = new Sid("S-1-388-" + i),
                 TargetTable = "dbo.t",

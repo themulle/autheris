@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using System.Security.Claims;
 using Autheris.Application.Catalog.Services;
@@ -16,17 +17,17 @@ public sealed class CallerScopeResolverTests
     [Fact]
     public void Resolve_NoPrincipalOrUnauthenticatedOrNoSid_IsNone()
     {
-        CallerScopeResolver.Resolve(null, TenancyMode.Multi.Owner()).ShouldBe(CallerScope.None);
-        CallerScopeResolver.Resolve(new ClaimsPrincipal(new ClaimsIdentity()), TenancyMode.Single.Owner()).ShouldBe(CallerScope.None);
-        CallerScopeResolver.Resolve(Wp0.User("u", "tenant-a", ["ClusterAdmin"], authType: ""), TenancyMode.Multi.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(null, TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(new ClaimsPrincipal(new ClaimsIdentity()), TenancyShape.Single.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(Wp0.User("u", "tenant-a", ["ClusterAdmin"], authType: ""), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
         var noSid = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "ClusterAdmin")], "Bearer"));
-        CallerScopeResolver.Resolve(noSid, TenancyMode.Multi.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(noSid, TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
     }
 
     [Theory]
-    [InlineData(TenancyMode.Multi)]
-    [InlineData(TenancyMode.Single)]
-    public void Resolve_CanonicalClusterAdmin_IsGlobalInBothModes(TenancyMode mode)
+    [InlineData(TenancyShape.Multi)]
+    [InlineData(TenancyShape.Single)]
+    public void Resolve_CanonicalClusterAdmin_IsGlobalInBothModes(TenancyShape mode)
         => CallerScopeResolver.Resolve(Wp0.User("root", null, ["ClusterAdmin"]), mode.Owner()).ShouldBe(CallerScope.Global);
 
     [Theory]
@@ -34,44 +35,44 @@ public sealed class CallerScopeResolverTests
     [InlineData("GatewayAdmin")]
     [InlineData("PlatformAdmin")]
     public void Resolve_TenantScopedAdminAliases_AreNotGlobal(string role)
-        => CallerScopeResolver.Resolve(Wp0.User("u", "tenant-a", [role]), TenancyMode.Multi.Owner()).ShouldBe(CallerScope.Subject);
+        => CallerScopeResolver.Resolve(Wp0.User("u", "tenant-a", [role]), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.Subject);
 
     [Fact]
     public void Resolve_ForwardAuthIdentityClaimingClusterAdmin_IsNotGlobal()
-        => CallerScopeResolver.Resolve(Wp0.User("u", "tenant-a", ["ClusterAdmin"], authType: "ForwardAuth"), TenancyMode.Multi.Owner())
+        => CallerScopeResolver.Resolve(Wp0.User("u", "tenant-a", ["ClusterAdmin"], authType: "ForwardAuth"), TenancyShape.Multi.Owner())
             .ShouldBe(CallerScope.Subject);
 
     [Fact]
     public void Resolve_Multi_GovernanceAdminWithTenantClaim_IsTenant()
-        => CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["GovernanceAdmin"]), TenancyMode.Multi.Owner()).ShouldBe(CallerScope.Tenant);
+        => CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["GovernanceAdmin"]), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.Tenant);
 
     [Fact]
     public void Resolve_Multi_PrincipalWithoutTenantClaim_IsNoneEvenWithGovernanceAdmin()
     {
-        CallerScopeResolver.Resolve(Wp0.User("a", null, ["GovernanceAdmin"]), TenancyMode.Multi.Owner()).ShouldBe(CallerScope.None);
-        CallerScopeResolver.Resolve(Wp0.User("a", null), TenancyMode.Multi.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(Wp0.User("a", null, ["GovernanceAdmin"]), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
+        CallerScopeResolver.Resolve(Wp0.User("a", null), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.None);
     }
 
     [Fact]
     public void Resolve_Multi_PlainUserWithTenantClaim_IsSubject()
-        => CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a"), TenancyMode.Multi.Owner()).ShouldBe(CallerScope.Subject);
+        => CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a"), TenancyShape.Multi.Owner()).ShouldBe(CallerScope.Subject);
 
     [Fact]
     public void Resolve_Single_GovernanceAdminWithoutClaim_IsCatalogOwner()
-        => CallerScopeResolver.Resolve(Wp0.User("a", null, ["GovernanceAdmin"]), TenancyMode.Single.Owner()).ShouldBe(CallerScope.CatalogOwner);
+        => CallerScopeResolver.Resolve(Wp0.User("a", null, ["GovernanceAdmin"]), TenancyShape.Single.Owner()).ShouldBe(CallerScope.CatalogOwner);
 
     [Fact]
     public void Resolve_Single_GovernanceAdminWithRealTenantClaim_IsTenantNotCatalogOwner()
-        => CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["GovernanceAdmin"]), TenancyMode.Single.Owner()).ShouldBe(CallerScope.Tenant);
+        => CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["GovernanceAdmin"]), TenancyShape.Single.Owner()).ShouldBe(CallerScope.Tenant);
 
     [Fact]
     public void Resolve_Single_PlainUser_IsSubject()
-        => CallerScopeResolver.Resolve(Wp0.User("a", null), TenancyMode.Single.Owner()).ShouldBe(CallerScope.Subject);
+        => CallerScopeResolver.Resolve(Wp0.User("a", null), TenancyShape.Single.Owner()).ShouldBe(CallerScope.Subject);
 
     [Theory]
-    [InlineData(TenancyMode.Multi)]
-    [InlineData(TenancyMode.Single)]
-    public void Resolve_InvalidTenantClaim_IsNoneNeverWider(TenancyMode mode)
+    [InlineData(TenancyShape.Multi)]
+    [InlineData(TenancyShape.Single)]
+    public void Resolve_InvalidTenantClaim_IsNoneNeverWider(TenancyShape mode)
         => CallerScopeResolver.Resolve(Wp0.User("a", "bad tenant!!", ["GovernanceAdmin"]), mode.Owner()).ShouldBe(CallerScope.None);
 
     [Fact]
@@ -80,41 +81,7 @@ public sealed class CallerScopeResolverTests
         // A RequestContext.Roles list or CallerSecurityContext.IsClusterAdmin never reaches the resolver: only the principal counts.
         var plain = Wp0.User("a", "tenant-a");
         var context = new Autheris.Domain.Model.RequestContext(Wp0.TenantA, new Autheris.Domain.Common.Sid("a"), ["ClusterAdmin", "GovernanceAdmin"], null, plain);
-        CallerScopeResolver.Resolve(context.User, TenancyMode.Multi.Owner()).ShouldBe(CallerScope.Subject);
-    }
-
-    [Fact]
-    public void TenancyOptions_DefaultsToMulti_AndEmptyIsNeverSingle()
-    {
-        new TenancyOptions().EffectiveMode.ShouldBe(TenancyMode.Multi);
-        new TenancyOptions().IsExplicit.ShouldBeFalse();
-        new TenancyOptions { Mode = "" }.EffectiveMode.ShouldBe(TenancyMode.Multi);
-        new TenancyOptions { Mode = "  " }.IsExplicit.ShouldBeFalse();
-        new GatewayOptions().Tenancy.EffectiveMode.ShouldBe(TenancyMode.Multi);
-    }
-
-    [Theory]
-    [InlineData("Single", TenancyMode.Single)]
-    [InlineData("single", TenancyMode.Single)]
-    [InlineData("Multi", TenancyMode.Multi)]
-    [InlineData("MULTI", TenancyMode.Multi)]
-    public void TenancyOptions_ParsesNamesOnly(string value, TenancyMode expected)
-    {
-        var options = new TenancyOptions { Mode = value };
-        options.IsExplicit.ShouldBeTrue();
-        options.IsValid.ShouldBeTrue();
-        options.EffectiveMode.ShouldBe(expected);
-    }
-
-    [Theory]
-    [InlineData("1")]
-    [InlineData("Both")]
-    [InlineData("Single,Multi")]
-    public void TenancyOptions_UnknownValue_IsInvalidAndNeverSingle(string value)
-    {
-        var options = new TenancyOptions { Mode = value };
-        options.IsValid.ShouldBeFalse();
-        options.EffectiveMode.ShouldBe(TenancyMode.Multi);
+        CallerScopeResolver.Resolve(context.User, TenancyShape.Multi.Owner()).ShouldBe(CallerScope.Subject);
     }
 
     [Fact]

@@ -73,7 +73,7 @@ public sealed class GatewayRoleRightAssignmentReportTests
     public async Task Startup_Report_Lists_Only_Roles_Lacking_An_Approved_Assignment()
     {
         var repository = Substitute.For<IFunctionalRightRepository>();
-        var approved = new FunctionalRightMapping(TenantId.LegacySingleTenant, "r1", "DataSteward", FunctionalRight.DataExport, "bob", DateTimeOffset.UtcNow, "Standard", "alice", DateTimeOffset.UtcNow);
+        var approved = new FunctionalRightMapping(Autheris.Tests.Common.TestTenants.Default, "r1", "DataSteward", FunctionalRight.DataExport, "bob", DateTimeOffset.UtcNow, "Standard", "alice", DateTimeOffset.UtcNow);
         repository.GetMappingsAsync(Arg.Any<TenantId>(), "r1", Arg.Any<CancellationToken>()).Returns([approved]);
         var registry = Substitute.For<IIdentityRealmRegistry>();
         registry.GetAllRealms().Returns([Realm("r1")]);
@@ -88,6 +88,6 @@ public sealed class GatewayRoleRightAssignmentReportTests
 
     private static IdentityRealm Realm(string id)
     {
-        return new IdentityRealm(id, IdentityRealmKind.EntraWorkforce, new TenantBindingSpecification(TenantBindingKind.Fixed, TenantId.LegacySingleTenant.Value));
+        return new IdentityRealm(id, IdentityRealmKind.EntraWorkforce, new TenantBindingSpecification(TenantBindingKind.Fixed, Autheris.Tests.Common.TestTenants.Default.Value));
     }
 }

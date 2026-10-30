@@ -262,7 +262,7 @@ public class Issue113AccessRequestsSecurityTests
 
         var submission = new ConsentRequestSubmission(
             "finance", "dbo", "orders", "Valid justification", 30, null,
-            new Sid("S-1-5-MACHINE"), principal, TenantId.LegacySingleTenant);
+            new Sid("S-1-5-MACHINE"), principal, Autheris.Tests.Common.TestTenants.Default);
 
         var ex = await Should.ThrowAsync<ConsentRequestException>(() => service.SubmitAsync(submission));
         ex.Code.ShouldBe("FORBIDDEN");
@@ -306,7 +306,7 @@ public class Issue113AccessRequestsSecurityTests
             Id = requestId,
             RequesterSid = originalRequester,
             Status = "PENDING",
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             RequesterIdentifiers = [originalRequester.Value]
         });
 
@@ -337,7 +337,7 @@ public class Issue113AccessRequestsSecurityTests
             Id = requestId,
             RequesterSid = requesterSid,
             Status = nonPendingStatus,
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             RequesterIdentifiers = [requesterSid.Value]
         });
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Analytics;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,7 +54,7 @@ public sealed class SemanticMetricQueryServiceP2Tests
     private static async Task<Rig> NewRigAsync(
         IEnumerable<DbtMetric>? metrics = null,
         bool allow = true,
-        TenancyMode mode = TenancyMode.Multi,
+        TenancyShape mode = TenancyShape.Multi,
         IEnumerable<DbtMeasure>? measures = null,
         ISemanticCatalogService? catalogOverride = null)
     {

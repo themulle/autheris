@@ -235,7 +235,7 @@ public sealed class Wave1GatewayHardeningTests
         var caller = new Autheris.Domain.Security.CallerContext("ReportingWorker", "1.0.0", "DailySync");
         var entry = new AuditLogEntry
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             EventType = "TABLE_QUERY",
             Decision = "ALLOW",
             DetailsJson = JsonSerializer.Serialize(new { row_count = 100 }),

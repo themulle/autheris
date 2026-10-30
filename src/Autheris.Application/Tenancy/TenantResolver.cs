@@ -56,13 +56,7 @@ public sealed class TenantResolver : ITenantResolver
             return null;
         }
 
-        if (tenancy.DefaultTenantId is { } raw)
-        {
-            return TenantId.TryParse(raw, out var parsed) ? (TenantId?)parsed : null;
-        }
-
-        // Transitional shim (removed in WP-DT-6): see DefaultState.From.
-        return tenancy.EffectiveMode == TenancyMode.Single ? (TenantId?)TenantId.LegacySingleTenant : null;
+        return tenancy.DefaultTenantId is { } raw && TenantId.TryParse(raw, out var parsed) ? (TenantId?)parsed : null;
     }
 
     public static TenantResolution Decide(ClaimTenant claim, TenantId? defaultTenant) => claim.Kind switch
@@ -198,14 +192,7 @@ public sealed class TenantResolver : ITenantResolver
                 return new DefaultState { Source = tenancy, Invalid = true };
             }
 
-            // Transitional shim (WP-DT-1..5, removed in WP-DT-6): Mode=Single keeps the legacy tenant as the default.
-            TenantId? shim = null;
-            if (tenancy.EffectiveMode == TenancyMode.Single)
-            {
-                shim = TenantId.LegacySingleTenant;
-            }
-
-            return new DefaultState { Source = tenancy, Effective = shim };
+            return new DefaultState { Source = tenancy };
         }
     }
 }

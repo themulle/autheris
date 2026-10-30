@@ -94,11 +94,6 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             }
         }
 
-        if (!opts.Tenancy.IsValid)
-        {
-            failures.Add("Gateway:Tenancy:Mode must be Single or Multi (empty means Multi).");
-        }
-
         ValidateDefaultTenant(opts, failures);
 
         if (opts.Catalog.MaxTagsPerDataset is < 1 or > Autheris.Domain.Model.DatasetTagRules.HardMaxTagsPerDataset)

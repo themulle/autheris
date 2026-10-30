@@ -14,7 +14,7 @@ public sealed class AuditGroupCommitSinkTests
 {
     private static AuditLogEntry Entry(string trace) => new()
     {
-        TenantId = TenantId.LegacySingleTenant, EventType = "TABLE_QUERY", ActorSid = new Sid("user"), TargetTable = "t", Decision = "ALLOW", TraceId = trace
+        TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = "TABLE_QUERY", ActorSid = new Sid("user"), TargetTable = "t", Decision = "ALLOW", TraceId = trace
     };
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class AuditGroupCommitSinkTests
         var tasks = Enumerable.Range(0, totalEntries)
             .Select(i => sink.RecordAuditEventAsync(new AuditLogEntry
             {
-                TenantId = TenantId.LegacySingleTenant,
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 EventType = "TABLE_QUERY",
                 ActorSid = new Sid($"user-{i}"),
                 TargetTable = "public.orders",
@@ -133,7 +133,7 @@ public sealed class AuditGroupCommitSinkTests
         var tasks = Enumerable.Range(0, 4)
             .Select(i => sink.RecordAuditEventAsync(new AuditLogEntry
             {
-                TenantId = TenantId.LegacySingleTenant,
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 EventType = "CONSENT_GRANTED",
                 ActorSid = new Sid($"admin-{i}"),
                 TargetTable = "public.customers",

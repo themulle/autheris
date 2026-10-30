@@ -21,7 +21,7 @@ public class ConsentPropertyBasedTests
         var denyCount = Math.Min(count.Item, 20);
         var denies = Enumerable.Range(0, denyCount).Select(_ => new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = TestTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.User,
@@ -47,7 +47,7 @@ public class ConsentPropertyBasedTests
         var allowCount = Math.Min(count.Item, 30);
         var allows = Enumerable.Range(0, allowCount).Select(i => new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = TestTable,
             Effect = ConsentEffect.Allow,
             GranteeType = (i % 2 == 0) ? GranteeType.User : GranteeType.Group,
@@ -58,7 +58,7 @@ public class ConsentPropertyBasedTests
 
         var hardDeny = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = TestTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.User,
@@ -86,7 +86,7 @@ public class ConsentPropertyBasedTests
         var allowCount = Math.Min(count.Item, 20);
         var allows = Enumerable.Range(0, allowCount).Select(_ => new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = TestTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -101,7 +101,7 @@ public class ConsentPropertyBasedTests
 
         var columnDeny = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = TestTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.Group,

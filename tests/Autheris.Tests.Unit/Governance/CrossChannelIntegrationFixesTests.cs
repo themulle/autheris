@@ -239,7 +239,7 @@ public sealed class CrossChannelIntegrationFixesTests
 
         var clampedConsent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,

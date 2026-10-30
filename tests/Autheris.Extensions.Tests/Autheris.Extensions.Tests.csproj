@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Autheris.Tests.Common\TestTenants.cs" Link="TestSupport\TestTenants.cs" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
   </ItemGroup>
 

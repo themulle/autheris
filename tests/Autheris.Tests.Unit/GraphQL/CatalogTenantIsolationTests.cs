@@ -125,8 +125,8 @@ public sealed class CatalogTenantIsolationTests
     public async Task LegacySingleTenant_GovernanceAdmin_IsNotRestricted()
     {
         // Single-tenant deployment (Gateway:Tenancy:Mode=Single): a GovernanceAdmin without a real tenant claim is unrestricted.
-        var options = new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } };
-        var catalog = await Catalog(Accessor(TenantId.LegacySingleTenant.Value, "GovernanceAdmin"), Repositories(), options);
+        var options = new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } };
+        var catalog = await Catalog(Accessor(Autheris.Tests.Common.TestTenants.Default.Value, "GovernanceAdmin"), Repositories(), options);
 
         catalog.Count.ShouldBe(3);
     }

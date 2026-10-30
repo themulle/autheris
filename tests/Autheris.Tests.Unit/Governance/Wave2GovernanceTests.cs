@@ -339,7 +339,7 @@ public sealed class Wave2GovernanceTests
         // Consent allows salary column clear for normal access, but masks for Agent.Read
         var consent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             TableId = Guid.NewGuid(),
             TableIdentifier = table,

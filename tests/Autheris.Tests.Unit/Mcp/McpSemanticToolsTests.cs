@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System.Collections.Generic;
 using System.Security.Claims;
 using System.Text.Json;
@@ -31,9 +32,9 @@ public sealed class McpSemanticToolsTests
     [Fact]
     public async Task ExecuteListAndDescribeMetrics_ReturnsAccurateJson()
     {
-        var single = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } });
+        var single = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } });
         var catalog = new InMemorySemanticCatalog(single);
-        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Single.Owner());
+        var tenancy = new SemanticTenancy(Autheris.Tests.Common.TenancyShape.Single.Owner());
         var admin = AdminPrincipal();
         var manifest = new DbtSemanticManifest(
             SemanticModels: new List<DbtSemanticModel>(),
@@ -51,7 +52,7 @@ public sealed class McpSemanticToolsTests
                     Meta: new Dictionary<string, string> { ["unit"] = "EUR" }
                 )
             });
-        await catalog.RegisterManifestAsync(manifest, Autheris.Domain.Common.TenantId.LegacySingleTenant);
+        await catalog.RegisterManifestAsync(manifest, Autheris.Tests.Common.TestTenants.Default);
 
         // 1. List metrics
         var listJson = await McpSemanticTools.ExecuteListMetricsAsync(catalog, admin, tenancy, null);
@@ -88,7 +89,7 @@ public sealed class McpSemanticToolsTests
     public async Task McpListMetrics_TenantScoped()
     {
         var catalog = new InMemorySemanticCatalog();
-        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi.Owner());
+        var tenancy = new SemanticTenancy(Autheris.Tests.Common.TenancyShape.Multi.Owner());
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-a"));
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("b_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-b"));
 
@@ -111,8 +112,8 @@ public sealed class McpSemanticToolsTests
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-a"));
         var noSid = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "tenant-a"), new Claim(ClaimTypes.Name, "x")], "TestAuth"));
 
-        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi.Owner()), null)).ShouldNotContain("a_metric");
-        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Single.Owner()), null)).ShouldNotContain("a_metric");
+        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Tests.Common.TenancyShape.Multi.Owner()), null)).ShouldNotContain("a_metric");
+        (await McpSemanticTools.ExecuteListMetricsAsync(catalog, noSid, new SemanticTenancy(Autheris.Tests.Common.TenancyShape.Single.Owner()), null)).ShouldNotContain("a_metric");
     }
 
     [Fact]
@@ -120,7 +121,7 @@ public sealed class McpSemanticToolsTests
     public async Task McpDescribeMetric_NonAdmin_NoFilterTemplate()
     {
         var catalog = new InMemorySemanticCatalog();
-        var tenancy = new SemanticTenancy(Autheris.Domain.Options.TenancyMode.Multi.Owner());
+        var tenancy = new SemanticTenancy(Autheris.Tests.Common.TenancyShape.Multi.Owner());
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), new Autheris.Domain.Common.TenantId("tenant-a"));
 
         var analystList = await McpSemanticTools.ExecuteListMetricsAsync(catalog, Analyst("tenant-a"), tenancy, null);

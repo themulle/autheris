@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -65,8 +66,8 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
     [Fact]
     public async Task List_ClusterAdminAndSingleModeGovernanceAdmin_SeeEverything()
     {
-        var (single, _) = Create(Wp0.Options(TenancyMode.Single));
-        var (multi, _) = Create(Wp0.Options(TenancyMode.Multi));
+        var (single, _) = Create(Wp0.Options(TenancyShape.Single));
+        var (multi, _) = Create(Wp0.Options(TenancyShape.Multi));
 
         Names(await multi.Inner.ListDatasetsAsync(Wp0.Context(Wp0.User("root", null, ["ClusterAdmin"])))).Length.ShouldBe(3);
         Names(await single.Inner.ListDatasetsAsync(Wp0.Context(Wp0.User("gov", null, ["GovernanceAdmin"])))).Length.ShouldBe(3);
@@ -76,7 +77,7 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
     [Fact]
     public async Task TenantScopedGovernanceAdmin_Multi_ListDetailSearchDatasources_ShowNoForeignTenantTable()
     {
-        var (svc, _) = Create(Wp0.Options(TenancyMode.Multi, "ref.dbo.countries"),
+        var (svc, _) = Create(Wp0.Options(TenancyShape.Multi, "ref.dbo.countries"),
             consents: [Wp0.Allow(InvoicesB.Identifier, "S-B-OWNER", Wp0.TenantB), Wp0.Allow(OrdersA.Identifier, "S-A-OWNER", Wp0.TenantA)]);
         var admin = Wp0.Context(Wp0.User("S-B-ADMIN", "tenant-b", ["GovernanceAdmin"]));
 
@@ -93,8 +94,8 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
     [Fact]
     public async Task Datasources_NonAdminAndClaimlessAdmin_AreEmpty_ClusterAdminAndSingleAdminSeeAll()
     {
-        var (multi, _) = Create(Wp0.Options(TenancyMode.Multi));
-        var (single, _) = Create(Wp0.Options(TenancyMode.Single));
+        var (multi, _) = Create(Wp0.Options(TenancyShape.Multi));
+        var (single, _) = Create(Wp0.Options(TenancyShape.Single));
 
         (await multi.Inner.ListDatasourcesAsync(Wp0.Context(Wp0.User("S-USER", "tenant-a")))).ShouldBeEmpty();
         (await multi.Inner.ListDatasourcesAsync(Wp0.Context(Wp0.User("S-ADM", null, ["GovernanceAdmin"])))).ShouldBeEmpty();
@@ -111,7 +112,7 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
         var logger = Substitute.For<ILogger<Autheris.Application.Catalog.Services.CatalogDiscoveryService>>();
         logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
         var sid = "S-CLAIMLESS-" + Guid.NewGuid().ToString("N");
-        var (svc, _) = Create(Wp0.Options(TenancyMode.Multi), logger: logger, consents: [Wp0.Allow(Countries.Identifier, sid, TenantId.LegacySingleTenant)]);
+        var (svc, _) = Create(Wp0.Options(TenancyShape.Multi), logger: logger, consents: [Wp0.Allow(Countries.Identifier, sid, Autheris.Tests.Common.TestTenants.Default)]);
         var admin = Wp0.Context(Wp0.User(sid, null, ["GovernanceAdmin"]));
 
         Names(await svc.Inner.ListDatasetsAsync(admin)).ShouldBeEmpty();

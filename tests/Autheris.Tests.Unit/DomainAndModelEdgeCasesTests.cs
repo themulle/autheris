@@ -251,7 +251,7 @@ public class DomainAndModelEdgeCasesTests
 
         var invalidEqual = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = new TableIdentifier("finance", "dbo", "invoices"),
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-USER"),
@@ -263,7 +263,7 @@ public class DomainAndModelEdgeCasesTests
 
         var invalidLess = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = new TableIdentifier("finance", "dbo", "invoices"),
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("S-1-5-21-USER"),
@@ -279,7 +279,7 @@ public class DomainAndModelEdgeCasesTests
     {
         var consent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = new TableIdentifier("finance", "dbo", "invoices"),
             GranteeType = GranteeType.Role,
             RoleId = null,
@@ -297,7 +297,7 @@ public class DomainAndModelEdgeCasesTests
     {
         var consentUser = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = new TableIdentifier("finance", "dbo", "invoices"),
             GranteeType = GranteeType.User,
             GranteeSid = null,
@@ -308,7 +308,7 @@ public class DomainAndModelEdgeCasesTests
 
         var consentEmptySid = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = new TableIdentifier("finance", "dbo", "invoices"),
             GranteeType = GranteeType.User,
             GranteeSid = new Sid("   "),
@@ -326,7 +326,7 @@ public class DomainAndModelEdgeCasesTests
 
         var consent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             ValidFrom = from,
             ValidTo = to,
             IsRevoked = false
@@ -350,7 +350,7 @@ public class DomainAndModelEdgeCasesTests
         // If revoked, always inactive even within valid window
         var revokedConsent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             ValidFrom = from,
             ValidTo = to,
             IsRevoked = true
@@ -461,7 +461,7 @@ public class DomainAndModelEdgeCasesTests
     [InlineData("tenant-1")]
     [InlineData("TENANT_CORP_123")]
     [InlineData("a")]
-    [InlineData("legacy-single-tenant")]
+    [InlineData("default-tenant")]
     public void TenantId_ValidInputs_PassValidationAndPreserveValue(string validVal)
     {
         var tenant = new TenantId(validVal);

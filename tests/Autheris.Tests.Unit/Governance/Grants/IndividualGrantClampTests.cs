@@ -17,7 +17,7 @@ public sealed class IndividualGrantClampTests : IDisposable
 
     private static Consent C(GranteeType type, DateTimeOffset validTo) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         GranteeType = type,
         GranteeSid = type is GranteeType.User or GranteeType.ServicePrincipal ? new Sid("S-1-5-21-X") : (Sid?)null,
         RoleName = type == GranteeType.Role ? "R" : null,
@@ -44,7 +44,7 @@ public sealed class IndividualGrantClampTests : IDisposable
     {
         var deny = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Effect = ConsentEffect.Deny, GranteeType = type, GranteeSid = new Sid("S-1-5-21-X"),
             ValidFrom = From, ValidTo = DateTimeOffset.MaxValue
         };
@@ -60,11 +60,11 @@ public sealed class IndividualGrantClampTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var deny = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = table, Effect = ConsentEffect.Deny, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"),
             ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(50)
         };
-        var roleAllow = new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = table, GranteeType = GranteeType.Role, RoleName = "analyst", ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
+        var roleAllow = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = table, GranteeType = GranteeType.Role, RoleName = "analyst", ValidFrom = now.AddDays(-400), ValidTo = now.AddYears(1) };
 
         var decision = new Autheris.Application.Services.ConsentResolutionService().ResolveAccess(
             new Sid("S-1-5-21-X"), new HashSet<Sid>(), new HashSet<string> { "analyst" }, table, [deny, roleAllow]);
@@ -92,7 +92,7 @@ public sealed class IndividualGrantClampTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var clamped = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-X"), ValidFrom = now.AddDays(-180).AddMinutes(2), ValidTo = now.AddYears(5)
         };
 
@@ -139,7 +139,7 @@ public sealed class IndividualGrantClampTests : IDisposable
     [Fact]
     public void SEC_SC_20_PermanentUnmaskedProfile_IsClampedTo30DaysFromCreation()
     {
-        var p = new AccessProfile { ProfileId = "p", Name = "n", TenantId = TenantId.LegacySingleTenant, MaskingMode = MaskingPolicyMode.Unmasked, CreatedAt = From, ValidTo = null };
+        var p = new AccessProfile { ProfileId = "p", Name = "n", TenantId = Autheris.Tests.Common.TestTenants.Default, MaskingMode = MaskingPolicyMode.Unmasked, CreatedAt = From, ValidTo = null };
 
         p.EffectiveValidTo.ShouldBe(From.AddDays(30));
         p.IsActive(From.AddDays(29)).ShouldBeTrue();
@@ -149,12 +149,12 @@ public sealed class IndividualGrantClampTests : IDisposable
     [Fact]
     public void SEC_SC_20_UnmaskedProfile_WithShorterExpiry_KeepsIt_AndRestrictiveProfilesAreUnaffected()
     {
-        var unmasked = new AccessProfile { ProfileId = "p", Name = "n", TenantId = TenantId.LegacySingleTenant, MaskingMode = MaskingPolicyMode.Unmasked, CreatedAt = From, ValidTo = From.AddDays(3) };
+        var unmasked = new AccessProfile { ProfileId = "p", Name = "n", TenantId = Autheris.Tests.Common.TestTenants.Default, MaskingMode = MaskingPolicyMode.Unmasked, CreatedAt = From, ValidTo = From.AddDays(3) };
         unmasked.EffectiveValidTo.ShouldBe(From.AddDays(3));
 
         foreach (var mode in new[] { MaskingPolicyMode.Default, MaskingPolicyMode.Strict })
         {
-            var p = new AccessProfile { ProfileId = "p", Name = "n", TenantId = TenantId.LegacySingleTenant, MaskingMode = mode, CreatedAt = From, ValidTo = null };
+            var p = new AccessProfile { ProfileId = "p", Name = "n", TenantId = Autheris.Tests.Common.TestTenants.Default, MaskingMode = mode, CreatedAt = From, ValidTo = null };
             p.EffectiveValidTo.ShouldBeNull();
             p.IsActive(From.AddDays(5000)).ShouldBeTrue();
         }

@@ -28,7 +28,6 @@ public sealed class ForwardAuthOptions
     public string GroupsHeader { get; init; } = "X-Forwarded-Groups";
     public string RolesHeader { get; init; } = "X-Forwarded-Roles";
     public string TenantHeader { get; init; } = "X-Forwarded-Tenant";
-    public string? DefaultTenantId { get; init; }
     public string? SharedSecretKeyVaultRef { get; init; }
     public string? SharedSecret { get; init; }
     public string SharedSecretHeader { get; init; } = "X-Forwarded-Secret";
@@ -61,7 +60,7 @@ public sealed class ForwardAuthOptions
 
     /// <summary>
     /// SEC H-1: When true, the proxy-asserted tenant header (X-Forwarded-Tenant) is honored, provided it is in AllowedTenantIds.
-    /// When false (default), the tenant header is ignored and DefaultTenantId is used.
+    /// When false (default), the tenant header is ignored and the principal falls back to Gateway:Tenancy:DefaultTenantId.
     /// </summary>
     public bool TrustUpstreamTenant { get; init; } = false;
 

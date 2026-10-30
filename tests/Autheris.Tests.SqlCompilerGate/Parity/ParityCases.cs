@@ -92,9 +92,9 @@ public static class ParityCases
     private static ConsentRowFilter F(string column, string op, string valueJson, int group = 0) =>
         new() { ColumnName = column, Operator = op, ValueJson = valueJson, FilterGroup = group };
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters };
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters };
 
     private static ParityCase Consent(string id, string description, Consent[] allow, Consent[] deny, DatabaseDialect? only = null) =>
         new(id, ProducerKind.ConsentFilter, description, ctx =>

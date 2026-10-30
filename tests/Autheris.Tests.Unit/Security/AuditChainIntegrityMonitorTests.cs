@@ -208,7 +208,7 @@ public sealed class AuditChainIntegrityMonitorTests
     [Fact]
     public void BuildStepAudit_TruncatesVeryLongReason()
     {
-        var req = new ConsentRequest { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, RequesterSid = new Sid("S-REQ") };
+        var req = new ConsentRequest { TenantId = Autheris.Tests.Common.TestTenants.Default, RequesterSid = new Sid("S-REQ") };
 
         var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-A"), "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, new string('x', 5000));
 

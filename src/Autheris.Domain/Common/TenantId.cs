@@ -48,8 +48,6 @@ public readonly record struct TenantId
     /// </summary>
     public static readonly TenantId Platform = new("_platform", true);
 
-    public static readonly TenantId LegacySingleTenant = new("legacy-single-tenant");
-
     /// <summary>True when the value starts with the reserved <c>_</c> prefix (DT-SC-07).</summary>
     public static bool IsReserved(string? value) => value is { Length: > 0 } && value[0] == ReservedPrefix;
 

@@ -105,7 +105,7 @@ public sealed class ConsentRequestServiceTests
         var service = new ConsentRequestService(metadata, approvals);
 
         var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
-            service.SubmitAsync(new ConsentRequestSubmission(domain, schema, table, justification, days, null, User, Principal("t"), TenantId.LegacySingleTenant)));
+            service.SubmitAsync(new ConsentRequestSubmission(domain, schema, table, justification, days, null, User, Principal("t"), Autheris.Tests.Common.TestTenants.Default)));
 
         ex.Code.ShouldBe("VALIDATION_ERROR");
     }

@@ -151,8 +151,8 @@ public sealed class WebSqlCoLocatedDataSourcesTests
                 Arg.Any<CancellationToken>())
             .Returns(
             [
-                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
-                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
             ]);
 
         var gatewayOptions = new GatewayOptions
@@ -219,8 +219,8 @@ public sealed class WebSqlCoLocatedDataSourcesTests
                 Arg.Any<CancellationToken>())
             .Returns(
             [
-                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
-                new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta1.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) },
+                new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, TableIdentifier = meta2.Identifier, Effect = ConsentEffect.Allow, GranteeSid = new Sid("user-1"), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1) }
             ]);
 
         var gatewayOptions = new GatewayOptions

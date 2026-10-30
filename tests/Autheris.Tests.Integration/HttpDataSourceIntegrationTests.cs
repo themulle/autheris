@@ -173,7 +173,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
             // Grant consent: ALLOW with row filter `region = 'EU'` and masking on `email`
             await repo.CreateConsentAsync(new Consent
             {
-                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = savedMeta.Table.Id,
                 TableIdentifier = tableId,
                 Effect = ConsentEffect.Allow,
@@ -297,7 +297,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
             // secret_notes is DENIED (not in column rules -> Zero-Trust Deny)
             await repo.CreateConsentAsync(new Consent
             {
-                TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                TenantId = Autheris.Tests.Common.TestTenants.Default,
                 TableId = savedMeta.Table.Id,
                 TableIdentifier = tableId,
                 Effect = ConsentEffect.Allow,

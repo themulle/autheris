@@ -35,7 +35,7 @@ public sealed class PolicyPredicateLintTests
     {
         ProfileId = id,
         Name = id,
-        TenantId = TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         TargetTables = ["erp.main.orders"],
         RowFilterPredicate = predicate
     };
@@ -197,7 +197,7 @@ public sealed class PolicyPredicateLintCallerPlaceholderTests
     [InlineData("region = '__autheris_caller__dept'")]
     public void AccessProfile_WithAPlaceholder_IsAFinding(string predicate)
     {
-        var profile = new AccessProfile { ProfileId = "p", Name = "p", TenantId = TenantId.LegacySingleTenant, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate };
+        var profile = new AccessProfile { ProfileId = "p", Name = "p", TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate };
         var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [profile], [], []));
         report.Findings.ShouldHaveSingleItem().Code.ShouldBe(PolicyPredicateLinter.CodeCallerPlaceholderNotAllowed);
     }

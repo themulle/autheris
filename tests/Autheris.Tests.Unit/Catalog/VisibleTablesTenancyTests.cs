@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Tests.Common;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Services;
@@ -23,12 +24,12 @@ public sealed class VisibleTablesTenancyTests
     private static readonly TableMetadata Countries = Wp0.Table("ref", "countries", columns: ["code"]);
 
     private static Task<System.Collections.Generic.IReadOnlyList<TableMetadata>> VisibleAsync(
-        System.Security.Claims.ClaimsPrincipal user, TenancyMode mode, string tenantForConsents = "legacy-single-tenant")
+        System.Security.Claims.ClaimsPrincipal user, TenancyShape mode, string tenantForConsents = "default-tenant")
     {
         var consents = Wp0.Consents(
             Wp0.Allow(InvoicesB.Identifier, "S-B-OWNER", Wp0.TenantB),
             Wp0.Allow(OrdersA.Identifier, "S-A-OWNER", Wp0.TenantA),
-            Wp0.Allow(Countries.Identifier, "S-CLAIMLESS", TenantId.LegacySingleTenant));
+            Wp0.Allow(Countries.Identifier, "S-CLAIMLESS", Autheris.Tests.Common.TestTenants.Default));
         return CatalogVisibility.VisibleTablesAsync(
             [OrdersA, InvoicesB, Countries], user, new TenantId(tenantForConsents), consents, contract: null, mode.Owner(),
             sharedTables: ["ref.dbo.countries"], default);
@@ -37,23 +38,23 @@ public sealed class VisibleTablesTenancyTests
     private static string[] Names(System.Collections.Generic.IEnumerable<TableMetadata> tables) => tables.Select(t => t.Identifier.TableName).OrderBy(n => n).ToArray();
 
     [Theory]
-    [InlineData(TenancyMode.Multi)]
-    [InlineData(TenancyMode.Single)]
-    public async Task TenantGovernanceAdmin_IsConfinedToItsTenantAndSharedTables(TenancyMode mode)
+    [InlineData(TenancyShape.Multi)]
+    [InlineData(TenancyShape.Single)]
+    public async Task TenantGovernanceAdmin_IsConfinedToItsTenantAndSharedTables(TenancyShape mode)
         => Names(await VisibleAsync(Wp0.User("S-B-ADMIN", "tenant-b", ["GovernanceAdmin"]), mode, "tenant-b")).ShouldBe(["countries", "invoices_b"]);
 
     [Fact]
     public async Task ClaimlessGovernanceAdmin_Multi_SeesNothing()
-        => Names(await VisibleAsync(Wp0.User("S-CLAIMLESS", null, ["GovernanceAdmin"]), TenancyMode.Multi)).ShouldBeEmpty();
+        => Names(await VisibleAsync(Wp0.User("S-CLAIMLESS", null, ["GovernanceAdmin"]), TenancyShape.Multi)).ShouldBeEmpty();
 
     [Fact]
     public async Task ClaimlessGovernanceAdmin_Single_SeesEverything()
-        => Names(await VisibleAsync(Wp0.User("S-CLAIMLESS", null, ["GovernanceAdmin"]), TenancyMode.Single)).ShouldBe(["countries", "invoices_b", "orders_a"]);
+        => Names(await VisibleAsync(Wp0.User("S-CLAIMLESS", null, ["GovernanceAdmin"]), TenancyShape.Single)).ShouldBe(["countries", "invoices_b", "orders_a"]);
 
     [Theory]
-    [InlineData(TenancyMode.Multi)]
-    [InlineData(TenancyMode.Single)]
-    public async Task ClusterAdmin_SeesEverything(TenancyMode mode)
+    [InlineData(TenancyShape.Multi)]
+    [InlineData(TenancyShape.Single)]
+    public async Task ClusterAdmin_SeesEverything(TenancyShape mode)
         => Names(await VisibleAsync(Wp0.User("root", "tenant-b", ["ClusterAdmin"]), mode, "tenant-b")).ShouldBe(["countries", "invoices_b", "orders_a"]);
 
     [Fact]
@@ -62,12 +63,12 @@ public sealed class VisibleTablesTenancyTests
         var consents = Wp0.Consents();
         var admin = Wp0.User("S-ADM", null, ["GovernanceAdmin"]);
 
-        (await CatalogVisibility.VisibleTablesAsync([OrdersA], admin, TenantId.LegacySingleTenant, consents, default)).ShouldBeEmpty();
+        (await CatalogVisibility.VisibleTablesAsync([OrdersA], admin, Autheris.Tests.Common.TestTenants.Default, consents, default)).ShouldBeEmpty();
     }
 
     [Fact]
     public async Task InvalidTenantClaim_YieldsNothing()
-        => (await VisibleAsync(Wp0.User("S-X", "bad tenant!!", ["GovernanceAdmin"]), TenancyMode.Single)).ShouldBeEmpty();
+        => (await VisibleAsync(Wp0.User("S-X", "bad tenant!!", ["GovernanceAdmin"]), TenancyShape.Single)).ShouldBeEmpty();
 
     [Fact]
     public async Task TrinoShowTables_FollowsTheSameRule()
@@ -77,13 +78,13 @@ public sealed class VisibleTablesTenancyTests
         var adminB = Wp0.User("S-B-ADMIN", "tenant-b", ["GovernanceAdmin"]);
         var claimless = Wp0.User("S-ADM", null, ["GovernanceAdmin"]);
 
-        var confined = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", adminB, Wp0.TenantB, tables, consents, Wp0.Options(TenancyMode.Multi));
+        var confined = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", adminB, Wp0.TenantB, tables, consents, Wp0.Options(TenancyShape.Multi));
         confined!.Rows.Select(r => r["Table"]?.ToString()).ShouldBe(["invoices_b"]);
 
-        var multi = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, TenantId.LegacySingleTenant, tables, consents, Wp0.Options(TenancyMode.Multi));
+        var multi = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, Autheris.Tests.Common.TestTenants.Default, tables, consents, Wp0.Options(TenancyShape.Multi));
         multi!.Rows.ShouldBeEmpty();
 
-        var single = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, TenantId.LegacySingleTenant, tables, consents, Wp0.Options(TenancyMode.Single));
+        var single = await TrinoMetadataQueryHandler.TryExecuteAsync("SHOW TABLES FROM sales.dbo", claimless, Autheris.Tests.Common.TestTenants.Default, tables, consents, Wp0.Options(TenancyShape.Single));
         single!.Rows.Select(r => r["Table"]?.ToString()).ShouldBe(["orders_a", "invoices_b"], ignoreOrder: true);
     }
 }

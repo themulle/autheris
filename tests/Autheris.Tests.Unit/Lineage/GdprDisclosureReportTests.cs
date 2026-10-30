@@ -25,7 +25,7 @@ public sealed class GdprDisclosureReportTests
 
     private static AuditLogEntry Read(Sid actor, string decision = "ALLOW") => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         ActorSid = actor,
         TargetTable = Salary.ToString(),
         Decision = decision,

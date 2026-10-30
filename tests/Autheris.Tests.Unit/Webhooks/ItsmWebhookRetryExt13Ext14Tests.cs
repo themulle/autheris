@@ -39,7 +39,7 @@ public sealed class ItsmWebhookRetryExt13Ext14Tests
 
     private static ConsentRequest Request(string status) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         Id = Guid.NewGuid(),
         Status = status,
         ItsmTicketId = "CHG1"

@@ -52,7 +52,7 @@ public sealed class RowFilterKeySetTextBudgetTests
 
     private static PolicyPredicate Substituted(TargetSqlDialect dialect, int ordinal, int count)
     {
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = [Correlated()] }], [], Air1)!;
+        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [Correlated()] }], [], Air1)!;
         var site = CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node;
         var keys = Enumerable.Range(1, count).Select(i => new PolicyValue((long)i, SqlParameterType.Int64)).ToList();
         var replacement = new KeySetReplacement("client_id", keys, count, ordinal);

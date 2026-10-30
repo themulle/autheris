@@ -54,7 +54,11 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-CatalogParity-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            b.UseSetting("Gateway:Tenancy:Mode", tenancyMode);
+            if (tenancyMode == "Single")
+            {
+                b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default-tenant");
+            }
+
             b.UseSetting("Gateway:Rebac:Enabled", rebac ? "true" : "false");
         });
 
@@ -157,7 +161,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
         // WP-DT-4: a truly tenant-less principal (Multi, no default tenant) is refused at the gate (S6); the legacy id carried as an explicit
         // tenant claim is an ordinary tenant, so its GovernanceAdmin is a confined tenant administrator.
         (await (await ClientAsync("S-ADM", null, "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        var legacyTenantAdmin = await (await ClientAsync("S-ADM", "legacy-single-tenant", "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources");
+        var legacyTenantAdmin = await (await ClientAsync("S-ADM", "default-tenant", "GovernanceAdmin")).GetAsync("/api/v1/catalog/datasources");
         legacyTenantAdmin.StatusCode.ShouldBe(HttpStatusCode.OK);
         var legacyBody = await BodyAsync(legacyTenantAdmin);
         legacyBody.ShouldNotContain("dom_a");
@@ -220,7 +224,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     }
 
     [Fact]
-    public async Task SingleMode_GovernanceAdminWithoutTenantClaim_IsTheUnrestrictedAdministrator()
+    public async Task DefaultTenant_GovernanceAdminWithoutTenantClaim_SeesTheWholeCatalog()
     {
         var single = Configure(new WebApplicationFactory<Program>(), "Single");
         await SeedAsync(single);
@@ -398,14 +402,14 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
 
         // ... while the legacy id carried as an explicit tenant claim is an ordinary tenant and confined: no unshared table (a shared table
         // shows to a tenant administrator in every tier, as for any tenant).
-        var claimless = await ClientAsync("S-ADM", "legacy-single-tenant", "GovernanceAdmin", factory);
+        var claimless = await ClientAsync("S-ADM", "default-tenant", "GovernanceAdmin", factory);
         var claimlessList = await BodyAsync(await claimless.GetAsync("/api/v1/catalog/datasets"));
         claimlessList.ShouldNotContain("unshared_full_t");
         (await claimless.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
-    public async Task SingleMode_EveryTableIsTierEligible_ClaimlessUserSeesSummaryAndFull()
+    public async Task DefaultTenant_EveryTableIsTierEligible_ClaimlessUserSeesSummaryAndFull()
     {
         var single = Configure(new WebApplicationFactory<Program>(), "Single");
         await SeedTiersAsync(single);

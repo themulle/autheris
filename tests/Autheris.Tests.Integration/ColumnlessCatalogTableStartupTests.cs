@@ -52,7 +52,6 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_dbFile}");
-            b.UseSetting("Gateway:Tenancy:Mode", "Multi");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:SystemMetrics:Enabled", systemMetricsEnabled ? "true" : "false");
         });

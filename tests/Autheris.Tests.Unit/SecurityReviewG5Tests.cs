@@ -86,7 +86,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
             .Returns(ci => Task.FromResult(new ResolvedTableAccess(
                 new TableMetadata { Identifier = ci.ArgAt<TableIdentifier>(1) },
                 TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(1), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
-                TenantId.LegacySingleTenant,
+                Autheris.Tests.Common.TestTenants.Default,
                 new Sid("S-1-5-21-G5"),
                 ci.ArgAt<ClaimsPrincipal?>(0)!)));
         return new ServiceCollection()

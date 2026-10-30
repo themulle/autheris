@@ -11,7 +11,7 @@ internal static class DbtSyncTestExtensions
     public static Task<DbtSyncResult> IngestManifestStreamAsClusterAdminAsync(this IDbtMetadataIngestionService service, Stream manifestStream, bool dryRun = false, CancellationToken ct = default)
         => service.IngestManifestStreamAsync(
             manifestStream,
-            new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("system:dbt-sync"), IsSync: true, null), TenantId.LegacySingleTenant, true),
+            new DbtGovernanceImportCaller(new VirtualFilterActor(new Sid("system:dbt-sync"), IsSync: true, null), Autheris.Tests.Common.TestTenants.Default, true),
             dryRun,
             ct);
 }

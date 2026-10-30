@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -75,7 +76,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task CatalogSummaryResource_FollowsTheCallerClassOfThePrincipal()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
 
         var consented = await ReadAsync(h, Session("S-A-USER", "tenant-a"), "autheris://catalog/summary");
         consented.ShouldContain("orders_a");
@@ -98,7 +99,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task SchemaResource_UnconsentedTable_IsNotFound_ConsentedShowsOnlyConsentedColumns()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
         const string uri = "autheris://catalog/datasets/sales.dbo.orders_a/schema";
 
         var own = await ReadAsync(h, Session("S-A-USER", "tenant-a"), uri);
@@ -111,7 +112,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task AnonymousMcpClient_SeesNothing_EvenWithAConsentOnThatSid()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), Wp0.Allow(OrdersA.Identifier, "ANONYMOUS_MCP_CLIENT", Wp0.TenantA));
+        var h = Create(Wp0.Options(TenancyShape.Multi), Wp0.Allow(OrdersA.Identifier, "ANONYMOUS_MCP_CLIENT", Wp0.TenantA));
 
         (await ReadAsync(h, Session("ANONYMOUS_MCP_CLIENT", "tenant-a"), "autheris://catalog/summary")).ShouldNotContain("orders_a");
     }
@@ -119,7 +120,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task InvokeApi_CatalogRoutes_UseThePrincipalOfTheContext_AndDefaultContextSeesNothing()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
         var user = Wp0.Context(Wp0.User("S-A-USER", "tenant-a"));
 
         (await h.Dispatcher.InvokeApiAsync("/api/v1/catalog/datasets", "GET", context: user)).ShouldContain("orders_a");
@@ -134,7 +135,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task InvokeApi_ListDatasources_AdminWithoutResolvableTenant_NamesTheDefaultTenantOption()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
         var noTenantAdmin = Wp0.Context(Wp0.User("S-ADM", null, ["GovernanceAdmin"]));
 
         var result = await h.Dispatcher.InvokeApiAsync("/api/v1/catalog/datasources", "GET", context: noTenantAdmin);
@@ -148,15 +149,15 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task ListDatasources_AllChannels_AreAdminOnly()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
         var user = Session("S-A-USER", "tenant-a");
         var cluster = Session("root", "tenant-a", "ClusterAdmin");
-        var claimlessAdmin = new McpSessionContext("s", "S-ADM", "legacy-single-tenant", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-ADM", Roles: ["GovernanceAdmin"], GroupSids: []);
+        var claimlessAdmin = new McpSessionContext("s", "S-ADM", "default-tenant", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-ADM", Roles: ["GovernanceAdmin"], GroupSids: []);
 
         var forbidden = await ToolAsync(h, user, McpDatasetTools.ListDatasources);
         forbidden.ShouldContain("Forbidden");
         forbidden.ShouldNotContain("a.internal");
-        // DT-A-7: "legacy-single-tenant" is an ordinary tenant id; its GovernanceAdmin is a tenant administrator confined to its own tables.
+        // DT-A-7: "default-tenant" is an ordinary tenant id; its GovernanceAdmin is a tenant administrator confined to its own tables.
         var legacyTenantAdmin = await ToolAsync(h, claimlessAdmin, McpDatasetTools.ListDatasources);
         legacyTenantAdmin.ShouldNotContain("Forbidden");
         legacyTenantAdmin.ShouldNotContain("a.internal");
@@ -175,7 +176,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task SearchAndGetMyPermissionsTools_ShowOnlyConsentedColumns_AndSameAnswerForUnknownAndUnconsented()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
         var user = Session("S-A-USER", "tenant-a");
         var other = Session("S-B-USER", "tenant-b");
 
@@ -198,7 +199,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task TenantScopedGovernanceAdmin_Multi_HasNoCrossTenantMcpView()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi),
+        var h = Create(Wp0.Options(TenancyShape.Multi),
             Wp0.Allow(InvoicesB.Identifier, "S-B-OWNER", Wp0.TenantB), Wp0.Allow(OrdersA.Identifier, "S-A-OWNER", Wp0.TenantA));
         var adminB = Wp0.User("S-B-ADMIN", "tenant-b", ["GovernanceAdmin"]);
 
@@ -212,9 +213,9 @@ public sealed class McpCatalogChannelsWp0Tests
     }
 
     [Fact]
-    public async Task SingleMode_GovernanceAdminWithoutTenantClaim_AndClusterAdmin_SeeEverything()
+    public async Task DefaultTenant_GovernanceAdminWithoutTenantClaim_AndClusterAdmin_SeeEverything()
     {
-        var h = Create(Wp0.Options(TenancyMode.Single));
+        var h = Create(Wp0.Options(TenancyShape.Single));
 
         (await h.Datasets.ListDatasetsAsync(Wp0.User("gov", null, ["GovernanceAdmin"]))).Datasets.Count.ShouldBe(2);
         (await h.Datasets.ListDatasetsAsync(Wp0.User("root", "tenant-a", ["ClusterAdmin"]))).Datasets.Count.ShouldBe(2);
@@ -225,7 +226,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task ClaimlessGovernanceAdmin_Multi_IsNotAnAdministratorInTheDatasetTools()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi));
+        var h = Create(Wp0.Options(TenancyShape.Multi));
 
         (await h.Datasets.ListDatasetsAsync(Wp0.User("gov", null, ["GovernanceAdmin"]))).Datasets.ShouldBeEmpty();
     }
@@ -234,7 +235,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task ListDatasets_SearchForAHiddenColumnName_FindsNothing()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-A-USER"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-A-USER"));
         var user = Wp0.User("S-A-USER", "tenant-a");
 
         (await h.Datasets.ListDatasetsAsync(user, search: "secret_note", domain: null)).Datasets.ShouldBeEmpty();
@@ -252,7 +253,7 @@ public sealed class McpCatalogChannelsWp0Tests
         };
         var tables = Wp0.Tables(released);
         var consents = Wp0.Consents(Wp0.Allow(released.Identifier, "S-GRANTED", Wp0.TenantA));
-        var options = Options.Create(Wp0.Options(TenancyMode.Multi, "sales.dbo.orders_a"));
+        var options = Options.Create(Wp0.Options(TenancyShape.Multi, "sales.dbo.orders_a"));
         var catalog = new McpDatasetCatalog(tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(), options: options,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options.Value));
 
@@ -268,7 +269,7 @@ public sealed class McpCatalogChannelsWp0Tests
     [Fact]
     public async Task ForwardAuthClusterAdminClaim_ThroughRealMcpCallerResolution_TakesTheConsentPath()
     {
-        var h = Create(Wp0.Options(TenancyMode.Multi), AllowA("S-FWD"));
+        var h = Create(Wp0.Options(TenancyShape.Multi), AllowA("S-FWD"));
         var forwardAuth = Wp0.User("S-FWD", "tenant-a", ["ClusterAdmin"], authType: "ForwardAuth");
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = forwardAuth };
 

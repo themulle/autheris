@@ -81,7 +81,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [InlineData("TENANT_BETA_123")]
     [InlineData("t1")]
     [InlineData("0123456789-abcdef")]
-    [InlineData("legacy-single-tenant")]
+    [InlineData("default-tenant")]
     [InlineData("company-prod-eu-west-1")]
     public void TenantId_ValidWhitelistedIdentifiers_ShouldSucceed(string validTenantId)
     {
@@ -637,7 +637,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         var entry1 = new AuditLogEntry
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
             ActorSid = new Sid("S-1-5-21-LEGIT-USER"),
@@ -672,7 +672,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         var entry1 = new AuditLogEntry
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow.AddMinutes(-2),
             ActorSid = new Sid("S-1-5-21-LEGIT-USER"),

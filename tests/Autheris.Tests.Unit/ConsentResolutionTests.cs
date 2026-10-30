@@ -23,7 +23,7 @@ public class ConsentResolutionTests
     {
         return new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = effect,
             GranteeType = granteeType,
@@ -91,7 +91,7 @@ public class ConsentResolutionTests
         // Rule: Group has salary = MASK, User has direct ALLOW without column rule -> salary is CLEAR (maximum over A)
         var groupAllow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -124,7 +124,7 @@ public class ConsentResolutionTests
         // Rule: Group has salary = MASK, User has direct ALLOW, Role has hard DENY on salary -> salary is DENY
         var groupAllow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -141,7 +141,7 @@ public class ConsentResolutionTests
 
         var roleDeny = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.Role,
@@ -172,7 +172,7 @@ public class ConsentResolutionTests
         // Zwei ALLOW-Consents mit Company = DE01 bzw. Company = AT01 -> Vereinigung der Zeilen
         var allowDe = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -193,7 +193,7 @@ public class ConsentResolutionTests
 
         var allowAt = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -232,7 +232,7 @@ public class ConsentResolutionTests
     {
         var filteredAllow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -265,7 +265,7 @@ public class ConsentResolutionTests
         var allowAll = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, _userSid);
         var denyBlocked = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.Group,
@@ -297,7 +297,7 @@ public class ConsentResolutionTests
     {
         var expiredAllow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -309,7 +309,7 @@ public class ConsentResolutionTests
 
         var revokedAllow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -338,7 +338,7 @@ public class ConsentResolutionTests
         // Consent 1 grants MASK only on salary
         var allowConsent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -354,7 +354,7 @@ public class ConsentResolutionTests
         // Consent 2 (DENY) hard-denies secret_note
         var denyConsent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.User,
@@ -387,7 +387,7 @@ public class ConsentResolutionTests
         // Consent 1: salary = MASK
         var allow1 = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -403,7 +403,7 @@ public class ConsentResolutionTests
         // Consent 2: bonus = MASK (different column)
         var allow2 = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
@@ -435,7 +435,7 @@ public class ConsentResolutionTests
     {
         var allow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -477,7 +477,7 @@ public class ConsentResolutionTests
     {
         var allow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -511,7 +511,7 @@ public class ConsentResolutionTests
         var allowAll = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, _userSid);
         var denyUserAttr = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Deny,
             GranteeType = GranteeType.User,
@@ -554,7 +554,7 @@ public class ConsentResolutionTests
         // Arrange: AD Domain user in row filter value: ACME\Sales
         var allow = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,

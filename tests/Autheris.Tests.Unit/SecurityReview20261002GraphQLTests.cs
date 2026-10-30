@@ -389,7 +389,7 @@ public sealed class SecurityReview20261002GraphQLTests
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
         var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, TenantId.LegacySingleTenant));
+        consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(CreateConsent(consentId, table, Autheris.Tests.Common.TestTenants.Default));
         var sut = CreateLineageService(consentRepo, Substitute.For<IDataOwnershipRepository>(), Substitute.For<IAuditLogRepository>(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-GOV"), [], ["GovernanceAdmin"], new TenantId("tenant-a"), true, false);

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Dbt;
 
+using Autheris.Tests.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
@@ -73,13 +74,13 @@ public sealed class DbtSemanticManifestIngestionTests
     [Fact]
     public async Task ParseAndIngestAsync_ValidManifest_PopulatesCatalog()
     {
-        var single = SemanticCatalogTestKit.Mode(TenancyMode.Single);
+        var single = SemanticCatalogTestKit.Mode(TenancyShape.Single);
         var catalog = new InMemorySemanticCatalog(single);
         var repository = Substitute.For<ITableMetadataRepository>();
         repository.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(SemanticManifestValidatorTests.Orders());
         repository.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
         var service = new DbtSemanticManifestIngestionService(catalog, NullLogger<DbtSemanticManifestIngestionService>.Instance, repository, gatewayOptions: single);
-        var legacy = TenantId.LegacySingleTenant;
+        var legacy = Autheris.Tests.Common.TestTenants.Default;
 
         var manifest = await service.ParseAndIngestAsync(SampleSemanticManifestJson, legacy);
 

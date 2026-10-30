@@ -31,7 +31,7 @@ internal static class McpCatalogVisibility
         => VisibleTablesAsync(allTables, principal, consentRepo, options: null, ct);
 
     /// <summary>
-    /// Same rule with the deployment tenancy setting: <paramref name="options"/> supplies <c>Gateway:Tenancy:Mode</c> and
+    /// Same rule with the deployment tenancy setting: <paramref name="options"/> supplies <c>Gateway:Tenancy:DefaultTenantId</c> and
     /// <c>Gateway:Catalog:SharedTables</c>. Without options there is no catalog owner (confined view).
     /// </summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
@@ -97,7 +97,7 @@ internal static class McpCatalogVisibility
         return tables.Where(t => visible.Contains(t.Identifier)).ToList();
     }
 
-    // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup never sees it.
+    // An invalid tenant claim resolves to "no caller" in the resolver; the consent lookup sees the reserved platform tenant, which holds no consents (fail closed).
     internal static TenantId SafeTenantId(ClaimsPrincipal principal)
     {
         try
@@ -106,7 +106,7 @@ internal static class McpCatalogVisibility
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            return TenantId.LegacySingleTenant;
+            return TenantId.Platform;
         }
     }
 }

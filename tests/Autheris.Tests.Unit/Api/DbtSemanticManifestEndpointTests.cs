@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Api;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -74,7 +75,7 @@ public sealed class DbtSemanticManifestEndpointTests
         public required SemanticTenancy Tenancy { get; init; }
     }
 
-    private static Host NewHost(TenancyMode mode)
+    private static Host NewHost(TenancyShape mode)
     {
         var options = SemanticCatalogTestKit.Mode(mode);
         var catalog = new InMemorySemanticCatalog(options);
@@ -98,7 +99,7 @@ public sealed class DbtSemanticManifestEndpointTests
     [Trait("Category", "Security")]
     public async Task T_S_11_TenantAImports_TenantBSeesNoMetric_ImportTenantComesFromTheToken()
     {
-        var host = NewHost(TenancyMode.Multi);
+        var host = NewHost(TenancyShape.Multi);
         var admin = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
 
         var import = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, host.Ingestion, host.Tenancy), admin);
@@ -123,22 +124,22 @@ public sealed class DbtSemanticManifestEndpointTests
     [Trait("Category", "Security")]
     public async Task SemanticStore_MultiMode_ClaimlessImport_403_AndEmptyList()
     {
-        var host = NewHost(TenancyMode.Multi);
+        var host = NewHost(TenancyShape.Multi);
         var claimless = Context(Principal(null, "GovernanceAdmin"), Manifest);
 
         var import = await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(claimless, host.Ingestion, host.Tenancy), claimless);
 
         import.Status.ShouldBe(403);
-        (await host.Catalog.ListMetricsAsync(null, TenantId.LegacySingleTenant)).ShouldBeEmpty();
+        (await host.Catalog.ListMetricsAsync(null, Autheris.Tests.Common.TestTenants.Default)).ShouldBeEmpty();
         var list = Context(Principal(null, "Analyst"));
         (await RunAsync(await DbtEndpoints.HandleListDbtMetricsAsync(list, host.Catalog, host.Tenancy), list)).Body.ShouldBe("[]");
     }
 
     [Theory]
-    [InlineData(TenancyMode.Single)]
-    [InlineData(TenancyMode.Multi)]
+    [InlineData(TenancyShape.Single)]
+    [InlineData(TenancyShape.Multi)]
     [Trait("Category", "Security")]
-    public async Task SemanticStore_NoSid_Import403_AndEmptyList_InBothModes(TenancyMode mode)
+    public async Task SemanticStore_NoSid_Import403_AndEmptyList_InBothModes(TenancyShape mode)
     {
         var host = NewHost(mode);
         var noSid = Context(Principal("tenant-a", "GovernanceAdmin", sid: false), Manifest);
@@ -150,9 +151,9 @@ public sealed class DbtSemanticManifestEndpointTests
     }
 
     [Fact]
-    public async Task SingleMode_DefaultTenantCallerImports_OtherTenantsDoNotSeeTheManifest()
+    public async Task DefaultTenant_DefaultTenantCallerImports_OtherTenantsDoNotSeeTheManifest()
     {
-        var host = NewHost(TenancyMode.Single);
+        var host = NewHost(TenancyShape.Single);
         var admin = Context(Principal(DefaultTenantCaller.Claim.Value, "GovernanceAdmin"), Manifest);
 
         (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(admin, host.Ingestion, host.Tenancy), admin)).Status.ShouldBe(200);
@@ -167,7 +168,7 @@ public sealed class DbtSemanticManifestEndpointTests
     [Fact]
     public async Task T_3_7_NonAdmin_IsForbidden()
     {
-        var host = NewHost(TenancyMode.Multi);
+        var host = NewHost(TenancyShape.Multi);
         var analyst = Context(Principal("tenant-a", "Analyst"), Manifest);
 
         (await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(analyst, host.Ingestion, host.Tenancy), analyst)).Status.ShouldBe(403);
@@ -177,7 +178,7 @@ public sealed class DbtSemanticManifestEndpointTests
     [Fact]
     public async Task InvalidManifest_Is400_Partial_Is500_Forbidden_Is403()
     {
-        var host = NewHost(TenancyMode.Multi);
+        var host = NewHost(TenancyShape.Multi);
         var ingestion = Substitute.For<IDbtSemanticManifestIngestionService>();
 
         ingestion.ParseAndIngestAsync(Arg.Any<string>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
@@ -205,7 +206,7 @@ public sealed class DbtSemanticManifestEndpointTests
     [Trait("Category", "Security")]
     public async Task RestMetricsList_NonAdmin_HasNoFilterTemplate_AdminKeepsIt()
     {
-        var host = NewHost(TenancyMode.Multi);
+        var host = NewHost(TenancyShape.Multi);
         var import = Context(Principal("tenant-a", "GovernanceAdmin"), Manifest);
         await RunAsync(await DbtEndpoints.HandleImportSemanticManifestAsync(import, host.Ingestion, host.Tenancy), import);
 
@@ -224,7 +225,7 @@ public sealed class DbtSemanticManifestEndpointTests
     [Trait("Category", "Security")]
     public async Task RestMetricsQuery_Result_HasNoFilterTemplate()
     {
-        var host = NewHost(TenancyMode.Multi);
+        var host = NewHost(TenancyShape.Multi);
         var metric = new DbtMetric("revenue", "simple", "d", "Revenue", "status = 'secret_filter'", "{ \"measure\": \"x\" }", ["status"], ["order_total"],
             new Dictionary<string, string> { ["model"] = "internal_model" }, Unit: "EUR");
         var service = Substitute.For<Autheris.Application.Analytics.ISemanticMetricQueryService>();

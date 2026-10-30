@@ -223,7 +223,7 @@ public sealed class ConsentRowFilterAttributeValidatorTests
         var repo = new AttributeValidatingConsentRepository(inner, registry, tables,
             Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = Options(true) }));
         var seam = (IConsentDescriptionRepository)repo;
-        var updates = new List<ConsentDescriptionUpdate> { new(Guid.NewGuid(), TenantId.LegacySingleTenant, "text") };
+        var updates = new List<ConsentDescriptionUpdate> { new(Guid.NewGuid(), Autheris.Tests.Common.TestTenants.Default, "text") };
 
         await Should.ThrowAsync<InvalidOperationException>(() => seam.ReplaceConsentsAsync([], [ConsentOf(Attr(name: "unknown"))], new Sid("S-1"), "r", null, updates, default));
         await ((IConsentDescriptionRepository)inner).DidNotReceive().ReplaceConsentsAsync(default!, default!, default, default!, default, default, default);

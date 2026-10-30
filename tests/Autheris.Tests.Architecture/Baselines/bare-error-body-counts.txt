@@ -1,6 +1,6 @@
 # O-5b step 1 (NL-SC-05): bare { error = ... } response bodies per src file. Format: path|count. Counts may only fall; no wildcards.
 src/Autheris.Api/Endpoints/BackstageEndpoints.cs|1
-src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|23
+src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|22
 src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|4
 src/Autheris.Api/Endpoints/DataContractEndpoints.cs|2
 src/Autheris.Api/Endpoints/DbtEndpoints.cs|2

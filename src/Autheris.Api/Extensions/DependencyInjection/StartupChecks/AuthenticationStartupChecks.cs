@@ -56,14 +56,6 @@ internal static class AuthenticationStartupChecks
     {
         var options = context.Options;
 
-        // Review (Low): a malformed default tenant must abort startup instead of degrading to the legacy tenant.
-        if (options.Authentication.ForwardAuth.Enabled &&
-            !string.IsNullOrWhiteSpace(options.Authentication.ForwardAuth.DefaultTenantId) &&
-            !TenantId.TryParse(options.Authentication.ForwardAuth.DefaultTenantId, out _))
-        {
-            throw new ValidationException("ForwardAuth.DefaultTenantId has an invalid tenant format.");
-        }
-
         if (options.Authentication.RequireKerberosOnly && options.Authentication.BasicAuth.Enabled)
         {
             throw new ValidationException("Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.");

@@ -31,7 +31,7 @@ public sealed class Round4OpenMetadataCoreTests : IDisposable
         meta.ShouldNotBeNull();
         return await _repository.CreateConsentAsync(new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableId = meta.Table.Id,
             TableIdentifier = SeededTable,
             ConsentRequestId = consentRequestId,

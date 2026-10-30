@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.TestSupport;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -36,7 +37,7 @@ internal static class CatalogVisibilityTestFactory
         => new(
             tables,
             consents,
-            Options.Create(options ?? new GatewayOptions { Tenancy = new TenancyOptions { Mode = nameof(TenancyMode.Multi) }, Rebac = new RebacOptions { Enabled = false } }),
+            Options.Create(options ?? new GatewayOptions { Tenancy = TenancyShape.Multi.Options(), Rebac = new RebacOptions { Enabled = false } }),
             rebac ?? (omitEvaluator ? null : DisabledRebac()),
             logger ?? NullLogger<CatalogVisibilityService>.Instance)
         {
@@ -84,5 +85,5 @@ internal static class CatalogVisibilityTestFactory
     }
 
     public static CatalogCaller Caller(ClaimsPrincipal? principal, CatalogChannel channel = CatalogChannel.Rest) =>
-        new(principal, principal?.FindFirst("tenant_id") is { } c ? new TenantId(c.Value) : TenantId.LegacySingleTenant, channel);
+        new(principal, principal?.FindFirst("tenant_id") is { } c ? new TenantId(c.Value) : Autheris.Tests.Common.TestTenants.Default, channel);
 }

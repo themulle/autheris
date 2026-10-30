@@ -39,7 +39,7 @@ public sealed class CallerAttributeDisclosureTests
         var ownership = Substitute.For<IDataOwnershipRepository>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(owner);
         return new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership,
-            Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } }));
+            Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } }));
     }
 
     private static TableAccessDecision WithAttribute(string text = "1 = 0") =>

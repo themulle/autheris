@@ -106,15 +106,15 @@ public sealed class DbtDatasetTagTests
             .Returns(ci => Task.FromResult(ci.Arg<TableMetadata>()));
         var service = new DbtSemanticManifestIngestionService(
             Substitute.For<ISemanticCatalogService>(), NullLogger<DbtSemanticManifestIngestionService>.Instance, tableRepo, _tags,
-            gatewayOptions: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { Mode = "Single" } }));
+            gatewayOptions: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } }));
 
         await service.ParseAndIngestAsync("""
         { "semantic_models": [ { "name": "orders", "description": "d", "node_relation": { "relation_name": "a.b.orders" },
             "entities": [ { "name": "order_id", "type": "primary" } ], "dimensions": [], "measures": [] } ], "metrics": [] }
-        """, TenantId.LegacySingleTenant);
+        """, Autheris.Tests.Common.TestTenants.Default);
 
         captured!.Table.Tags.ShouldBeEmpty();
-        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(TenantId.LegacySingleTenant), "orders"),
+        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"),
             Arg.Is<IEnumerable<string?>>(t => t.SequenceEqual(new string?[] { "dbt", "semantic-model" })), Arg.Any<CancellationToken>());
     }
 }

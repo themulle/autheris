@@ -90,6 +90,6 @@ public sealed class DefaultTenantOwnerChannelsTests
         (await ResolveCountAsync(D.Value, "tenant-a")).ShouldBe(1);
         (await ResolveCountAsync(D.Value, "tenant-b")).ShouldBe(0);
         (await ResolveCountAsync(null, D.Value)).ShouldBe(0);
-        (await ResolveCountAsync(null, TenantId.LegacySingleTenant.Value)).ShouldBe(0);
+        (await ResolveCountAsync(null, Autheris.Tests.Common.TestTenants.Default.Value)).ShouldBe(0);
     }
 }

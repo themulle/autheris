@@ -73,7 +73,7 @@ public sealed class DatasetCatalogAdminServiceTests
         => new(_tables, owners ?? _owners, _audit,
             new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
             {
-                Tenancy = new TenancyOptions { Mode = mode },
+                Tenancy = new TenancyOptions { DefaultTenantId = string.Equals(mode, "Single", StringComparison.Ordinal) ? "default-tenant" : null },
                 Catalog = new DataCatalogOptions { MaxTagsPerDataset = maxTags, SharedTables = shared ?? [] }
             }),
             _time);

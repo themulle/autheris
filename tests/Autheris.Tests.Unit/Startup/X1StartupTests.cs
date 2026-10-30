@@ -151,7 +151,7 @@ public sealed class X1StartupTests
 
     private static AccessProfile Profile(string id, string predicate) => new()
     {
-        ProfileId = id, Name = id, TenantId = TenantId.LegacySingleTenant, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate
+        ProfileId = id, Name = id, TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate
     };
 
     [Fact]

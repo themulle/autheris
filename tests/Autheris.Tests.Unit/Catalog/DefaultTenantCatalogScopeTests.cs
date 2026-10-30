@@ -158,10 +158,10 @@ public sealed class DefaultTenantCatalogScopeTests
     [Fact]
     public async Task Claimless_Without_Default_Sees_Nothing_Whatever_The_Role()
     {
-        var consents = new[] { Wp0.Allow(Orders.Identifier, "S-X", TenantId.LegacySingleTenant) };
+        var consents = new[] { Wp0.Allow(Orders.Identifier, "S-X", Autheris.Tests.Common.TestTenants.Default) };
 
-        (await StaticVisibleAsync(Wp0.User("S-X", null, ["GovernanceAdmin"]), TenantId.LegacySingleTenant, null, [Orders], consents)).ShouldBeEmpty();
-        (await StaticVisibleAsync(Wp0.User("S-X", null), TenantId.LegacySingleTenant, null, [Orders], consents)).ShouldBeEmpty();
+        (await StaticVisibleAsync(Wp0.User("S-X", null, ["GovernanceAdmin"]), Autheris.Tests.Common.TestTenants.Default, null, [Orders], consents)).ShouldBeEmpty();
+        (await StaticVisibleAsync(Wp0.User("S-X", null), Autheris.Tests.Common.TestTenants.Default, null, [Orders], consents)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -259,9 +259,9 @@ public sealed class DefaultTenantCatalogScopeTests
     [Fact]
     public async Task Claimless_Admin_Without_Default_Gets_The_Empty_Set_From_The_Service()
     {
-        var service = CatalogVisibilityTestFactory.Create(Wp0.Tables(Orders), Wp0.Consents(Wp0.Allow(Orders.Identifier, "ga", TenantId.LegacySingleTenant)), OptionsWithDefault(null));
+        var service = CatalogVisibilityTestFactory.Create(Wp0.Tables(Orders), Wp0.Consents(Wp0.Allow(Orders.Identifier, "ga", Autheris.Tests.Common.TestTenants.Default)), OptionsWithDefault(null));
 
-        var visible = await service.GetVisibleAsync(new CatalogCaller(Wp0.User("ga", null, ["GovernanceAdmin"]), TenantId.LegacySingleTenant, CatalogChannel.Rest));
+        var visible = await service.GetVisibleAsync(new CatalogCaller(Wp0.User("ga", null, ["GovernanceAdmin"]), Autheris.Tests.Common.TestTenants.Default, CatalogChannel.Rest));
 
         visible.Tables.ShouldBeEmpty();
     }

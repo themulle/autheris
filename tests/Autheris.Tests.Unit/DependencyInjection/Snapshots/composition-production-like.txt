@@ -350,7 +350,7 @@
 0349 Microsoft.Extensions.Hosting.IHostedService Singleton key=- type:Autheris.Application.Tenancy.TenancyDefaultTenantStartupAuditor
 0350 Autheris.Application.Governance.Interfaces.IDataContractEngine Singleton key=- type:Autheris.Application.Governance.Services.InMemoryDataContractEngine
 0351 Autheris.Application.Governance.Interfaces.IDataHubCatalogClient Scoped key=- type:Autheris.Application.Governance.Services.DataHubCatalogClient
-0352 Autheris.Application.Identity.IIdentityRealmRegistry Singleton key=- type:Autheris.Application.Identity.IdentityRealmRegistry
+0352 Autheris.Application.Identity.IIdentityRealmRegistry Singleton key=- factory:Autheris.Application.Identity.IIdentityRealmRegistry
 0353 Autheris.Application.Identity.Caching.IRoleResolverCache Singleton key=- type:Autheris.Application.Identity.Caching.RoleResolverCache
 0354 Autheris.Application.Identity.IRoleResolver Singleton key=- type:Autheris.Application.Identity.RoleResolver
 0355 Autheris.Application.Identity.Services.IRedisLockPubSubChannel Singleton key=- type:Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel

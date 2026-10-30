@@ -63,7 +63,7 @@ public class ConsentAccessLevelFailClosedTests
     {
         var consent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,
@@ -115,7 +115,7 @@ public class ConsentAccessLevelFailClosedTests
     {
         var consent = new Consent
         {
-            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             TableIdentifier = _testTable,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.User,

@@ -361,7 +361,7 @@ public static partial class GovernanceEndpoints
             if (!isCanonicalClusterAdmin || string.IsNullOrWhiteSpace(tenantId))
             {
                 var reqTenant = EndpointSecurity.GetRequestTenant(context);
-                tenantId = !string.IsNullOrWhiteSpace(reqTenant.Value) ? reqTenant.Value : "default";
+                tenantId = !string.IsNullOrWhiteSpace(reqTenant.Value) ? reqTenant.Value : throw new Autheris.Domain.Exceptions.TenantUnresolvedException();
             }
 
             var cert = await exporter.GenerateCertificateAsync(tenantId, context.RequestAborted);

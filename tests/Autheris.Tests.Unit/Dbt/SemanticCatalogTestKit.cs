@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Dbt;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -14,10 +15,10 @@ using Microsoft.Extensions.Options;
 /// <summary>Shared builders of the #112 semantic catalog tests.</summary>
 internal static class SemanticCatalogTestKit
 {
-    internal static IOptions<GatewayOptions> Mode(TenancyMode? mode) =>
+    internal static IOptions<GatewayOptions> Mode(TenancyShape? mode) =>
         Options.Create(new GatewayOptions
         {
-            Tenancy = new TenancyOptions { Mode = mode?.ToString() }
+            Tenancy = (mode ?? TenancyShape.Multi).Options()
         });
 
     internal static DbtSemanticManifest Manifest(string version, params string[] metricNames)

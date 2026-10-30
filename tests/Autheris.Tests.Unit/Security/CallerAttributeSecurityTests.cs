@@ -172,7 +172,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
         CorrelatedFilterSiteRegistry.TryGet((ExistsExpression)bound.Expression, out _).ShouldBeFalse();
 
         var consent = new TypedRowFilterBuilder().BuildCombined(
-            [new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { ColumnName = "c", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "dept" }] }], [],
+            [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { ColumnName = "c", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "dept" }] }], [],
             new TableIdentity("main", "orders"), null, new CallerAttributeSet(new Dictionary<string, CallerAttributeResult> { ["dept"] = Raw("D1") }));
         consent!.Expression.ShouldNotBeOfType<ExistsExpression>();
     }
@@ -221,7 +221,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
         var set = new CallerAttributeSet(new Dictionary<string, CallerAttributeResult> { ["cost_center"] = CallerAttributeResult.Resolved(value) });
 
         var predicate = new TypedRowFilterBuilder().BuildCombined(
-            [new Consent { TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { ColumnName = "c", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "cost_center" }] }], [],
+            [new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [new ConsentRowFilter { ColumnName = "c", Operator = "IN", ValueSource = "USER_ATTRIBUTE", UserAttribute = "cost_center" }] }], [],
             new TableIdentity("main", "orders"), null, set)!;
         var rendered = new PolicyPredicateRenderer().Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
 

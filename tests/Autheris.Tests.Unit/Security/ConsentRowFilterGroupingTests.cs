@@ -39,7 +39,7 @@ public sealed class ConsentRowFilterGroupingTests
 
     private static Consent Allow(ConsentRowFilter filter, params ConsentColumnRule[] rules) => new()
     {
-        TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+        TenantId = Autheris.Tests.Common.TestTenants.Default,
         TableIdentifier = HrTable,
         Effect = ConsentEffect.Allow,
         GranteeType = GranteeType.User,

@@ -188,14 +188,14 @@ public class MemoryPackAndGarnetTests
             var decision = TableAccessDecision.Allowed(table, colMap);
 
             // 1. Cache Miss initially
-            var cached = await consentCache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
+            var cached = await consentCache.GetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, userSid, table);
             cached.ShouldBeNull();
 
             // 2. Set Decision (stores in L1 MemoryCache + L2 Garnet via MemoryPack)
-            await consentCache.SetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table, decision, TimeSpan.FromMinutes(10));
+            await consentCache.SetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, userSid, table, decision, TimeSpan.FromMinutes(10));
 
             // 3. Cache Hit in L1
-            var hit1 = await consentCache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
+            var hit1 = await consentCache.GetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, userSid, table);
             hit1.ShouldNotBeNull();
             hit1.GetColumnAccess("salary").ShouldBe(ColumnAccessLevel.Mask);
 
@@ -203,7 +203,7 @@ public class MemoryPackAndGarnetTests
             await consentCache.ClearL1CacheAsync();
 
             // 5. Cache Hit via L2 (Garnet) with MemoryPack binary deserialization and repopulation into L1
-            var hitL2 = await consentCache.GetCachedDecisionAsync(Autheris.Domain.Common.TenantId.LegacySingleTenant, userSid, table);
+            var hitL2 = await consentCache.GetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, userSid, table);
             hitL2.ShouldNotBeNull();
             hitL2.Table.Schema.ShouldBe("hr");
             hitL2.Table.TableName.ShouldBe("employees");

@@ -25,7 +25,7 @@ public sealed class TenantIdReservedPrefixTests
     [Theory]
     [InlineData("acme")]
     [InlineData("a_b")]
-    [InlineData("legacy-single-tenant")]
+    [InlineData("default-tenant")]
     [InlineData("x_")]
     public void Ordinary_Ids_Are_Not_Reserved(string value)
     {

@@ -52,10 +52,10 @@ public sealed class PagingTests
     [Fact]
     public void SEC_SC_16_PageSize_IsClamped()
     {
-        new AuditLogPageQuery(TenantId.LegacySingleTenant, PageSize: 0).EffectivePageSize.ShouldBe(1);
-        new AuditLogPageQuery(TenantId.LegacySingleTenant, PageSize: 100000).EffectivePageSize.ShouldBe(AuditLogPageQuery.MaxPageSize);
-        new ConsentPageQuery(TenantId.LegacySingleTenant, PageSize: -3).EffectivePageSize.ShouldBe(1);
-        new ConsentPageQuery(TenantId.LegacySingleTenant, PageSize: 100000).EffectivePageSize.ShouldBe(ConsentPageQuery.MaxPageSize);
+        new AuditLogPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: 0).EffectivePageSize.ShouldBe(1);
+        new AuditLogPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: 100000).EffectivePageSize.ShouldBe(AuditLogPageQuery.MaxPageSize);
+        new ConsentPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: -3).EffectivePageSize.ShouldBe(1);
+        new ConsentPageQuery(Autheris.Tests.Common.TestTenants.Default, PageSize: 100000).EffectivePageSize.ShouldBe(ConsentPageQuery.MaxPageSize);
     }
 
     // ---- consent reader --------------------------------------------------------------------------------------------------------

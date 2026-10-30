@@ -125,7 +125,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
-                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = ordersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("user-1"),
@@ -239,7 +239,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
-                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = customersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("analyst-1"),
@@ -324,7 +324,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             {
                 new Consent
                 {
-                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = usersTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("dev-1"),
@@ -333,7 +333,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 },
                 new Consent
                 {
-                    TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                    TenantId = Autheris.Tests.Common.TestTenants.Default,
                     TableIdentifier = auditTable.Identifier,
                     Effect = ConsentEffect.Allow,
                     GranteeSid = new Sid("dev-1"),
@@ -497,7 +497,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                     {
                         new Consent
                         {
-                            TenantId = Autheris.Domain.Common.TenantId.LegacySingleTenant,
+                            TenantId = Autheris.Tests.Common.TestTenants.Default,
                             TableIdentifier = ordersTable.Identifier,
                             Effect = ConsentEffect.Allow,
                             GranteeSid = new Sid("member-granted"),
@@ -808,12 +808,12 @@ public sealed class QueryAnalysisAndValueProfilingTests
             metadataRepo,
             consentRepo,
             executionService,
-            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }),
+            options: Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
             profileService: profileService,
             syntheticRowGenerator: syntheticGenerator,
             auditLogRepository: auditRepo,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
-                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { Mode = "Single" } }));
+                Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeSingleReadsFromCatalog(metadataRepo), consentRepo, new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }));
 
         var viewer = CreatePrincipal("catalog-viewer-1");
 

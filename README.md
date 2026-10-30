@@ -185,7 +185,7 @@ Autheris encompasses **57+ production-ready enterprise features**, documented in
   - Streamable HTTP endpoint `/mcp` on the official MCP C# SDK (current protocol revisions, stateless, OAuth protected resource metadata for Entra ID / AD FS) and a standard I/O runner (`McpStdioRunner`) for AI agents (Claude, Cursor, LangChain).
 - **Official Hybrid MCP Gateway ([`F-AI-12`](docs/features/f-ai-12-hybrid-mcp-gateway.md), `P14`)**:
   - Full suite of hybrid query tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`, `describe_api`, `invoke_api`).
-  - Catalog discovery (REST, MCP tools and resources, `invoke_api`) shows each caller only the datasets and columns its consents allow; `list_datasources` / `GET /api/v1/catalog/datasources` are administrator-only. Single-tenant deployments set `Gateway:Tenancy:Mode=Single` (default `Multi`, see the [configuration guide](docs/configuration-guide.md)).
+  - Catalog discovery (REST, MCP tools and resources, `invoke_api`) shows each caller only the datasets and columns its consents allow; `list_datasources` / `GET /api/v1/catalog/datasources` are administrator-only. Single-tenant deployments set `Gateway:Tenancy:DefaultTenantId` (unset means no default tenant, see the [configuration guide](docs/configuration-guide.md)).
   - Native MCP Resources (`autheris://catalog/tables`, `autheris://catalog/schema/{domain}/{table}`, `autheris://governance/effective-permissions`).
   - Standardized agent prompts (`explore_dataset`, `audit_access_compliance`).
 - **Admin MCP Tools & Two-Phase Access Planning (HitL) ([`F-AI-13`](docs/features/f-ai-13-admin-mcp-tools-two-phase-hitl.md), `P15`)**:

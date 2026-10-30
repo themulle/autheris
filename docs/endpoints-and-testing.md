@@ -95,4 +95,4 @@ dotnet test tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj
 
 ### OpenLineage tenant scoping
 
-`PushLineageGraphAsync(tenant)` only pushes lineage nodes whose `TenantId` equals the pushed tenant. Nodes without a tenant (legacy data) are pushed only for `legacy-single-tenant`. dbt manifest ingestion tags nodes with the request tenant, and the in-memory lineage store replaces only the nodes of the ingesting tenant, keeping other tenants' graphs.
+`PushLineageGraphAsync(tenant)` only pushes lineage nodes whose `TenantId` equals the pushed tenant. Nodes without a tenant (legacy data) are pushed only for the configured default tenant (`Gateway:Tenancy:DefaultTenantId`). dbt manifest ingestion tags nodes with the request tenant, and the in-memory lineage store replaces only the nodes of the ingesting tenant, keeping other tenants' graphs.

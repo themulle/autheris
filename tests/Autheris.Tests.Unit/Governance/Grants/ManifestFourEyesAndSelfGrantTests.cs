@@ -240,7 +240,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         var context = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-ADMIN"),
-            TenantId = TenantId.LegacySingleTenant,
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
             GroupSids = new HashSet<Sid> { new("S-1-5-21-GRP-ENRICHED") },
             TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "EnrichedRole" },
             ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
