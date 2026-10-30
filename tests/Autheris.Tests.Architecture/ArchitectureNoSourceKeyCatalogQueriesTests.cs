@@ -43,7 +43,11 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
     private static readonly Dictionary<string, string> Allowlist = new(StringComparer.Ordinal)
     {
         ["Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"] =
-            "Proves PHYSICAL uniqueness for row-scope authorization (fails closed); a declared, unverified index must not replace it (SEC-94-10)."
+            "Proves PHYSICAL uniqueness for row-scope authorization (fails closed); a declared, unverified index must not replace it (SEC-94-10).",
+        ["Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs"] =
+            "Issue #403: reads only the column DIRECTION of the declared keys, never a key source; the declared definition stays the only key (I403-SC-04, SC-06).",
+        ["Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"] =
+            "Issue #403: reads only the column DIRECTION of the declared keys, never a key source; the declared definition stays the only key (I403-SC-04, SC-06)."
     };
 
     private const string MigrationsDirectory = "Autheris.Infrastructure/Persistence/Migrations/";
@@ -94,7 +98,9 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
     {
         Allowlist.Keys.Order(StringComparer.Ordinal).ShouldBe(
         [
-            "Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"
+            "Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs",
+            "Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs",
+            "Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"
         ]);
         foreach (var (path, reason) in Allowlist)
         {

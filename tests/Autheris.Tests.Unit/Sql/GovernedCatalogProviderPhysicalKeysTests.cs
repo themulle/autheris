@@ -34,7 +34,7 @@ public sealed class GovernedCatalogProviderPhysicalKeysTests
         {
             Calls++;
             if (Failure is not null) throw Failure;
-            if (Hang) await Task.Delay(Timeout.Infinite, ct);
+            if (Hang) await new TaskCompletionSource().Task.WaitAsync(ct);
             if (RowsToStream >= 0)
             {
                 for (var i = 0; i < RowsToStream; i++) yield return new DbKeyIndexColumn("ix", false, false, 1, "c" + i, false);

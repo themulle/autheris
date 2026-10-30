@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.DataCatalog;
 
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Audit;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -65,7 +67,7 @@ public sealed class DataCatalogSyncTenantScopeTests
             metadataRepo,
             epochService,
             options,
-            NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync(dryRun: false, restrictToTenant: new TenantId("tenant-a"));
 
