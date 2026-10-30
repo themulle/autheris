@@ -59,7 +59,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         _maxAggregates = maxAggregates > 0 ? maxAggregates : AggregationOptions.DefaultMaxAggregates;
         _maxAggregateFieldsPerOperation = maxAggregateFieldsPerOperation > 0 ? maxAggregateFieldsPerOperation : GraphQLAggregationOptions.DefaultMaxFieldsPerOperation;
         _maxAllowedCost = maxAllowedCost;
-        _defaultListMultiplier = costOptions?.DefaultListMultiplier > 0 ? costOptions.DefaultListMultiplier : defaultListMultiplier;
+        _defaultListMultiplier = QueryCostOptions.RequireValidListMultiplier(costOptions?.DefaultListMultiplier ?? defaultListMultiplier); // I417-SC-A02: never a silent fallback
         _maxResponseRows = maxResponseRows;
         _onQueryTooComplex = onQueryTooComplex;
         _maxRootFields = maxRootFields > 0 ? maxRootFields : int.MaxValue;

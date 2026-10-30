@@ -85,6 +85,31 @@ namespace Autheris.Api.Extensions;
 
 public static partial class GatewayServiceCollectionExtensions
 {
+    /// <summary>
+    /// I417-SC-A03: builds the admission rule from the same <c>GatewayOptions.QueryCost</c> instance that
+    /// <c>CostAndQuotaMiddleware</c> reads, so both price a list identically.
+    /// </summary>
+    internal static Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule CreateQueryCostRule(
+        GatewayOptions gatewayOptions,
+        int maxCost,
+        Autheris.Domain.Options.AnalyticsOptions? analytics) =>
+        new(
+            maxAllowedCost: maxCost,
+            maxResponseRows: gatewayOptions.GraphQL.MaxResponseRows,
+            onQueryTooComplex: () => GatewayDiagnostics.QueryTooComplexCounter.Add(1),
+            maxRootFields: gatewayOptions.AreQueryLimitsRelaxed
+                ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 200 : 25)
+                : gatewayOptions.GraphQL.MaxRootFieldsPerOperation,
+            maxExecutionDepth: Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL),
+            costOptions: gatewayOptions.QueryCost ?? throw new InvalidOperationException("Gateway:QueryCost must not be null."),
+            aggregateFieldCostWeight: analytics?.Aggregation.AggregateFieldCostWeight
+                ?? Autheris.Domain.Options.AggregationOptions.DefaultAggregateFieldCostWeight,
+            maxGroupByColumns: analytics?.Aggregation.MaxGroupByColumns
+                ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxGroupByColumns,
+            maxAggregates: analytics?.Aggregation.MaxAggregates
+                ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxAggregates,
+            maxAggregateFieldsPerOperation: gatewayOptions.GraphQL.Aggregation.MaxFieldsPerOperation);
+
     public static IServiceCollection AddGatewayGraphQL(
         this IServiceCollection services,
         GatewayOptions gatewayOptions)
@@ -190,21 +215,10 @@ public static partial class GatewayServiceCollectionExtensions
             .AddDirectiveType<Autheris.GraphQL.Directives.RebacDirectiveType>()
             .AddMaxExecutionDepthRule(maxDepth)
             .AddValidationRule<Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule>((sp, _) =>
-                new Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule(
-                    maxAllowedCost: maxCost,
-                    maxResponseRows: gatewayOptions.GraphQL.MaxResponseRows,
-                    onQueryTooComplex: () => GatewayDiagnostics.QueryTooComplexCounter.Add(1),
-                    maxRootFields: gatewayOptions.AreQueryLimitsRelaxed
-                        ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 200 : 25)
-                        : gatewayOptions.GraphQL.MaxRootFieldsPerOperation,
-                    maxExecutionDepth: Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL),
-                    aggregateFieldCostWeight: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.AggregateFieldCostWeight
-                        ?? Autheris.Domain.Options.AggregationOptions.DefaultAggregateFieldCostWeight,
-                    maxGroupByColumns: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.MaxGroupByColumns
-                        ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxGroupByColumns,
-                    maxAggregates: sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation.MaxAggregates
-                        ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxAggregates,
-                    maxAggregateFieldsPerOperation: gatewayOptions.GraphQL.Aggregation.MaxFieldsPerOperation))
+                CreateQueryCostRule(
+                    gatewayOptions,
+                    maxCost,
+                    sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value))
             // HotChocolate 16 adds the types __SchemaDefinition/__SearchResult (semantic introspection) to the schema.
             // Their names start with "__", which GraphQL reserves for introspection; graphql-js based clients (GraphiQL,
             // Apollo, codegen) reject the whole schema because of them. Autheris does not use the semantic search.

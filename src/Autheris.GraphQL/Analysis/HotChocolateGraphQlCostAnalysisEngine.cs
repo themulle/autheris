@@ -57,9 +57,8 @@ public sealed class HotChocolateGraphQlCostAnalysisEngine : IGraphQlCostAnalysis
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: ct).ConfigureAwait(false);
         var schema = executor.Schema;
 
-        var defaultListMultiplier = _options.QueryCost?.DefaultListMultiplier > 0
-            ? _options.QueryCost.DefaultListMultiplier
-            : 10;
+        // I417-SC-A02: no silent fallback; the rule reads the validated configured multiplier from costOptions.
+        var defaultListMultiplier = _options.QueryCost.DefaultListMultiplier;
 
         var rule = new QueryCostAnalyzerRule(
             maxAllowedCost: _options.GraphQL.MaxAllowedComplexity > 0 ? _options.GraphQL.MaxAllowedComplexity : 500,
