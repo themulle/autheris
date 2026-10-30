@@ -225,11 +225,68 @@ public static class TableStreamEndpoints
             }
         }
 
+        // 5b. Resolve the caller policy and the admissible slice before planning (I418-SC-01..05)
+        var rateLimiter = httpContext.RequestServices!.GetService<IRateLimiterService>();
+        var tierResolver = httpContext.RequestServices!.GetService<IClientTierResolver>();
+        const int baseCost = 10;
+        const int costPerRow = 1;
+        const int maxSliceLimit = GovernedTableReadPlanner.MaxStreamSliceLimit;
+        const int defaultSliceLimit = GovernedTableReadPlanner.DefaultStreamSliceLimit;
+
+        ClientQuotaPolicy policy;
+        ClientQuotaContext? clientContext = null;
+        string subjectId = EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous";
+        if (tierResolver != null)
+        {
+            string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
+            clientContext = await tierResolver.ResolveAsync(httpContext.User, apiKey, clientIp, ct).ConfigureAwait(false);
+            policy = clientContext.Policy;
+            subjectId = clientContext.SubjectId;
+        }
+        else
+        {
+            policy = ClientQuotaPolicy.ForTier(ClientTier.Internal);
+        }
+
+        // I418-SC-02/03: the slice must fit the caller's bucket (capacity - base cost). Long arithmetic avoids overflow;
+        // a capacity at or below the base cost can never admit a slice and fails closed.
+        long maxAdmissibleLimit = Math.Min((long)policy.MaxTokensCapacity - baseCost, maxSliceLimit);
+        if (maxAdmissibleLimit < 1)
+        {
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming request cannot be admitted for this caller.", ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (request.Limit is <= 0)
+        {
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming arguments are invalid.", ct).ConfigureAwait(false);
+            return;
+        }
+
+        int sliceLimit;
+        if (request.Limit is > 0)
+        {
+            int requested = Math.Min(request.Limit.Value, maxSliceLimit);
+            if (requested > maxAdmissibleLimit)
+            {
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, $"The limit must not exceed {maxAdmissibleLimit.ToString(CultureInfo.InvariantCulture)} for this caller.", ct).ConfigureAwait(false);
+                return;
+            }
+
+            sliceLimit = requested;
+        }
+        else
+        {
+            sliceLimit = (int)Math.Min(defaultSliceLimit, maxAdmissibleLimit);
+        }
+
+        int reservedCost = baseCost + (sliceLimit * costPerRow);
+
         // 6. Plan the Keyset Stream Query
         PlannedTableRead planned;
         try
         {
-            planned = planner.PlanKeysetStream(request, metadata, decision, tenant.Value, callerSid);
+            planned = planner.PlanKeysetStream(request with { Limit = sliceLimit }, metadata, decision, tenant.Value, callerSid);
         }
         catch (InvalidCursorException ex)
         {
@@ -256,57 +313,7 @@ public static class TableStreamEndpoints
             return;
         }
 
-        // 7. Token Bucket Admission (Phase 1: Upfront Reservation)
-        var rateLimiter = httpContext.RequestServices!.GetService<IRateLimiterService>();
-        var tierResolver = httpContext.RequestServices!.GetService<IClientTierResolver>();
-        const int baseCost = 10;
-        const int costPerRow = 1;
-        const int maxSliceLimit = 10000;
-        const int defaultSliceLimit = 5000;
-
-        ClientQuotaPolicy policy;
-        ClientQuotaContext? clientContext = null;
-        string subjectId = EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous";
-        if (tierResolver != null)
-        {
-            string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
-            clientContext = await tierResolver.ResolveAsync(httpContext.User, apiKey, clientIp, ct).ConfigureAwait(false);
-            policy = clientContext.Policy;
-            subjectId = clientContext.SubjectId;
-        }
-        else
-        {
-            policy = ClientQuotaPolicy.ForTier(ClientTier.Internal);
-        }
-
-        // I418-SC-02/03: the slice must fit the caller's bucket (capacity - base cost). Long arithmetic avoids overflow;
-        // a capacity at or below the base cost can never admit a slice and fails closed.
-        long maxAdmissibleLimit = Math.Min((long)policy.MaxTokensCapacity - baseCost, maxSliceLimit);
-        if (maxAdmissibleLimit < 1)
-        {
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming request cannot be admitted for this caller.", ct).ConfigureAwait(false);
-            return;
-        }
-
-        int sliceLimit;
-        if (request.Limit is > 0)
-        {
-            int requested = Math.Min(request.Limit.Value, maxSliceLimit);
-            if (requested > maxAdmissibleLimit)
-            {
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, $"The limit must not exceed {maxAdmissibleLimit.ToString(CultureInfo.InvariantCulture)} for this caller.", ct).ConfigureAwait(false);
-                return;
-            }
-
-            sliceLimit = requested;
-        }
-        else
-        {
-            sliceLimit = (int)Math.Min(defaultSliceLimit, maxAdmissibleLimit);
-        }
-
-        int reservedCost = baseCost + (sliceLimit * costPerRow);
-
+        // 7. Token Bucket Admission (Phase 1: Upfront Reservation); policy and slice were resolved before planning.
         if (rateLimiter != null)
         {
             var reservation = await rateLimiter.ReserveCostQuotaAsync(subjectId, reservedCost, policy, ct).ConfigureAwait(false);

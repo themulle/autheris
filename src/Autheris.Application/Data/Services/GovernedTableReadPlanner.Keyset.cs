@@ -13,6 +13,12 @@ using Autheris.Domain.Model;
 
 public sealed partial class GovernedTableReadPlanner
 {
+    /// <summary>Hard cap of a bulk stream slice.</summary>
+    public const int MaxStreamSliceLimit = 10000;
+
+    /// <summary>Slice used when the request carries no limit (further bounded by the caller bucket at the endpoint).</summary>
+    public const int DefaultStreamSliceLimit = 5000;
+
     private static readonly HashSet<string> DisallowedSqlKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "join", "inner", "outer", "cross", "left", "right", "full", "select", "insert", "update", "delete", "drop",
@@ -42,6 +48,7 @@ public sealed partial class GovernedTableReadPlanner
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(decision);
 
+        // A null limit means "default slice"; an explicit non-positive limit is invalid. The endpoint passes the effective limit.
         if (request.Limit <= 0)
         {
             throw new ArgumentException("The stream slice limit must be positive.", nameof(request));
@@ -231,7 +238,7 @@ public sealed partial class GovernedTableReadPlanner
         sb.Append(" ORDER BY ")
           .Append(string.Join(", ", pkCols.Select((c, i) => DataApiFilterTranslator.QuoteIdentifier(metadata.GetColumn(c)!.ColumnName) + (streamKey.IsDescending(i) ? " DESC" : " ASC"))));
 
-        int sliceLimit = request.Limit is > 0 ? Math.Min(request.Limit.Value, 10000) : 5000;
+        int sliceLimit = request.Limit is > 0 ? Math.Min(request.Limit.Value, MaxStreamSliceLimit) : DefaultStreamSliceLimit;
         sb.Append(" LIMIT ").Append((sliceLimit + 1).ToString(CultureInfo.InvariantCulture));
 
         return new PlannedTableRead(sb.ToString(), parameters, columnsToSelect, DefaultOrderingKind.Explicit);

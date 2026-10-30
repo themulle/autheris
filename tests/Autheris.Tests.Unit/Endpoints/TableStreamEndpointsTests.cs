@@ -421,7 +421,8 @@ public sealed class TableStreamEndpointsTests
         Action<DefaultHttpContext>? configure = null,
         CostQuotaResult? reserveResult = null,
         IRateLimiterService? limiter = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        List<GovernedSqlQueryRequest>? capturedQueries = null)
     {
         var context = CreateHttpContext();
         var table = CreateTableMetadata();
@@ -471,6 +472,7 @@ public sealed class TableStreamEndpointsTests
             Arg.Any<CancellationToken>())
             .Returns(async callInfo =>
             {
+                capturedQueries?.Add(callInfo.Arg<GovernedSqlQueryRequest>());
                 using var reader = CreateDataTableReader(3);
                 await callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>()(reader, CancellationToken.None);
             });
@@ -667,5 +669,32 @@ public sealed class TableStreamEndpointsTests
 
         run.Context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
         logs.Entries.Where(e => e.Level >= LogLevel.Information).ShouldAllBe(e => !e.Message.Contains("1000") && !e.Message.Contains("990"));
+    }
+
+    [Theory]
+    [InlineData(ClientTier.Free, null, 91)]
+    [InlineData(ClientTier.Standard, null, 991)]
+    [InlineData(ClientTier.Standard, 500, 501)]
+    [InlineData(ClientTier.Enterprise, null, 5001)]
+    public async Task Stream_PlannedSqlLimit_IsEffectiveSlicePlusOne(ClientTier tier, int? limit, int expectedSqlLimit)
+    {
+        var captured = new List<GovernedSqlQueryRequest>();
+        var body = limit is null ? null : $"{{\"limit\":{limit}}}";
+        var run = await RunSliceAsync(ClientQuotaPolicy.ForTier(tier), body, capturedQueries: captured);
+
+        run.Context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        captured.Single().Sql.ShouldEndWith($" LIMIT {expectedSqlLimit}");
+    }
+
+    [Fact]
+    public void KeysetCursorContext_IsIndependentOfThePlannedLimit()
+    {
+        var metadata = CreateTableMetadata();
+        var a = KeysetCursorContextFactory.ForBulkStream("t", metadata, metadata.PrimaryKeyColumns, "caller", new BulkTableStreamRequest { });
+        var b = KeysetCursorContextFactory.ForBulkStream("t", metadata, metadata.PrimaryKeyColumns, "caller", new BulkTableStreamRequest(Limit: 90));
+        var c = KeysetCursorContextFactory.ForBulkStream("t", metadata, metadata.PrimaryKeyColumns, "caller", new BulkTableStreamRequest(Limit: 9990));
+
+        b.ShouldBe(a);
+        c.ShouldBe(a);
     }
 }

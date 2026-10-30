@@ -80,3 +80,8 @@ Verdict: APPROVED WITH CONDITIONS. Code facts verified: `TableStreamEndpoints.cs
 - I418-T-S09 `Stream_OverflowCapacity_NoArithmeticOverflow` (int.MaxValue capacity, limit 10000 cap).
 
 Open questions 1-3 resolved as the PRD defaults (BAD_REQUEST, detail only, reject); question 4 stays out of scope.
+
+## Changelog
+
+- 2026-10-30: Redis parity is covered only by the policy-derived slice (stubbed limiters); no Redis-backed test runs.
+- 2026-10-30: Policy and slice are resolved before planning; the planner receives the effective limit (LIMIT = slice + 1).
