@@ -32,6 +32,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly IAuditWriter _auditWriter;
     private readonly IRebacStore? _rebacStore;
     private readonly ILogger<DataCatalogSyncService> _logger;
+    private readonly PhysicalIndexSync _physicalIndexSync;
 
     public DataCatalogSyncService(
         IDataCatalogClientFactory clientFactory,
@@ -41,7 +42,8 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IPhysicalKeyCatalog physicalKeys,
         IAuditWriter auditWriter,
         ILogger<DataCatalogSyncService> logger,
-        IRebacStore? rebacStore = null)
+        IRebacStore? rebacStore = null,
+        IPhysicalIndexRepository? physicalIndexes = null)
     {
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
@@ -51,6 +53,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _rebacStore = rebacStore;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _physicalIndexSync = new PhysicalIndexSync(physicalIndexes, _auditWriter, () => Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy), _logger);
     }
 
     public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
@@ -257,6 +260,8 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                 try
                 {
                     await _metadataRepo.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+                    // Issue #404: physical non-unique indexes, after the table exists and before its epoch invalidation (I404-SC-14).
+                    await _physicalIndexSync.ApplyAsync(tableAsset.Identifier, existing, metadata, physical, restrictToTenant, warnings, ct).ConfigureAwait(false);
                 }
                 finally
                 {
