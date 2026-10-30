@@ -66,12 +66,13 @@ public static class DevStartupBanner
                            user.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) ||
                            user.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase);
 
-            var password = isHashed
+            // A constant label only; named neutrally so no value of the credential flows into the log sink.
+            var pwLabel = isHashed
                 ? "<hashed>"
                 : (options.Dev.ShowPasswords ? "<see config>" : "<hidden>");
 
             var roles = user.Roles.Count == 0 ? "-" : string.Join(",", user.Roles);
-            sb.Append($"    {user.Username,-12} pw {password,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user) ?? "(default tenant)"}");
+            sb.Append($"    {user.Username,-12} pw {pwLabel,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user) ?? "(default tenant)"}");
             if (sessionActive)
             {
                 var redirectPath = options.GraphQL.EnableBananaCakePop
