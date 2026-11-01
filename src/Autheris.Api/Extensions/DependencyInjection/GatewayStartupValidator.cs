@@ -672,6 +672,11 @@ public static class GatewayStartupValidator
         {
             throw new ValidationException("Invalid QueryCost configuration: ScalarColumnWeight must be 0.01..1.0.");
         }
+
+        if (queryCost.UnindexedRootListSurchargeMultiplier is < 1.0 or > 50.0 || double.IsNaN(queryCost.UnindexedRootListSurchargeMultiplier))
+        {
+            throw new ValidationException("Invalid QueryCost configuration: UnindexedRootListSurchargeMultiplier must be 1.0..50.0.");
+        }
     }
 
     /// <summary>

@@ -53,5 +53,12 @@ public sealed class QueryCostOptions
     [Range(0.01, 1.0)]
     public double ScalarColumnWeight { get; set; } = 1.0;
 
+    /// <summary>
+    /// Issue #421: Multiplier applied to root list pricing when neither filter nor ordering can utilize a database index.
+    /// Default 2.0 (doubles the base list pricing for unindexed queries).
+    /// </summary>
+    [Range(1.0, 50.0)]
+    public double UnindexedRootListSurchargeMultiplier { get; set; } = 2.0;
+
     public bool EnablePostExecutionSettlement { get; set; } = true;
 }

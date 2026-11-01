@@ -27,6 +27,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
     private readonly int _maxExecutionDepth;
     private readonly QueryCostOptions? _costOptions;
     private readonly Func<string, string, RelationCardinality?>? _relationLookup;
+    private readonly Func<string, TableMetadata?>? _tableMetadataLookup;
     private readonly double _aggregateFieldCostWeight;
     private readonly int _maxGroupByColumns;
     private readonly int _maxAggregates;
@@ -48,10 +49,12 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         double aggregateFieldCostWeight = AggregationOptions.DefaultAggregateFieldCostWeight,
         int maxGroupByColumns = AggregationOptions.DefaultMaxGroupByColumns,
         int maxAggregates = AggregationOptions.DefaultMaxAggregates,
-        int maxAggregateFieldsPerOperation = GraphQLAggregationOptions.DefaultMaxFieldsPerOperation)
+        int maxAggregateFieldsPerOperation = GraphQLAggregationOptions.DefaultMaxFieldsPerOperation,
+        Func<string, TableMetadata?>? tableMetadataLookup = null)
     {
         _costOptions = costOptions;
         _relationLookup = relationLookup;
+        _tableMetadataLookup = tableMetadataLookup;
         _maxExecutionDepth = maxExecutionDepth > 0 ? maxExecutionDepth : 25;
         // #112 A-7: the three weights of the typed aggregate cost model (the same ones the engine's cost calculator uses).
         _aggregateFieldCostWeight = aggregateFieldCostWeight > 0 ? aggregateFieldCostWeight : AggregationOptions.DefaultAggregateFieldCostWeight;
@@ -86,7 +89,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         QueryCostOptions? costOptions = null,
         Func<string, string, RelationCardinality?>? relationLookup = null,
         AggregationOptions? aggregation = null,
-        int maxExecutionDepth = 25)
+        int maxExecutionDepth = 25,
+        Func<string, TableMetadata?>? tableMetadataLookup = null)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
@@ -97,7 +101,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
             relationLookup: relationLookup,
             aggregateFieldCostWeight: aggregation?.AggregateFieldCostWeight ?? AggregationOptions.DefaultAggregateFieldCostWeight,
             maxGroupByColumns: aggregation?.MaxGroupByColumns ?? AggregationOptions.DefaultMaxGroupByColumns,
-            maxAggregates: aggregation?.MaxAggregates ?? AggregationOptions.DefaultMaxAggregates);
+            maxAggregates: aggregation?.MaxAggregates ?? AggregationOptions.DefaultMaxAggregates,
+            tableMetadataLookup: tableMetadataLookup);
         return rule.ComputeCost(document, schema, variableValues);
     }
 
@@ -117,7 +122,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         IReadOnlyDictionary<string, object?>? variableValues = null,
         QueryCostOptions? costOptions = null,
         Func<string, string, RelationCardinality?>? relationLookup = null,
-        int maxExecutionDepth = 25)
+        int maxExecutionDepth = 25,
+        Func<string, TableMetadata?>? tableMetadataLookup = null)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
@@ -125,7 +131,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
             maxResponseRows,
             maxExecutionDepth: maxExecutionDepth,
             costOptions: costOptions,
-            relationLookup: relationLookup);
+            relationLookup: relationLookup,
+            tableMetadataLookup: tableMetadataLookup);
         return rule.ComputeCostDetails(document, schema, variableValues);
     }
 
@@ -576,6 +583,29 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     }
 
                     int multiplier = (isList && effectiveRows > 1) ? _defaultListMultiplier : _payloadRowMultiplier;
+
+                    bool isRootField = currentDepth <= 1 || (currentType != null && currentType == schema.QueryType);
+
+                    // Issue #421 (WP-D of #417): Apply surcharge multiplier if root list plan has no usable index
+                    if (isRootField && isList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
+                    {
+                        var tableMeta = _tableMetadataLookup?.Invoke(field.Name.Value)
+                            ?? (_tableMetadataLookup != null && field.Name.Value.EndsWith("Connection", StringComparison.Ordinal)
+                                ? _tableMetadataLookup.Invoke(field.Name.Value[..^10])
+                                : null)
+                            ?? CatalogGraphQlTypeModule.CurrentLookup?.Invoke(field.Name.Value);
+
+                        if (tableMeta != null)
+                        {
+                            var orderBy = IndexUsabilityEvaluator.ExtractOrderBy(field.Arguments.FirstOrDefault(a => a.Name.Value == "orderBy"), variableValues);
+                            var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(field.Arguments.FirstOrDefault(a => a.Name.Value == "where"), variableValues);
+                            if (!IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleColumns: null, orderBy, filterColumns))
+                            {
+                                multiplier = (int)Math.Min((long)int.MaxValue, (long)Math.Ceiling(multiplier * _costOptions.UnindexedRootListSurchargeMultiplier));
+                            }
+                        }
+                    }
+
                     cost = SafeAdd(cost, (int)Math.Min((long)int.MaxValue, (long)multiplier * effectiveRows));
 
                     if (field.SelectionSet != null)
