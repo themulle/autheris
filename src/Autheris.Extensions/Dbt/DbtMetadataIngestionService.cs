@@ -8,15 +8,20 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
+using Autheris.Application.Audit;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Tenancy;
 using Autheris.Application.VirtualFilters;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 
 public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionService
@@ -36,6 +41,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
+    private readonly IPhysicalKeyCatalog? _physicalKeys;
+    private readonly IAuditWriter? _auditWriter;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -180,6 +187,26 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, null, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        IRebacStore? rebacStore,
+        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
+        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        IDbtTestTargetMap? testTargetMap,
+        IPhysicalKeyCatalog? physicalKeys,
+        IAuditWriter? auditWriter,
+        ILogger<DbtMetadataIngestionService> logger)
     {
         _tagImport = tagImport;
         _syntheticRowGenerator = syntheticRowGenerator;
@@ -193,6 +220,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         _relationRepository = relationRepository;
         _virtualFilterAdmin = virtualFilterAdmin;
         _rebacStore = rebacStore;
+        _physicalKeys = physicalKeys;
+        _auditWriter = auditWriter;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -685,6 +714,29 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     if (model.DeclaredKeys is { } declared)
                     {
                         updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
+
+                        // Issue #427: Reconcile physical key directions for SQL tables
+                        if (_physicalKeys is not null && updatedMetadata.Table.DataSourceType == DataSourceType.Sql)
+                        {
+                            var physical = await _physicalKeys.ReadAsync(updatedMetadata, ct).ConfigureAwait(false);
+                            var reconciled = PhysicalKeyDirectionReconciler.Reconcile(updatedMetadata, existingMeta, physical);
+                            foreach (var finding in reconciled.Findings)
+                            {
+                                warnings.Add($"Table '{updatedMetadata.Identifier}': {finding}");
+                            }
+
+                            if (reconciled.PhysicalApplied)
+                            {
+                                if (await TryAuditPhysicalDirectionsAsync(updatedMetadata.Identifier, existingMeta, reconciled, ct).ConfigureAwait(false))
+                                {
+                                    updatedMetadata = reconciled.Metadata;
+                                }
+                                else
+                                {
+                                    updatedMetadata = reconciled.WithoutPhysical;
+                                }
+                            }
+                        }
                     }
 
                     if (mergedSamples != null)
@@ -1973,4 +2025,60 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
         return ImmutableArray<ImmutableArray<string>>.Empty;
     }
+
+    private async Task<bool> TryAuditPhysicalDirectionsAsync(
+        TableIdentifier table,
+        TableMetadata? existing,
+        PhysicalKeyDirectionReconciler.Result reconciled,
+        CancellationToken ct)
+    {
+        if (_auditWriter is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var tenant = existing?.OwnerTenantId is { } owner
+                ? new TenantId(owner)
+                : TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value?.Tenancy) ?? TenantId.Platform;
+
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+            {
+                TenantId = tenant,
+                EventType = AuditEventTypes.CatalogKeyDefinitionChanged,
+                ActorSid = new Sid("system:dbt-sync"),
+                TargetTable = table.ToString(),
+                Decision = "ALLOW",
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    datasetId = table.ToString(),
+                    directionSource = "physical",
+                    before = DirectionView(reconciled.WithoutPhysical),
+                    after = DirectionView(reconciled.Metadata)
+                })
+            }, ct).ConfigureAwait(false);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (ex is OperationCanceledException && ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Key direction audit cancelled for table {Table}; physical directions not applied.", table);
+            }
+            else
+            {
+                _logger.LogWarning(ex, "Key direction audit failed for table {Table}; physical directions not applied.", table);
+            }
+
+            return false;
+        }
+    }
+
+    private static object DirectionView(TableMetadata metadata) => new
+    {
+        primaryKeyDirections = KeyDirections.ToWire(metadata.PrimaryKeyDirections),
+        uniqueIndexDirections = metadata.Indexes.Where(static i => i.IsUnique).Select(static i => KeyDirections.ToWire(i.Directions)).ToArray()
+    };
 }

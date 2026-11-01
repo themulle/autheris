@@ -6,11 +6,13 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.Sql.Catalog;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -28,6 +30,7 @@ public sealed partial class DbtMetadataIngestionService
     /// Composition with the owner import (issue #393 part b). The audit repository is mandatory here (L-5); <paramref name="ownerAssignments"/> may be
     /// absent, which makes an owner payload fail closed.
     /// </summary>
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public DbtMetadataIngestionService(
         IDbtProposalRepository proposalRepository,
         ITableMetadataRepository metadataRepository,
@@ -44,9 +47,11 @@ public sealed partial class DbtMetadataIngestionService
         ILogger<DbtMetadataIngestionService> logger,
         IAuditLogRepository auditLog,
         IDataOwnerAssignmentRepository? ownerAssignments = null,
-        IDataOwnerIdentityVerifier? ownerIdentityVerifier = null)
+        IDataOwnerIdentityVerifier? ownerIdentityVerifier = null,
+        IPhysicalKeyCatalog? physicalKeys = null,
+        IAuditWriter? auditWriter = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
-            virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, logger)
+            virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, physicalKeys, auditWriter, logger)
     {
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _ownerAssignments = ownerAssignments;
