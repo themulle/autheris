@@ -398,7 +398,49 @@ internal static class SecurityProbes
             }
         }, new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql });
 
-        all.AddRange(ActivationProbes.Build());
+        // ---- X0k: MaxAffectedRows, commit order and the binder factory (SEC-X1-07) --------------------------------------------
+        Add("CheckedExecutor_InTransaction_RollsBackWhenMaxAffectedRowsIsExceeded", "checked-max-rows", () =>
+        {
+            using var connection = OpenTable();
+            using var transaction = connection.BeginTransaction();
+            var compiled = Checked("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: null, TargetSqlDialect.DuckDb);
+            var executor = CompiledSqlBinders.CheckedExecutorFor(TargetSqlDialect.DuckDb);
+            Assert.ThrowsAsync<DmlAffectedRowsLimitException>(() =>
+                executor.ExecuteInTransactionAsync(transaction, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(0, 1))).GetAwaiter().GetResult();
+            Assert.Equal(0, Count(connection));
+        });
+
+        Add("CheckedExecutor_InTransaction_NeverCommitsBeforeTheCountIsChecked", "checked-commit-order", () =>
+        {
+            using var connection = OpenTable();
+            using var transaction = connection.BeginTransaction();
+            var compiled = Checked("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: 1, TargetSqlDialect.DuckDb);   // writes 2 rows, 1 expected
+            var executor = CompiledSqlBinders.CheckedExecutorFor(TargetSqlDialect.DuckDb);
+            Assert.ThrowsAsync<DmlCheckOptionViolationException>(() =>
+                executor.ExecuteInTransactionAsync(transaction, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(0, 0))).GetAwaiter().GetResult();
+            Assert.Equal(0, Count(connection));
+        });
+
+        foreach (var dialect in Production)
+        {
+            var d = dialect;
+            Add($"BinderFactory_For_RefusesACheckedStatement[{d}]", "binder-factory", () =>
+            {
+                using var command = new SqliteCommand();
+                var compiled = Checked("INSERT INTO t (a) SELECT 1", expected: 1, d);
+                Assert.Throws<CheckedExecutionRequiredException>(() => CompiledSqlBinders.For(d).Bind(command, compiled, new Dictionary<string, object?>()));
+            });
+        }
+
+        // ---- X0j: the Databricks tenant comparison never trusts the catalog collation (SEC-X1-10) --------------------------------
+        Add("TenantComparison_Databricks_IsBinaryEvenForAUtf8BinaryCatalogCollation", "tenant-compare", () =>
+        {
+            var caps = DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks);
+            var predicate = TenantPredicateFactory.Build(caps, "TenantId", "t", SqlParameterType.String, columnCollation: "UTF8_BINARY");
+            Assert.True(predicate is BinaryExpression { Operator: BinaryOperator.Equal, Left: not ColumnReference },
+                "a plain column = value comparison would follow the column collation");
+        });
+
         return all;
     }
 

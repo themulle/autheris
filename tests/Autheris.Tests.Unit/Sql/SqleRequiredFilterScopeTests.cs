@@ -1,11 +1,11 @@
 using System.Collections.Immutable;
-using Autheris.Application.Sql.Errors;
+using RequiredFilterColumnMissingException = TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
-using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
 
-namespace TrinoSqlEngine.Tests.Security;
+namespace Autheris.Tests.Unit.Sql;
 
 /// <summary>SQLE-08: the required-filter guard resolves the qualifier against the FROM scope; every ambiguity is "not satisfied".</summary>
 [Trait("Category", "Security")]
@@ -33,12 +33,24 @@ public sealed class SqleRequiredFilterScopeTests
             TokenGuards = SqlTokenSecurityOptions.Strict,
             Policy = new GovernancePolicy
             {
-                RowFilters = new DictPolicyProvider(),
-                Masks = new DictMaskProvider(),
+                RowFilters = new ScopeDictPolicyProvider(),
+                Masks = new ScopeDictMaskProvider(),
                 Catalog = catalog,
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
             }
         };
+    }
+
+    private sealed class ScopeDictPolicyProvider : IPolicyPredicateProvider
+    {
+        public bool ShouldApplyPolicy(TableIdentity table) => true;
+        public PolicyPredicate GetPredicate(TableIdentity table) => PolicyPredicate.DenyAll;
+    }
+
+    private sealed class ScopeDictMaskProvider : IColumnMaskProvider
+    {
+        public bool HasMask(TableIdentity table, string column) => false;
+        public MaskSpec GetMask(TableIdentity table, string column) => throw new NotSupportedException();
     }
 
     private static CompiledSql Compile(string sql) => new FastSqlEngine().Compile(sql.AsMemory(), Request(), default);

@@ -100,13 +100,9 @@ internal static class SecurityMutants
         m.Add(new SecurityMutant("cache-key-omits-token-guards", "the plan-cache key omits the token guards", "M-8", OmitFromKey("TokenGuards")));
         m.Add(new SecurityMutant("cache-key-omits-versions", "the plan-cache key omits the compiler and capability version", "M-8", OmitFromKey("Versions")));
 
-        // WP-X0v activation (the controls of X0a, X0b, X0c, X0j, X0k, X0p are on this branch)
-        m.Add(new SecurityMutant("skip-session-pin-read-back", "skip the session pin read-back on a connection rental", "Phase 3 amendment, SEC-X1-08", Off(SecurityControl.SessionPinReadBack)));
+        // WP-X0v activation (engine controls X0j, X0k)
         m.Add(new SecurityMutant("skip-max-affected-rows", "skip MaxAffectedRows in ExecuteInTransactionAsync", "Phase 3 amendment, SEC-X1-07", Off(SecurityControl.CheckedDmlMaxAffectedRows)));
         m.Add(new SecurityMutant("commit-before-enforce-in-transaction", "commit before DmlCheckOption.Enforce in ExecuteInTransactionAsync", "Phase 3 amendment, SEC-X1-07", Off(SecurityControl.CheckedDmlCommitBeforeEnforce)));
-        m.Add(new SecurityMutant("error-mapper-returns-exception-message", "the error mapper returns Exception.Message", "Phase 3 amendment, SEC-X1-12", Off(SecurityControl.ErrorMapperFixedMessage)));
-        m.Add(new SecurityMutant("tenant-registry-registered-when-unavailable", "the tenant registry returns Registered when it is unavailable", "Phase 3 amendment, SEC-X1-13", Off(SecurityControl.TenantRegistryFailClosed)));
-        m.Add(new SecurityMutant("catalog-load-failure-returns-empty-entry", "a catalog load failure returns an empty (allow-all) entry", "Phase 3 amendment, SEC-X1-09", Off(SecurityControl.CatalogLoadFailureDenies)));
         m.Add(new SecurityMutant("compiled-sql-binders-for-non-refusing", "CompiledSqlBinders.For returns a non-refusing binder", "Phase 3 amendment, SEC-X1-07", Off(SecurityControl.BinderFactoryRefusal)));
         m.Add(new SecurityMutant("reenable-databricks-utf8-binary-relaxation", "re-enable the Databricks UTF8_BINARY relaxation", "Phase 3 amendment, SEC-X1-10", Off(SecurityControl.DatabricksUtf8BinaryRelaxation)));
 
