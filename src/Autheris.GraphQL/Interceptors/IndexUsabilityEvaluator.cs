@@ -36,14 +36,20 @@ public static class IndexUsabilityEvaluator
                 metadata.Columns.Where(c => visibleColumns.Contains(c.ColumnName, StringComparer.OrdinalIgnoreCase)).ToList())
             : metadata;
 
+        bool hasExplicitOrder = orderBy is not null && orderBy.Count > 0;
+        bool hasFilter = filterColumns is not null && filterColumns.Count > 0;
+
+        if (!hasExplicitOrder && !hasFilter)
+        {
+            // Top-K sequential read without orderBy or where condition does not perform an unindexed sort or filter scan.
+            return true;
+        }
+
         var candidates = GetCandidateIndexes(effectiveMeta);
         if (candidates.Count == 0)
         {
             return false;
         }
-
-        bool hasExplicitOrder = orderBy is not null && orderBy.Count > 0;
-        bool hasFilter = filterColumns is not null && filterColumns.Count > 0;
 
         if (hasExplicitOrder)
         {
@@ -87,9 +93,8 @@ public static class IndexUsabilityEvaluator
             return false;
         }
 
-        // Neither explicit orderBy nor where filter: uses default PK/unique index scan.
-        return effectiveMeta.PrimaryKeyColumns.Count > 0 ||
-               effectiveMeta.Indexes.Any(i => i.IsUnique);
+        // Neither explicit orderBy nor where filter: top-K sequential read does not require an unindexed sort or filter scan.
+        return true;
     }
 
     /// <summary>

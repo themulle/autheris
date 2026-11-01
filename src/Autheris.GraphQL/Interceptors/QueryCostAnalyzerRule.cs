@@ -584,8 +584,10 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                     int multiplier = (isList && effectiveRows > 1) ? _defaultListMultiplier : _payloadRowMultiplier;
 
+                    bool isRootField = currentDepth <= 1 || (currentType != null && currentType == schema.QueryType);
+
                     // Issue #421 (WP-D of #417): Apply surcharge multiplier if root list plan has no usable index
-                    if (isList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
+                    if (isRootField && isList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
                     {
                         var tableMeta = _tableMetadataLookup?.Invoke(field.Name.Value)
                             ?? (_tableMetadataLookup != null && field.Name.Value.EndsWith("Connection", StringComparison.Ordinal)

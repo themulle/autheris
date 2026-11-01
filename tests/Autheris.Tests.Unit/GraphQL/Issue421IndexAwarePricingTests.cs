@@ -188,14 +188,14 @@ public sealed class Issue421IndexAwarePricingTests
     }
 
     [Fact]
-    public void HasUsableIndex_NoOrderAndNoFilter_TableWithoutPkOrUniqueIndex_ReturnsFalse()
+    public void HasUsableIndex_NoOrderAndNoFilter_ReturnsTrue()
     {
         var metadata = CreateTable(pk: []);
 
         var isUsable = IndexUsabilityEvaluator.HasUsableIndex(metadata, visibleColumns: null, orderBy: null, filterColumns: null);
 
-        // Heap scan without any primary key or unique index
-        isUsable.ShouldBeFalse();
+        // Top-K sequential read does not perform an unindexed sort or filter
+        isUsable.ShouldBeTrue();
     }
 
     [Fact]
