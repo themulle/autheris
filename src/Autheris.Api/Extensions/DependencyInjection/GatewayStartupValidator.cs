@@ -667,5 +667,41 @@ public static class GatewayStartupValidator
         {
             throw new ValidationException("Invalid QueryCost configuration: DefaultListMultiplier must be 1..1000.");
         }
+
+        if (queryCost.ScalarColumnWeight is < 0.01 or > 1.0 || double.IsNaN(queryCost.ScalarColumnWeight))
+        {
+            throw new ValidationException("Invalid QueryCost configuration: ScalarColumnWeight must be 0.01..1.0.");
+        }
+    }
+
+    /// <summary>
+    /// REQ-COST-419 / SEC-COST-01: Validates that per-tier and per-scope complexity overrides do not exceed the
+    /// hard safety ceiling of 10000 or fall below the minimum bounded threshold of 100.
+    /// </summary>
+    internal static void ValidateClientTierComplexityOverrides(GatewayOptions options)
+    {
+        if (options?.RateLimiting?.ClientTiers == null) return;
+
+        foreach (var (tierName, overrideLimit) in options.RateLimiting.ClientTiers.TierLimits)
+        {
+            if (overrideLimit?.MaxCostPerQuery is { } cost)
+            {
+                if (cost is < 100 or > 10000)
+                {
+                    throw new ValidationException($"Invalid ClientTier configuration for '{tierName}': MaxCostPerQuery must be between 100 and 10000.");
+                }
+            }
+        }
+
+        foreach (var (scopeName, overrideLimit) in options.RateLimiting.ClientTiers.ScopeLimits)
+        {
+            if (overrideLimit?.MaxCostPerQuery is { } cost)
+            {
+                if (cost is < 100 or > 10000)
+                {
+                    throw new ValidationException($"Invalid ScopeLimit configuration for '{scopeName}': MaxCostPerQuery must be between 100 and 10000.");
+                }
+            }
+        }
     }
 }
