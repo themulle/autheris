@@ -13,6 +13,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -174,9 +175,13 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             cmd.CommandType = CommandType.Text;
             cmd.CommandTimeout = timeout;
             cmd.CommandText = BuildKeyQuery(dialect, table, keyColumns, tenantColumn, filterSql, batch.Count);
-            if (_options.Value.Logging?.LogGeneratedSql == true)
+            bool allowStatementText = _options.Value.Logging?.AllowStatementText ?? true;
+            if (_options.Value.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))
             {
-                _logger?.LogDebug("SqlProcedureRowScopeResolver: Generated SQL: {Sql}", cmd.CommandText);
+                if (SqlTextScrubber.TryScrub(cmd.CommandText, dialect, out var scrubbed, out var queryHash))
+                {
+                    _logger.LogDebug("SqlProcedureRowScopeResolver: Executing scope discovery query [{QueryHash}]: {StatementText}", queryHash, scrubbed);
+                }
             }
 
             // SEC-ADG-02: a duplicate bare parameter name (two filter values, a filter value that names the tenant or a key) fails closed.

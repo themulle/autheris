@@ -117,6 +117,73 @@ public sealed class LoggingRedactionDep8Tests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void LOG426_T01_StatementText_And_QueryHash_AreNotRedacted()
+    {
+        var (logger, records) = CreateTestLogger(includeTenant: false);
+        logger.LogDebug(
+            "Governed query [{QueryHash}]: {StatementText} on {DataSource}",
+            "a1b2c3d4e5f6",
+            "SELECT c.id FROM customers c WHERE c.tenant_id = @p0",
+            "orders_db");
+
+        records.Count.ShouldBe(1);
+        var record = records[0];
+        record.Attributes.ShouldNotBeNull();
+
+        record.Attributes.First(a => a.Key == "QueryHash").Value.ShouldBe("a1b2c3d4e5f6");
+        record.Attributes.First(a => a.Key == "StatementText").Value.ShouldBe("SELECT c.id FROM customers c WHERE c.tenant_id = @p0");
+        record.Attributes.First(a => a.Key == "DataSource").Value.ShouldBe("orders_db");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void LOG426_T02_GenericSqlKeywords_RemainRedacted()
+    {
+        var (logger, records) = CreateTestLogger(includeTenant: false);
+        logger.LogDebug(
+            "Executing {Sql} and {SecuredSql} and {UserQuery}",
+            "SELECT 1",
+            "SELECT 2",
+            "SELECT 3");
+
+        records.Count.ShouldBe(1);
+        var record = records[0];
+        record.Attributes.ShouldNotBeNull();
+
+        record.Attributes.First(a => a.Key == "Sql").Value.ShouldBe("[redacted]");
+        record.Attributes.First(a => a.Key == "SecuredSql").Value.ShouldBe("[redacted]");
+        record.Attributes.First(a => a.Key == "UserQuery").Value.ShouldBe("[redacted]");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void LOG426_T03_StatementText_Truncation_Enforces4096Bound()
+    {
+        var (logger, records) = CreateTestLogger(includeTenant: false);
+        var normalLongString = new string('x', 2000);
+        var longStatement = "SELECT " + new string('a', 5000);
+
+        logger.LogDebug(
+            "Testing lengths: {NormalAttr} and {StatementText}",
+            normalLongString,
+            longStatement);
+
+        records.Count.ShouldBe(1);
+        var record = records[0];
+        record.Attributes.ShouldNotBeNull();
+
+        var normalVal = record.Attributes.First(a => a.Key == "NormalAttr").Value?.ToString();
+        var statementVal = record.Attributes.First(a => a.Key == "StatementText").Value?.ToString();
+
+        normalVal.ShouldNotBeNull();
+        normalVal.Length.ShouldBe(1024);
+
+        statementVal.ShouldNotBeNull();
+        statementVal.Length.ShouldBe(4096);
+    }
+
+    [Fact]
     public void Exceptions_AreWrappedInRedactedException()
     {
         var (logger, records) = CreateTestLogger(includeTenant: false);

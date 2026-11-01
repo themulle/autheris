@@ -21,6 +21,7 @@ using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -707,9 +708,13 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
         }
 
-        if (_options.Value.Logging.LogGeneratedSql)
+        bool allowStatementText = _options.Value.Logging?.AllowStatementText ?? true;
+        if (_options.Value.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))
         {
-            _logger?.LogDebug("GovernedSqlExecutionService: Compiled secured SQL: {SecuredSql}", compiled.Sql);
+            if (SqlTextScrubber.TryScrub(compiled.Sql, targetDatabaseDialect.Value, out var scrubbed, out var queryHash))
+            {
+                _logger.LogDebug("GovernedSqlExecutionService: Compiled secured SQL [{QueryHash}]: {StatementText}", queryHash, scrubbed);
+            }
             LogKeySets(assembly.KeySets);
         }
 

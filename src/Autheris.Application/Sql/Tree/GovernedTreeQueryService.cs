@@ -12,6 +12,7 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree.Federation;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -781,9 +782,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 command.Parameters.Add(parameter);
             }
 
-            if (_options.Logging?.LogGeneratedSql == true)
+            bool allowStatementText = _options.Logging?.AllowStatementText ?? true;
+            if (_options.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))
             {
-                _logger?.LogDebug("GovernedTreeQueryService: Generated SQL: {Sql}", compiled.Sql);
+                if (SqlTextScrubber.TryScrub(compiled.Sql, dialect, out var scrubbed, out var queryHash))
+                {
+                    _logger.LogDebug("GovernedTreeQueryService: Generated SQL [{QueryHash}]: {StatementText}", queryHash, scrubbed);
+                }
             }
 
             string json;
