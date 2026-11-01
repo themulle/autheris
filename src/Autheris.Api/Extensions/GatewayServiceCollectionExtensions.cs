@@ -122,6 +122,24 @@ public static partial class GatewayServiceCollectionExtensions
             options.DefaultChallengeScheme = GatewayAuthSchemes.DefaultScheme;
         });
 
+        ConfigureBasicAndSessionAuth(authBuilder, services, gatewayOptions, environment, out var isBasicSessionAllowed, out var basicSessionCookieName);
+        ConfigureForwardAuth(authBuilder, services);
+        ConfigureNegotiateAndTestAuth(authBuilder, gatewayOptions, environment, out var isTestAuthAllowed);
+        ConfigureJwtBearerAndMcpAuth(authBuilder, gatewayOptions, environment);
+        ConfigureDefaultPolicyScheme(authBuilder, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isTestAuthAllowed);
+        ConfigureAuthorizationAndErrorHandling(services, gatewayOptions, environment);
+
+        return services;
+    }
+
+    private static void ConfigureBasicAndSessionAuth(
+        AuthenticationBuilder authBuilder,
+        IServiceCollection services,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment environment,
+        out bool isBasicSessionAllowed,
+        out string basicSessionCookieName)
+    {
         // 1. Basic Authentication
         authBuilder.AddScheme<AuthenticationSchemeOptions, BasicAuthenticationHandler>(
             GatewayAuthSchemes.Basic, _ => { });
@@ -133,8 +151,8 @@ public static partial class GatewayServiceCollectionExtensions
             GatewayAuthSchemes.Scim, _ => { });
 
         // 1b. F-AUTH-DX: cookie session after a successful Basic login (allowlisted non-production environments only)
-        var isBasicSessionAllowed = BasicAuthSession.IsAllowed(gatewayOptions, environment);
-        var basicSessionCookieName = gatewayOptions.Authentication.BasicAuth.Session.CookieName;
+        isBasicSessionAllowed = BasicAuthSession.IsAllowed(gatewayOptions, environment);
+        basicSessionCookieName = gatewayOptions.Authentication.BasicAuth.Session.CookieName;
         if (isBasicSessionAllowed)
         {
             var dataProtection = services.AddDataProtection().SetApplicationName("Autheris.Gateway");
@@ -153,15 +171,27 @@ public static partial class GatewayServiceCollectionExtensions
         {
             Console.WriteLine($"[Autheris] WARNING: BasicAuth.Session is configured but inactive: {inactiveReason}.");
         }
+    }
 
+    private static void ConfigureForwardAuth(
+        AuthenticationBuilder authBuilder,
+        IServiceCollection services)
+    {
         // 2. Traefik / Kubernetes Ingress ForwardAuth
         authBuilder.AddScheme<AuthenticationSchemeOptions, ForwardAuthAuthenticationHandler>(
             GatewayAuthSchemes.ForwardAuth, _ => { });
         services.AddHostedService<ForwardAuthSecretStartupValidator>();
+    }
 
+    private static void ConfigureNegotiateAndTestAuth(
+        AuthenticationBuilder authBuilder,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment environment,
+        out bool isTestAuthAllowed)
+    {
         // 3. Windows Negotiate (Kerberos / NTLM) or TestAuthHandler
 #if AUTHERIS_TEST_AUTH
-        bool isTestAuthAllowed = environment.IsDevelopment() &&
+        isTestAuthAllowed = environment.IsDevelopment() &&
             (gatewayOptions.Authentication.EnableTestAuthHandler || gatewayOptions.IsAnonymousAccessAllowed);
 
         if (isTestAuthAllowed)
@@ -170,6 +200,8 @@ public static partial class GatewayServiceCollectionExtensions
                 TestAuthHandler.SchemeName, _ => { });
         }
         else
+#else
+        isTestAuthAllowed = false;
 #endif
         if (gatewayOptions.Authentication.IsKerberosConfigured)
         {
@@ -178,7 +210,13 @@ public static partial class GatewayServiceCollectionExtensions
             authBuilder.AddNegotiate(NegotiateDefaults.AuthenticationScheme, negotiate =>
                 NegotiateHardening.Configure(negotiate, gatewayOptions.Authentication.RequireKerberosOnly));
         }
+    }
 
+    private static void ConfigureJwtBearerAndMcpAuth(
+        AuthenticationBuilder authBuilder,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment environment)
+    {
         // 4. Microsoft Entra ID (Azure AD) and/or AD FS JWT Bearer
         var entraConfig = gatewayOptions.Authentication.EntraId;
         var adfsConfig = gatewayOptions.Authentication.Adfs;
@@ -187,103 +225,117 @@ public static partial class GatewayServiceCollectionExtensions
         // authority (Entra), so every AD FS token failed. Each IdP then gets its own scheme with its own metadata;
         // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
         bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
-        authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options => ConfigureJwtBearer(options, useEntra: entraConfig.Enabled, useAdfs: adfsConfig.Enabled && !splitJwtSchemes));
+        authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options => ConfigureJwtBearer(options, entraConfig, adfsConfig, environment, useEntra: entraConfig.Enabled, useAdfs: adfsConfig.Enabled && !splitJwtSchemes));
         // MCP OAuth discovery (RFC 9728 protected resource metadata) for the configured token issuers.
         Autheris.Api.Mcp.GatewayMcpOAuth.AddGatewayMcpOAuth(authBuilder, gatewayOptions);
         if (splitJwtSchemes)
         {
-            authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, useEntra: false, useAdfs: true));
+            authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, entraConfig, adfsConfig, environment, useEntra: false, useAdfs: true));
+        }
+    }
+
+    private static void ConfigureJwtBearer(
+        Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions options,
+        EntraIdAuthOptions entraConfig,
+        AdfsAuthOptions adfsConfig,
+        IHostEnvironment environment,
+        bool useEntra,
+        bool useAdfs)
+    {
+        // Review E-1: JwtBearer keeps the default inbound claim mapping (sub -> NameIdentifier, oid -> objectidentifier
+        // URI); revocation lookups (GetLookupKeys) accept both spellings.
+        // SEC SG-37: RequireHttpsMetadata must always be true outside Development.
+        options.RequireHttpsMetadata = !environment.IsDevelopment() ||
+                                       (useEntra && entraConfig.RequireHttpsMetadata) ||
+                                       (useAdfs && adfsConfig.RequireHttpsMetadata);
+
+        if (useEntra && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
+        {
+            var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
+                ? "https://login.microsoftonline.com/"
+                : entraConfig.Instance.TrimEnd('/') + "/";
+            options.Authority = $"{instance}{entraConfig.TenantId}/v2.0";
+        }
+        else if (useAdfs && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
+        {
+            options.Authority = adfsConfig.Authority.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(adfsConfig.MetadataAddress))
+            {
+                options.MetadataAddress = adfsConfig.MetadataAddress;
+            }
         }
 
-        void ConfigureJwtBearer(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions options, bool useEntra, bool useAdfs)
-        {
-            // Review E-1: JwtBearer keeps the default inbound claim mapping (sub -> NameIdentifier, oid -> objectidentifier
-            // URI); revocation lookups (GetLookupKeys) accept both spellings.
-            // SEC SG-37: RequireHttpsMetadata must always be true outside Development.
-            options.RequireHttpsMetadata = !environment.IsDevelopment() ||
-                                           (useEntra && entraConfig.RequireHttpsMetadata) ||
-                                           (useAdfs && adfsConfig.RequireHttpsMetadata);
+        var validIssuers = new List<string>();
+        var validAudiences = new List<string>();
+        var entraIssuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            if (useEntra && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
+        if (useEntra)
+        {
+            if (!string.IsNullOrWhiteSpace(entraConfig.TenantId))
             {
                 var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
                     ? "https://login.microsoftonline.com/"
                     : entraConfig.Instance.TrimEnd('/') + "/";
-                options.Authority = $"{instance}{entraConfig.TenantId}/v2.0";
+                entraIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
+                entraIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
+                validIssuers.AddRange(entraIssuers);
             }
-            else if (useAdfs && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
-            {
-                options.Authority = adfsConfig.Authority.TrimEnd('/');
-                if (!string.IsNullOrWhiteSpace(adfsConfig.MetadataAddress))
-                {
-                    options.MetadataAddress = adfsConfig.MetadataAddress;
-                }
-            }
-
-            var validIssuers = new List<string>();
-            var validAudiences = new List<string>();
-            var entraIssuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            if (useEntra)
-            {
-                if (!string.IsNullOrWhiteSpace(entraConfig.TenantId))
-                {
-                    var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
-                        ? "https://login.microsoftonline.com/"
-                        : entraConfig.Instance.TrimEnd('/') + "/";
-                    entraIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
-                    entraIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
-                    validIssuers.AddRange(entraIssuers);
-                }
-                if (!string.IsNullOrWhiteSpace(entraConfig.Audience)) validAudiences.Add(entraConfig.Audience);
-                if (!string.IsNullOrWhiteSpace(entraConfig.ClientId)) validAudiences.Add(entraConfig.ClientId);
-            }
-
-            if (useAdfs)
-            {
-                if (!string.IsNullOrWhiteSpace(adfsConfig.Authority))
-                {
-                    validIssuers.Add(adfsConfig.Authority.TrimEnd('/'));
-                    validIssuers.Add($"{adfsConfig.Authority.TrimEnd('/')}/services/trust");
-                }
-                if (!string.IsNullOrWhiteSpace(adfsConfig.Audience)) validAudiences.Add(adfsConfig.Audience);
-            }
-
-            // SEC M-02: Issuer and audience are ALWAYS validated (fail-closed). If no issuer/audience is
-            // configured, no token can pass validation; outside Development startup is aborted beforehand.
-            options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidIssuers = validIssuers.Count > 0 ? validIssuers : null,
-                ValidateAudience = true,
-                ValidAudiences = validAudiences.Count > 0 ? validAudiences : null,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ClockSkew = TimeSpan.FromMinutes(2)
-            };
-            options.IncludeErrorDetails = false;
-
-            if (useEntra)
-            {
-                // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (ADFS may share this scheme).
-                options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
-                options.Events.OnTokenValidated = ctx =>
-                {
-                    if (ctx.Principal != null && entraIssuers.Contains(ctx.SecurityToken?.Issuer ?? string.Empty))
-                    {
-                        var resolver = ctx.HttpContext.RequestServices.GetRequiredService<IIdentitySubjectResolver>();
-                        var failure = EntraTokenPolicy.Apply(ctx.Principal, entraConfig, resolver);
-                        if (failure != null)
-                        {
-                            ctx.Fail(failure);
-                        }
-                    }
-
-                    return Task.CompletedTask;
-                };
-            }
+            if (!string.IsNullOrWhiteSpace(entraConfig.Audience)) validAudiences.Add(entraConfig.Audience);
+            if (!string.IsNullOrWhiteSpace(entraConfig.ClientId)) validAudiences.Add(entraConfig.ClientId);
         }
 
+        if (useAdfs)
+        {
+            if (!string.IsNullOrWhiteSpace(adfsConfig.Authority))
+            {
+                validIssuers.Add(adfsConfig.Authority.TrimEnd('/'));
+                validIssuers.Add($"{adfsConfig.Authority.TrimEnd('/')}/services/trust");
+            }
+            if (!string.IsNullOrWhiteSpace(adfsConfig.Audience)) validAudiences.Add(adfsConfig.Audience);
+        }
+
+        // SEC M-02: Issuer and audience are ALWAYS validated (fail-closed). If no issuer/audience is
+        // configured, no token can pass validation; outside Development startup is aborted beforehand.
+        options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuers = validIssuers.Count > 0 ? validIssuers : null,
+            ValidateAudience = true,
+            ValidAudiences = validAudiences.Count > 0 ? validAudiences : null,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.FromMinutes(2)
+        };
+        options.IncludeErrorDetails = false;
+
+        if (useEntra)
+        {
+            // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (ADFS may share this scheme).
+            options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+            options.Events.OnTokenValidated = ctx =>
+            {
+                if (ctx.Principal != null && entraIssuers.Contains(ctx.SecurityToken?.Issuer ?? string.Empty))
+                {
+                    var resolver = ctx.HttpContext.RequestServices.GetRequiredService<IIdentitySubjectResolver>();
+                    var failure = EntraTokenPolicy.Apply(ctx.Principal, entraConfig, resolver);
+                    if (failure != null)
+                    {
+                        ctx.Fail(failure);
+                    }
+                }
+
+                return Task.CompletedTask;
+            };
+        }
+    }
+
+    private static void ConfigureDefaultPolicyScheme(
+        AuthenticationBuilder authBuilder,
+        GatewayOptions gatewayOptions,
+        bool isBasicSessionAllowed,
+        string basicSessionCookieName,
+        bool isTestAuthAllowed)
+    {
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
         authBuilder.AddPolicyScheme(GatewayAuthSchemes.DefaultScheme, "Gateway Smart Authentication", options =>
         {
@@ -394,7 +446,13 @@ public static partial class GatewayServiceCollectionExtensions
                 return GatewayAuthSchemes.JwtBearer;
             };
         });
+    }
 
+    private static void ConfigureAuthorizationAndErrorHandling(
+        IServiceCollection services,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment environment)
+    {
         // SEC M-03: Authenticated-user fallback policy and named role policies.
         services.AddAuthorization(GatewayPolicies.Configure);
         if (DevFeatures.Resolve(gatewayOptions, environment.IsDevelopment()).VerboseErrors)
@@ -408,8 +466,6 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddExceptionHandler<Autheris.Api.Middleware.GatewayExceptionHandler>();
         services.AddSingleton<Autheris.Application.Interfaces.IGatewayRoleEvaluator, Autheris.Application.Security.GatewayRoleEvaluator>();
         services.AddHttpContextAccessor();
-
-        return services;
     }
 
     internal static void ValidateGatewayOptions(
