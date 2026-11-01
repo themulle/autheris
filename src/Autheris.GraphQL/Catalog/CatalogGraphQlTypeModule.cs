@@ -40,8 +40,26 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
     // One volatile reference so readers never observe a fingerprint paired with another build's omissions.
     private volatile BuiltState _built = new(null, []);
+    private volatile CatalogSchemaModel? _currentSchemaModel;
     private long _builtStructureVersion = -1;
     private readonly SemaphoreSlim _checkGate = new(1, 1);
+
+    /// <summary>
+    /// Issue #421: Ambient table metadata lookup for GraphQL cost analysis.
+    /// </summary>
+    public static Func<string, TableMetadata?>? CurrentLookup { get; set; }
+
+    public TableMetadata? GetTableMetadataForField(string fieldName)
+    {
+        var model = _currentSchemaModel;
+        if (model == null) return null;
+        if (model.TablesByQueryFieldName.TryGetValue(fieldName, out var table))
+            return table.Metadata;
+        if (fieldName.EndsWith("Connection", StringComparison.Ordinal) &&
+            model.TablesByQueryFieldName.TryGetValue(fieldName[..^10], out var connTable))
+            return connTable.Metadata;
+        return null;
+    }
 
     private readonly GraphQLOptions _graphQlOptions;
 
@@ -203,6 +221,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         {
             schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(), cancellationToken)
                 .ConfigureAwait(false);
+            _currentSchemaModel = schemaModel;
+            CurrentLookup = GetTableMetadataForField;
             _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
             if (_versionProvider != null)
             {
