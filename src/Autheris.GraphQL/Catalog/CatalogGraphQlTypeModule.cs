@@ -233,6 +233,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         RegisterOperatorFilterTypes(types);
 
         AggregateGraphQlTypes.RegisterShared(types);
+        ConnectionGraphQlTypes.RegisterShared(types);
         if (_metricsEnabled)
         {
             MetricGraphQlTypes.Register(types);
@@ -313,6 +314,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             {
                 AggregateGraphQlTypes.RegisterTable(types, table);
             }
+
+            ConnectionGraphQlTypes.RegisterTable(types, table);
         }
 
         if (schemaModel.Tables.Count > 0)
@@ -348,6 +351,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     {
                         AggregateGraphQlTypes.AddQueryField(d, table);
                     }
+
+                    ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);
                 }
             }));
         }
