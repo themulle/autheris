@@ -2,11 +2,14 @@ namespace Autheris.Application.Data.Services;
 
 using System;
 using System.Buffers;
+using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Autheris.Application.Data.Interfaces;
+using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -63,6 +66,38 @@ public static class KeysetCursorContextFactory
             Caller: callerSid ?? string.Empty,
             Schema: table.Schema ?? string.Empty,
             RequestHash: ComputeRequestHash(request.Filter, request.Select));
+    }
+
+    /// <summary>Builds the GraphQL keyset cursor context binding tenant, table, caller SID, and query shape.</summary>
+    /// <param name="tenantId">The request tenant id value.</param>
+    /// <param name="metadata">The table being queried.</param>
+    /// <param name="keyColumns">The resolved seek key columns.</param>
+    /// <param name="callerSid">The caller SID the cursor is issued to.</param>
+    /// <param name="filter">The user where filter (tree).</param>
+    /// <param name="select">The selected columns under node.</param>
+    /// <param name="keyDirections">The declared directions of <paramref name="keyColumns"/> (empty or null = all ascending).</param>
+    public static KeysetCursorContext ForGraphQl(
+        string? tenantId,
+        TableMetadata metadata,
+        IReadOnlyList<string> keyColumns,
+        string? callerSid,
+        TreeFilter? filter,
+        IReadOnlyList<string>? select,
+        IReadOnlyList<KeyColumnDirection>? keyDirections = null)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(keyColumns);
+
+        var table = metadata.Identifier;
+        return new KeysetCursorContext(
+            TenantId: tenantId ?? string.Empty,
+            DataSource: table.Domain ?? string.Empty,
+            TableName: table.TableName ?? string.Empty,
+            Direction: DirectionSignature(keyDirections),
+            Columns: keyColumns,
+            Caller: callerSid ?? string.Empty,
+            Schema: table.Schema ?? string.Empty,
+            RequestHash: ComputeRequestHash(filter, select));
     }
 
     /// <summary>
@@ -146,5 +181,148 @@ public static class KeysetCursorContextFactory
         }
 
         writer.WriteEndArray();
+    }
+
+    /// <summary>
+    /// Computes deterministic SHA-256 over a canonical JSON rendering of the GraphQL TreeFilter and selected fields.
+    /// </summary>
+    internal static string ComputeRequestHash(TreeFilter? filter, IReadOnlyList<string>? select)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WritePropertyName("filter");
+            WriteTreeFilter(writer, filter);
+            writer.WritePropertyName("select");
+            if (select is { Count: > 0 })
+            {
+                writer.WriteStartArray();
+                foreach (var column in select
+                    .Select(c => (c ?? string.Empty).Trim().ToLowerInvariant())
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(c => c, StringComparer.Ordinal))
+                {
+                    writer.WriteStringValue(column);
+                }
+
+                writer.WriteEndArray();
+            }
+            else
+            {
+                writer.WriteNullValue();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return Convert.ToHexString(SHA256.HashData(buffer.WrittenSpan));
+    }
+
+    private static void WriteTreeFilter(Utf8JsonWriter writer, TreeFilter? filter)
+    {
+        if (filter is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteStartObject();
+        switch (filter)
+        {
+            case TreeComparison comp:
+                writer.WriteString("type", "comp");
+                writer.WriteString("column", comp.Column?.ToLowerInvariant());
+                writer.WriteString("op", comp.Operator.ToString().ToLowerInvariant());
+                writer.WritePropertyName("value");
+                WriteObjectValue(writer, comp.Value);
+                break;
+            case TreeAndFilter and:
+                writer.WriteString("type", "and");
+                writer.WritePropertyName("items");
+                writer.WriteStartArray();
+                foreach (var item in and.Items)
+                {
+                    WriteTreeFilter(writer, item);
+                }
+                writer.WriteEndArray();
+                break;
+            case TreeOrFilter or:
+                writer.WriteString("type", "or");
+                writer.WritePropertyName("items");
+                writer.WriteStartArray();
+                foreach (var item in or.Items)
+                {
+                    WriteTreeFilter(writer, item);
+                }
+                writer.WriteEndArray();
+                break;
+            case TreeNotFilter not:
+                writer.WriteString("type", "not");
+                writer.WritePropertyName("item");
+                WriteTreeFilter(writer, not.Item);
+                break;
+            default:
+                writer.WriteString("type", filter.GetType().Name);
+                break;
+        }
+        writer.WriteEndObject();
+    }
+
+    private static void WriteObjectValue(Utf8JsonWriter writer, object? val)
+    {
+        switch (val)
+        {
+            case null:
+                writer.WriteNullValue();
+                break;
+            case bool b:
+                writer.WriteBooleanValue(b);
+                break;
+            case int i:
+                writer.WriteNumberValue(i);
+                break;
+            case long l:
+                writer.WriteNumberValue(l);
+                break;
+            case float f:
+                writer.WriteNumberValue(f);
+                break;
+            case double d:
+                writer.WriteNumberValue(d);
+                break;
+            case decimal m:
+                writer.WriteNumberValue(m);
+                break;
+            case string s:
+                writer.WriteStringValue(s);
+                break;
+            case DateTime dt:
+                writer.WriteStringValue(dt.ToString("O", CultureInfo.InvariantCulture));
+                break;
+            case DateTimeOffset dto:
+                writer.WriteStringValue(dto.ToString("O", CultureInfo.InvariantCulture));
+                break;
+            case DateOnly date:
+                writer.WriteStringValue(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                break;
+            case Guid g:
+                writer.WriteStringValue(g.ToString());
+                break;
+            case JsonElement je:
+                je.WriteTo(writer);
+                break;
+            case IEnumerable en:
+                writer.WriteStartArray();
+                foreach (var item in en)
+                {
+                    WriteObjectValue(writer, item);
+                }
+                writer.WriteEndArray();
+                break;
+            default:
+                writer.WriteStringValue(Convert.ToString(val, CultureInfo.InvariantCulture));
+                break;
+        }
     }
 }

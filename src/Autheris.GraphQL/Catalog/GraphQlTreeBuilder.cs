@@ -61,6 +61,149 @@ public static class GraphQlTreeBuilder
         return root;
     }
 
+    /// <summary>
+    /// Builds a TreeQueryNode for a Relay keyset connection query.
+    /// Traverses connection selection (edges -> node) to collect requested columns and relations,
+    /// ensures all required primary key columns are selected for cursor generation,
+    /// conjoins any seek predicate with the where argument, and enforces budget validation.
+    /// </summary>
+    public static TreeQueryNode BuildConnectionTree(
+        IResolverContext context,
+        CatalogTableType rootTable,
+        CatalogSchemaModel schema,
+        int requestedLimit,
+        int maxAllowedLimit,
+        TreeFilter? seekPredicate,
+        IReadOnlyList<string> requiredPkColumns,
+        IReadOnlyList<TreeOrder>? defaultOrdering = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(rootTable);
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(requiredPkColumns);
+
+        var currentSelection = context.Selection;
+        var operation = context.Operation;
+
+        var gqlOptions = context.Services.GetService(typeof(Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>)) as Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>;
+        var maxBudget = gqlOptions?.Value?.GraphQL?.MaxAggregateRowBudget > 0
+            ? gqlOptions.Value.GraphQL.MaxAggregateRowBudget
+            : MaxAggregateBudget;
+
+        // 1. Arguments: where and orderBy from connection selection
+        var whereFilter = ParseWhereArgument(currentSelection, rootTable, context);
+        var orderByList = ParseOrderByArgument(currentSelection, rootTable, context);
+
+        if ((orderByList == null || orderByList.Count == 0) && defaultOrdering != null && defaultOrdering.Count > 0)
+        {
+            orderByList = defaultOrdering;
+        }
+
+        TreeFilter? effectiveWhere = null;
+        if (whereFilter != null && seekPredicate != null)
+        {
+            effectiveWhere = new TreeAndFilter([whereFilter, seekPredicate]);
+        }
+        else
+        {
+            effectiveWhere = seekPredicate ?? whereFilter;
+        }
+
+        int limit = Math.Clamp(requestedLimit, 0, maxAllowedLimit);
+
+        // 2. Locate node selection under edges -> node
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var relations = new List<TreeRelationNode>();
+
+        var connectionSelectionSet = operation.GetSelectionSet(currentSelection);
+        Selection? nodeSelection = null;
+        foreach (var sel in connectionSelectionSet.Selections)
+        {
+            if (!sel.IsIncluded(context.IncludeFlags)) continue;
+            if (string.Equals(sel.Field.Name, "edges", StringComparison.Ordinal))
+            {
+                var edgesSet = operation.GetSelectionSet(sel);
+                foreach (var edgeSel in edgesSet.Selections)
+                {
+                    if (!edgeSel.IsIncluded(context.IncludeFlags)) continue;
+                    if (string.Equals(edgeSel.Field.Name, "node", StringComparison.Ordinal))
+                    {
+                        nodeSelection = edgeSel;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (nodeSelection != null)
+        {
+            var nodeSelectionSet = operation.GetSelectionSet(nodeSelection);
+            foreach (var sel in nodeSelectionSet.Selections)
+            {
+                if (!sel.IsIncluded(context.IncludeFlags)) continue;
+                var fieldName = sel.Field.Name;
+                if (fieldName.StartsWith("__", StringComparison.Ordinal)) continue;
+
+                var col = rootTable.Columns.FirstOrDefault(c => string.Equals(c.FieldName, fieldName, StringComparison.Ordinal));
+                if (col != null)
+                {
+                    columns.Add(col.ColumnName);
+                    continue;
+                }
+
+                var rel = rootTable.Relations.FirstOrDefault(r => string.Equals(r.FieldName, fieldName, StringComparison.Ordinal));
+                if (rel != null && schema.TablesByIdentifier.TryGetValue(rel.TargetTableIdentifier, out var targetTable))
+                {
+                    var childNode = BuildNode(
+                        context,
+                        sel,
+                        operation,
+                        targetTable,
+                        schema,
+                        TreeSqlCompiler.MaxLimit,
+                        isRoot: false,
+                        depth: 1);
+
+                    relations.Add(new TreeRelationNode(
+                        ResponseKey: sel.ResponseName,
+                        ParentColumns: rel.ParentColumns,
+                        ChildColumns: rel.ChildColumns,
+                        IsList: rel.IsList,
+                        Child: childNode));
+                }
+            }
+        }
+
+        // 3. Always include primary key columns so cursors can be computed
+        foreach (var pk in requiredPkColumns)
+        {
+            var matchedCol = rootTable.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, pk, StringComparison.OrdinalIgnoreCase));
+            if (matchedCol != null)
+            {
+                columns.Add(matchedCol.ColumnName);
+            }
+            else
+            {
+                columns.Add(pk);
+            }
+        }
+
+        int executionLimit = Math.Min(limit + 1, maxAllowedLimit + 1);
+
+        var root = new TreeQueryNode(rootTable.Identifier, columns.ToList())
+        {
+            Relations = relations,
+            Where = effectiveWhere,
+            OrderBy = orderByList ?? [],
+            Limit = limit,
+            Offset = 0,
+            ExecutionLimit = executionLimit
+        };
+
+        ValidateTreeBudget(root, maxBudget);
+        return root;
+    }
+
     /// <summary>The fixed client message of a page size or offset outside its allowed range; the only source is <see cref="GatewayPageRangeException"/>.</summary>
     public const string PageRangeMessage = GatewayPageRangeException.FixedMessage;
 
@@ -253,7 +396,7 @@ public static class GraphQlTreeBuilder
         };
     }
 
-    private static TreeFilter? ParseWhereArgument(
+    internal static TreeFilter? ParseWhereArgument(
         Selection selection,
         CatalogTableType table,
         IResolverContext context)
@@ -441,7 +584,7 @@ public static class GraphQlTreeBuilder
         return items.Count == 1 ? items[0] : new TreeAndFilter(items);
     }
 
-    private static IReadOnlyList<TreeOrder> ParseOrderByArgument(
+    internal static IReadOnlyList<TreeOrder> ParseOrderByArgument(
         Selection selection,
         CatalogTableType table,
         IResolverContext context)
