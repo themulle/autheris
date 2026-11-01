@@ -46,10 +46,42 @@ public sealed class CostAndQuotaMiddleware
         return runtimeVariables;
     }
 
-    private static int EffectiveGatewayMaxCost(GatewayOptions gatewayOptions) =>
-        gatewayOptions.AreQueryLimitsRelaxed
-            ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100000 : 5000)
-            : gatewayOptions.GraphQL.MaxAllowedComplexity;
+    public const int MaxComplexitySafetyCeiling = 10000;
+
+    public static int ResolveMaxAdmissionCeiling(GatewayOptions gatewayOptions)
+    {
+        if (gatewayOptions.AreQueryLimitsRelaxed)
+        {
+            return gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100000 : 5000;
+        }
+
+        int max = gatewayOptions.GraphQL.MaxAllowedComplexity;
+        if (gatewayOptions.RateLimiting?.ClientTiers?.TierLimits != null)
+        {
+            foreach (var tier in gatewayOptions.RateLimiting.ClientTiers.TierLimits.Values)
+            {
+                if (tier.MaxCostPerQuery.HasValue && tier.MaxCostPerQuery.Value > max)
+                {
+                    max = tier.MaxCostPerQuery.Value;
+                }
+            }
+        }
+        if (gatewayOptions.RateLimiting?.ClientTiers?.ScopeLimits != null)
+        {
+            foreach (var scope in gatewayOptions.RateLimiting.ClientTiers.ScopeLimits.Values)
+            {
+                if (scope.MaxCostPerQuery.HasValue && scope.MaxCostPerQuery.Value > max)
+                {
+                    max = scope.MaxCostPerQuery.Value;
+                }
+            }
+        }
+
+        return Math.Min(max, MaxComplexitySafetyCeiling);
+    }
+
+    internal static int EffectiveGatewayMaxCost(GatewayOptions gatewayOptions) =>
+        ResolveMaxAdmissionCeiling(gatewayOptions);
 
     /// <summary>
     /// The gateway-wide complexity limit on the runtime variable values, for the paths that skip the tier and quota gate (rate limiting

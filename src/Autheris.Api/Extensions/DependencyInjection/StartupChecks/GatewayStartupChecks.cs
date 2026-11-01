@@ -94,6 +94,7 @@ internal static class GatewayStartupChecks
     internal static void QueryCostOptions(StartupCheckContext context)
     {
         GatewayStartupValidator.ValidateQueryCostOptions(context.Options.QueryCost, context.Environment);
+        GatewayStartupValidator.ValidateClientTierComplexityOverrides(context.Options);
     }
 
     internal static void RecursiveCteWarning(StartupCheckContext context)

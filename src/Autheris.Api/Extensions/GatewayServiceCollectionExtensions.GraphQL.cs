@@ -118,9 +118,7 @@ public static partial class GatewayServiceCollectionExtensions
         var maxDepth = gatewayOptions.AreQueryLimitsRelaxed
             ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100 : 15)
             : gatewayOptions.GraphQL.MaxAllowedExecutionDepth;
-        var maxCost = gatewayOptions.AreQueryLimitsRelaxed
-            ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100000 : 5000)
-            : gatewayOptions.GraphQL.MaxAllowedComplexity;
+        var maxCost = Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware.ResolveMaxAdmissionCeiling(gatewayOptions);
 
         // SEC M-16: Singleton, damit registrierte API-Keys und der Key-Cache über Requests hinweg bestehen.
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
