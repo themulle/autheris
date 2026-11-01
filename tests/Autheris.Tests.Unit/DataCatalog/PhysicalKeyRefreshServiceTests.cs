@@ -30,7 +30,6 @@ public sealed class PhysicalKeyRefreshServiceTests
     private readonly IPhysicalKeyCatalog _physicalKeys = Substitute.For<IPhysicalKeyCatalog>();
     private readonly IAuditWriter _auditWriter = Substitute.For<IAuditWriter>();
     private readonly IEpochValidationService _epochService = Substitute.For<IEpochValidationService>();
-    private readonly IOptions<GatewayOptions> _options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions());
     private readonly Sid _actor = new("user:alice");
 
     private static TableMetadata CreateSqlTable(string domain, string schema, string table, string[] pk, KeyColumnDirection[]? pkDirs = null) => new()
@@ -68,7 +67,6 @@ public sealed class PhysicalKeyRefreshServiceTests
             _physicalKeys,
             _auditWriter,
             _epochService,
-            _options,
             null,
             NullLogger<PhysicalKeyRefreshService>.Instance);
 
@@ -105,7 +103,6 @@ public sealed class PhysicalKeyRefreshServiceTests
             _physicalKeys,
             _auditWriter,
             _epochService,
-            _options,
             null,
             NullLogger<PhysicalKeyRefreshService>.Instance);
 
@@ -151,7 +148,6 @@ public sealed class PhysicalKeyRefreshServiceTests
             _physicalKeys,
             _auditWriter,
             _epochService,
-            _options,
             null,
             NullLogger<PhysicalKeyRefreshService>.Instance);
 

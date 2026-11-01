@@ -191,40 +191,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     {
     }
 
-    public DbtMetadataIngestionService(
-        IDbtProposalRepository proposalRepository,
-        ITableMetadataRepository metadataRepository,
-        ILineageGraphStore lineageGraphStore,
-        IPolicyEpochRepository? epochRepository,
-        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
-        ITableRelationRepository? relationRepository,
-        VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
-        Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
-        IDbtTestTargetMap? testTargetMap,
-        IPhysicalKeyCatalog? physicalKeys,
-        IAuditWriter? auditWriter,
-        ILogger<DbtMetadataIngestionService> logger)
-    {
-        _tagImport = tagImport;
-        _syntheticRowGenerator = syntheticRowGenerator;
-        _testTargetMap = testTargetMap;
-        _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
-        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
-        _epochRepository = epochRepository;
-        _gatewayOptions = gatewayOptions;
-        _sqlEndpointLoader = sqlEndpointLoader;
-        _relationRepository = relationRepository;
-        _virtualFilterAdmin = virtualFilterAdmin;
-        _rebacStore = rebacStore;
-        _physicalKeys = physicalKeys;
-        _auditWriter = auditWriter;
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
     /// <summary>
     /// Issue #111 (A-2): the model-level tags (never the column tags) become dbt-source dataset tags after the upsert; the upsert itself neither reads
     /// nor writes tags. A failing import never fails the ingestion; counts (no values) are reported as warnings.
@@ -716,27 +682,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
 
                         // Issue #427: Reconcile physical key directions for SQL tables
-                        if (_physicalKeys is not null && updatedMetadata.Table.DataSourceType == DataSourceType.Sql)
-                        {
-                            var physical = await _physicalKeys.ReadAsync(updatedMetadata, ct).ConfigureAwait(false);
-                            var reconciled = PhysicalKeyDirectionReconciler.Reconcile(updatedMetadata, existingMeta, physical);
-                            foreach (var finding in reconciled.Findings)
-                            {
-                                warnings.Add($"Table '{updatedMetadata.Identifier}': {finding}");
-                            }
-
-                            if (reconciled.PhysicalApplied)
-                            {
-                                if (await TryAuditPhysicalDirectionsAsync(updatedMetadata.Identifier, existingMeta, reconciled, ct).ConfigureAwait(false))
-                                {
-                                    updatedMetadata = reconciled.Metadata;
-                                }
-                                else
-                                {
-                                    updatedMetadata = reconciled.WithoutPhysical;
-                                }
-                            }
-                        }
+                        updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
                     }
 
                     if (mergedSamples != null)
@@ -2025,60 +1971,4 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
         return ImmutableArray<ImmutableArray<string>>.Empty;
     }
-
-    private async Task<bool> TryAuditPhysicalDirectionsAsync(
-        TableIdentifier table,
-        TableMetadata? existing,
-        PhysicalKeyDirectionReconciler.Result reconciled,
-        CancellationToken ct)
-    {
-        if (_auditWriter is null)
-        {
-            return true;
-        }
-
-        try
-        {
-            var tenant = existing?.OwnerTenantId is { } owner
-                ? new TenantId(owner)
-                : TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value?.Tenancy) ?? TenantId.Platform;
-
-            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
-            {
-                TenantId = tenant,
-                EventType = AuditEventTypes.CatalogKeyDefinitionChanged,
-                ActorSid = new Sid("system:dbt-sync"),
-                TargetTable = table.ToString(),
-                Decision = "ALLOW",
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    datasetId = table.ToString(),
-                    directionSource = "physical",
-                    before = DirectionView(reconciled.WithoutPhysical),
-                    after = DirectionView(reconciled.Metadata)
-                })
-            }, ct).ConfigureAwait(false);
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            if (ex is OperationCanceledException && ct.IsCancellationRequested)
-            {
-                _logger.LogWarning("Key direction audit cancelled for table {Table}; physical directions not applied.", table);
-            }
-            else
-            {
-                _logger.LogWarning(ex, "Key direction audit failed for table {Table}; physical directions not applied.", table);
-            }
-
-            return false;
-        }
-    }
-
-    private static object DirectionView(TableMetadata metadata) => new
-    {
-        primaryKeyDirections = KeyDirections.ToWire(metadata.PrimaryKeyDirections),
-        uniqueIndexDirections = metadata.Indexes.Where(static i => i.IsUnique).Select(static i => KeyDirections.ToWire(i.Directions)).ToArray()
-    };
 }

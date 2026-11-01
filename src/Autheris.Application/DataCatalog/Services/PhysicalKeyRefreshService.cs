@@ -29,7 +29,6 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
     private readonly IPhysicalKeyCatalog _physicalKeyCatalog;
     private readonly IAuditWriter _auditWriter;
     private readonly IEpochValidationService _epochService;
-    private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly IPhysicalIndexRepository? _physicalIndexRepository;
     private readonly ILogger<PhysicalKeyRefreshService> _logger;
 
@@ -38,7 +37,6 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
         IPhysicalKeyCatalog physicalKeyCatalog,
         IAuditWriter auditWriter,
         IEpochValidationService epochService,
-        IOptions<GatewayOptions> gatewayOptions,
         IPhysicalIndexRepository? physicalIndexRepository = null,
         ILogger<PhysicalKeyRefreshService>? logger = null)
     {
@@ -46,7 +44,6 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
         _physicalKeyCatalog = physicalKeyCatalog ?? throw new ArgumentNullException(nameof(physicalKeyCatalog));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
-        _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _physicalIndexRepository = physicalIndexRepository;
         _logger = logger ?? NullLogger<PhysicalKeyRefreshService>.Instance;
     }
@@ -66,7 +63,7 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
                         t.Identifier.Domain.Equals(datasourceId, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        if (sourceTables.Count == 0 && !HasConfiguredConnection(datasourceId))
+        if (sourceTables.Count == 0)
         {
             throw new KeyNotFoundException($"Datasource '{datasourceId}' was not found.");
         }
@@ -203,7 +200,7 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
         {
             var tenant = table.OwnerTenantId is { } owner
                 ? new TenantId(owner)
-                : TenantResolver.EffectiveDefaultOf(_gatewayOptions.Value.Tenancy) ?? TenantId.Platform;
+                : TenantId.Platform;
 
             await _auditWriter.RecordRequiredAsync(new AuditLogEntry
             {
@@ -229,10 +226,6 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
             return false;
         }
     }
-
-    private bool HasConfiguredConnection(string datasourceId) =>
-        _gatewayOptions.Value.DataSources?.Connections != null &&
-        _gatewayOptions.Value.DataSources.Connections.ContainsKey(datasourceId);
 
     private static object DirectionView(TableMetadata metadata) => new
     {
