@@ -8,15 +8,20 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
+using Autheris.Application.Audit;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Tenancy;
 using Autheris.Application.VirtualFilters;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 
 public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionService
@@ -36,6 +41,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
+    private readonly IPhysicalKeyCatalog? _physicalKeys;
+    private readonly IAuditWriter? _auditWriter;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -180,20 +187,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, null, null, logger)
     {
-        _tagImport = tagImport;
-        _syntheticRowGenerator = syntheticRowGenerator;
-        _testTargetMap = testTargetMap;
-        _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
-        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _lineageGraphStore = lineageGraphStore ?? throw new ArgumentNullException(nameof(lineageGraphStore));
-        _epochRepository = epochRepository;
-        _gatewayOptions = gatewayOptions;
-        _sqlEndpointLoader = sqlEndpointLoader;
-        _relationRepository = relationRepository;
-        _virtualFilterAdmin = virtualFilterAdmin;
-        _rebacStore = rebacStore;
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -685,6 +680,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     if (model.DeclaredKeys is { } declared)
                     {
                         updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
+
+                        // Issue #427: Reconcile physical key directions for SQL tables
+                        updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
                     }
 
                     if (mergedSamples != null)

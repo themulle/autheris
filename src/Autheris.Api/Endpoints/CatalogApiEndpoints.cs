@@ -13,6 +13,7 @@ using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Localization;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -246,6 +247,15 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.DatasourceTested);
 
+        // Issue #427: POST /api/v1/catalog/datasources/{id}/refresh-physical-keys
+        group.MapPost("/datasources/{id}/refresh-physical-keys", RefreshDatasourcePhysicalKeysHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
+
+        app.MapPost("/api/governance/datasources/{id}/refresh-physical-keys", RefreshDatasourcePhysicalKeysHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
+
         // B-15: PUT /api/v1/catalog/datasets/{id}/state
         group.MapPut("/datasets/{id}/state", SetDatasetStateHandler)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
@@ -426,6 +436,44 @@ public static class CatalogApiEndpoints
         Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
         CancellationToken ct)
         => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
+
+    internal static async Task<IResult> RefreshDatasourcePhysicalKeysHandler(
+        string id,
+        PhysicalKeyRefreshRequest? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] IPhysicalKeyRefreshService refreshService,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (httpContext.User.GetUserSid() is not { } actorSid)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (string.IsNullOrWhiteSpace(id) || !DatasourceTestingService.IsValidDatasourceId(id))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The datasource identifier is invalid.", httpContext);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request?.TableFilter))
+        {
+            var filter = request.TableFilter;
+            if (filter.Length > 256 || filter.IndexOfAny(['\0', '\r', '\n', '/', '\\']) >= 0 || filter.Contains("..", StringComparison.Ordinal))
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The table filter contains invalid characters.", httpContext);
+            }
+        }
+
+        try
+        {
+            var effectiveRequest = request ?? new PhysicalKeyRefreshRequest();
+            var result = await refreshService.RefreshDatasourceKeysAsync(id, effectiveRequest, actorSid, ct);
+            return Results.Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The datasource was not found.", httpContext);
+        }
+    }
 
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,
