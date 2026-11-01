@@ -28,6 +28,7 @@ using Xunit;
     internal sealed class KeySetPipeline : IDisposable
     {
         public GovernedSqlRewriter Rewriter { get; set; } = null!;
+        public required GatewayOptions Gateway { get; init; }
         public required FakeKeySetLoader Loader { get; init; }
         public required FakeEpochs Epochs { get; init; }
         public required RowFilterKeySetCache Cache { get; init; }
@@ -46,14 +47,14 @@ using Xunit;
 
     private static readonly TableIdentifier OrdersId = new("default", "public", "orders");
 
-    public static KeySetPipeline Create(bool optIn = true, int keyCount = 3, int maxKeys = 2000, bool wireStage = true, string correlatedFk = "client_id", bool logSql = false)
+    public static KeySetPipeline Create(bool optIn = true, int keyCount = 3, int maxKeys = 2000, bool wireStage = true, string correlatedFk = "client_id", bool logSql = false, bool allowStatementText = true)
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 17, 12, 0, 0, TimeSpan.Zero));
         var logs = new List<(LogLevel, string)>();
         var gateway = new GatewayOptions
         {
             WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "default" },
-            Logging = new LoggingOptions { LogGeneratedSql = logSql },
+            Logging = new LoggingOptions { LogGeneratedSql = logSql, AllowStatementText = allowStatementText },
             RowFilters = new RowFilterOptions
             {
                 KeySetCache = new RowFilterKeySetCacheOptions
@@ -102,7 +103,7 @@ using Xunit;
         var epochs = new FakeEpochs();
         var cache = new RowFilterKeySetCache(64L * 1024 * 1024, 4, time);
         var stage = new RowFilterKeySetStage(new MutableGatewayOptionsMonitor(gateway), new PolicyKeyQueryCompiler(), epochs, cache, loader);
-        var fixture = new KeySetPipeline { Loader = loader, Epochs = epochs, Cache = cache, Compiles = [], Logs = logs };
+        var fixture = new KeySetPipeline { Gateway = gateway, Loader = loader, Epochs = epochs, Cache = cache, Compiles = [], Logs = logs };
 
         var engine = Substitute.For<ISqlEngine>();
         engine.Analyze(Arg.Any<ReadOnlyMemory<char>>(), Arg.Any<SqlTokenSecurityOptions?>(), Arg.Any<CancellationToken>())

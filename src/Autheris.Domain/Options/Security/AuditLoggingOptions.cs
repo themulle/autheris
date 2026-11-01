@@ -132,4 +132,5 @@ public sealed class AuditOptions
 public sealed class LoggingOptions
 {
     public bool LogGeneratedSql { get; set; } = false;
+    public bool AllowStatementText { get; set; } = true;
 }

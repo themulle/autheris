@@ -214,7 +214,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
         }
 
         // SEC-DS05-06: Telemetry redaction ceiling precedence
-        bool allowStatementText = telemetry?.Redaction?.AllowStatementText ?? true;
+        bool allowStatementText = (telemetry?.Redaction?.AllowStatementText ?? true) && (gateway?.Logging?.AllowStatementText ?? true);
         bool rawLogSql = profileOptions?.LogGeneratedSql
             ?? fallbackDefaults.LogGeneratedSql
             ?? gateway?.Logging?.LogGeneratedSql

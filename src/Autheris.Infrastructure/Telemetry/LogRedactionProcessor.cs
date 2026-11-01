@@ -51,9 +51,10 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
                 {
                     val = "[redacted]";
                 }
-                else if (val is string s && s.Length > 1024)
+                int maxLen = IsStatementKey(key) ? MaxStatementLength : MaxDefaultStringLength;
+                if (val is string s && s.Length > maxLen)
                 {
-                    val = s.Substring(0, 1024);
+                    val = s.Substring(0, maxLen);
                 }
 
                 modified.Add(new KeyValuePair<string, object?>(key, val));
@@ -72,6 +73,13 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
         }
     }
 
+    private const int MaxDefaultStringLength = 1024;
+    private const int MaxStatementLength = 4096;
+
+    private static bool IsStatementKey(string key) =>
+        key.Equals("StatementText", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals(TelemetryAttributes.DbQueryText, StringComparison.OrdinalIgnoreCase);
+
     private static bool IsQueryKey(string key) =>
         key.Equals("QueryString", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("Uri", StringComparison.OrdinalIgnoreCase) ||
@@ -82,6 +90,9 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
     private static bool IsSensitiveKey(string key)
     {
         if (key.StartsWith("autheris.", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("StatementText", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("QueryHash", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals(TelemetryAttributes.DbQueryText, StringComparison.OrdinalIgnoreCase) ||
             key.Equals("ErrorCode", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("TraceId", StringComparison.OrdinalIgnoreCase) ||
             key.Equals("DataSource", StringComparison.OrdinalIgnoreCase) ||
