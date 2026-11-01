@@ -75,16 +75,24 @@ public sealed class SpecGraphQlTests(ParityHostFixture host) : ParityTestBase
                 calls++;
                 var gap = SpecKnownGaps.ForField(key);
                 var info = new ParityCellInfo("spec", "GraphQl", "field", key, GapId: gap);
+                ChannelResult? lastResult = null;
                 try
                 {
                     await ParityCell.RunAsync(info, async () =>
                     {
                         var result = await PostAsync(query);
+                        lastResult = result;
                         ParityAssert.NoServerError(result, query);
                         ParityAssert.StableCode(result);
                         if (ParityAssert.IsError(result) && result.Code?.StartsWith("REQUIRED_FILTER", StringComparison.Ordinal) == true && field.Name.Contains("scoped", StringComparison.Ordinal))
                         {
                             rejected++; // by design: the scoped table demands its filter column; a stable 4xx-class answer is the spec result
+                            return;
+                        }
+
+                        if (ParityAssert.IsError(result) && result.Code == "INVALID_QUERY" && arg?.Name == "after")
+                        {
+                            rejected++; // by design: an arbitrary cursor literal lacks a valid HMAC signature; fail-closed rejection is the spec result
                             return;
                         }
 

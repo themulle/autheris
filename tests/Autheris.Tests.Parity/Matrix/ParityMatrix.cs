@@ -16,7 +16,6 @@ public static class ParityMatrix
     private const string InvalidForType = "AGGREGATION_INVALID_FUNCTION_FOR_TYPE";
     private const string RestPending = "inexpressible: the OData filter grammar of the REST data endpoint cannot express this capability";
     private const string RestNoAggregation = "inexpressible: the REST data endpoint has no aggregation";
-    private const string McpPending = "MCP channel driver deferred (PARITY-FU-001)";
 
     public static IReadOnlyList<MatrixChannel> Channels { get; } = [MatrixChannel.WebSql, MatrixChannel.GraphQl, MatrixChannel.Rest, MatrixChannel.Mcp];
 
@@ -29,13 +28,23 @@ public static class ParityMatrix
         var cells = new Dictionary<(string, MatrixChannel), MatrixCell>();
         var caps = new List<string>();
 
+        MatrixCell ToMcp(MatrixCell cell) => cell switch
+        {
+            Supported s when s.Request is GraphQlRequest g =>
+                new Supported(new McpRequest("query_graphql", g.Variables is null ? (object)new { query = g.Query } : new { query = g.Query, variables = g.Variables }, g.Field), s.Expected, s.ActualColumns),
+            Unsupported u when u.Request is GraphQlRequest g =>
+                new Unsupported(new McpRequest("query_graphql", g.Variables is null ? (object)new { query = g.Query } : new { query = g.Query, variables = g.Variables }, g.Field), u.Code, u.NamesCapability),
+            Pending p => new Pending(p.Reason),
+            _ => cell,
+        };
+
         void Cap(string id, MatrixCell webSql, MatrixCell graphQl, MatrixCell? rest = null, MatrixCell? mcp = null)
         {
             caps.Add(id);
             cells.Add((id, MatrixChannel.WebSql), webSql);
             cells.Add((id, MatrixChannel.GraphQl), graphQl);
             cells.Add((id, MatrixChannel.Rest), rest ?? new Pending(RestPending));
-            cells.Add((id, MatrixChannel.Mcp), mcp ?? new Pending(McpPending));
+            cells.Add((id, MatrixChannel.Mcp), mcp ?? ToMcp(graphQl));
         }
 
         // ---- aggregates over the whole table ----

@@ -103,15 +103,6 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
         await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.SalesTable, "second", SalesColumns));
         await repo.UpsertTableMetadataAsync(Metadata(ParitySeed.BigTable, "default", ("id", "integer"), ("grp", "varchar")));
 
-        // WP-R2: the bulk keyset route and the analyze endpoint need a declared key and a visible tier (Hidden tables answer 404 / UNKNOWN_TABLE for a reader).
-        var governance = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
-        foreach (var table in new[] { ParitySeed.SalesTable, ParitySeed.BigTable })
-        {
-            var id = new TableIdentifier("default", "main", table);
-            await governance.ReplaceTableKeyDefinitionAsync(id, ["id"], []);
-            await governance.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, new Sid("parity-seed"));
-        }
-
         var scoped = Metadata(ParitySeed.ScopedTable, "default", SalesColumns);
         await repo.UpsertTableMetadataAsync(scoped with { Table = scoped.Table with { RequiredFilterColumns = ["region"] } });
 
@@ -120,6 +111,23 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
         {
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["amount"] = new MaskingRule { RuleType = "NULLIFY" } },
         });
+
+        // WP-R2: the bulk keyset route, keyset connections and the analyze endpoint need a declared key and a visible tier.
+        var governance = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        foreach (var (source, table) in new[]
+        {
+            ("default", ParitySeed.SalesTable),
+            ("second", ParitySeed.SalesTable),
+            ("default", ParitySeed.BigTable),
+            ("default", ParitySeed.RegionsTable),
+            ("default", ParitySeed.ScopedTable),
+            ("default", ParitySeed.MaskedTable),
+        })
+        {
+            var id = new TableIdentifier(source, "main", table);
+            await governance.ReplaceTableKeyDefinitionAsync(id, ["id"], []);
+            await governance.SetDatasetVisibilityAsync(id, DatasetVisibility.Full, new Sid("parity-seed"));
+        }
     }
 
     private static TableMetadata Metadata(string table, string source, params (string Name, string Type)[] columns)

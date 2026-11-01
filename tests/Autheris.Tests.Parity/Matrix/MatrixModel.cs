@@ -17,6 +17,8 @@ public sealed record GraphQlRequest(string Query, string Field, object? Variable
 
 public sealed record RestRequest(string PathAndQuery) : MatrixRequest;
 
+public sealed record McpRequest(string Tool, object? Arguments = null, string? Field = null) : MatrixRequest;
+
 /// <summary>
 /// Expected result of a capability: the columns to compare (names as the channel returns them, see <see cref="Supported.ActualColumns"/>)
 /// and the rows computed by <see cref="ParityOracle"/>; order matters only when <see cref="Ordered"/>.

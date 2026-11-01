@@ -97,7 +97,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "INDIVIDUAL_GRANT_INDETERMINATE",
         // #341: stable codes the resolvers already raised that were masked as INTERNAL_SERVER_ERROR; fixed messages only.
         "SYNC_FAILED",
-        "GDPR_SUBJECT_SCOPE_UNRESOLVED"
+        "GDPR_SUBJECT_SCOPE_UNRESOLVED",
+        // Relay keyset pagination
+        "KEYSET_PAGINATION_UNAVAILABLE"
     };
 
     /// <summary>
@@ -106,6 +108,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     /// </summary>
     private static readonly Dictionary<string, string> FixedClientMessages = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["KEYSET_PAGINATION_UNAVAILABLE"] = "Keyset pagination is unavailable for this table or caller.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,

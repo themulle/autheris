@@ -33,6 +33,8 @@ public static class ParityHostSettings
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
         b.UseSetting("Gateway:OpenSchema", "true");
+        b.UseSetting("Gateway:Mcp:Enabled", "true");
+        b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
     }
 
     public static HttpClient CreateClient(WebApplicationFactory<Program> factory, string roles = "Reader", string tenant = "tenant_parity")

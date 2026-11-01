@@ -24,7 +24,7 @@ public sealed class DialectMatrixTests(ParityPostgresHostFixture host) : ParityT
     public const string SqliteOnlyReason = "inexpressible: the request text uses SQLite strftime and has no PostgreSQL spelling";
 
     public static IEnumerable<object[]> Cells() =>
-        ParityMatrix.Capabilities.SelectMany(_ => ParityMatrix.Channels.Where(c => c != MatrixChannel.Mcp), (c, ch) => new object[] { c, ch.ToString() });
+        ParityMatrix.Capabilities.SelectMany(_ => ParityMatrix.Channels, (c, ch) => new object[] { c, ch.ToString() });
 
     [ParityTheory]
     [MemberData(nameof(Cells))]
