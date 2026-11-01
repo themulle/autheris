@@ -56,7 +56,7 @@ public sealed class MatrixTests(ParityHostFixture host) : ParityTestBase
         var pending = ParityMatrix.Cells.Where(kv => kv.Value is Pending).ToList();
         pending.ShouldNotBeEmpty();
         pending.ShouldAllBe(kv => ((Pending)kv.Value).Reason.Length > 10);
-        ParityMatrix.Capabilities.All(cap => ParityMatrix.Cells[(cap, MatrixChannel.Mcp)] is Pending).ShouldBeTrue();
+        ParityMatrix.Capabilities.Count(cap => ParityMatrix.Cells[(cap, MatrixChannel.Mcp)] is Pending).ShouldBe(2);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public sealed class MatrixTests(ParityHostFixture host) : ParityTestBase
             }
         }
 
-        ParityMatrix.Cells[("agg_sum", MatrixChannel.Mcp)].ShouldBeOfType<Pending>().Reason.ShouldContain("PARITY-FU-001");
+        ParityMatrix.Cells[("agg_sum", MatrixChannel.Mcp)].ShouldBeOfType<Supported>();
     }
 
     [Fact]

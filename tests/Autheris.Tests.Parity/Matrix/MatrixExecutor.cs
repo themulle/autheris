@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Tests.Parity.Channels;
 using Autheris.Tests.Parity.Infrastructure;
@@ -17,6 +18,7 @@ public sealed class MatrixExecutor(IParityHost host, string schema = "main")
         SqlRequest s => await _client.WebSqlAsync(s.Sql, s.Parameters),
         GraphQlRequest g => await _client.GraphQlAsync(g.Query, g.Field, g.Variables),
         RestRequest r => await _client.RestAsync(r.PathAndQuery),
+        McpRequest m => await _client.McpAsync(m.Tool, m.Arguments, m.Field),
         _ => throw new InvalidOperationException("Unknown request kind."),
     };
 
@@ -27,8 +29,26 @@ public sealed class MatrixExecutor(IParityHost host, string schema = "main")
         {
             GraphQlRequest g => g with { Query = g.Query.Replace("default_main_", $"default_{schema}_", StringComparison.Ordinal), Field = g.Field.Replace("default_main_", $"default_{schema}_", StringComparison.Ordinal) },
             RestRequest r => r with { PathAndQuery = r.PathAndQuery.Replace("/default/main/", $"/default/{schema}/", StringComparison.Ordinal) },
+            McpRequest m => m with
+            {
+                Field = m.Field?.Replace("default_main_", $"default_{schema}_", StringComparison.Ordinal),
+                Arguments = ForMcpSchema(m.Arguments, schema)
+            },
             _ => request,
         };
+
+    private static object? ForMcpSchema(object? arguments, string schema)
+    {
+        if (arguments is null) return null;
+        var json = JsonSerializer.Serialize(arguments);
+        if (json.Contains("default_main_", StringComparison.Ordinal))
+        {
+            var replaced = json.Replace("default_main_", $"default_{schema}_", StringComparison.Ordinal);
+            return JsonSerializer.Deserialize<JsonElement>(replaced);
+        }
+
+        return arguments;
+    }
 
     public async Task RunCellAsync(string capability, MatrixChannel channel)
     {

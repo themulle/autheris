@@ -7,6 +7,11 @@ using Autheris.Tests.Parity.Channels;
 using Autheris.Tests.Parity.Infrastructure;
 using Autheris.Tests.Parity.Invariant;
 using Autheris.Tests.Parity.Seed;
+using ModelContextProtocol;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
+using McpHttpTransport = ModelContextProtocol.Client.HttpClientTransport;
+using McpTransportOptions = ModelContextProtocol.Client.HttpClientTransportOptions;
 using Shouldly;
 using Xunit.Sdk;
 
@@ -83,6 +88,104 @@ public sealed class RobinClient(IParityHost host)
         using var response = await client.GetAsync(pathAndQuery);
         var body = await response.Content.ReadAsStringAsync();
         return Checked(ParseOData((int)response.StatusCode, body), null);
+    }
+
+    /// <summary>Connects via Streamable HTTP MCP and calls a tool with arguments; rows are parsed from the response.</summary>
+    public async Task<ChannelResult> McpAsync(string tool, object? arguments = null, string? field = null)
+    {
+        using var client = host.CreateClient();
+        await using var mcp = await McpClient.CreateAsync(new McpHttpTransport(
+            new McpTransportOptions { Endpoint = new Uri(client.BaseAddress!, "/mcp"), TransportMode = HttpTransportMode.StreamableHttp },
+            client,
+            ownsHttpClient: false));
+
+        var argsDict = arguments switch
+        {
+            null => new Dictionary<string, object?>(),
+            JsonElement el when el.ValueKind == JsonValueKind.Object => el.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone()),
+            _ => JsonSerializer.SerializeToElement(arguments).EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone())
+        };
+
+        try
+        {
+            var result = await mcp.CallToolAsync(tool, argsDict);
+            var text = string.Concat(result.Content.OfType<TextContentBlock>().Select(c => c.Text));
+            var statusCode = result.IsError == true ? 400 : 200;
+            return Checked(ParseMcp(statusCode, text, field), null);
+        }
+        catch (McpProtocolException ex)
+        {
+            return Checked(new ChannelResult(400, "INVALID_PARAMS", ChannelResult.NoRows, ex.Message), null);
+        }
+    }
+
+    public static ChannelResult ParseMcp(int status, string body, string? field)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return new ChannelResult(status, null, ChannelResult.NoRows, body);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("isError", out var isErr) && isErr.ValueKind == JsonValueKind.True)
+                {
+                    status = status >= 400 ? status : 400;
+                    string? code = null;
+                    if (root.TryGetProperty("graphQL", out var gql) && gql.ValueKind == JsonValueKind.Object &&
+                        gql.TryGetProperty("errors", out var gqlErrors) && gqlErrors.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var e in gqlErrors.EnumerateArray())
+                        {
+                            if (e.TryGetProperty("extensions", out var ext) && ext.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String)
+                            {
+                                code = c.GetString();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (code is null && root.TryGetProperty("error", out var err))
+                    {
+                        if (err.ValueKind == JsonValueKind.Object && err.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String)
+                        {
+                            code = c.GetString();
+                        }
+                        else if (err.ValueKind == JsonValueKind.String)
+                        {
+                            code = err.GetString();
+                        }
+                    }
+
+                    code ??= root.TryGetProperty("code", out var c2) && c2.ValueKind == JsonValueKind.String ? c2.GetString() : null;
+                    return new ChannelResult(status, code, ChannelResult.NoRows, body);
+                }
+
+                if (status >= 400 && root.TryGetProperty("error", out var errProp))
+                {
+                    var code = errProp.ValueKind == JsonValueKind.Object && errProp.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String
+                        ? c.GetString()
+                        : errProp.ValueKind == JsonValueKind.String ? errProp.GetString() : null;
+                    return new ChannelResult(status, code, ChannelResult.NoRows, body);
+                }
+            }
+
+            if (field is not null)
+            {
+                return ParseGraphQl(status, body, field);
+            }
+
+            return WebSqlChannel.Parse(status, body);
+        }
+        catch (JsonException)
+        {
+            return new ChannelResult(status, null, ChannelResult.NoRows, body);
+        }
     }
 
     public static ChannelResult ParseOData(int status, string body)

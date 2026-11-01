@@ -18,11 +18,12 @@ public sealed class ParityHostSmokeTests(ParityHostFixture host) : ParityTestBas
         [new ParityAggregate(ParityFn.Sum, "amount", "total")],
         ["region"]);
 
-    private IParityChannel[] Channels => [new WebSqlChannel(host), new GraphQlChannel(host)];
+    private IParityChannel[] Channels => [new WebSqlChannel(host), new GraphQlChannel(host), new McpChannel(host)];
 
     [ParityTheory]
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
+    [InlineData("Mcp")]
     public async Task Smoke_CountAll(string channelName)
     {
         var channel = Channels.Single(c => c.Name == channelName);
@@ -38,6 +39,7 @@ public sealed class ParityHostSmokeTests(ParityHostFixture host) : ParityTestBas
     [ParityTheory]
     [InlineData("WebSql")]
     [InlineData("GraphQl")]
+    [InlineData("Mcp")]
     public async Task Smoke_SumByRegion(string channelName)
     {
         var channel = Channels.Single(c => c.Name == channelName);

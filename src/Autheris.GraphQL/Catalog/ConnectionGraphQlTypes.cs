@@ -293,66 +293,100 @@ internal static class ConnectionGraphQlTypes
             defaultOrdering);
 
         // SEC-RG-08: Execute tree query
-        using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted).ConfigureAwait(false);
-
-        // SEC-412 Check: If any PK column is masked for the caller, reject keyset pagination (fail closed)
-        var maskedColumns = treeService.GetMaskedColumns(principal, queryNode, opId);
-        if (maskedColumns != null)
+        JsonDocument doc;
+        try
         {
-            foreach (var pk in pkCols)
+            doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted).ConfigureAwait(false);
+        }
+        catch (GatewayPageRangeException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode("INVALID_QUERY").Build());
+        }
+        catch (GatewayInvalidQueryException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
+        }
+        catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing))
+                .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
+                .Build());
+        }
+        catch (GatewayForbiddenException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
+        }
+        catch (GatewayThrottledException ex)
+        {
+            if (httpContext != null && !httpContext.Response.HasStarted)
             {
-                if (maskedColumns.Any(m => m.Path.Count == 0 && string.Equals(m.Column, pk, StringComparison.OrdinalIgnoreCase)))
+                httpContext.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("TOO_MANY_REQUESTS").Build());
+        }
+
+        using (doc)
+        {
+            // SEC-412 Check: If any PK column is masked for the caller, reject keyset pagination (fail closed)
+            var maskedColumns = treeService.GetMaskedColumns(principal, queryNode, opId);
+            if (maskedColumns != null)
+            {
+                foreach (var pk in pkCols)
                 {
-                    throw new GraphQLException(ErrorBuilder.New()
-                        .SetMessage("Keyset pagination is unavailable when primary key columns are masked.")
-                        .SetCode("KEYSET_PAGINATION_UNAVAILABLE")
-                        .Build());
+                    if (maskedColumns.Any(m => m.Path.Count == 0 && string.Equals(m.Column, pk, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new GraphQLException(ErrorBuilder.New()
+                            .SetMessage("Keyset pagination is unavailable when primary key columns are masked.")
+                            .SetCode("KEYSET_PAGINATION_UNAVAILABLE")
+                            .Build());
+                    }
                 }
             }
-        }
 
-        var root = doc.RootElement.Clone();
-        var list = new List<JsonElement>();
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in root.EnumerateArray())
+            var root = doc.RootElement.Clone();
+            var list = new List<JsonElement>();
+            if (root.ValueKind == JsonValueKind.Array)
             {
-                list.Add(item);
-            }
-        }
-
-        bool hasNextPage = false;
-        if (list.Count > first)
-        {
-            hasNextPage = true;
-            list.RemoveAt(list.Count - 1);
-        }
-
-        // Format Edges with cursors
-        var edges = new List<GraphQlEdge>(list.Count);
-        foreach (var row in list)
-        {
-            var rowPk = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in pkCols)
-            {
-                var canonCol = table.Metadata.GetColumn(col)?.ColumnName ?? col;
-                if (row.TryGetProperty(canonCol, out var prop) || row.TryGetProperty(col, out prop))
+                foreach (var item in root.EnumerateArray())
                 {
-                    rowPk[canonCol] = ReadElementValue(prop);
+                    list.Add(item);
                 }
             }
 
-            var cursor = cursorEncoder.EncodeCursor(rowPk, cursorContext);
-            edges.Add(new GraphQlEdge(cursor, row));
+            bool hasNextPage = false;
+            if (list.Count > first)
+            {
+                hasNextPage = true;
+                list.RemoveAt(list.Count - 1);
+            }
+
+            // Format Edges with cursors
+            var edges = new List<GraphQlEdge>(list.Count);
+            foreach (var row in list)
+            {
+                var rowPk = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in pkCols)
+                {
+                    var canonCol = table.Metadata.GetColumn(col)?.ColumnName ?? col;
+                    if (row.TryGetProperty(canonCol, out var prop) || row.TryGetProperty(col, out prop))
+                    {
+                        rowPk[canonCol] = ReadElementValue(prop);
+                    }
+                }
+
+                var cursor = cursorEncoder.EncodeCursor(rowPk, cursorContext);
+                edges.Add(new GraphQlEdge(cursor, row));
+            }
+
+            var pageInfo = new GraphQlPageInfo(
+                HasNextPage: hasNextPage,
+                HasPreviousPage: !string.IsNullOrWhiteSpace(after),
+                StartCursor: edges.Count > 0 ? edges[0].Cursor : null,
+                EndCursor: edges.Count > 0 ? edges[^1].Cursor : null);
+
+            return new GraphQlConnection(edges, pageInfo, edges.Count);
         }
-
-        var pageInfo = new GraphQlPageInfo(
-            HasNextPage: hasNextPage,
-            HasPreviousPage: !string.IsNullOrWhiteSpace(after),
-            StartCursor: edges.Count > 0 ? edges[0].Cursor : null,
-            EndCursor: edges.Count > 0 ? edges[^1].Cursor : null);
-
-        return new GraphQlConnection(edges, pageInfo, edges.Count);
     }
 
     private static IReadOnlyList<string> CollectSelectedNodeColumns(IResolverContext ctx)

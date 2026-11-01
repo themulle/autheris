@@ -280,9 +280,9 @@ Fixed 2026-10-23 on fix/parity-gaps (#312 WebSQL, #313 REST, #314 GraphQL): WebS
 
 A matrix `Pending` reason is either `inexpressible: <reason>` (the channel cannot state the capability) or names one of these ids. `Matrix_PendingReasonsAreInexpressibleOrFollowUp` fails closed on any other text or an unknown id.
 
-### PARITY-FU-001
+### PARITY-FU-001 (Completed 2026-11-01)
 
-MCP channel driver. The 36 MCP cells of the capability x channel matrix are `Pending`: the parity host does not drive the MCP tools (owner default: MCP and REST cells are deferred in the first delivery). Work: a driver that calls the MCP query/aggregation tools with the matrix requests and compares with the oracle; then the 36 cells become `Supported`/`Unsupported`.
+MCP channel driver. Implemented via Streamable HTTP (`/mcp` endpoint) in `McpChannel` and `RobinClient.McpAsync`. The matrix delegates SQL or GraphQL requests to the respective MCP tools (`query_sql` and `query_graphql`). The 36 MCP cells are now verified: 34 cells are `Supported`/`Unsupported` and execute against the parity host (smoke count/sum and matrix suites pass); the 2 inexpressible cells (`group_date_part_standard_sql`, `group_expression`) remain marked `Pending(inexpressible)`. Fixed MCP target table resolution for `_aggregate` root fields in `CatalogGraphQlMap`, registered keyset connection error codes in `ErrorSanitizingFilter`, and ensured key definitions in `ParityHostFixture`.
 
 ### PARITY-FU-002
 

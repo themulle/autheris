@@ -147,13 +147,27 @@ public sealed class CatalogGraphQlMap(
                     // Introspection (__schema, __type, __typename) reads no table.
                     break;
                 case FieldNode field:
-                    if (!walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value, out var table))
+                    CatalogTableType? table = null;
+                    bool isAggregate = false;
+                    if (walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value, out table))
+                    {
+                    }
+                    else if (field.Name.Value.EndsWith("_aggregate", StringComparison.Ordinal) &&
+                             walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value[..^10], out table))
+                    {
+                        isAggregate = true;
+                    }
+                    else if (field.Name.Value.EndsWith("Connection", StringComparison.Ordinal) &&
+                             walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value[..^10], out table))
+                    {
+                    }
+                    else
                     {
                         return false;
                     }
 
                     walk.Tables.Add(table.Identifier);
-                    if (field.SelectionSet != null && !CollectTable(field.SelectionSet, table, walk, depth + 1))
+                    if (!isAggregate && field.SelectionSet != null && !CollectTable(field.SelectionSet, table, walk, depth + 1))
                     {
                         return false;
                     }
