@@ -16,6 +16,7 @@ using Autheris.Infrastructure.Persistence.Catalog;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -23,7 +24,12 @@ using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 using Xunit;
 
-namespace TrinoSqlEngine.Tests.Security;
+namespace Autheris.Tests.Unit.Security;
+
+internal sealed record SecurityProbe(string Name, string Control, Action Run)
+{
+    public override string ToString() => Name;
+}
 
 /// <summary>
 /// Probes of the controls that the WP-X0v amendment listed as pending (X0a, X0b, X0c, X0j, X0k, X0p). Each passes on the real code

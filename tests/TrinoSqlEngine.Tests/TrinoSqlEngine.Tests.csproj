@@ -19,9 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
-    <!-- The mutant probes of the controls that live outside the engine (WP-X0v activation: X0a, X0b, X0c, X0p). -->
-    <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
-    <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

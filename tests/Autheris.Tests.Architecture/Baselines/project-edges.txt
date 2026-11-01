@@ -48,8 +48,6 @@ Autheris.Tests.Unit->Autheris.Tests.Common
 Autheris.Tests.Unit->TrinoSqlEngine
 PolicyPredicateLint->Autheris.Application
 PolicyPredicateLint->Autheris.Infrastructure
-TrinoSqlEngine.Tests->Autheris.Application
-TrinoSqlEngine.Tests->Autheris.Infrastructure
 TrinoSqlEngine.Tests->TrinoSqlEngine
 autheris-schema-check->Autheris.Application
 casbin-policy-lint->Autheris.Application

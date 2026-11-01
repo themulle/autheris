@@ -73,12 +73,19 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
         Assert.Equal(SecurityProbes.All.Count, SecurityProbes.All.Select(p => p.Name).Distinct().Count());
     }
 
-    /// <summary>A new control switch cannot be added without a mutant that uses it (and so without a probe that guards it).</summary>
+    /// <summary>A new control switch cannot be added without a mutant that uses it (and so without a probe that guards it). Non-engine controls are tested in Autheris.Tests.Unit.</summary>
     [Fact]
     public void EverySecurityControlSwitch_HasAnActiveMutant()
     {
+        var nonEngineControls = new HashSet<SecurityControl>
+        {
+            SecurityControl.SessionPinReadBack,
+            SecurityControl.ErrorMapperFixedMessage,
+            SecurityControl.TenantRegistryFailClosed,
+            SecurityControl.CatalogLoadFailureDenies
+        };
         var used = SecurityMutants.Active.SelectMany(m => m.Seam.DisabledControls ?? Enumerable.Empty<SecurityControl>()).ToHashSet();
-        var unused = Enum.GetValues<SecurityControl>().Where(c => !used.Contains(c)).ToList();
+        var unused = Enum.GetValues<SecurityControl>().Where(c => !nonEngineControls.Contains(c) && !used.Contains(c)).ToList();
         Assert.True(unused.Count == 0, "Security control switches without a mutant: " + string.Join(", ", unused));
     }
 

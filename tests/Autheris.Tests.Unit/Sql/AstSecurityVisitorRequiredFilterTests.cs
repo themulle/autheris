@@ -1,14 +1,13 @@
-namespace TrinoSqlEngine.Tests.Ast;
+namespace Autheris.Tests.Unit.Sql;
 
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using Autheris.Application.Sql.Errors;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
-using TrinoSqlEngine.Tests.Compiler;
-using Autheris.Application.Sql.Errors;
 using Xunit;
 
 public sealed class AstSecurityVisitorRequiredFilterTests
@@ -42,7 +41,7 @@ public sealed class AstSecurityVisitorRequiredFilterTests
         IPolicyPredicateProvider? rowFilters = null,
         TenantBinding? tenant = null)
     {
-        var filters = rowFilters ?? new DictPolicyProvider();
+        var filters = rowFilters ?? new LocalDictPolicyProvider();
         return new CompileRequest
         {
             TargetDialect = TargetSqlDialect.PostgreSql,
@@ -52,7 +51,7 @@ public sealed class AstSecurityVisitorRequiredFilterTests
             Policy = new GovernancePolicy
             {
                 RowFilters = filters,
-                Masks = new DictMaskProvider(),
+                Masks = new LocalDictMaskProvider(),
                 Catalog = catalog,
                 Tenant = tenant ?? new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
             }
@@ -165,7 +164,7 @@ public sealed class AstSecurityVisitorRequiredFilterTests
     public void T_SEC_163_10_QueryWithoutWhere_ActiveRlsConstrainsColumn_Permitted()
     {
         var catalog = CreateCatalog("region");
-        var filters = new DictPolicyProvider();
+        var filters = new LocalDictPolicyProvider();
         filters.NoPolicy.Remove(Orders);
         filters.Predicates[Orders] = PolicyPredicate.Create(
             new BinaryExpression(
@@ -258,5 +257,21 @@ public sealed class AstSecurityVisitorRequiredFilterTests
         Assert.Equal(400, mapping.Status);
         Assert.Equal("REQUIRED_FILTER_COLUMN_MISSING", mapping.Code);
         Assert.Equal("A required filter column was not constrained by the query or an active row policy.", mapping.Title);
+    }
+
+    private sealed class LocalDictPolicyProvider : IPolicyPredicateProvider
+    {
+        public Dictionary<TableIdentity, PolicyPredicate> Predicates { get; } = new();
+        public HashSet<TableIdentity> NoPolicy { get; } = new();
+        public bool ShouldApplyPolicy(TableIdentity table) => !NoPolicy.Contains(table);
+        public PolicyPredicate GetPredicate(TableIdentity table) =>
+            Predicates.TryGetValue(table, out var p) ? p : PolicyPredicate.DenyAll;
+    }
+
+    private sealed class LocalDictMaskProvider : IColumnMaskProvider
+    {
+        public Dictionary<(TableIdentity, string), MaskSpec> Masks { get; } = new();
+        public bool HasMask(TableIdentity table, string column) => Masks.ContainsKey((table, column.ToLowerInvariant()));
+        public MaskSpec GetMask(TableIdentity table, string column) => Masks[(table, column.ToLowerInvariant())];
     }
 }
