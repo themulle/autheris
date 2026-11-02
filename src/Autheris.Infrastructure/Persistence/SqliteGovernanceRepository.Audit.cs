@@ -18,6 +18,64 @@ namespace Autheris.Infrastructure.Persistence;
 public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAuditPurgeKeyProvider
 {
     byte[]? IAuditPurgeKeyProvider.GetAuditHmacKey() => _auditHmacKey;
+
+    internal static class AuditSql
+    {
+        public const string SelectLatestPurgeCheckpoint = @"SELECT first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature
+                            FROM AUDIT_PURGE_CHECKPOINTS
+                            ORDER BY first_surviving_seq DESC
+                            LIMIT 1";
+
+        public const string InsertPurgeCheckpoint = @"INSERT INTO AUDIT_PURGE_CHECKPOINTS (id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature)
+                            VALUES (@id, @firstSeq, @prevHash, @purgedCount, @purgedThrough, @createdAt, @sig, @extSig)";
+
+        public static readonly AuditPurgePlanStatements PurgePlan = new(
+            SelectOldestRowSql: "SELECT seq, occurred_at FROM AUDIT_LOG_ENTRIES ORDER BY seq ASC LIMIT 1",
+            SelectSurvivingRowSql: "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES WHERE occurred_at >= @threshold ORDER BY seq ASC LIMIT 1",
+            SelectNewestRowSql: "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq DESC LIMIT 1",
+            SelectMaxEligibleSeqSql: "SELECT MAX(seq) FROM AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq");
+
+        public static string GetAuditLogEntries(bool withTenant) =>
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+                            FROM AUDIT_LOG_ENTRIES
+                            {(withTenant ? " WHERE tenant_id = @tenantId" : "")}
+                            ORDER BY rowid ASC
+                            LIMIT @lim";
+
+        public static string FormatQueryAuditLogs(string whereSql) =>
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+                            FROM AUDIT_LOG_ENTRIES
+                            {whereSql}
+                            ORDER BY occurred_at DESC
+                            LIMIT @lim";
+
+        public static string FormatQueryAuditLogPage(string wherePredicate) =>
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
+                            FROM AUDIT_LOG_ENTRIES
+                            WHERE {wherePredicate}
+                            ORDER BY seq DESC
+                            LIMIT @lim";
+
+        public const string SelectChainRangeMinMax = @"SELECT MIN(rowid), MAX(rowid) FROM AUDIT_LOG_ENTRIES
+                                    WHERE occurred_at >= @from AND occurred_at <= @to";
+
+        public const string SelectChainRangeCount = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE rowid BETWEEN @a AND @b";
+
+        public const string SelectChainPage = @"SELECT rowid, seq, id, occurred_at, event_type, actor_sid, target_table, target_column,
+                                       decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+                                FROM AUDIT_LOG_ENTRIES
+                                WHERE rowid > @after AND rowid <= @last
+                                ORDER BY rowid ASC
+                                LIMIT @lim";
+
+        public const string SelectTail = "SELECT entry_hash, seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 1";
+
+        public const string SelectCount = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES";
+
+        public const string SelectVerifyScan = @"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, seq, tenant_id
+                                FROM AUDIT_LOG_ENTRIES
+                                ORDER BY rowid ASC";
+    }
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
         StoredTenant.RequireWritable(entry.TenantId); // DT-SC-04: a missing tenant is refused at the door, not dead-lettered later
@@ -649,46 +707,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        var conn = scope.Connection;
-        {
-            var list = new List<AuditLogEntry>();
-            using var cmd = conn.CreateCommand();
-            var sql = new StringBuilder(@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
-                                       decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
-                                FROM AUDIT_LOG_ENTRIES");
-            if (tenantId.HasValue)
-            {
-                sql.Append(" WHERE tenant_id = @tenantId");
-                cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
-            }
-            sql.Append(" ORDER BY rowid ASC LIMIT @lim");
-            cmd.CommandText = sql.ToString();
-            cmd.Parameters.AddWithValue("@lim", limit);
-
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                list.Add(ReadAuditEntry(reader));
-            }
-            return list;
-        }
+        return await AuditSqlCore.GetAuditLogEntriesAsync(scope.Connection, AuditSql.GetAuditLogEntries(tenantId != null), limit, tenantId, ct).ConfigureAwait(false);
     }
 
-    private static AuditLogEntry ReadAuditEntry(SqliteDataReader reader, int o = 0) => new()
-    {
-        Id = Guid.Parse(reader.GetString(o)),
-        OccurredAt = DateTimeOffset.Parse(reader.GetString(o + 1)),
-        EventType = reader.GetString(o + 2),
-        ActorSid = new Sid(reader.GetString(o + 3)),
-        TargetTable = reader.GetString(o + 4),
-        TargetColumn = reader.IsDBNull(o + 5) ? null : reader.GetString(o + 5),
-        Decision = reader.GetString(o + 6),
-        TraceId = reader.GetString(o + 7),
-        DetailsJson = reader.GetString(o + 8),
-        PrevHash = reader.GetString(o + 9),
-        EntryHash = reader.GetString(o + 10),
-        TenantId = StoredTenant.ParseAudit(reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11))
-    };
+    private static AuditLogEntry ReadAuditEntry(SqliteDataReader reader, int o = 0) =>
+        AuditSqlCore.ReadAuditEntry(reader, o);
 
     public async Task<IReadOnlyList<AuditLogEntry>> QueryAuditLogsAsync(
         string? targetTable = null,
@@ -700,47 +723,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        var conn = scope.Connection;
-        {
-            var list = new List<AuditLogEntry>();
-            using var cmd = conn.CreateCommand();
-            var sql = new StringBuilder(@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
-                                               decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
-                                        FROM AUDIT_LOG_ENTRIES
-                                        WHERE 1=1");
-
-            if (!string.IsNullOrWhiteSpace(targetTable))
-            {
-                sql.Append(" AND target_table = @targetTable");
-                cmd.Parameters.AddWithValue("@targetTable", targetTable);
-            }
-            if (actorSid.HasValue && !string.IsNullOrWhiteSpace(actorSid.Value.Value))
-            {
-                sql.Append(" AND actor_sid = @actorSid");
-                cmd.Parameters.AddWithValue("@actorSid", actorSid.Value.Value);
-            }
-            if (since.HasValue)
-            {
-                sql.Append(" AND occurred_at >= @since");
-                cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since.Value));
-            }
-            if (tenantId.HasValue)
-            {
-                sql.Append(" AND tenant_id = @tenantId");
-                cmd.Parameters.AddWithValue("@tenantId", tenantId.Value.Value);
-            }
-
-            sql.Append(" ORDER BY occurred_at DESC LIMIT @lim");
-            cmd.Parameters.AddWithValue("@lim", Math.Clamp(limit, 1, 5000));
-            cmd.CommandText = sql.ToString();
-
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                list.Add(ReadAuditEntry(reader));
-            }
-            return list;
-        }
+        return await AuditSqlCore.QueryAuditLogsAsync(scope.Connection, AuditSql.FormatQueryAuditLogs, targetTable, actorSid, since, limit, tenantId, ct).ConfigureAwait(false);
     }
 
     public async Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
@@ -748,90 +731,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
     {
         ArgumentNullException.ThrowIfNull(query);
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
-        var size = query.EffectivePageSize;
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        using var cmd = scope.Connection.CreateCommand();
-        var sql = new StringBuilder(@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
-                                             decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
-                                      FROM AUDIT_LOG_ENTRIES
-                                      WHERE seq IS NOT NULL");
-        if (query.Tenant is { } tenant)
-        {
-            sql.Append(" AND tenant_id = @tenantId");
-            cmd.Parameters.AddWithValue("@tenantId", tenant.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.TargetTable))
-        {
-            sql.Append(" AND LOWER(target_table) = LOWER(@targetTable)");
-            cmd.Parameters.AddWithValue("@targetTable", query.TargetTable);
-        }
-
-        if (query.Actor is { } actor && !string.IsNullOrWhiteSpace(actor.Value))
-        {
-            sql.Append(" AND actor_sid = @actorSid");
-            cmd.Parameters.AddWithValue("@actorSid", actor.Value);
-        }
-
-        if (query.Since is { } since)
-        {
-            sql.Append(" AND occurred_at >= @since");
-            cmd.Parameters.AddWithValue("@since", AuditTimestamp.ToStorage(since));
-        }
-
-        if (query.BeforeSequence is { } before)
-        {
-            sql.Append(" AND seq < @before");
-            cmd.Parameters.AddWithValue("@before", before);
-        }
-
-        sql.Append(" ORDER BY seq DESC LIMIT @lim");
-        cmd.Parameters.AddWithValue("@lim", size + 1);
-        cmd.CommandText = sql.ToString();
-
-        var items = new List<AuditLogEntry>(size + 1);
-        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            items.Add(new AuditLogEntry
-            {
-                Id = Guid.Parse(reader.GetString(0)),
-                OccurredAt = DateTimeOffset.Parse(reader.GetString(1)),
-                EventType = reader.GetString(2),
-                ActorSid = new Sid(reader.GetString(3)),
-                TargetTable = reader.GetString(4),
-                TargetColumn = reader.IsDBNull(5) ? null : reader.GetString(5),
-                Decision = reader.GetString(6),
-                TraceId = reader.GetString(7),
-                DetailsJson = reader.GetString(8),
-                PrevHash = reader.GetString(9),
-                EntryHash = reader.GetString(10),
-                TenantId = StoredTenant.ParseAudit(reader.IsDBNull(11) ? null : reader.GetString(11)),
-                ChainSequence = reader.GetInt64(12)
-            });
-        }
-
-        return AuditPageSlicer.Slice(items, size);
+        return await AuditSqlCore.QueryAuditLogPageAsync(scope.Connection, AuditSql.FormatQueryAuditLogPage, query, ct).ConfigureAwait(false);
     }
 
     public async Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = @"SELECT id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature
-                            FROM AUDIT_PURGE_CHECKPOINTS
-                            ORDER BY first_surviving_seq DESC
-                            LIMIT 1";
-        using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
-        return new AuditPurgeCheckpoint(
-            reader.GetInt64(1),
-            reader.GetString(2),
-            reader.GetInt64(3),
-            DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
-            reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7));
+        return await AuditSqlCore.GetLatestPurgeCheckpointAsync(scope.Connection, AuditSql.SelectLatestPurgeCheckpoint, ct).ConfigureAwait(false);
     }
 
     public async Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
@@ -848,86 +755,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         }
 
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
-        using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = @"INSERT INTO AUDIT_PURGE_CHECKPOINTS (id, first_surviving_seq, surviving_prev_hash, purged_count, purged_through_utc, created_at, signature, external_signature)
-                            VALUES (@id, @firstSeq, @prevHash, @purgedCount, @purgedThrough, @createdAt, @sig, @extSig)";
-        cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
-        cmd.Parameters.AddWithValue("@firstSeq", checkpoint.FirstSurvivingSequence);
-        cmd.Parameters.AddWithValue("@prevHash", checkpoint.SurvivingPrevHash);
-        cmd.Parameters.AddWithValue("@purgedCount", checkpoint.PurgedCount);
-        cmd.Parameters.AddWithValue("@purgedThrough", checkpoint.PurgedThroughUtc.ToUniversalTime().ToString("O"));
-        cmd.Parameters.AddWithValue("@createdAt", checkpoint.CreatedAtUtc.ToUniversalTime().ToString("O"));
-        cmd.Parameters.AddWithValue("@sig", checkpoint.Signature);
-        cmd.Parameters.AddWithValue("@extSig", (object?)checkpoint.ExternalSignature ?? DBNull.Value);
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await AuditSqlCore.SavePurgeCheckpointAsync(scope.Connection, AuditSql.InsertPurgeCheckpoint, checkpoint, ct).ConfigureAwait(false);
     }
 
     public async Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(DateTimeOffset thresholdUtc, CancellationToken ct = default)
     {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        var conn = scope.Connection;
-        var thresholdIso = thresholdUtc.ToUniversalTime().ToString("O");
-
-        // 1. Check oldest row
-        using (var minCmd = conn.CreateCommand())
-        {
-            minCmd.CommandText = "SELECT seq, occurred_at FROM AUDIT_LOG_ENTRIES ORDER BY seq ASC LIMIT 1";
-            using var minReader = await minCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            if (!await minReader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                return null;
-            }
-
-            var oldestOccurredAt = minReader.GetString(1);
-            if (string.CompareOrdinal(oldestOccurredAt, thresholdIso) >= 0)
-            {
-                return null;
-            }
-        }
-
-        // 2. Find first surviving entry (earliest entry with occurred_at >= thresholdIso)
-        long survivingSeq;
-        string survivingPrevHash;
-        using (var survCmd = conn.CreateCommand())
-        {
-            survCmd.CommandText = "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES WHERE occurred_at >= @threshold ORDER BY seq ASC LIMIT 1";
-            survCmd.Parameters.AddWithValue("@threshold", thresholdIso);
-            using var survReader = await survCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            if (await survReader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                survivingSeq = survReader.GetInt64(0);
-                survivingPrevHash = survReader.GetString(1);
-            }
-            else
-            {
-                using var newestCmd = conn.CreateCommand();
-                newestCmd.CommandText = "SELECT seq, prev_hash FROM AUDIT_LOG_ENTRIES ORDER BY seq DESC LIMIT 1";
-                using var newestReader = await newestCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                if (!await newestReader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    return null;
-                }
-                survivingSeq = newestReader.GetInt64(0);
-                survivingPrevHash = newestReader.GetString(1);
-            }
-        }
-
-        // 3. Find max eligible sequence (< survivingSeq)
-        long maxEligibleSeq;
-        using (var maxCmd = conn.CreateCommand())
-        {
-            maxCmd.CommandText = "SELECT MAX(seq) FROM AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq";
-            maxCmd.Parameters.AddWithValue("@survivingSeq", survivingSeq);
-            var maxObj = await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (maxObj == null || maxObj is DBNull)
-            {
-                return null;
-            }
-            maxEligibleSeq = Convert.ToInt64(maxObj, CultureInfo.InvariantCulture);
-        }
-
-        long purgeCount = survivingSeq - 1;
-        return (maxEligibleSeq, survivingSeq, survivingPrevHash, purgeCount);
+        return await AuditSqlCore.PlanPurgePrefixAsync(scope.Connection, AuditSql.PurgePlan, thresholdUtc, ct).ConfigureAwait(false);
     }
 
     public async Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
@@ -985,109 +820,9 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             }
 
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column,
-                                       decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
-                                FROM AUDIT_LOG_ENTRIES
-                                ORDER BY rowid ASC";
+            cmd.CommandText = AuditSql.SelectVerifyScan;
+            using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            var expectedPrevHash = checkpoint != null ? checkpoint.SurvivingPrevHash : AuditGenesisHash;
-            long position = checkpoint != null ? checkpoint.FirstSurvivingSequence - 1 : 0;
-            var anchorEntryMatched = anchor == null || anchor.Sequence == 0;
-            bool readAnyRows = false;
-
-            while (await reader.ReadAsync(ct))
-            {
-                readAnyRows = true;
-                position++;
-                var id = reader.GetString(0);
-                var occurredAt = reader.GetString(1);
-                var eventType = reader.GetString(2);
-                var actorSid = reader.GetString(3);
-                var targetTable = reader.GetString(4);
-                var targetColumn = reader.IsDBNull(5) ? "" : reader.GetString(5);
-                var decision = reader.GetString(6);
-                var traceId = reader.GetString(7);
-                var detailsJson = reader.GetString(8);
-                var prevHash = reader.GetString(9);
-                var entryHash = reader.GetString(10);
-                var storedTenant = reader.IsDBNull(11) ? null : reader.GetString(11);
-                if (!StoredTenant.IsValidAudit(storedTenant))
-                {
-                    // DT-SC-16: an unparsable stored tenant fails verification (it is never skipped or defaulted); the value is not logged.
-                    FlagAuditChainViolation("Audit entry carries an invalid stored tenant (STORED_TENANT_INVALID).");
-                    return false;
-                }
-
-                var tenantId = storedTenant!;
-                long? seq = reader.IsDBNull(12) ? null : reader.GetInt64(12);
-
-                if (checkpoint != null && seq.HasValue && seq.Value < checkpoint.FirstSurvivingSequence)
-                {
-                    FlagAuditChainViolation($"Audit entry found before purge checkpoint sequence: got seq {seq.Value}, checkpoint first sequence is {checkpoint.FirstSurvivingSequence}.");
-                    return false;
-                }
-
-                if (!FixedTimeEqualsString(prevHash, expectedPrevHash))
-                {
-                    FlagAuditChainViolation($"Broken prev_hash chain at position {position} (id {id}). Expected {expectedPrevHash}, got {prevHash}.");
-                    return false; // Broken chain!
-                }
-
-                // SEC H-17: every row carries a gap-free sequence number equal to its ordinal position.
-                if (!seq.HasValue)
-                {
-                    FlagAuditChainViolation($"Unsequenced audit row at position {position} (id {id}). Investigate tampering.");
-                    return false;
-                }
-
-                if (seq.Value != position)
-                {
-                    FlagAuditChainViolation($"Audit entry sequence gap/divergence: expected seq {position}, got {seq.Value}.");
-                    return false;
-                }
-
-                var parsedOccurredAt = DateTimeOffset.Parse(occurredAt);
-                var computedHash = ComputeAuditEntryHash(seq, id, prevHash, parsedOccurredAt, eventType, actorSid, targetTable, targetColumn, decision, traceId, detailsJson, tenantId);
-
-                if (!FixedTimeEqualsString(entryHash, computedHash))
-                {
-                    FlagAuditChainViolation($"Invalid entry_hash at position {position} (id {id}). Hash does not match row payload.");
-                    return false; // Tampered payload!
-                }
-
-                if (anchor != null && anchor.Sequence == position)
-                {
-                    anchorEntryMatched = FixedTimeEqualsString(entryHash, anchor.EntryHash);
-                }
-
-                expectedPrevHash = entryHash;
-            }
-
-            if (checkpoint != null && (!readAnyRows || position < checkpoint.FirstSurvivingSequence))
-            {
-                FlagAuditChainViolation($"Audit chain missing surviving rows: checkpoint expected seq {checkpoint.FirstSurvivingSequence} but DB has none.");
-                return false;
-            }
-
-            // SEC H-17: compare with the external signed anchor (detects tail truncation and total deletion,
-            // also across restarts).
-            if (anchor != null)
-            {
-                if (position < anchor.Sequence)
-                {
-                    FlagAuditChainViolation($"Audit chain truncated: DB ends at seq {position}, signed anchor at seq {anchor.Sequence}.");
-                    return false;
-                }
-
-                if (!anchorEntryMatched)
-                {
-                    FlagAuditChainViolation($"Audit chain entry at anchored seq {anchor.Sequence} does not match the signed anchor hash.");
-                    return false;
-                }
-            }
-
-            // Tail truncation detection against the in-memory reference of this process.
             long knownSeq;
             string knownHash;
             lock (_pendingAuditTxStates)
@@ -1095,21 +830,18 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
                 knownSeq = _lastAuditSeq;
                 knownHash = _lastAuditHash;
             }
-            if (knownHash != AuditGenesisHash &&
-                (!FixedTimeEqualsString(expectedPrevHash, knownHash) || position != knownSeq))
-            {
-                var explainedByAnchor = anchor != null
-                                        && position > knownSeq
-                                        && anchor.Sequence == position
-                                        && FixedTimeEqualsString(anchor.EntryHash, expectedPrevHash);
-                if (!explainedByAnchor)
-                {
-                    FlagAuditChainViolation($"Audit chain tail (seq {position}) does not match the in-memory reference (seq {knownSeq}).");
-                    return false; // Tail truncation detected!
-                }
-            }
 
-            return true;
+            var result = await AuditSqlCore.VerifyAuditRowsAsync(
+                reader,
+                checkpoint,
+                anchor,
+                knownSeq,
+                knownHash,
+                _auditHmacKey,
+                FlagAuditChainViolation,
+                ct).ConfigureAwait(false);
+
+            return result.Success;
         }
     }
 
@@ -1117,98 +849,21 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
-        var conn = scope.Connection;
-        {
-            long firstRowId;
-            long lastRowId;
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = @"SELECT MIN(rowid), MAX(rowid) FROM AUDIT_LOG_ENTRIES
-                                    WHERE occurred_at >= @from AND occurred_at <= @to";
-                cmd.Parameters.AddWithValue("@from", AuditTimestamp.ToStorage(windowFrom));
-                cmd.Parameters.AddWithValue("@to", AuditTimestamp.ToStorage(windowTo));
-                using var reader = await cmd.ExecuteReaderAsync(ct);
-                if (!await reader.ReadAsync(ct) || reader.IsDBNull(0) || reader.IsDBNull(1))
-                {
-                    return null;
-                }
-                firstRowId = reader.GetInt64(0);
-                lastRowId = reader.GetInt64(1);
-            }
-
-            using var countCmd = conn.CreateCommand();
-            countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE rowid BETWEEN @a AND @b";
-            countCmd.Parameters.AddWithValue("@a", firstRowId);
-            countCmd.Parameters.AddWithValue("@b", lastRowId);
-            var count = Convert.ToInt64(await countCmd.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture);
-            return new AuditChainRange(firstRowId, lastRowId, count);
-        }
+        return await AuditSqlCore.GetAuditChainRangeAsync(scope.Connection, AuditSql.SelectChainRangeMinMax, AuditSql.SelectChainRangeCount, windowFrom, windowTo, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<AuditChainRecord>> GetAuditChainPageAsync(long afterRowId, long lastRowIdInclusive, int pageSize, CancellationToken ct = default)
     {
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        var conn = scope.Connection;
-        {
-            var list = new List<AuditChainRecord>();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"SELECT rowid, seq, id, occurred_at, event_type, actor_sid, target_table, target_column,
-                                       decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
-                                FROM AUDIT_LOG_ENTRIES
-                                WHERE rowid > @after AND rowid <= @last
-                                ORDER BY rowid ASC
-                                LIMIT @lim";
-            cmd.Parameters.AddWithValue("@after", afterRowId);
-            cmd.Parameters.AddWithValue("@last", lastRowIdInclusive);
-            cmd.Parameters.AddWithValue("@lim", Math.Clamp(pageSize, 1, 10000));
-
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                long? seq = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-                var entry = ReadAuditEntry(reader, 2);
-                list.Add(new AuditChainRecord(reader.GetInt64(0), seq, entry));
-            }
-            return list;
-        }
+        return await AuditSqlCore.GetAuditChainPageAsync(scope.Connection, AuditSql.SelectChainPage, afterRowId, lastRowIdInclusive, pageSize, ct).ConfigureAwait(false);
     }
 
     public AuditChainAnchor? GetVerifiedChainAnchor() => TryLoadVerifiedAnchor(out _);
 
     /// <summary>Last entry hash and its (explicit or ordinal) sequence number; hash is null for an empty log.</summary>
-    private (string? Hash, long Sequence) ReadAuditTail(SqliteConnection conn, SqliteTransaction? tx)
-    {
-        string? hash = null;
-        long? seq = null;
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = "SELECT entry_hash, seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 1";
-            using var reader = cmd.ExecuteReader();
-            if (reader.Read())
-            {
-                hash = reader.GetString(0);
-                seq = reader.IsDBNull(1) ? null : reader.GetInt64(1);
-            }
-        }
-
-        if (hash == null)
-        {
-            return (null, 0);
-        }
-
-        if (seq.HasValue)
-        {
-            return (hash, seq.Value);
-        }
-
-        using var countCmd = conn.CreateCommand();
-        countCmd.Transaction = tx;
-        countCmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES";
-        var count = Convert.ToInt64(countCmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-        return (hash, count);
-    }
+    private (string? Hash, long Sequence) ReadAuditTail(SqliteConnection conn, SqliteTransaction? tx) =>
+        AuditSqlCore.ReadAuditTail(conn, tx, AuditSql.SelectTail, AuditSql.SelectCount);
 
     private string ComputeAuditEntryHash(
         long? sequence,
@@ -1222,14 +877,13 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         string? decision,
         string? traceId,
         string? detailsJson,
-        string? tenantId)
-    {
-        return AuditChainEngine.ComputeEntryHash(
+        string? tenantId) =>
+        AuditSqlCore.ComputeAuditEntryHash(
             _auditHmacKey,
             sequence,
             id,
             prevHash,
-            occurredAt.ToUniversalTime(),
+            occurredAt,
             eventType,
             actorSid,
             targetTable,
@@ -1238,7 +892,6 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             traceId,
             detailsJson,
             tenantId);
-    }
 
     /// <summary>
     /// SEC H-17: every audit row is written with a sequence number. Rows without one were not written by the gateway, so they
@@ -1255,17 +908,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         }
     }
 
-    private AuditChainAnchor CreateSignedAnchor(long sequence, string entryHash)
-    {
-        var updatedAt = DateTimeOffset.UtcNow;
-        return new AuditChainAnchor(sequence, entryHash, updatedAt, ComputeAnchorSignature(sequence, entryHash, updatedAt));
-    }
-
-    private string ComputeAnchorSignature(long sequence, string entryHash, DateTimeOffset updatedAt)
-    {
-        var data = Encoding.UTF8.GetBytes($"anchor-v1|{sequence}|{entryHash}|{updatedAt.ToUniversalTime():O}");
-        return Convert.ToHexString(HMACSHA256.HashData(_auditAnchorKey, data));
-    }
+    private AuditChainAnchor CreateSignedAnchor(long sequence, string entryHash) =>
+        AuditSqlCore.CreateSignedAnchor(_auditAnchorKey, sequence, entryHash);
 
     /// <summary>SR-L-07: saves the anchor only if it is ahead of the verified anchor currently stored (or none/invalid exists).</summary>
     private void SaveAnchorMonotonic(AuditChainAnchor anchor)
@@ -1285,76 +929,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
         }
     }
 
-    private AuditChainAnchor? TryLoadVerifiedAnchor(out bool invalid)
-    {
-        invalid = false;
-        AuditChainAnchor? anchor;
-        try
-        {
-            anchor = _auditAnchorStore.Load();
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to read the external audit chain anchor.");
-            invalid = true;
-            return null;
-        }
+    private AuditChainAnchor? TryLoadVerifiedAnchor(out bool invalid) =>
+        AuditSqlCore.TryLoadVerifiedAnchor(_auditAnchorStore, _auditAnchorKey, _logger, out invalid);
 
-        if (anchor == null)
-        {
-            return null;
-        }
-
-        if (anchor.Sequence < 0 || string.IsNullOrEmpty(anchor.EntryHash) || string.IsNullOrEmpty(anchor.Signature))
-        {
-            invalid = true;
-            return null;
-        }
-
-        var expected = ComputeAnchorSignature(anchor.Sequence, anchor.EntryHash, anchor.UpdatedAt);
-        if (!FixedTimeEqualsString(expected, anchor.Signature))
-        {
-            invalid = true;
-            return null;
-        }
-
-        return anchor;
-    }
-
-    private AuditPurgeCheckpoint? TryLoadVerifiedPurgeCheckpoint(out bool invalid)
-    {
-        invalid = false;
-        AuditPurgeCheckpoint? checkpoint;
-        try
-        {
-            checkpoint = _auditAnchorStore.LoadPurgeCheckpoint();
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to read purge checkpoint anchor.");
-            invalid = true;
-            return null;
-        }
-
-        if (checkpoint == null)
-        {
-            return null;
-        }
-
-        if (checkpoint.FirstSurvivingSequence < 1 || string.IsNullOrEmpty(checkpoint.SurvivingPrevHash) || string.IsNullOrEmpty(checkpoint.Signature) || checkpoint.PurgedCount < 0)
-        {
-            invalid = true;
-            return null;
-        }
-
-        if (!AuditChainEngine.VerifyPurgeCheckpointSignature(_auditHmacKey, checkpoint))
-        {
-            invalid = true;
-            return null;
-        }
-
-        return checkpoint;
-    }
+    private AuditPurgeCheckpoint? TryLoadVerifiedPurgeCheckpoint(out bool invalid) =>
+        AuditSqlCore.TryLoadVerifiedPurgeCheckpoint(_auditAnchorStore, _auditHmacKey, _logger, out invalid);
 
     private void InitializeAuditChainAnchor(bool isDevOrTest)
     {
@@ -1419,7 +998,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
     }
 
     private static bool FixedTimeEqualsString(string? a, string? b) =>
-        CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a ?? string.Empty), Encoding.UTF8.GetBytes(b ?? string.Empty));
+        AuditSqlCore.FixedTimeEqualsString(a, b);
 
     private static string EscapeField(string? s) => Autheris.Domain.Audit.AuditCanonicalizer.CanonicalizeField(s);
 }

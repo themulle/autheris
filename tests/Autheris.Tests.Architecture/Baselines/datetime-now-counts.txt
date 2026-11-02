@@ -136,7 +136,7 @@ src/Autheris.Infrastructure/Persistence/IdentityStore.cs|4
 src/Autheris.Infrastructure/Persistence/InMemoryAccessProfileRepository.cs|5
 src/Autheris.Infrastructure/Persistence/InMemoryDbtProposalRepository.cs|1
 src/Autheris.Infrastructure/Persistence/Migrations/GovernanceMigrationRunnerBase.cs|1
-src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|4
+src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|3
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs|9
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|15
@@ -144,12 +144,12 @@ src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Schema.cs
 src/Autheris.Infrastructure/Persistence/RecertificationStore.cs|1
 src/Autheris.Infrastructure/Persistence/RightsAndPoliciesStore.cs|1
 src/Autheris.Infrastructure/Persistence/RowFilterEvaluationStore.cs|2
-src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|4
+src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|3
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs|9
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|15
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Schema.cs|1
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|5
+src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|4
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|9
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs|12
