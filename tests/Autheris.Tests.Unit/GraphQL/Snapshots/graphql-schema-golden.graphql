@@ -1,0 +1,348 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+type Query {
+  table(
+    domain: String!
+    name: String!
+    schema: String! = "dbo"
+    first: Int! = 50
+    after: Int! = 0
+  ): TableRecordPayload! @cost(weight: "10")
+  myAccess(table: String!): EffectiveTableAccessDto! @cost(weight: "10")
+  myAccessRequests(status: String, first: Int, after: Int): [ConsentRequestDto!]!
+    @cost(weight: "10")
+  pendingApprovalsForMe(first: Int, after: Int): [ConsentRequestDto!]!
+    @cost(weight: "10")
+  myActiveConsents(table: String, first: Int, after: Int): [ConsentDto!]!
+    @cost(weight: "10")
+  catalog(
+    domain: String
+    first: Int
+    after: Int
+    search: String
+    tag: String
+    language: String
+  ): [TableMetadataDto!]! @cost(weight: "10")
+  calculateConsentRevocationImpact(consentId: UUID!): ConsentRevocationImpactReport!
+    @cost(weight: "10")
+  tableConsumers(
+    domain: String!
+    schema: String!
+    tableName: String!
+    timeWindowDays: Int! = 30
+  ): TableConsumersReport! @cost(weight: "10")
+  gdprDataDisclosureReport(
+    domain: String
+    schema: String
+    tableName: String
+    subjectSid: String
+    timeWindowDays: Int! = 365
+  ): GdprDisclosureReport! @cost(weight: "10")
+  exportGdprDataDisclosureReportPdfBase64(
+    domain: String
+    schema: String
+    tableName: String
+    subjectSid: String
+    timeWindowDays: Int! = 365
+  ): String! @cost(weight: "10")
+}
+
+type Mutation {
+  setConsentDescription(consentId: UUID!, description: String): ConsentDto!
+    @cost(weight: "10")
+  requestTableAccess(
+    domain: String!
+    schema: String!
+    tableName: String!
+    justification: String!
+    durationDays: Int!
+    idempotencyKey: String
+    context: AccessRequestContextInput
+  ): ConsentRequestPayload! @cost(weight: "10")
+  withdrawAccessRequest(requestId: UUID!): ConsentRequestPayload!
+    @cost(weight: "10")
+  approveConsentRequest(
+    requestId: UUID!
+    idempotencyKey: String
+    rowFilter: RowFilterInput
+    columnMasking: ColumnMaskingInput
+    description: String
+  ): ConsentRequestPayload! @cost(weight: "10")
+  rejectConsentRequest(
+    requestId: UUID!
+    reason: String!
+    idempotencyKey: String
+  ): ConsentRequestPayload! @cost(weight: "10")
+  revokeConsent(consentId: UUID!, reason: String!): Boolean! @cost(weight: "10")
+  reloadSchema: Boolean! @cost(weight: "10")
+  syncOpenMetadata(dryRun: Boolean! = false): OpenMetadataSyncPayload!
+    @cost(weight: "10")
+  syncDataCatalog(dryRun: Boolean! = false): DataCatalogSyncPayload!
+    @cost(weight: "10")
+}
+
+type AffectedEntity {
+  id: String!
+  name: String!
+  type: LineageNodeType!
+  ownerTeam: String
+  ownerEmail: String
+  cyclicReferenceDetected: Boolean!
+}
+
+type CallingApplicationUsage {
+  application: String!
+  day: String!
+  calls: Long!
+  rowsReturned: Long!
+  rowsMeasuredCalls: Long!
+  rejections: RejectionBreakdown!
+  versions: [String!]!
+  queryNames: [String!]!
+  distinctActors: Int!
+  actorSids: [String!]
+}
+
+type ConsentDto {
+  id: UUID!
+  tableIdentifier: String!
+  effect: String!
+  granteeType: String!
+  granteeSid: String
+  roleName: String
+  validFrom: DateTime!
+  validTo: DateTime!
+  columns: [String!]!
+  description: String
+}
+
+type ConsentRequestDto {
+  id: UUID!
+  tableId: UUID!
+  tableIdentifier: String!
+  requesterSid: String!
+  requestedGranteeType: String!
+  requestedGranteeRef: String
+  businessJustification: String
+  status: String!
+  requestedAt: DateTime!
+  requestedValidTo: DateTime
+  itsmTicketId: String
+  contextJson: String
+}
+
+type ConsentRequestPayload {
+  requestId: UUID!
+  status: String!
+  message: String!
+  itsmTicketReference: ItsmTicketReference
+  description: String
+}
+
+type ConsentRevocationImpactReport {
+  severity: String!
+  affectedDownstreamCount: Int!
+  affectedEntities: [AffectedEntity!]!
+  containsCycles: Boolean!
+}
+
+type DataCatalogSyncPayload {
+  success: Boolean!
+  syncedTablesCount: Int!
+  syncedColumnsCount: Int!
+  maskedColumnsCount: Int!
+  art9ProtectedTablesCount: Int!
+  warnings: [String!]!
+}
+
+type DownstreamConsumerEntity {
+  id: String!
+  name: String!
+  type: LineageNodeType!
+  ownerTeam: String
+  ownerEmail: String
+  distanceFromRoot: Int!
+  upstreamDependencyId: String
+}
+
+type EffectiveTableAccessDto {
+  table: String!
+  decision: String!
+  allowedColumns: [String!]!
+  maskedColumns: [String!]!
+  deniedColumns: [String!]!
+  activeRowFilters: [String!]!
+  consentDescription: String
+  validTo: DateTime
+  restrictedScope: Boolean!
+  scopeClearRequiredColumns: [String!]
+  consentDescriptions: [String!]!
+  consentDescriptionOrigin: String!
+}
+
+type GdprDisclosureReport {
+  targetTable: String
+  subjectSid: String
+  generatedAt: DateTime!
+  timeWindowDays: Int!
+  totalAccessEvents: Int!
+  disclosedRecipients: [GdprRecipientAccessRecord!]!
+  sensitivityCategories: [String!]!
+  legalBasisNotice: String!
+  isComplete: Boolean!
+  evidenceLevel: String!
+  incompletenessReasons: [String!]
+}
+
+type GdprRecipientAccessRecord {
+  recipientSid: String!
+  recipientCategory: String!
+  purpose: String!
+  firstAccess: DateTime!
+  lastAccess: DateTime!
+  totalQueries: Int!
+  accessedColumns: [String!]!
+  maskingRuleApplied: String
+}
+
+type ItsmTicketReference {
+  system: ItsmSystemType!
+  ticketId: String!
+  ticketUrl: String!
+}
+
+type OpenMetadataSyncPayload {
+  success: Boolean!
+  syncedTables: Int!
+  syncedConsents: Int!
+  syncedMaskingRules: Int!
+  warnings: [String!]!
+}
+
+type RejectionBreakdown {
+  access: Long!
+  rateLimit: Long!
+  cost: Long!
+  other: Long!
+  total: Long!
+}
+
+type RuntimeConsumerSummary {
+  actorSid: String!
+  queryCount: Int!
+  firstSeenAt: DateTime!
+  lastSeenAt: DateTime!
+  clientType: String!
+}
+
+type TableConsumersReport {
+  table: String!
+  breakingChangeRisk: String!
+  totalDownstreamCount: Int!
+  activeReadersCount: Int!
+  lastAccessedAt: DateTime
+  downstreamConsumers: [DownstreamConsumerEntity!]!
+  runtimeConsumers: [RuntimeConsumerSummary!]!
+  recommendedMitigations: [String!]!
+  applicationUsages: [CallingApplicationUsage!]
+  suppressedSmallGroups: Boolean!
+}
+
+type TableMetadataDto {
+  domain: String!
+  schema: String!
+  tableName: String!
+  displayName: String!
+  sensitivity: String!
+  description: String
+  columns: [String!]!
+  tags: [String!]!
+  accessStatus: String
+  dataOwner: String
+  delegates: [String!]
+  language: String
+}
+
+type TableRecordPayload {
+  tableName: String!
+  totalCount: Int!
+  jsonRows: [String!]!
+}
+
+input AccessRequestContextInput {
+  application: String
+  tool: String
+  justification: String
+  expectedDuration: String
+}
+
+input ColumnMaskingInput {
+  rules: [ColumnMaskRuleInput!]
+}
+
+input ColumnMaskRuleInput {
+  columnName: String!
+  maskingType: String
+  maskingLevel: ColumnAccessLevel!
+}
+
+input RowFilterInput {
+  rowFilterSql: String
+  filterGroup: String
+  predicates: [RowFilterPredicateInput!]
+}
+
+input RowFilterPredicateInput {
+  columnName: String!
+  operator: String!
+  valueType: String
+  valueJson: String
+  value: String
+  values: [String!]
+}
+
+enum ColumnAccessLevel {
+  DENY
+  MASK
+  CLEAR
+}
+
+enum ItsmSystemType {
+  SERVICE_NOW
+  JIRA
+}
+
+enum LineageNodeType {
+  TABLE
+  COLUMN
+  DASHBOARD
+  PIPELINE
+  EXTERNAL_SERVICE
+}
+
+"The `DateTime` scalar type represents a date and time with time zone offset information."
+scalar DateTime
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/date-time.html")
+
+"The `Long` scalar type represents a signed 64-bit integer."
+scalar Long
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/long.html")
+
+"The `UUID` scalar type represents a Universally Unique Identifier (UUID) as defined by RFC 9562."
+scalar UUID
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/uuid.html")
+
+"The purpose of the `cost` directive is to define a `weight` for GraphQL types, fields, and arguments. Static analysis can use these weights when calculating the overall cost of a query or response."
+directive @cost(
+  "The `weight` argument defines what value to add to the overall cost for every appearance, or possible appearance, of a type, field, argument, etc."
+  weight: String!
+) on
+  | SCALAR
+  | OBJECT
+  | FIELD_DEFINITION
+  | ARGUMENT_DEFINITION
+  | ENUM
+  | INPUT_FIELD_DEFINITION

@@ -24,6 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="GraphQL\Snapshots\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Autheris.Domain\Autheris.Domain.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />

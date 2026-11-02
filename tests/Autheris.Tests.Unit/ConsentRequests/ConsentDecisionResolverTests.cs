@@ -574,7 +574,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [InlineData("public async Task<ConsentRequestPayload> RejectConsentRequestAsync(\n        Guid requestId,\n        string reason,\n        string? idempotencyKey,\n        [Service] IConsentApprovalRepository approvalRepository = default!,")]
     public void W8_FirstStatementOfBothResolvers_IsTheGuardCall(string signature)
     {
-        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "MutationTypes.cs")).Replace("\r\n", "\n");
+        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "Mutation.Consent.cs")).Replace("\r\n", "\n");
         var body = ResolverBody(source, signature);
 
         var firstStatement = body.Split('\n').Select(l => l.Trim()).First(l => l.Length > 0 && !l.StartsWith("//", StringComparison.Ordinal));
@@ -590,7 +590,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public void W8_ApproveResolver_EvaluatesThePolicyBeforeTheStep()
     {
-        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "MutationTypes.cs")).Replace("\r\n", "\n");
+        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "Mutation.Consent.cs")).Replace("\r\n", "\n");
         var body = ResolverBody(source, "public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(\n        Guid requestId,\n        string? idempotencyKey,\n        [Service] IConsentApprovalRepository approvalRepository = default!,");
 
         body.IndexOf("policy.Evaluate(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
