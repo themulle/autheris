@@ -176,7 +176,7 @@ public sealed class GraphQlSpecModel
             a.TryGetProperty("defaultValue", out var d) && d.ValueKind == JsonValueKind.String));
 
     /// <summary>One call: the field with its required arguments plus <paramref name="extra"/> (null = required only); null when it cannot be built.</summary>
-    public string? Build(GqlField field, GqlInput? extra)
+    public string? Build(GqlField field, GqlInput? extra, string operationType = "query")
     {
         var args = new List<string>();
         // list fields are rejected without a page size (QUERY_TOO_COMPLEX), so 'first' belongs to every minimal call
@@ -212,7 +212,14 @@ public sealed class GraphQlSpecModel
             args.Add($"{extra.Name}: {lit}");
         }
 
-        var sb = new StringBuilder("{ ").Append(field.Name);
+        var prefix = operationType switch
+        {
+            "mutation" => "mutation { ",
+            "subscription" => "subscription { ",
+            _ => "{ ",
+        };
+
+        var sb = new StringBuilder(prefix).Append(field.Name);
         if (args.Count > 0)
         {
             sb.Append('(').Append(string.Join(", ", args)).Append(')');
