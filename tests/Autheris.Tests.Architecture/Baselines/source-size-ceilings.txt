@@ -5,13 +5,13 @@ src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.c
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|1977
 src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs|1346
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|1064
-src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs|1575
+src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs|1040
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|1920
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|1120
-src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs|1597
+src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs|1055
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|1952
 src/Autheris.Infrastructure/Persistence/SqlServerWindowsAuthConfigurator.cs|1242
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|1004
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|1662
+src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|1045
 src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs|2026
 src/TrinoSqlEngine/Ast/Builder/SqlAstBuilder.cs|1673
