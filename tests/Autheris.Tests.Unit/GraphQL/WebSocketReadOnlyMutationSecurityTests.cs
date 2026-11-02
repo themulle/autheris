@@ -215,7 +215,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
             .UseDocumentParser()
             .UseDocumentValidation()
             .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution()
             .BuildRequestExecutorAsync();

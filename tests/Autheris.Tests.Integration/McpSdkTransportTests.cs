@@ -75,6 +75,7 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
 
         client.ServerInstructions.ShouldNotBeNull();
         client.ServerInstructions.ShouldContain("query_graphql");
+        client.ServerInfo.ShouldNotBeNull();
         client.ServerInfo.Name.ShouldBe("Autheris.McpServer");
         // The SDK serves the current protocol revisions; the old hand-written server only spoke 2024-11-05.
         string.CompareOrdinal(client.NegotiatedProtocolVersion, "2025-11-25").ShouldBeGreaterThanOrEqualTo(0, client.NegotiatedProtocolVersion);

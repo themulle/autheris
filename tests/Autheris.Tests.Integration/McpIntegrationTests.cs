@@ -35,6 +35,7 @@ public class McpIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         await using var client = await McpTestClient.ConnectAsync(_factory.CreateClient());
 
+        client.ServerInfo.ShouldNotBeNull();
         client.ServerInfo.Name.ShouldBe("Autheris.McpServer");
 
         var (_, text) = await McpTestClient.CallAsync(client, "query_customers", new { });

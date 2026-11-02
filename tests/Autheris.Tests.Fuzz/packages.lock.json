@@ -24,8 +24,8 @@
       },
       "Microsoft.Extensions.ObjectPool": {
         "type": "Transitive",
-        "resolved": "10.0.13",
-        "contentHash": "NX3bhcc0WitPKAVc9Zfi8jeEPClhfEmobUJM4a4bkWhJcBt5IWg6lCrItUoFy4whLjU+atXktURYCweQlR7wfg=="
+        "resolved": "10.0.14",
+        "contentHash": "nBvu7Mxct9qBt37meuwloqVp3FxnitlvfbLmwkVMVWIxJTSKJnLg7ve53l4vUBwB/VcKfYJL6nlp8+hYAZyM4Q=="
       },
       "SharpFuzz.Common": {
         "type": "Transitive",
@@ -36,7 +36,7 @@
         "type": "Project",
         "dependencies": {
           "Antlr4.Runtime.Standard": "[4.13.1, )",
-          "Microsoft.Extensions.ObjectPool": "[10.0.13, )"
+          "Microsoft.Extensions.ObjectPool": "[10.0.14, )"
         }
       }
     }

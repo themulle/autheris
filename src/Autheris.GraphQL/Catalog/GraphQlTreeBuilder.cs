@@ -119,13 +119,13 @@ public static class GraphQlTreeBuilder
         Selection? nodeSelection = null;
         foreach (var sel in connectionSelectionSet.Selections)
         {
-            if (!sel.IsIncluded(context.IncludeFlags)) continue;
+            if (!sel.IsIncluded(context.IncludeConditionFlags)) continue;
             if (string.Equals(sel.Field.Name, "edges", StringComparison.Ordinal))
             {
                 var edgesSet = operation.GetSelectionSet(sel);
                 foreach (var edgeSel in edgesSet.Selections)
                 {
-                    if (!edgeSel.IsIncluded(context.IncludeFlags)) continue;
+                    if (!edgeSel.IsIncluded(context.IncludeConditionFlags)) continue;
                     if (string.Equals(edgeSel.Field.Name, "node", StringComparison.Ordinal))
                     {
                         nodeSelection = edgeSel;
@@ -140,7 +140,7 @@ public static class GraphQlTreeBuilder
             var nodeSelectionSet = operation.GetSelectionSet(nodeSelection);
             foreach (var sel in nodeSelectionSet.Selections)
             {
-                if (!sel.IsIncluded(context.IncludeFlags)) continue;
+                if (!sel.IsIncluded(context.IncludeConditionFlags)) continue;
                 var fieldName = sel.Field.Name;
                 if (fieldName.StartsWith("__", StringComparison.Ordinal)) continue;
 
@@ -340,7 +340,7 @@ public static class GraphQlTreeBuilder
         for (int i = 0; i < selections.Length; i++)
         {
             var sel = selections[i];
-            if (!sel.IsIncluded(context.IncludeFlags))
+            if (!sel.IsIncluded(context.IncludeConditionFlags))
             {
                 continue;
             }

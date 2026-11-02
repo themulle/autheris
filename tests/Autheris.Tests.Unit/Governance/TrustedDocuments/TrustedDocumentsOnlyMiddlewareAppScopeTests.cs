@@ -75,7 +75,7 @@ public sealed class TrustedDocumentsOnlyMiddlewareAppScopeTests : IAsyncDisposab
             .UseDocumentParser()
             .UseDocumentValidation()
             .UseOperationCache()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution();
         _sp = services.BuildServiceProvider();

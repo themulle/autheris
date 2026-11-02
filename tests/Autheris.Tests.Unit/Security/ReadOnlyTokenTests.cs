@@ -324,7 +324,7 @@ public class ReadOnlyTokenTests
             .UseDocumentParser()
             .UseDocumentValidation()
             .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution()
             .BuildRequestExecutorAsync();

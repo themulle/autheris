@@ -395,19 +395,19 @@ internal static class ConnectionGraphQlTypes
         var connectionSelectionSet = ctx.Operation.GetSelectionSet(ctx.Selection);
         foreach (var sel in connectionSelectionSet.Selections)
         {
-            if (!sel.IsIncluded(ctx.IncludeFlags)) continue;
+            if (!sel.IsIncluded(ctx.IncludeConditionFlags)) continue;
             if (string.Equals(sel.Field.Name, "edges", StringComparison.Ordinal))
             {
                 var edgesSet = ctx.Operation.GetSelectionSet(sel);
                 foreach (var edgeSel in edgesSet.Selections)
                 {
-                    if (!edgeSel.IsIncluded(ctx.IncludeFlags)) continue;
+                    if (!edgeSel.IsIncluded(ctx.IncludeConditionFlags)) continue;
                     if (string.Equals(edgeSel.Field.Name, "node", StringComparison.Ordinal))
                     {
                         var nodeSet = ctx.Operation.GetSelectionSet(edgeSel);
                         foreach (var nodeField in nodeSet.Selections)
                         {
-                            if (!nodeField.IsIncluded(ctx.IncludeFlags)) continue;
+                            if (!nodeField.IsIncluded(ctx.IncludeConditionFlags)) continue;
                             var name = nodeField.Field.Name;
                             if (!name.StartsWith("__", StringComparison.Ordinal))
                             {
