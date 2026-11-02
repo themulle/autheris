@@ -117,7 +117,7 @@ public sealed class CatalogSurfaceCallSiteGuardTests
         string[] allowed =
         [
             "TableModels.cs", "DatasetCatalogStore.cs",
-            "McpDatasetCatalog.cs", "QueryTypes.cs", "CatalogDiscoveryService.cs", "McpDatasetModels.cs",
+            "McpDatasetCatalog.cs", "Query.Catalog.cs", "CatalogDiscoveryService.cs", "McpDatasetModels.cs",
             "DatasetCatalogAdminService.cs", "CatalogApiEndpoints.cs"
         ];
 
