@@ -328,7 +328,7 @@ public sealed class Issues236And237GovernanceHotfixTests
             .UseDocumentParser()
             .UseDocumentValidation()
             .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution()
             .BuildRequestExecutorAsync();

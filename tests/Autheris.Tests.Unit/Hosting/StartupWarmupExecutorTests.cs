@@ -205,7 +205,7 @@ public sealed class StartupWarmupExecutorTests
             await next(context);
         });
         builder.UseExceptions().UseTimeout().UseDocumentCache()
-            .UseDocumentParser().UseDocumentValidation().UseOperationCache().UseOperationResolver()
+            .UseDocumentParser().UseDocumentValidation().UseOperationCache().UseOperationCompiler()
             .UseOperationVariableCoercion().UseOperationExecution();
         if (withTask)
         {

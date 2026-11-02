@@ -79,7 +79,7 @@ public sealed class ReadOnlyTokenAggregateTests
                 .UseDocumentParser()
                 .UseDocumentValidation()
                 .UseRequest<ReadOnlyOperationMiddleware>()
-                .UseOperationResolver()
+                .UseOperationCompiler()
                 .UseOperationVariableCoercion()
                 .UseOperationExecution()
                 .BuildRequestExecutorAsync();

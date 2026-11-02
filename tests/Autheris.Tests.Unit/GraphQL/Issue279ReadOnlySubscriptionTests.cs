@@ -82,10 +82,11 @@ public sealed class Issue279ReadOnlySubscriptionTests
             b.AddValidationRule<QueryCostAnalyzerRule>((_, _) => new QueryCostAnalyzerRule(maxAllowedCost: int.MaxValue));
         }
         return await b
+            .UseExceptions()
             .UseDocumentParser()
             .UseDocumentValidation()
             .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution()
             .BuildRequestExecutorAsync();
@@ -269,9 +270,10 @@ public sealed class Issue279ReadOnlySubscriptionTests
         var b = services.AddGraphQLServer().AddQueryType<Q>().AddMutationType<M>();
         b.AddGatewaySubscriptions(new GraphQLOptions { Subscriptions = new GraphQLSubscriptionOptions { Enabled = true } }); // SEC-279-A5
         var ex = await b
+            .UseExceptions()
             .UseDocumentParser().UseDocumentValidation()
             .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver().UseOperationVariableCoercion().UseOperationExecution()
+            .UseOperationCompiler().UseOperationVariableCoercion().UseOperationExecution()
             .BuildRequestExecutorAsync();
 
         ex.Schema.SubscriptionType.ShouldNotBeNull();

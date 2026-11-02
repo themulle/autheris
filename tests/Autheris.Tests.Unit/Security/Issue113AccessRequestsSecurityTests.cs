@@ -421,7 +421,7 @@ public class Issue113AccessRequestsSecurityTests
             .UseDocumentParser()
             .UseDocumentValidation()
             .UseRequest<ReadOnlyOperationMiddleware>()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution()
             .BuildRequestExecutorAsync();

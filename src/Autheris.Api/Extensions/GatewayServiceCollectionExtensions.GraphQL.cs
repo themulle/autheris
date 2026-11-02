@@ -196,7 +196,7 @@ public static partial class GatewayServiceCollectionExtensions
             .TryAddTypeInterceptor<Autheris.GraphQL.Federation.SubgraphFieldMaskingTypeInterceptor>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
             .UseOperationExecution()

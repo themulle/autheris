@@ -478,7 +478,7 @@ public sealed class StartupWarmupTests
         builder.UseDocumentParser()
             .UseDocumentValidation()
             .UseOperationCache()
-            .UseOperationResolver()
+            .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseOperationExecution();
         var sp = services.BuildServiceProvider();
