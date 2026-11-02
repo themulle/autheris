@@ -393,7 +393,8 @@ RETURNING structure_version, content_version;";
             metadata = TableKeyDefinitionValidator.Validate(metadata);
         }
 
-        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
+        {
         var conn = scope.Connection;
         using var tx = conn.BeginTransaction();
         try
@@ -490,17 +491,18 @@ RETURNING structure_version, content_version;";
             var structureDelta = structuralChange ? 1L : 0L;
             var contentDelta = structuralChange ? 0L : 1L;
             var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
-            tx.Commit();
+            await tx.CommitAsync(ct).ConfigureAwait(false);
             await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
         }
         catch
         {
-            tx.Rollback();
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
 
-        _metadataCache.TryRemove(metadata.Identifier.ToString().ToLowerInvariant(), out _);
+        QueueMetadataInvalidation(metadata.Identifier);
         await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        }
 
         try
         {
@@ -520,7 +522,8 @@ RETURNING structure_version, content_version;";
         CancellationToken ct = default)
     {
         TableKeyDefinitionChange? change;
-        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
+        {
         var conn = scope.Connection;
         using (var tx = conn.BeginTransaction())
         {
@@ -531,19 +534,20 @@ RETURNING structure_version, content_version;";
                     () => BumpTableEpochAndReadAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {
-                    tx.Rollback();
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
                     return null;
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-                tx.Commit();
+                await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
             catch
             {
-                tx.Rollback();
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
+        }
         }
 
         QueueMetadataInvalidation(table);
@@ -555,7 +559,8 @@ RETURNING structure_version, content_version;";
         TableIdentifier table, RowFilterEvaluationSettings? settings, Sid actor, CancellationToken ct = default)
     {
         RowFilterEvaluationChange? change;
-        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
+        {
         var conn = scope.Connection;
         using (var tx = conn.BeginTransaction())
         {
@@ -566,19 +571,20 @@ RETURNING structure_version, content_version;";
                     () => BumpTableEpochAndReadAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {
-                    tx.Rollback();
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
                     return null;
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-                tx.Commit();
+                await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
             catch
             {
-                tx.Rollback();
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
+        }
         }
 
         QueueMetadataInvalidation(table);
@@ -588,13 +594,13 @@ RETURNING structure_version, content_version;";
 
     public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
     {
-        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
         return await DatasetCatalogStore.CountByVisibilityAsync(scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, ct).ConfigureAwait(false);
     }
 
     public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
     {
-        await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
+        await using var scope = await ReadScopeAsync(ct, snapshot: true).ConfigureAwait(false);
         return await DatasetCatalogStore.ReadSettingsAsync(
             scope.Connection, null, CatalogKeyDefinitionStore.Sqlite, table, strict, _logger, ct).ConfigureAwait(false);
     }
@@ -628,7 +634,7 @@ RETURNING structure_version, content_version;";
                 change = await write(conn, tx).ConfigureAwait(false);
                 if (change is null)
                 {
-                    tx.Rollback();
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
                     return null;
                 }
 
@@ -638,7 +644,12 @@ RETURNING structure_version, content_version;";
                     newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
                 }
 
-                tx.Commit();
+                if (change.Changed)
+                {
+                    QueueMetadataInvalidation(table);
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
                 if (change.Changed && newVersion.HasValue)
                 {
                     await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
@@ -646,15 +657,11 @@ RETURNING structure_version, content_version;";
             }
             catch
             {
-                tx.Rollback();
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
         }
 
-        if (change.Changed)
-        {
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        }
 
         return change;
     }
@@ -761,7 +768,7 @@ RETURNING structure_version, content_version;";
         cmd.AddBound("@schema", table.Schema);
         cmd.AddBound("@table", table.TableName);
         var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return result is long l ? l : (result is int i ? i : 2L);
+        return result is long l ? l : Convert.ToInt64(result ?? 1L, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task DeletePolicyEpochForTableAsync(TableIdentifier table, CancellationToken ct = default)
@@ -798,13 +805,13 @@ RETURNING structure_version, content_version;";
 
             await cmd.ExecuteNonQueryAsync(ct);
             var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
-            tx.Commit();
+            await tx.CommitAsync(ct).ConfigureAwait(false);
             await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             return delegation;
         }
         catch
         {
-            tx.Rollback();
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -898,7 +905,7 @@ RETURNING structure_version, content_version;";
 
         ct.ThrowIfCancellationRequested();
         var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-        tx.Commit();
+        await tx.CommitAsync(ct).ConfigureAwait(false);
         await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
         return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
     }
@@ -921,17 +928,17 @@ RETURNING structure_version, content_version;";
             if (updated)
             {
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-                tx.Commit();
+                await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
                 return true;
             }
 
-            tx.Rollback();
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
             return false;
         }
         catch
         {
-            tx.Rollback();
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
     }
