@@ -625,6 +625,11 @@ WHERE rm.member_sid = @sid";
             Guid? tid = null;
             try
             {
+                if (!reader.IsDBNull(1) && Guid.TryParse(reader.GetString(1), out var parsedTid))
+                {
+                    tid = parsedTid;
+                }
+
                 var col = ReadTableColumn(reader, out var tableId, out var rule, logger);
                 tid = tableId;
                 if (!columnsByTable.TryGetValue(tableId, out var colList))
@@ -657,19 +662,19 @@ WHERE rm.member_sid = @sid";
         return (columnsByTable, maskingRulesByTable, corruptedTableIds);
     }
 
-    public static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
+    public static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
         DbConnection conn,
         DbTransaction tx,
         Guid tableId,
         CancellationToken ct)
     {
-        var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive)>(StringComparer.OrdinalIgnoreCase);
+        var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)>(StringComparer.OrdinalIgnoreCase);
         var existingMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
         var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive,
+        cmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
                                    m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id
                             FROM TABLE_COLUMNS c
                             LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
@@ -683,19 +688,22 @@ WHERE rm.member_sid = @sid";
                 var colName = reader.GetString(1);
                 var colDataType = reader.GetString(2);
                 var colSens = reader.GetInt32(3) == 1;
-                existingColsByName[colName] = (existingId, colDataType, colSens);
+                var colDesc = reader.IsDBNull(4) ? null : reader.GetString(4);
+                var colLongDesc = reader.IsDBNull(5) ? null : reader.GetString(5);
+                var colDocSource = reader.IsDBNull(6) ? null : reader.GetString(6);
+                existingColsByName[colName] = (existingId, colDataType, colSens, colDesc, colLongDesc, colDocSource);
                 colIdByName[colName] = existingId;
 
-                if (!reader.IsDBNull(4) && Guid.TryParse(reader.GetString(4), out var maskId))
+                if (!reader.IsDBNull(7) && Guid.TryParse(reader.GetString(7), out var maskId))
                 {
                     existingMaskingRules[colName] = new MaskingRule
                     {
                         Id = maskId,
                         TableColumnId = existingId,
-                        RuleType = reader.GetString(5),
-                        PatternOrFormat = reader.IsDBNull(6) ? null : reader.GetString(6),
-                        Replacement = reader.IsDBNull(7) ? null : reader.GetString(7),
-                        HmacKeyId = reader.IsDBNull(8) ? null : reader.GetString(8)
+                        RuleType = reader.GetString(8),
+                        PatternOrFormat = reader.IsDBNull(9) ? null : reader.GetString(9),
+                        Replacement = reader.IsDBNull(10) ? null : reader.GetString(10),
+                        HmacKeyId = reader.IsDBNull(11) ? null : reader.GetString(11)
                     };
                 }
             }
@@ -710,14 +718,22 @@ WHERE rm.member_sid = @sid";
         string insertColumnSql,
         Guid tableId,
         TableMetadata metadata,
-        Dictionary<string, (Guid Id, string DataType, bool IsSensitive)> existingColsByName,
+        Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)> existingColsByName,
         Dictionary<string, Guid> colIdByName,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string?, string?, bool>? shouldOverwriteDoc = null)
     {
         var structuralChange = false;
         foreach (var col in metadata.Columns)
         {
             var colId = col.Id == Guid.Empty ? Guid.NewGuid() : col.Id;
+            var incomingColSource = shouldOverwriteDoc != null
+                ? (col.DocumentationSource ?? metadata.Table.DocumentationSource)
+                : col.DocumentationSource;
+            var targetColDesc = col.Description;
+            var targetColLongDesc = col.LongDescription;
+            var targetColDocSource = incomingColSource;
+
             if (existingColsByName.TryGetValue(col.ColumnName, out var existingCol))
             {
                 colId = existingCol.Id;
@@ -725,6 +741,21 @@ WHERE rm.member_sid = @sid";
                     existingCol.IsSensitive != col.IsSensitive)
                 {
                     structuralChange = true;
+                }
+
+                if (shouldOverwriteDoc != null)
+                {
+                    bool canOverwriteColDesc = string.IsNullOrWhiteSpace(existingCol.Description) ||
+                                               (!string.IsNullOrWhiteSpace(col.Description) &&
+                                                shouldOverwriteDoc(existingCol.DocSource, incomingColSource));
+
+                    bool canOverwriteColLongDesc = string.IsNullOrWhiteSpace(existingCol.LongDescription) ||
+                                                   (!string.IsNullOrWhiteSpace(col.LongDescription) &&
+                                                    shouldOverwriteDoc(existingCol.DocSource, incomingColSource));
+
+                    targetColDesc = canOverwriteColDesc ? col.Description : existingCol.Description;
+                    targetColLongDesc = canOverwriteColLongDesc ? col.LongDescription : existingCol.LongDescription;
+                    targetColDocSource = canOverwriteColDesc ? (incomingColSource ?? existingCol.DocSource) : existingCol.DocSource;
                 }
             }
             else
@@ -749,9 +780,9 @@ WHERE rm.member_sid = @sid";
                 insertColCmd.AddBound("@columnName", col.ColumnName);
                 insertColCmd.AddBound("@dataType", col.DataType);
                 insertColCmd.AddBound("@isSensitive", col.IsSensitive ? 1 : 0);
-                insertColCmd.AddBound("@description", (object?)col.Description ?? DBNull.Value);
-                insertColCmd.AddBound("@longDescription", (object?)col.LongDescription ?? DBNull.Value);
-                insertColCmd.AddBound("@docSource", (object?)col.DocumentationSource ?? DBNull.Value);
+                insertColCmd.AddBound("@description", (object?)targetColDesc ?? DBNull.Value);
+                insertColCmd.AddBound("@longDescription", (object?)targetColLongDesc ?? DBNull.Value);
+                insertColCmd.AddBound("@docSource", (object?)targetColDocSource ?? DBNull.Value);
                 insertColCmd.AddBound("@metaJson", (object?)metaJson ?? DBNull.Value);
                 insertColCmd.AddBound("@displayName", (object?)col.DisplayName ?? DBNull.Value);
                 insertColCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(col.Texts) ?? DBNull.Value);

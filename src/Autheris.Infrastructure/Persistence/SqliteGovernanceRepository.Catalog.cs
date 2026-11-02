@@ -23,7 +23,7 @@ public partial class SqliteGovernanceRepository
 FROM TABLES
 WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
 
-        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type FROM TABLES
+        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
 WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
 
         public const string SelectActiveTableEntitiesSql = @"SELECT t.id, t.source_type, t.source_name, t.schema_name, t.table_name,
@@ -40,7 +40,8 @@ WHERE t.is_active = 1";
        c.display_name, c.texts_json
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-WHERE c.table_id = @tableId";
+WHERE c.table_id = @tableId
+ORDER BY c.rowid"; // registration order, equal to the list read (a natural-key index scan would sort by name)
 
         public const string SelectActiveBatchTableColumnsSql = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -64,9 +65,9 @@ ON CONFLICT (id) DO UPDATE SET
     data_source_type = excluded.data_source_type,
     http_endpoint_json = excluded.http_endpoint_json,
     plugin_name = excluded.plugin_name,
-    description = COALESCE(excluded.description, TABLES.description),
-    long_description = COALESCE(excluded.long_description, TABLES.long_description),
-    doc_source = COALESCE(excluded.doc_source, TABLES.doc_source),
+    description = excluded.description,
+    long_description = excluded.long_description,
+    doc_source = excluded.doc_source,
     required_filter_columns_json = excluded.required_filter_columns_json,
     texts_json = excluded.texts_json";
 
@@ -75,9 +76,9 @@ VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @long
 ON CONFLICT (id) DO UPDATE SET
     data_type = excluded.data_type,
     is_sensitive = excluded.is_sensitive,
-    description = COALESCE(excluded.description, TABLE_COLUMNS.description),
-    long_description = COALESCE(excluded.long_description, TABLE_COLUMNS.long_description),
-    doc_source = COALESCE(excluded.doc_source, TABLE_COLUMNS.doc_source),
+    description = excluded.description,
+    long_description = excluded.long_description,
+    doc_source = excluded.doc_source,
     meta_json = COALESCE(excluded.meta_json, TABLE_COLUMNS.meta_json),
     display_name = excluded.display_name,
     texts_json = excluded.texts_json";
@@ -393,16 +394,21 @@ RETURNING structure_version, content_version;";
             metadata = TableKeyDefinitionValidator.Validate(metadata);
         }
 
-        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
-        {
+        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
         var conn = scope.Connection;
+        var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
+        var tableExisted = false;
+        var structuralChange = false;
+        var targetDesc = metadata.Table.Description;
+        var targetLongDesc = metadata.Table.LongDescription;
+        var targetDocSource = metadata.Table.DocumentationSource;
+        IReadOnlyList<string> persistedPks;
+        IReadOnlyList<KeyColumnDirection> persistedPkDirections;
+        IReadOnlyList<TableIndexDefinition> persistedIndexes;
+
         using var tx = conn.BeginTransaction();
         try
         {
-            var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
-            var tableExisted = false;
-            var structuralChange = false;
-
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
@@ -421,6 +427,10 @@ RETURNING structure_version, content_version;";
                     var existingFourEyes = reader.GetInt32(3) == 1;
                     var existingActive = reader.GetInt32(4) == 1;
                     var existingDst = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+                    var existingDesc = reader.IsDBNull(6) ? null : reader.GetString(6);
+                    var existingLongDesc = reader.IsDBNull(7) ? null : reader.GetString(7);
+                    var existingDocSource = reader.IsDBNull(8) ? null : reader.GetString(8);
+
                     if (!string.Equals(existingSourceType, metadata.Table.SourceType, StringComparison.OrdinalIgnoreCase) ||
                         !string.Equals(existingSensitivity, metadata.Table.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
                         existingFourEyes != metadata.Table.RequiresFourEyes ||
@@ -429,6 +439,18 @@ RETURNING structure_version, content_version;";
                     {
                         structuralChange = true;
                     }
+
+                    bool canOverwriteDesc = string.IsNullOrWhiteSpace(existingDesc) ||
+                                            (!string.IsNullOrWhiteSpace(metadata.Table.Description) &&
+                                             ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
+
+                    bool canOverwriteLongDesc = string.IsNullOrWhiteSpace(existingLongDesc) ||
+                                                (!string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
+                                                 ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
+
+                    targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
+                    targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
+                    targetDocSource = canOverwriteDesc ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
                 }
                 else
                 {
@@ -456,9 +478,9 @@ RETURNING structure_version, content_version;";
                 upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
                 upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
                 upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-                upsertCmd.AddBound("@desc", (object?)metadata.Table.Description ?? DBNull.Value);
-                upsertCmd.AddBound("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
-                upsertCmd.AddBound("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                upsertCmd.AddBound("@desc", (object?)targetDesc ?? DBNull.Value);
+                upsertCmd.AddBound("@longDesc", (object?)targetLongDesc ?? DBNull.Value);
+                upsertCmd.AddBound("@docSource", (object?)targetDocSource ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
                 await upsertCmd.ExecuteNonQueryAsync(ct);
@@ -476,7 +498,7 @@ RETURNING structure_version, content_version;";
                 structuralChange = true;
             }
 
-            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct).ConfigureAwait(false))
+            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, ShouldOverwriteDocumentation).ConfigureAwait(false))
             {
                 structuralChange = true;
             }
@@ -485,6 +507,23 @@ RETURNING structure_version, content_version;";
             {
                 structuralChange = true;
                 await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
+                persistedPks = metadata.PrimaryKeyColumns;
+                persistedPkDirections = metadata.PrimaryKeyDirections;
+                persistedIndexes = metadata.Indexes;
+            }
+            else
+            {
+                try
+                {
+                    (persistedPks, persistedPkDirections, persistedIndexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                        conn, tx, CatalogKeyDefinitionStore.Sqlite, metadata.Identifier, tableId, metadata.Columns, ct).ConfigureAwait(false);
+                }
+                catch (TableMetadataUnavailableException)
+                {
+                    persistedPks = metadata.PrimaryKeyColumns;
+                    persistedPkDirections = metadata.PrimaryKeyDirections;
+                    persistedIndexes = metadata.Indexes;
+                }
             }
 
             await IncrementTableEpochInternalAsync(conn, metadata.Identifier, tx, ct);
@@ -502,16 +541,37 @@ RETURNING structure_version, content_version;";
 
         QueueMetadataInvalidation(metadata.Identifier);
         await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
-        }
 
-        try
+        var updatedTable = new Table
         {
-            return await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false) ?? metadata;
-        }
-        catch (TableMetadataUnavailableException)
+            Id = tableId,
+            SourceType = metadata.Table.SourceType,
+            SourceName = metadata.Identifier.Domain,
+            SchemaName = metadata.Identifier.Schema,
+            TableName = metadata.Identifier.TableName,
+            DisplayName = metadata.Table.DisplayName,
+            Sensitivity = metadata.Table.Sensitivity,
+            RequiresFourEyes = metadata.Table.RequiresFourEyes,
+            IsActive = metadata.Table.IsActive,
+            DataSourceType = metadata.Table.DataSourceType,
+            HttpEndpoint = metadata.Table.HttpEndpoint,
+            PluginName = metadata.Table.PluginName,
+            Description = targetDesc,
+            LongDescription = targetLongDesc,
+            Texts = metadata.Table.Texts,
+            DocumentationSource = targetDocSource
+        };
+
+        return new TableMetadata
         {
-            return metadata;
-        }
+            Identifier = metadata.Identifier,
+            Table = updatedTable,
+            Columns = metadata.Columns,
+            ColumnMaskingRules = metadata.ColumnMaskingRules,
+            PrimaryKeyColumns = persistedPks,
+            PrimaryKeyDirections = persistedPkDirections,
+            Indexes = persistedIndexes
+        };
     }
 
     public async Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
@@ -524,9 +584,8 @@ RETURNING structure_version, content_version;";
         TableKeyDefinitionChange? change;
         await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
         {
-        var conn = scope.Connection;
-        using (var tx = conn.BeginTransaction())
-        {
+            var conn = scope.Connection;
+            using var tx = conn.BeginTransaction();
             try
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
@@ -539,6 +598,7 @@ RETURNING structure_version, content_version;";
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
@@ -548,9 +608,7 @@ RETURNING structure_version, content_version;";
                 throw;
             }
         }
-        }
 
-        QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
         return change;
     }
@@ -561,9 +619,8 @@ RETURNING structure_version, content_version;";
         RowFilterEvaluationChange? change;
         await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
         {
-        var conn = scope.Connection;
-        using (var tx = conn.BeginTransaction())
-        {
+            var conn = scope.Connection;
+            using var tx = conn.BeginTransaction();
             try
             {
                 change = await RowFilterEvaluationStore.SetObjectAsync(
@@ -576,6 +633,7 @@ RETURNING structure_version, content_version;";
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                QueueMetadataInvalidation(table);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
@@ -585,9 +643,7 @@ RETURNING structure_version, content_version;";
                 throw;
             }
         }
-        }
 
-        QueueMetadataInvalidation(table);
         await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
         return change;
     }
