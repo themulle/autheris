@@ -20,7 +20,7 @@ public sealed class IndividualGrantLimitsService : IIndividualGrantLimits
     {
     }
 
-    public IndividualGrantLimitsService(IndividualGrantOptions? options = null)
+    internal IndividualGrantLimitsService(IndividualGrantOptions? options = null)
     {
         var opts = options ?? new IndividualGrantOptions();
         RegularMax = Shorten(TimeSpan.FromDays(opts.RegularMaxDays), IndividualGrantLimits.DefaultRegularMax);
