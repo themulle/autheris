@@ -93,7 +93,7 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
         ("amount", "decimal"), ("sale_date", "date"), ("sold_at", "timestamp"), ("is_return", "boolean"), ("note", "varchar"),
     ];
 
-    private static async Task RegisterCatalogAsync(WebApplicationFactory<Program> host)
+    internal static async Task RegisterCatalogAsync(WebApplicationFactory<Program> host)
     {
         using var scope = host.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();

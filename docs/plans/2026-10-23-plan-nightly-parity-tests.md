@@ -280,13 +280,19 @@ Fixed 2026-10-23 on fix/parity-gaps (#312 WebSQL, #313 REST, #314 GraphQL): WebS
 
 A matrix `Pending` reason is either `inexpressible: <reason>` (the channel cannot state the capability) or names one of these ids. `Matrix_PendingReasonsAreInexpressibleOrFollowUp` fails closed on any other text or an unknown id.
 
-### PARITY-FU-001 (Completed 2026-11-01)
+### PARITY-FU-001
+
+*Status: Completed 2026-11-01 in PR #436.*
+
 
 MCP channel driver. Implemented via Streamable HTTP (`/mcp` endpoint) in `McpChannel` and `RobinClient.McpAsync`. The matrix delegates SQL or GraphQL requests to the respective MCP tools (`query_sql` and `query_graphql`). The 36 MCP cells are now verified: 34 cells are `Supported`/`Unsupported` and execute against the parity host (smoke count/sum and matrix suites pass); the 2 inexpressible cells (`group_date_part_standard_sql`, `group_expression`) remain marked `Pending(inexpressible)`. Fixed MCP target table resolution for `_aggregate` root fields in `CatalogGraphQlMap`, registered keyset connection error codes in `ErrorSanitizingFilter`, and ensured key definitions in `ParityHostFixture`.
 
 ### PARITY-FU-002
 
+*Status: Completed 2026-11-02.* Implemented via isolated ephemeral hosts (`IsolatedParityHost`) with dedicated temporary SQLite databases and test seeds. Swept 9 mutation root fields (`SpecGraphQlMutationTests`) and verified subscription introspection, minimal valid generation, HTTP transport rejection, and WebSocket `graphql-transport-ws` connection/ack lifecycle (`SpecGraphQlSubscriptionTests`).
+
 Mutations and subscriptions of the GraphQL schema are not swept by block F (WP6): a mutation changes the shared seed and a subscription needs a transport. The sweep reports their count (9 mutations, 1 subscription on the parity host). Work: call each mutation against an isolated copy of the seed (own host fixture per mutation class) with generated minimal values and assert success or a stable 4xx; drive the subscription over the websocket transport.
+
 
 ### PARITY-FU-003
 
