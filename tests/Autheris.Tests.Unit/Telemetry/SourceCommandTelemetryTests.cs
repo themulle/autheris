@@ -143,4 +143,54 @@ public sealed class SourceCommandTelemetryTests
         scope.SetRows(100);
         scope.SetBytes(2000);
     }
+
+    [Fact]
+    public void ServiceInstance_StartsCommand_UsingInjectedLoggersAndPolicy()
+    {
+        var policy = new DataSourceTelemetryPolicy(
+            MinimumLogLevel: LogLevel.Information,
+            SpanDetail: SpanDetail.None,
+            StatementText: StatementTextMode.None,
+            SlowQueryThreshold: TimeSpan.Zero, // immediate slow query without sleeping
+            RecordRowCounts: true);
+
+        var policyProvider = Substitute.For<IDataSourceTelemetryPolicyProvider>();
+        policyProvider.GetPolicy("test_source").Returns(policy);
+
+        var mockLogger = Substitute.For<ILogger>();
+        var dataLoggers = Substitute.For<IDataSourceLoggers>();
+        dataLoggers.Get("test_source").Returns(mockLogger);
+
+        ISourceCommandTelemetry service = new SourceCommandTelemetryService(policyProvider, dataLoggers);
+
+        var descriptor = new SourceCommandDescriptor(
+            DataSourceName: "test_source",
+            DbSystemName: "sqlite",
+            Namespace: null,
+            OperationName: "SELECT",
+            CollectionName: "users",
+            CompiledSql: "SELECT 1;",
+            Dialect: DatabaseDialect.Sqlite);
+
+        using (var scope = service.Start(descriptor))
+        {
+            scope.SetRows(1);
+        }
+
+        dataLoggers.Received(1).Get("test_source");
+    }
+
+    [Fact]
+    public void DataSourceLoggersService_ProducesNormalizedCategoryLoggers()
+    {
+        var factory = Substitute.For<ILoggerFactory>();
+        var logger = Substitute.For<ILogger>();
+        factory.CreateLogger("Autheris.DataSource.sales_db").Returns(logger);
+
+        var service = new DataSourceLoggersService(factory);
+        var resolved = service.Get("sales_db");
+
+        resolved.ShouldBe(logger);
+        factory.Received(1).CreateLogger("Autheris.DataSource.sales_db");
+    }
 }

@@ -13,6 +13,8 @@ public static class TelemetryServiceCollectionExtensions
     public static IServiceCollection AddDataSourceTelemetryPolicy(this IServiceCollection services)
     {
         services.AddSingleton<IDataSourceTelemetryPolicyProvider, GlobalDataSourceTelemetryPolicyProvider>();
+        services.AddSingleton<IDataSourceLoggers, DataSourceLoggersService>();
+        services.AddSingleton<ISourceCommandTelemetry, SourceCommandTelemetryService>();
         return services;
     }
 }

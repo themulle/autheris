@@ -52,6 +52,21 @@ public sealed class QueryCostAnalyzerMultiplicityTests : IDisposable
         CatalogRelationRegistry.Clear();
     }
 
+    [Fact]
+    public void DefaultCatalogRelationRegistry_IsolatedInstance_RegistersAndResolvesCardinality()
+    {
+        ICatalogRelationRegistry registry = new DefaultCatalogRelationRegistry();
+        registry.TryGetCardinality("Order", "customer", out var unregCard).ShouldBeFalse();
+        unregCard.ShouldBe(RelationCardinality.OneToMany);
+
+        registry.Register("Order", "customer", RelationCardinality.ManyToOne);
+        registry.TryGetCardinality("Order", "customer", out var card).ShouldBeTrue();
+        card.ShouldBe(RelationCardinality.ManyToOne);
+
+        registry.Clear();
+        registry.TryGetCardinality("Order", "customer", out _).ShouldBeFalse();
+    }
+
     private static async Task<(IRequestExecutorProvider Provider, ISchemaDefinition Schema)> CreateTestSchemaAsync()
     {
         var services = new ServiceCollection();

@@ -28,6 +28,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
     private readonly QueryCostOptions? _costOptions;
     private readonly Func<string, string, RelationCardinality?>? _relationLookup;
     private readonly Func<string, TableMetadata?>? _tableMetadataLookup;
+    private readonly ICatalogRelationRegistry? _relationRegistry;
     private readonly double _aggregateFieldCostWeight;
     private readonly int _maxGroupByColumns;
     private readonly int _maxAggregates;
@@ -50,11 +51,13 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         int maxGroupByColumns = AggregationOptions.DefaultMaxGroupByColumns,
         int maxAggregates = AggregationOptions.DefaultMaxAggregates,
         int maxAggregateFieldsPerOperation = GraphQLAggregationOptions.DefaultMaxFieldsPerOperation,
-        Func<string, TableMetadata?>? tableMetadataLookup = null)
+        Func<string, TableMetadata?>? tableMetadataLookup = null,
+        ICatalogRelationRegistry? relationRegistry = null)
     {
         _costOptions = costOptions;
         _relationLookup = relationLookup;
         _tableMetadataLookup = tableMetadataLookup;
+        _relationRegistry = relationRegistry;
         _maxExecutionDepth = maxExecutionDepth > 0 ? maxExecutionDepth : 25;
         // #112 A-7: the three weights of the typed aggregate cost model (the same ones the engine's cost calculator uses).
         _aggregateFieldCostWeight = aggregateFieldCostWeight > 0 ? aggregateFieldCostWeight : AggregationOptions.DefaultAggregateFieldCostWeight;
@@ -927,7 +930,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         }
 
         // 2. CatalogRelationRegistry check
-        if (!string.IsNullOrEmpty(typeName) && CatalogRelationRegistry.TryGetCardinality(typeName, fieldName, out var registryCard))
+        var reg = _relationRegistry ?? CatalogRelationRegistry.Current;
+        if (!string.IsNullOrEmpty(typeName) && reg.TryGetCardinality(typeName, fieldName, out var registryCard))
         {
             if (registryCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
             {
