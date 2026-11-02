@@ -32,7 +32,8 @@ public sealed class TenantIngressArchitectureTests
         ["src/Autheris.GraphQL/Catalog/MetricGraphQlTypes.cs"] = 1,                     // empty fallback: unresolved
         ["src/Autheris.GraphQL/DynamicTypes/DynamicTableType.cs"] = 1,                  // empty fallback: unresolved
         ["src/Autheris.GraphQL/Mcp/GatewayMcpQueryExecutor.cs"] = 1,                    // MCP session tenant
-        ["src/Autheris.GraphQL/Types/QueryTypes.cs"] = 2                                // empty fallback: unresolved
+        ["src/Autheris.GraphQL/Types/Query.Catalog.cs"] = 1,                            // empty fallback: unresolved
+        ["src/Autheris.GraphQL/Types/Query.cs"] = 1                                     // empty fallback: unresolved
     };
 
     [Fact]

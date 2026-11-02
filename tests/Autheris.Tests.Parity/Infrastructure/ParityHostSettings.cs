@@ -14,6 +14,7 @@ public static class ParityHostSettings
 {
     public static void Apply(IWebHostBuilder b, string governancePath)
     {
+        b.UseEnvironment("Development");
         b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
         b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
         // The sweeps send hundreds of GraphQL queries from one subject; lift the per-subject cost budget so it cannot mask results.

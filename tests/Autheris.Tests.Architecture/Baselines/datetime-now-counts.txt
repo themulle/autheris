@@ -118,8 +118,10 @@ src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs|8
 src/Autheris.GraphQL/Federation/SubgraphSecurityValidator.cs|1
 src/Autheris.GraphQL/Mcp/CatalogGraphQlMap.cs|2
 src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs|2
-src/Autheris.GraphQL/Types/MutationTypes.cs|6
-src/Autheris.GraphQL/Types/QueryTypes.cs|3
+src/Autheris.GraphQL/Types/Mutation.Catalog.cs|1
+src/Autheris.GraphQL/Types/Mutation.Consent.cs|5
+src/Autheris.GraphQL/Types/Query.Catalog.cs|2
+src/Autheris.GraphQL/Types/Query.Consent.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/DuckDbPersistentTableCacheStore.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/InMemoryTableCacheStore.cs|1
 src/Autheris.Infrastructure/Idempotency/InMemoryIdempotencyStore.cs|3
