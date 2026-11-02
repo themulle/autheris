@@ -159,6 +159,29 @@ public sealed class IndividualGrantClampTests : IDisposable
             p.IsActive(From.AddDays(5000)).ShouldBeTrue();
         }
     }
+
+    [Fact]
+    public void SEC_SC_20_IndividualGrantLimitsService_IsolatedInstance_EvaluatesWithoutGlobalState()
+    {
+        var customOptions = new Autheris.Domain.Options.IndividualGrantOptions
+        {
+            RegularMaxDays = 45,
+            UnmaskedMaxDays = 15,
+            ServicePrincipalMaxDays = 90
+        };
+
+        var service = new Autheris.Application.Governance.Grants.IndividualGrantLimitsService(customOptions);
+
+        service.RegularMax.ShouldBe(TimeSpan.FromDays(45));
+        service.UnmaskedMax.ShouldBe(TimeSpan.FromDays(15));
+        service.ServicePrincipalMax.ShouldBe(TimeSpan.FromDays(90));
+
+        var consentValidTo = service.EffectiveConsentValidTo(GranteeType.User, From, DateTimeOffset.MaxValue);
+        consentValidTo.ShouldBe(From.AddDays(45));
+
+        var profileValidTo = service.EffectiveProfileValidTo(MaskingPolicyMode.Unmasked, From, null);
+        profileValidTo.ShouldBe(From.AddDays(15));
+    }
 }
 
 [CollectionDefinition("IndividualGrantLimits", DisableParallelization = true)]

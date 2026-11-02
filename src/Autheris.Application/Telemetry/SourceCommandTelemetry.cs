@@ -38,18 +38,33 @@ public static class SourceCommandTelemetry
     private static readonly Counter<long> QueryBytesCounter =
         Meter.CreateCounter<long>("autheris.query.bytes", "By", "Number of bytes returned or transferred.");
 
-    private static IDataSourceTelemetryPolicyProvider? s_defaultPolicyProvider;
+    private static readonly ISourceCommandTelemetry BuiltIn = new SourceCommandTelemetryService();
+    private static ISourceCommandTelemetry _current = BuiltIn;
+
+    /// <summary>
+    /// The active <see cref="ISourceCommandTelemetry"/> provider.
+    /// </summary>
+    public static ISourceCommandTelemetry Current
+    {
+        get => Volatile.Read(ref _current);
+        set => Volatile.Write(ref _current, value ?? BuiltIn);
+    }
 
     public static void Initialize(IDataSourceTelemetryPolicyProvider policyProvider)
     {
-        s_defaultPolicyProvider = policyProvider;
+        Current = new SourceCommandTelemetryService(policyProvider);
     }
 
     public static SourceCommandScope Start(
         in SourceCommandDescriptor descriptor,
-        IDataSourceTelemetryPolicyProvider? policyProvider = null)
+        IDataSourceTelemetryPolicyProvider? policyProvider = null) =>
+        Current.Start(descriptor, policyProvider);
+
+    internal static SourceCommandScope StartCore(
+        in SourceCommandDescriptor descriptor,
+        IDataSourceTelemetryPolicyProvider? provider,
+        IDataSourceLoggers? dataLoggers)
     {
-        var provider = policyProvider ?? s_defaultPolicyProvider;
         var policy = provider?.GetPolicy(descriptor.DataSourceName) ?? new DataSourceTelemetryPolicy(
             Microsoft.Extensions.Logging.LogLevel.Information,
             SpanDetail.Basic,
@@ -100,7 +115,8 @@ public static class SourceCommandTelemetry
             descriptor,
             normalizedDataSource,
             policy,
-            Stopwatch.GetTimestamp());
+            Stopwatch.GetTimestamp(),
+            dataLoggers);
     }
 
     internal static void RecordDuration(double durationSeconds, ref TagList tags) =>
@@ -131,6 +147,7 @@ public struct SourceCommandScope : IDisposable
     private int? _statusCode;
     private long _rows;
     private long _bytes;
+    private readonly IDataSourceLoggers? _dataLoggers;
     private bool _disposed;
 
     internal SourceCommandScope(
@@ -138,13 +155,15 @@ public struct SourceCommandScope : IDisposable
         in SourceCommandDescriptor descriptor,
         string normalizedDataSource,
         DataSourceTelemetryPolicy policy,
-        long startTimestamp)
+        long startTimestamp,
+        IDataSourceLoggers? dataLoggers = null)
     {
         _activity = activity;
         _descriptor = descriptor;
         _normalizedDataSource = normalizedDataSource;
         _policy = policy;
         _startTimestamp = startTimestamp;
+        _dataLoggers = dataLoggers;
     }
 
     public void SetRows(long rows)
@@ -227,7 +246,7 @@ public struct SourceCommandScope : IDisposable
             };
             SourceCommandTelemetry.RecordSlowQuery(ref slowTags);
 
-            var logger = DataSourceLoggers.Get(_normalizedDataSource);
+            var logger = _dataLoggers?.Get(_normalizedDataSource) ?? DataSourceLoggers.Get(_normalizedDataSource);
             DataSourceLoggers.LogSlowQuery(
                 logger,
                 _normalizedDataSource,

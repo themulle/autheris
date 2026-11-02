@@ -92,7 +92,8 @@ public static partial class GatewayServiceCollectionExtensions
     internal static Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule CreateQueryCostRule(
         GatewayOptions gatewayOptions,
         int maxCost,
-        Autheris.Domain.Options.AnalyticsOptions? analytics) =>
+        Autheris.Domain.Options.AnalyticsOptions? analytics,
+        Autheris.GraphQL.Catalog.ICatalogRelationRegistry? relationRegistry = null) =>
         new(
             maxAllowedCost: maxCost,
             maxResponseRows: gatewayOptions.GraphQL.MaxResponseRows,
@@ -108,7 +109,8 @@ public static partial class GatewayServiceCollectionExtensions
                 ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxGroupByColumns,
             maxAggregates: analytics?.Aggregation.MaxAggregates
                 ?? Autheris.Domain.Options.AggregationOptions.DefaultMaxAggregates,
-            maxAggregateFieldsPerOperation: gatewayOptions.GraphQL.Aggregation.MaxFieldsPerOperation);
+            maxAggregateFieldsPerOperation: gatewayOptions.GraphQL.Aggregation.MaxFieldsPerOperation,
+            relationRegistry: relationRegistry);
 
     public static IServiceCollection AddGatewayGraphQL(
         this IServiceCollection services,
@@ -120,6 +122,7 @@ public static partial class GatewayServiceCollectionExtensions
             : gatewayOptions.GraphQL.MaxAllowedExecutionDepth;
         var maxCost = Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware.ResolveMaxAdmissionCeiling(gatewayOptions);
 
+        services.AddSingleton<Autheris.GraphQL.Catalog.ICatalogRelationRegistry, Autheris.GraphQL.Catalog.DefaultCatalogRelationRegistry>();
         // SEC M-16: Singleton, damit registrierte API-Keys und der Key-Cache über Requests hinweg bestehen.
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
         services.AddHttpClient<CloudflareCdnPurgeService>().AddSecureOutboundHandlers(EgressIntegrations.Cdn);
@@ -216,7 +219,8 @@ public static partial class GatewayServiceCollectionExtensions
                 CreateQueryCostRule(
                     gatewayOptions,
                     maxCost,
-                    sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value))
+                    sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value,
+                    sp.GetService<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>()))
             // HotChocolate 16 adds the types __SchemaDefinition/__SearchResult (semantic introspection) to the schema.
             // Their names start with "__", which GraphQL reserves for introspection; graphql-js based clients (GraphiQL,
             // Apollo, codegen) reject the whole schema because of them. Autheris does not use the semantic search.
