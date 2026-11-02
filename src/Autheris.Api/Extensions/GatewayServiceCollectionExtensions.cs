@@ -124,9 +124,9 @@ public static partial class GatewayServiceCollectionExtensions
 
         ConfigureBasicAndSessionAuth(authBuilder, services, gatewayOptions, environment, out var isBasicSessionAllowed, out var basicSessionCookieName);
         ConfigureForwardAuth(authBuilder, services);
-        ConfigureNegotiateAndTestAuth(authBuilder, gatewayOptions, environment, out var isTestAuthAllowed);
+        ConfigureNegotiateAndDevAuth(authBuilder, gatewayOptions, environment, out var isDevAuthAllowed);
         ConfigureJwtBearerAndMcpAuth(authBuilder, gatewayOptions, environment);
-        ConfigureDefaultPolicyScheme(authBuilder, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isTestAuthAllowed);
+        ConfigureDefaultPolicyScheme(authBuilder, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed);
         ConfigureAuthorizationAndErrorHandling(services, gatewayOptions, environment);
 
         return services;
@@ -183,25 +183,25 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddHostedService<ForwardAuthSecretStartupValidator>();
     }
 
-    private static void ConfigureNegotiateAndTestAuth(
+    private static void ConfigureNegotiateAndDevAuth(
         AuthenticationBuilder authBuilder,
         GatewayOptions gatewayOptions,
         IHostEnvironment environment,
-        out bool isTestAuthAllowed)
+        out bool isDevAuthAllowed)
     {
-        // 3. Windows Negotiate (Kerberos / NTLM) or TestAuthHandler
+        // 3. Windows Negotiate (Kerberos / NTLM) or Dev AuthHandler
 #if AUTHERIS_TEST_AUTH
-        isTestAuthAllowed = environment.IsDevelopment() &&
+        isDevAuthAllowed = environment.IsDevelopment() &&
             (gatewayOptions.Authentication.EnableTestAuthHandler || gatewayOptions.IsAnonymousAccessAllowed);
 
-        if (isTestAuthAllowed)
+        if (isDevAuthAllowed)
         {
             authBuilder.AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
                 TestAuthHandler.SchemeName, _ => { });
         }
         else
 #else
-        isTestAuthAllowed = false;
+        isDevAuthAllowed = false;
 #endif
         if (gatewayOptions.Authentication.IsKerberosConfigured)
         {
@@ -334,7 +334,7 @@ public static partial class GatewayServiceCollectionExtensions
         GatewayOptions gatewayOptions,
         bool isBasicSessionAllowed,
         string basicSessionCookieName,
-        bool isTestAuthAllowed)
+        bool isDevAuthAllowed)
     {
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
         authBuilder.AddPolicyScheme(GatewayAuthSchemes.DefaultScheme, "Gateway Smart Authentication", options =>
@@ -412,7 +412,7 @@ public static partial class GatewayServiceCollectionExtensions
 
                 // 3. Development Test Auth Simulation or Insecure Anonymous Access
 #if AUTHERIS_TEST_AUTH
-                if (isTestAuthAllowed)
+                if (isDevAuthAllowed)
                 {
                     if (context.Request.Headers.ContainsKey("X-Test-User-Sid") ||
                         context.Request.Headers.ContainsKey("X-Test-AppId") ||
