@@ -10,7 +10,7 @@ namespace TrinoSqlEngine.Tests.Security;
 
 /// <summary>
 /// WP-X0v (G7): the legacy SQ-/SQL- security regressions, asserted on the AST path (<c>Compile</c>) with the same or a stricter
-/// outcome. The legacy rewriter is gone (X1); the legacy suites (<c>SecurityReview20261002SqTests</c>,
+/// outcome. The legacy rewriter is gone (X1); the legacy suites (<c>SqlParserLexerAndRewriterDifferentialTests</c>,
 /// <c>Sql1BracketLexerDifferentialTests</c>, <c>DmlLimitAndAliasSql78Tests</c>, <c>SecurityRemediationTests</c>) were ported to
 /// <c>Compile</c>, and these tests keep every ID guarded. <see cref="SecurityRegressionCatalog"/> maps each ID to the tests below,
 /// and <see cref="SecurityRegressionTraceabilityTests"/> keeps that map complete. Assertions are semantic (exception type, bound

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -20,19 +21,11 @@ using Xunit;
 
 public class ItsmClientsAndRecertificationTests
 {
-    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(handler(request));
-        }
-    }
-
     [Fact]
     public async Task ServiceNowTableApiClient_ShouldCreateTicketAndReturnTicketId()
     {
         // Arrange
-        var mockHandler = new DelegatingHandlerStub(req =>
+        var mockHandler = new StubHttpMessageHandler(req =>
         {
             req.Method.ShouldBe(HttpMethod.Post);
             req.RequestUri!.AbsolutePath.ShouldContain("/api/now/table/change_request");
@@ -85,7 +78,7 @@ public class ItsmClientsAndRecertificationTests
     public async Task JiraCloudRestClient_ShouldCreateIssueAndReturnIssueKey()
     {
         // Arrange
-        var mockHandler = new DelegatingHandlerStub(req =>
+        var mockHandler = new StubHttpMessageHandler(req =>
         {
             req.Method.ShouldBe(HttpMethod.Post);
             req.RequestUri!.AbsolutePath.ShouldContain("/rest/api/3/issue");
@@ -272,7 +265,7 @@ public class ItsmClientsAndRecertificationTests
     public async Task SqliteGovernanceRepository_GetExpiringConsentsAsync_ShouldReadStringEnumsCorrectly()
     {
         // Arrange: Real in-memory SQLite database
-        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
 
         var table = new TableIdentifier("crm", "dbo", "customers");
         var tableEntity = new Table
@@ -430,20 +423,5 @@ public class ItsmClientsAndRecertificationTests
 
         await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentNotExtendableException>(() =>
             NewWorkflow(consentRepo).ExtendConsentExpiryAsync(active.Id, TimeSpan.FromDays(7), new Sid("S-1-5-21-approver"), "Legitimate reason"));
-    }
-
-    private sealed class StubEpochValidationService : IEpochValidationService
-    {
-        public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
-            => Task.FromResult(true);
-
-        public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult(1L);
-
-        public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(new Dictionary<TableIdentifier, long>());
     }
 }

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DataCatalog;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -190,8 +191,8 @@ public sealed class PurviewTokenCacheTests
     public async Task DevMockToken_IsNeverCached()
     {
         var cache = new PurviewTokenCache(_time);
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
-        var client = NewClient(handler, new GatewayOptions(), "Development", cache, new RecordingLogger());
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var client = NewClient(handler, new GatewayOptions(), "Development", cache, new CapturingLogger<PurviewDataCatalogClient>());
 
         await client.GetTablesAsync(ct: default);
 
@@ -216,14 +217,14 @@ public sealed class PurviewTokenCacheTests
                 },
             },
         };
-        var logger = new RecordingLogger();
+        var logger = new CapturingLogger<PurviewDataCatalogClient>();
         var cache = new PurviewTokenCache(_time);
         var fingerprint = PurviewTokenCache.ComputeKey("tenant-1", "client-1", secret);
 
-        var failing = NewClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)), options, "Development", cache, logger);
+        var failing = NewClient(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)), options, "Development", cache, logger);
         var ex = await Should.ThrowAsync<HttpRequestException>(() => failing.GetTablesAsync(ct: default));
 
-        var ok = NewClient(new StubHandler(req => req.RequestUri!.AbsolutePath.Contains("oauth2", StringComparison.Ordinal)
+        var ok = NewClient(new StubHttpMessageHandler(req => req.RequestUri!.AbsolutePath.Contains("oauth2", StringComparison.Ordinal)
             ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"access_token\":\"TOKEN-ABC\",\"expires_in\":3600}") }
             : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"entities\":[]}") }), options, "Development", cache, logger);
         await ok.GetTablesAsync(ct: default);
@@ -240,23 +241,5 @@ public sealed class PurviewTokenCacheTests
         var host = Substitute.For<IHostEnvironment>();
         host.EnvironmentName.Returns(env);
         return new PurviewDataCatalogClient(new HttpClient(handler), Options.Create(options), logger, host, null, cache);
-    }
-
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(respond(request));
-    }
-
-    private sealed class RecordingLogger : ILogger<PurviewDataCatalogClient>
-    {
-        public List<string> Lines { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Lines.Add(formatter(state, exception) + exception);
     }
 }

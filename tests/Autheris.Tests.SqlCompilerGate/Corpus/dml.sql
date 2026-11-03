@@ -556,7 +556,7 @@ UPDATE AUDIT_LOG_ENTRIES SET id = @tamperedId WHERE id = @originalId
 -- @id dded497113f4 class=delete expected=accept source=tests/Autheris.Tests.Unit/InfrastructureTests.cs
 DELETE FROM POLICY_EPOCHS WHERE table_name = 'finance_table_1'
 
--- @id c46b1a15d7b9 class=insert expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id c46b1a15d7b9 class=insert expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 INSERT INTO orders VALUES (1, 'a', 'eu', 'tenant_a'), (2, 'b', 'us', 'tenant_b');
 
 -- @id be442b52e0f5 class=delete expected=accept source=tests/Autheris.Tests.Unit/Security/AuditAnchorHardeningTests.cs
@@ -565,7 +565,7 @@ DELETE FROM AUDIT_LOG_ENTRIES WHERE rowid IN (SELECT rowid FROM AUDIT_LOG_ENTRIE
 -- @id 13c75147271d class=update expected=reject source=tests/Autheris.Tests.Unit/Security/CorrelatedRowFilterAliasTests.cs
 UPDATE orders SET amount = 0 WHERE id = 1
 
--- @id df1d79768261 class=insert expected=accept source=tests/Autheris.Tests.Unit/Security/RepeatedReviewRound3Tests.cs
+-- @id df1d79768261 class=insert expected=accept source=tests/Autheris.Tests.Unit/Security/DynamicMaskingAndConnectorGuardTests.cs
 INSERT INTO orders VALUES (1);
 
 -- @id 30ffa4acc8be class=insert expected=accept source=tests/Autheris.Tests.Unit/Security/SecurityReviewRemediationCoverageTests.cs
@@ -598,23 +598,23 @@ INSERT INTO accounts (id, balance, TenantId) VALUES (1, 100, 'tenant-hacked')
 -- @id d44040cf4c27 class=update expected=accept source=tests/Autheris.Tests.Unit/Security/SecurityReviewRemediationCoverageTests.cs
 UPDATE accounts SET balance = 500 WHERE id = 1
 
--- @id c96743202271 class=insert expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002InfraTests.cs
+-- @id c96743202271 class=insert expected=accept source=tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id)
                                 VALUES (@id, @occ, 'LEGACY', 'S-1-5-21-LEGACY', 'hr.dbo.salaries', NULL, 'ALLOW', 'trace-legacy', '{}', @prev, @hash, 'legacy-single-tenant')
 
--- @id f72a6b20bc20 class=update expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002InfraTests.cs
+-- @id f72a6b20bc20 class=update expected=accept source=tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 UPDATE AUDIT_LOG_ENTRIES SET seq = 7 WHERE seq = 3
 
--- @id f82327fb67f7 class=delete expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002InfraTests.cs
+-- @id f82327fb67f7 class=delete expected=accept source=tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 DELETE FROM AUDIT_LOG_ENTRIES WHERE rowid = (SELECT MAX(rowid) FROM AUDIT_LOG_ENTRIES)
 
--- @id 1f7eb1c652ce class=insert expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id 1f7eb1c652ce class=insert expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 INSERT INTO orders (id, amount) VALUES (1, 10)
 
--- @id ae76e5939407 class=insert expected=reject source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id ae76e5939407 class=insert expected=reject source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, '42')
 
--- @id e0d1ed85f91d class=insert expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id e0d1ed85f91d class=insert expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')
 
 -- @id 001618967ba7 class=delete expected=accept source=tests/Autheris.Tests.Unit/VirtualFilters/Federation/SqlVirtualFilterKeySetProviderTests.cs
@@ -1364,31 +1364,31 @@ UPDATE orders SET status = 'shipped' WHERE id = 10 AND 1 = 1
 -- @id f93a09ccc13a class=update expected=accept source=tests/TrinoSqlEngine.Tests/SecurityRemediationTests.cs
 UPDATE customers SET notes = 'x' WHERE ssn LIKE '1%'
 
--- @id 19bb090992dc class=update expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 19bb090992dc class=update expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 UPDATE sales.customers SET notes = CAST("sales.customers" AS VARCHAR) WHERE id = 1
 
--- @id 3cc76a3b7e61 class=delete expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 3cc76a3b7e61 class=delete expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 DELETE FROM customers WHERE customers IS NOT NULL AND id = 1
 
--- @id 6423407a988e class=insert expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 6423407a988e class=insert expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 INSERT INTO orders (id, tenant_id) VALUES (1, 42)
 
--- @id 6bf92d07dd8e class=update expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 6bf92d07dd8e class=update expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 UPDATE customers SET notes = 'clean' WHERE id = 1
 
--- @id 7988bedaa9af class=insert expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 7988bedaa9af class=insert expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 INSERT INTO patients (id, tenant_id) VALUES (1, 42)
 
--- @id af06b94ef770 class=update expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id af06b94ef770 class=update expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 UPDATE customers SET notes = 'clean'
 
--- @id b3b4ebf362e3 class=insert expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id b3b4ebf362e3 class=insert expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 INSERT INTO orders
 
--- @id ce13dcbb3ddf class=update expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id ce13dcbb3ddf class=update expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 UPDATE customers SET notes = CAST(customers AS VARCHAR) WHERE id = 1
 
--- @id fe58c08d27e7 class=insert expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id fe58c08d27e7 class=insert expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 INSERT INTO health.records (id, tenant_id) VALUES (1, 42)
 
 -- @id 1684d50a4cd2 class=update expected=reject source=tests/TrinoSqlEngine.Tests/TrinoParserComplianceTests.cs

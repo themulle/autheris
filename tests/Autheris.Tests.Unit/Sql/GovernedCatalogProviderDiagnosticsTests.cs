@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
 using Autheris.Application.Interfaces;

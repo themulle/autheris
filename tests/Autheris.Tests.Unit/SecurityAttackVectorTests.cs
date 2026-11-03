@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -364,7 +365,7 @@ public sealed class SecurityAttackVectorTests
     public async Task SqliteGovernanceRepository_AuditHashChain_TamperingShouldBeDetected()
     {
         // Arrange
-        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
 
         // Insert valid consecutive audit records
         var entry1 = new AuditLogEntry
@@ -412,20 +413,5 @@ public sealed class SecurityAttackVectorTests
         // Act 3: Verification must now FAIL (tamper detection)
         var isChainValidAfterTampering = await repo.VerifyAuditHashChainAsync();
         isChainValidAfterTampering.ShouldBeFalse();
-    }
-
-    private sealed class StubEpochValidationService : IEpochValidationService
-    {
-        public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
-            => Task.FromResult(true);
-
-        public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult(1L);
-
-        public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(new Dictionary<TableIdentifier, long>());
     }
 }

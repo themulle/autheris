@@ -98,7 +98,7 @@ WHERE rm.member_sid = @sid";
             }
             return dict;
         }
-        catch
+        catch (JsonException)
         {
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }

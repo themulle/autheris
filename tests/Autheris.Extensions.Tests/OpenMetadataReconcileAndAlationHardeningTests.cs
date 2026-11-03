@@ -1,5 +1,6 @@
 namespace Autheris.Extensions.Tests;
 
+using Autheris.Tests.Common;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Audit;
 using System;
@@ -34,35 +35,12 @@ using Xunit;
 /// Round 4 (FIX-O): E-05..E-09 and EX-02 / EX-06 / EX-16 – OpenMetadata reconcile, Art. 9 mapping, SID resolution,
 /// Alation client hardening and the database-aware OpenMetadata identity.
 /// </summary>
-public sealed class Round4OpenMetadataTests
+public sealed class OpenMetadataReconcileAndAlationHardeningTests
 {
     private static readonly Guid PolicyId = new("6c1f2b0e-3a4d-4e5f-8a9b-0c1d2e3f4a5b");
     private static readonly TableIdentifier OrdersId = new("sales_svc", "dbo", "orders");
 
     // ------------------------------------------------------------------ helpers
-
-    private sealed class RecordingLogger<T> : ILogger<T>
-    {
-        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => Entries.Add((logLevel, formatter(state, exception), exception));
-    }
-
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
-    {
-        public List<HttpRequestMessage> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return Task.FromResult(responder(request));
-        }
-    }
 
     private static OpenMetadataTable OmTable(
         string service,
@@ -826,7 +804,7 @@ public sealed class Round4OpenMetadataTests
     }
 
     private static AlationCatalogClient CreateAlation(
-        StubHandler handler,
+        StubHttpMessageHandler handler,
         IKeyVaultSecretProvider? secretProvider,
         IHostEnvironment? environment,
         ILogger<AlationCatalogClient>? logger = null,
@@ -863,10 +841,10 @@ public sealed class Round4OpenMetadataTests
     [Fact]
     public async Task E08_Alation_SecretLookupFailure_InDevelopment_FailsClosed_AndLogsNoExceptionMessage()
     {
-        var handler = new StubHandler(_ => Json("[]"));
+        var handler = new StubHttpMessageHandler(_ => Json("[]"));
         var provider = Substitute.For<IKeyVaultSecretProvider>();
         provider.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("Secret 'raw-alation-token-XYZ' not found"));
-        var logger = new RecordingLogger<AlationCatalogClient>();
+        var logger = new CapturingLogger<AlationCatalogClient>();
 
         var client = CreateAlation(handler, provider, Env(Environments.Development), logger);
 
@@ -879,7 +857,7 @@ public sealed class Round4OpenMetadataTests
     [Fact]
     public async Task E08_Alation_EmptySecret_FailsClosed()
     {
-        var handler = new StubHandler(_ => Json("[]"));
+        var handler = new StubHttpMessageHandler(_ => Json("[]"));
         var provider = Substitute.For<IKeyVaultSecretProvider>();
         provider.GetSecretBytes(Arg.Any<string>()).Returns(Array.Empty<byte>());
 
@@ -892,7 +870,7 @@ public sealed class Round4OpenMetadataTests
     [Fact]
     public async Task E08_Alation_MissingSecretProvider_FailsClosed()
     {
-        var handler = new StubHandler(_ => Json("[]"));
+        var handler = new StubHttpMessageHandler(_ => Json("[]"));
         var client = CreateAlation(handler, secretProvider: null, environment: null);
 
         await Should.ThrowAsync<SecurityException>(() => client.GetTablesAsync());
@@ -906,17 +884,17 @@ public sealed class Round4OpenMetadataTests
         var provider = Substitute.For<IKeyVaultSecretProvider>();
         provider.GetSecretBytes("alation-token-ref").Returns(Encoding.UTF8.GetBytes("alation-token-ref"));
 
-        var blockedHandler = new StubHandler(_ => Json("[]"));
+        var blockedHandler = new StubHttpMessageHandler(_ => Json("[]"));
         var blocked = CreateAlation(blockedHandler, provider, Env(Environments.Development));
         await Should.ThrowAsync<SecurityException>(() => blocked.GetTablesAsync());
         blockedHandler.Requests.ShouldBeEmpty();
 
-        var allowedHandler = new StubHandler(_ => Json("[]"));
+        var allowedHandler = new StubHttpMessageHandler(_ => Json("[]"));
         var allowed = CreateAlation(allowedHandler, provider, Env(Environments.Development), allowPlaintextInDevelopment: true);
         await allowed.GetTablesAsync();
         allowedHandler.Requests.ShouldHaveSingleItem().Headers.GetValues("TOKEN").Single().ShouldBe("alation-token-ref");
 
-        var prodHandler = new StubHandler(_ => Json("[]"));
+        var prodHandler = new StubHttpMessageHandler(_ => Json("[]"));
         var prod = CreateAlation(prodHandler, provider, Env(Environments.Production), allowPlaintextInDevelopment: true);
         await Should.ThrowAsync<SecurityException>(() => prod.GetTablesAsync());
     }
@@ -927,7 +905,7 @@ public sealed class Round4OpenMetadataTests
         static string Page(int count, int offset) =>
             "[" + string.Join(",", Enumerable.Range(offset, count).Select(i => $"{{\"id\":{i},\"name\":\"t{i}\",\"schema_name\":\"s\",\"ds_id\":7}}")) + "]";
 
-        var handler = new StubHandler(req =>
+        var handler = new StubHttpMessageHandler(req =>
             req.RequestUri!.Query.Contains($"skip={AlationCatalogClient.PageSize}", StringComparison.Ordinal)
                 ? Json(Page(1, AlationCatalogClient.PageSize))
                 : Json(Page(AlationCatalogClient.PageSize, 0)));
@@ -945,7 +923,7 @@ public sealed class Round4OpenMetadataTests
     [Fact]
     public async Task E08_Alation_UnmappedAndMalformedDataSources_AreDiscarded()
     {
-        var handler = new StubHandler(_ => Json(
+        var handler = new StubHttpMessageHandler(_ => Json(
             """
             [
               {"id":1,"name":"patients","schema_name":"clinical","ds_id":7},
@@ -966,13 +944,13 @@ public sealed class Round4OpenMetadataTests
     {
         var provider = Substitute.For<IKeyVaultSecretProvider>();
         provider.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("Secret 'raw-om-token-ABC' could not be resolved"));
-        var logger = new RecordingLogger<OpenMetadataClient>();
+        var logger = new CapturingLogger<OpenMetadataClient>();
         var options = Options.Create(new GatewayOptions
         {
             OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ServerUrl = "https://om.corp.example/api/v1", AuthToken = "raw-om-token-ABC" }
         });
 
-        _ = new OpenMetadataClient(new HttpClient(new StubHandler(_ => Json("{}"))), options, logger, provider, Env(Environments.Development));
+        _ = new OpenMetadataClient(new HttpClient(new StubHttpMessageHandler(_ => Json("{}"))), options, logger, provider, Env(Environments.Development));
 
         logger.Entries.ShouldNotBeEmpty();
         logger.Entries.ShouldAllBe(e => e.Exception == null && !e.Message.Contains("raw-om-token-ABC"));

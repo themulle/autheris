@@ -330,7 +330,7 @@ public class ProcedureEndpointTests
     [Fact]
     public async Task Execute_PendingEndpoint_WithoutVisibility_IsNotFound()
     {
-        // 503 is only visible to callers that pass the visibility stage (see ProcedureSecurityInc1Tests)
+        // 503 is only visible to callers that pass the visibility stage (see ProcedureExecutionSecurityTests)
         var f = new Fixture();
         f.Registry.Register(ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60));
         await Should.ThrowAsync<KeyNotFoundException>(() => f.Create().ExecuteAsync("get_orders", null, User(), Tenant));

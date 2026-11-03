@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -43,11 +44,11 @@ namespace Autheris.Tests.Unit;
 /// Security review 2026-10-02, work package F (infrastructure + application integrations):
 /// H-01, H-17, M-25, M-26, M-27, M-28, M-29, M-30, M-31 and the MCP JSON-injection low finding.
 /// </summary>
-public sealed class SecurityReview20261002InfraTests : IDisposable
+public sealed class InfrastructureAndPluginSecurityTests : IDisposable
 {
     private readonly string _tempDir;
 
-    public SecurityReview20261002InfraTests()
+    public InfrastructureAndPluginSecurityTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), "sec_review_wpf_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDir);
@@ -627,20 +628,9 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     // M-25 / M-26: declarative HTTP data source
     // =========================================================================
 
-    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+    private static (DeclarativeHttpDataSourceExecutor Executor, StubHttpMessageHandler Handler) CreateHttpExecutor(Func<HttpRequestMessage, HttpResponseMessage> responder)
     {
-        public List<HttpRequestMessage> Requests { get; } = new();
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return Task.FromResult(responder(request));
-        }
-    }
-
-    private static (DeclarativeHttpDataSourceExecutor Executor, RecordingHandler Handler) CreateHttpExecutor(Func<HttpRequestMessage, HttpResponseMessage> responder)
-    {
-        var handler = new RecordingHandler(responder);
+        var handler = new StubHttpMessageHandler(responder);
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(new HttpClient(handler));
         var env = Substitute.For<IHostEnvironment>();

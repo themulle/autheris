@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql.TimeZones;
 
+using Autheris.Tests.Common;
 using Autheris.Application.Sql.TimeZones;
 using Autheris.Tests.Unit.Databricks;
 using Microsoft.Extensions.Logging;

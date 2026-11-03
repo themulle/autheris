@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -24,40 +25,12 @@ using Xunit;
 /// <summary>MISC-13: executors push down only the gateway-resolved context tenant, never a raw token claim.</summary>
 public sealed class DeclarativeHttpTenantPushdownTests
 {
-    private sealed class RecordingHandler : HttpMessageHandler
+    private static (DeclarativeHttpDataSourceExecutor Executor, StubHttpMessageHandler Handler, CapturingLogger<DeclarativeHttpDataSourceExecutor> Logger) Create()
     {
-        public List<HttpRequestMessage> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]", Encoding.UTF8, "application/json") });
-        }
-    }
-
-    private sealed class CapturingLogger : ILogger<DeclarativeHttpDataSourceExecutor>
-    {
-        public List<string> Warnings { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == LogLevel.Warning)
-            {
-                Warnings.Add(formatter(state, exception));
-            }
-        }
-    }
-
-    private static (DeclarativeHttpDataSourceExecutor Executor, RecordingHandler Handler, CapturingLogger Logger) Create()
-    {
-        var handler = new RecordingHandler();
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]", Encoding.UTF8, "application/json") });
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(handler));
-        var logger = new CapturingLogger();
+        var logger = new CapturingLogger<DeclarativeHttpDataSourceExecutor>();
         return (new DeclarativeHttpDataSourceExecutor(factory, logger), handler, logger);
     }
 

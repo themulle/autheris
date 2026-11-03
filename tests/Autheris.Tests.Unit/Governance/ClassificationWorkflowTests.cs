@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -93,7 +94,7 @@ public sealed class ClassificationWorkflowTests
         var store = new InMemoryClassificationProposalStore();
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance,
             store);
 
@@ -164,7 +165,7 @@ public sealed class ClassificationWorkflowTests
         var store = new InMemoryClassificationProposalStore();
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance,
             store);
 
@@ -203,7 +204,7 @@ public sealed class ClassificationWorkflowTests
         var store = new InMemoryClassificationProposalStore();
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance,
             store);
 
@@ -263,13 +264,5 @@ public sealed class ClassificationWorkflowTests
         refreshed.ShouldNotBeNull();
         refreshed.DataOwnerSid.ShouldBe("order_steward_sid");
         refreshed.Status.ShouldBe("PENDING_OWNER_REVIEW");
-    }
-
-    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
-    {
-        public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
-        public T CurrentValue { get; }
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

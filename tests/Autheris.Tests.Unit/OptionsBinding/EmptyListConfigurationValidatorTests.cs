@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.OptionsBinding;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -18,27 +19,13 @@ using Shouldly;
 /// </summary>
 public class EmptyListConfigurationValidatorTests
 {
-    private sealed class CapturingLogger : ILogger<GatewayEmptyListConfigurationValidator>
-    {
-        public List<string> Warnings { get; } = [];
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == LogLevel.Warning)
-            {
-                Warnings.Add(formatter(state, exception));
-            }
-        }
-    }
-
     private static IConfiguration Json(string json) =>
         new ConfigurationBuilder().AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(json))).Build();
 
-    private static (ValidateOptionsResult Result, CapturingLogger Logger) Run(string json)
+    private static (ValidateOptionsResult Result, CapturingLogger<GatewayEmptyListConfigurationValidator> Logger) Run(string json)
     {
         var config = Json(json);
-        var logger = new CapturingLogger();
+        var logger = new CapturingLogger<GatewayEmptyListConfigurationValidator>();
         var options = config.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
         return (new GatewayEmptyListConfigurationValidator(config, logger).Validate(null, options), logger);
     }

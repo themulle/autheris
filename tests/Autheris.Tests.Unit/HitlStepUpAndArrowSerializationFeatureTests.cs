@@ -20,7 +20,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 
-public sealed class Wave3MarketFeaturesTests
+public sealed class HitlStepUpAndArrowSerializationFeatureTests
 {
     // =========================================================================
     // 2. F-AI-05: Human-in-the-Loop (HitL) Step-Up Approval Tests

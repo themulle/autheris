@@ -64,7 +64,7 @@ public sealed class CollibraDataCatalogClient : IDataCatalogClient
         }
 
         var json = await CatalogHttpContent.ReadBoundedStringAsync(response, "Collibra", ct).ConfigureAwait(false);
-        return ParseCollibraAssetsResponse(json);
+        return ParseCollibraAssetsResponse(json, _logger);
     }
 
     public async Task<CatalogTableAsset?> GetTableAsync(TableIdentifier table, CancellationToken ct = default)
@@ -100,7 +100,7 @@ public sealed class CollibraDataCatalogClient : IDataCatalogClient
         }
     }
 
-    private static IReadOnlyList<CatalogTableAsset> ParseCollibraAssetsResponse(string json)
+    private static IReadOnlyList<CatalogTableAsset> ParseCollibraAssetsResponse(string json, ILogger logger)
     {
         var result = new List<CatalogTableAsset>();
         try
@@ -126,9 +126,9 @@ public sealed class CollibraDataCatalogClient : IDataCatalogClient
                 });
             }
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
-            // Resilient fallback on parsing error
+            logger.LogWarning("Collibra assets response could not be parsed ({ExceptionType}).", ex.GetType().Name);
         }
 
         return result;

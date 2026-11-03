@@ -86,18 +86,6 @@ public sealed class CatalogVisibilityServiceTests
         public Task InvalidateTenantCacheAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    private sealed class CapturingLogger : ILogger<CatalogVisibilityService>
-    {
-        public ConcurrentBag<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Entries.Add((logLevel, formatter(state, exception), exception));
-    }
-
     private static ClaimsPrincipal Subject(string sid = "S-USER") => Wp0.User(sid, "tenant-a");
 
     private static TableMetadata Row(TableIdentifier id) => Wp0.Table(id.Domain, id.TableName, "Short " + id.TableName, ["id"]);
@@ -665,7 +653,7 @@ public sealed class CatalogVisibilityServiceTests
     public async Task Logs_Metrics_NoSidTenantTableName_OnChunkFailureAndDeny()
     {
         var rows = Rows(40);
-        var logger = new CapturingLogger();
+        var logger = new CapturingLogger<CatalogVisibilityService>();
         var rebac = new FakeRebac
         {
             Override = req => throw new InvalidOperationException($"fail for S-USER tenant-a {req.Checks[0].Object}")
@@ -688,7 +676,7 @@ public sealed class CatalogVisibilityServiceTests
         var consents = Substitute.For<IConsentRepository>();
         consents.GetAllActiveConsentsForSubjectsAsync(default!, default, default, default, default)
             .ReturnsForAnyArgs<Task<IReadOnlyList<Consent>>>(_ => throw new InvalidOperationException("S-USER sales.dbo.tab0000"));
-        var logger2 = new CapturingLogger();
+        var logger2 = new CapturingLogger<CatalogVisibilityService>();
         (await Svc(Wp0.Tables(rows), consents, logger: logger2).GetVisibleAsync(Caller(Subject()))).Tables.ShouldBeEmpty();
         logger2.Entries.ShouldNotBeEmpty();
         logger2.Entries.ShouldAllBe(e => e.Exception == null && !e.Message.Contains("S-USER") && !e.Message.Contains("tab0000"));

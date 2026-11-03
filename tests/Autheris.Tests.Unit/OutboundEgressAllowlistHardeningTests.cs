@@ -30,7 +30,7 @@ using Xunit;
 /// E-03 hardened primary handler (no redirects, connect-time check with IP pinning) for all integration clients,
 /// E-04 Alation TOKEN header cannot follow a redirect.
 /// </summary>
-public sealed class Round4EgressTests
+public sealed class OutboundEgressAllowlistHardeningTests
 {
     private static readonly Func<string, string?> NoEnvironmentVariables = _ => null;
 

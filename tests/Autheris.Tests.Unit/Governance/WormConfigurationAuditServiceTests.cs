@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Services;
@@ -18,7 +19,7 @@ public sealed class WormConfigurationAuditServiceTests
         {
             Classification = new ClassificationOptions()
         };
-        var optionsMonitor = new TestOptionsMonitor<GatewayOptions>(gatewayOptions);
+        var optionsMonitor = new StaticOptionsMonitor<GatewayOptions>(gatewayOptions);
         var auditService = new WormConfigurationAuditService(optionsMonitor, NullLogger<WormConfigurationAuditService>.Instance, environment: WormTestEnvironment.Development);
 
         // 1. Startup snapshot
@@ -53,14 +54,5 @@ public sealed class WormConfigurationAuditServiceTests
         changedRecord.ActorSid.ShouldBe("admin@corp.local");
         changedRecord.PreviousConfigHash.ShouldBe(initialRecord.Sha256ConfigHash);
         changedRecord.Sha256ConfigHash.ShouldNotBe(initialRecord.Sha256ConfigHash);
-    }
-
-    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
-    {
-        public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
-        public T CurrentValue { get; private set; }
-        public void SetCurrent(T val) => CurrentValue = val;
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

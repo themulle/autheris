@@ -43,7 +43,7 @@ internal sealed record Phase3Entry(string Id, string Summary, string[] WorkPacka
 internal static class SecurityRegressionCatalog
 {
     private const string Ast = nameof(AstSecurityRegressionTests);
-    private const string SqReview = "TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs";
+    private const string SqReview = "TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs";
     private const string Remediation = "TrinoSqlEngine.Tests/SecurityRemediationTests.cs";
     private const string Vf = "Autheris.Tests.Unit/VirtualFilters/";
     private const string VfFed = "Autheris.Tests.Unit/VirtualFilters/Federation/";
@@ -82,13 +82,13 @@ internal static class SecurityRegressionCatalog
         new("SQ-10", LegacyIdKind.Compiler, "non-ASCII case folding is not applied to identifiers",
             T(nameof(AstSecurityRegressionTests.SQ10_NonAsciiLookalikes_DoNotResolveToACatalogTable)), new[] { SqReview }),
         new("SQ-11", LegacyIdKind.Compiler, "dots in quoted identifiers",
-            T(nameof(AstSecurityRegressionTests.SQ11_DotsInQuotedIdentifiers_AreRejected)), new[] { SqReview, Remediation, "Autheris.Tests.Unit/Round4ParserGatewayTests.cs" }),
+            T(nameof(AstSecurityRegressionTests.SQ11_DotsInQuotedIdentifiers_AreRejected)), new[] { SqReview, Remediation, "Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs" }),
         new("SQ-13", LegacyIdKind.Compiler, "time-travel queries",
             T(nameof(AstSecurityRegressionTests.SQ13_TimeTravelQueries_AreRejected)), new[] { SqReview, Remediation }),
         new("SQ-14", LegacyIdKind.Compiler, "a pooled parser carries no state to the next compile",
             T(nameof(AstSecurityRegressionTests.SQ14_PooledParsers_DoNotLeakStateAcrossCompiles)), new[] { SqReview }),
         new("SQ-15", LegacyIdKind.Application, "unlimited DML affected rows is a DANGER configuration entry",
-            Array.Empty<string>(), new[] { "Autheris.Tests.Unit/Round4ParserGatewayTests.cs" }),
+            Array.Empty<string>(), new[] { "Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs" }),
 
         // ---- SQL: the SQL review series -----------------------------------------------------------------------------------------
         new("SQL-1", LegacyIdKind.Compiler, "bracket lexer differential (SQL Server, SQLite) and DML on the tenant column",

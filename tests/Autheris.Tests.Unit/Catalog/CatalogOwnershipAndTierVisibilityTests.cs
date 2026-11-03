@@ -27,7 +27,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-public sealed class Wave3CatalogOwnershipTests
+public sealed class CatalogOwnershipAndTierVisibilityTests
 {
     private const string Tenant = "tenant-a";
     private static readonly TableIdentifier Orders = new("sales", "public", "orders");

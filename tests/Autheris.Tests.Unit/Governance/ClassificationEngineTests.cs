@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -23,7 +24,7 @@ public sealed class ClassificationEngineTests
         {
             Classification = new ClassificationOptions()
         };
-        _gatewayOptions = new TestOptionsMonitor<GatewayOptions>(options);
+        _gatewayOptions = new StaticOptionsMonitor<GatewayOptions>(options);
     }
 
     [Fact]
@@ -123,13 +124,5 @@ public sealed class ClassificationEngineTests
 
         proposal.ShouldNotBeNull();
         proposal.Columns[0].ProposedSensitivityKey.ShouldBe("L2_INTERNAL");
-    }
-
-    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
-    {
-        public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
-        public T CurrentValue { get; }
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

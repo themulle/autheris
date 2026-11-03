@@ -16,7 +16,7 @@ namespace Autheris.Tests.Unit.Governance;
 /// PLAN-GOV-158-INC1 review finding: the stored description is an explicit opt-in load. The repository read methods return consents without it
 /// (access-decision hot path); explain and myActiveConsents load it once for the consents they present.
 /// </summary>
-public sealed class Issue158Inc1DescriptionOptInTests
+public sealed class ConsentDescriptionOptInLoadingTests
 {
     private const string UserSid = "S-1-5-21-OPTIN-USER";
     private const string Group = "S-1-GRP-OPTIN";

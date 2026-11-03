@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 
+using Autheris.Tests.Common;
 using System;
 using System.IO;
 using System.Net;
@@ -48,14 +49,8 @@ public sealed class ResponseSizeLimitingHandlerTests
         }
     }
 
-    private sealed class StubHandler(Func<HttpResponseMessage> response) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(response());
-    }
-
     private static HttpClient Client(Func<HttpResponseMessage> response, long cap = Cap) =>
-        new(new ResponseSizeLimitingHandler(cap) { InnerHandler = new StubHandler(response) });
+        new(new ResponseSizeLimitingHandler(cap) { InnerHandler = new StubHttpMessageHandler(_ => response()) });
 
     [Fact]
     public async Task UnknownLengthBodyAboveTheCap_AbortsAfterAtMostCapPlusOneBuffer()

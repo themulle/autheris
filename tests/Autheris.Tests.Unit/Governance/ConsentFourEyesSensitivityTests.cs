@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -18,20 +19,11 @@ using Xunit;
 /// </summary>
 public sealed class ConsentFourEyesSensitivityTests
 {
-    private sealed class StubEpochValidationService : IEpochValidationService
-    {
-        public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default) => Task.FromResult(true);
-        public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult(1L);
-        public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(new Dictionary<TableIdentifier, long>());
-    }
-
     private static async Task<(SqliteGovernanceRepository repo, ConsentRequest request)> CreateRequestForTableAsync(
         string sensitivity,
         bool requiresFourEyes = false)
     {
-        var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "cust_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {

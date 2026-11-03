@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Data;
 using System.Data.Common;
 using System.IO;
@@ -213,7 +214,7 @@ public sealed class SecurityReviewRemediationCoverageTests
     [Fact]
     public async Task POL_3_ConsentResolutionService_AddedColumnsAfterConsentActivation_AreDenyNotClear()
     {
-        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "pol3_customers_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {
@@ -618,15 +619,6 @@ public sealed class SecurityReviewRemediationCoverageTests
             requireTransaction: true);
 
         tx.ShouldBeNull();
-    }
-
-    private sealed class StubEpochValidationService : IEpochValidationService
-    {
-        public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default) => Task.FromResult(true);
-        public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult(1L);
-        public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(new Dictionary<TableIdentifier, long>());
     }
 
     private sealed class StubPolicyEnforcementService : IPolicyEnforcementService

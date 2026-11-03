@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -276,19 +277,8 @@ public sealed class ExtensionsRegistrationTests
 
     // ------------------------------------------------------------------ Alation hardening
 
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
-    {
-        public List<HttpRequestMessage> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return Task.FromResult(responder(request));
-        }
-    }
-
     private static AlationCatalogClient CreateAlationClient(
-        StubHandler handler,
+        StubHttpMessageHandler handler,
         string baseUrl = "https://alation.corp.example",
         string apiToken = "alation-token-ref",
         IKeyVaultSecretProvider? secretProvider = null,
@@ -322,7 +312,7 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public async Task EXT_Alation_SendsTokenResolvedViaSecretProvider_AndMapsTables()
     {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """[{"id":42,"name":"patients","schema_name":"clinical","ds_id":7,"tags":["gdpr_art9"]}]""",
@@ -350,7 +340,7 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public async Task EXT_Alation_HttpError_IsPropagated_NotAnEmptyCatalog()
     {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
         var client = CreateAlationClient(handler);
 
         var ex = await Should.ThrowAsync<HttpRequestException>(() => client.GetTablesAsync());
@@ -360,7 +350,7 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public async Task EXT_Alation_OversizedResponse_IsRejected()
     {
-        var handler = new StubHandler(_ =>
+        var handler = new StubHttpMessageHandler(_ =>
         {
             var content = new StringContent("[]", Encoding.UTF8, "application/json");
             content.Headers.ContentLength = 11L * 1024 * 1024;
@@ -375,7 +365,7 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public async Task EXT_Alation_UnresolvableSecretOutsideDevelopment_FailsClosed()
     {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") });
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") });
         var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
         secretProvider.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("not found"));
         var prodEnv = Substitute.For<IHostEnvironment>();
@@ -390,7 +380,7 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public async Task EXT_Alation_MissingBaseUrl_Throws()
     {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         var client = CreateAlationClient(handler, baseUrl: string.Empty);
 
         await Should.ThrowAsync<InvalidOperationException>(() => client.GetTablesAsync());
@@ -400,7 +390,7 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public async Task EXT_Collibra_OversizedResponse_IsRejected()
     {
-        var handler = new StubHandler(_ =>
+        var handler = new StubHttpMessageHandler(_ =>
         {
             var content = new StringContent("{\"results\":[]}", Encoding.UTF8, "application/json");
             content.Headers.ContentLength = 11L * 1024 * 1024;

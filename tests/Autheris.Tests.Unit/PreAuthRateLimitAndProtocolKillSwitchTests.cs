@@ -22,7 +22,7 @@ namespace Autheris.Tests.Unit;
 /// - Issue #31: Caller Context in Audit Log
 /// - Issue #30: Distinguishable Error Codes
 /// </summary>
-public sealed class Wave1GatewayHardeningTests
+public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
 {
     [Fact]
     public async Task Issue44_PreAuthRateLimiter_Exempts_BearerToken_Requests()
