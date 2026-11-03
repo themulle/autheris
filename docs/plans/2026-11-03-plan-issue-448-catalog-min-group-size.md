@@ -125,7 +125,9 @@
 - R2: A governance admin can mislabel personal data as non-personal; mitigated only by audit and the column-flag gate, not preventable technically.
 - R3: dbt last-sync-wins can re-raise or clear values between syncs (fail-safe direction: absent key clears to the stricter state).
 
-### Owner questions (defaults taken)
-1. May dbt alone satisfy `non_personal`? Default: no (SEC-MGS-02; governance confirmation required, optional operator override).
-2. Block lowering on table-level pii/sensitive tags as well as columns? Default: yes.
-3. Multi-table queries: refuse or max floor? Default: max floor across tables.
+### Owner decisions (2026-11-03)
+All defaults confirmed by the owner:
+1. dbt alone never satisfies `non_personal` (SEC-MGS-02); governance confirmation is required, `AllowSourceDeclaredLowering` (default false) is the operator opt-in.
+2. Table-level pii/sensitive tags block lowering as well as column flags; four-eyes and highly sensitive tables block lowering too.
+3. Multi-table queries use the maximum floor across the tables involved.
+4. Per-column eligibility (only grouped/aggregated columns count) stays a follow-up candidate.

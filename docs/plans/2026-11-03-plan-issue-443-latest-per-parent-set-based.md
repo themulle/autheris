@@ -166,7 +166,10 @@ Tests: `Disabled_NoExtension`, `BelowThreshold_NoExtension`, `AboveThreshold_Rep
 - R-3: set-based costs one scan of the child partition set per statement; bounded by SEC-LPP-05/06 and the command timeout.
 - R-4: tie winners may differ between forms (D-5), not a confidentiality issue.
 
-### Owner questions (defaults)
-1. Is there an existing result-row/size limit in the executor to reuse for SEC-LPP-05? Default: yes, reuse; otherwise add `MaxSetBasedRows = 100 000`.
-2. Minimum SQL Server version for `STRING_AGG` (plan risk 2)? Default: 2017+ (compat 140); lower means a capability flag forcing correlated.
-3. Report for Standard tier too, or Enterprise/Internal only? Default: conjunction with `ExposeCostExtensions` only, per D-10.
+### Owner decisions (2026-11-03)
+All defaults confirmed by the owner:
+1. Row cap: reuse an existing executor result-row limit if one exists; otherwise add `MaxSetBasedRows = 100 000` (SEC-LPP-05). The developer checks first.
+2. SQL Server 2017+ (compat 140) is required for the set-based form (`STRING_AGG`); older versions get a capability flag that forces the correlated form.
+3. The slow-list report is off by default (`ThresholdMs = 1000`, `MaxEntries = 3`) and gated by `ExposeCostExtensions` (D-10).
+4. REQ-LPP-12 (pricing of nested lists) is a follow-up issue.
+5. D-3 stays ROW_NUMBER only. The WP-C benchmark (>= 10x faster than correlated, target <= 250 ms on the issue's shape) is a binding acceptance criterion; if it misses, `MAX` plus seek is planned as an addendum before merge.

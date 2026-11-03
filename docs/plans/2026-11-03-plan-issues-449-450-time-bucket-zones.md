@@ -263,6 +263,9 @@ Retained unchanged: SEC-PGP-04 (units), SEC-PGP-05 (SQL Server culture independe
 - R3: Lord_Howe-style zones merge their DST fold hour in HOUR buckets; merging increases group size, so it is privacy-safe.
 - R4: clients parsing `Z` keys break (not in production).
 
-### Owner questions (defaults)
-- Q1: fix the `AggregateArgumentParser.cs:195` echo in WP1? Default: yes (SEC-TBZ-11).
-- Q2: keep D4 on governed WebSQL (zoned columns readable in any registry zone)? Default: yes, with SEC-TBZ-05/06.
+### Owner decisions (2026-11-03)
+All defaults confirmed by the owner:
+- Q1: the `AggregateArgumentParser.cs:195` echo is fixed in WP1 (SEC-TBZ-11).
+- Q2: D4 stays on governed WebSQL (two-argument `convert_timezone` on PG/MSSQL), with SEC-TBZ-05/06.
+- D1: bucket keys carry the requested zone's offset; UTC keys use `+00:00`, not `Z` (breaking for `Z`-parsing clients, accepted: not in production).
+- D6: Databricks/Oracle refuse non-UTC zones; real zone support there is a follow-up candidate.
