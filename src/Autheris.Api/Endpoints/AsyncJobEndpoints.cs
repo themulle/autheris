@@ -33,7 +33,11 @@ public static class AsyncJobEndpoints
             AsyncJobDescriptor job;
             try
             {
-                job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+                job = await jobManager.SubmitJobAsync(
+                    request, httpContext.User, tenantId,
+                    httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
+                        ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
+                    ct).ConfigureAwait(false);
             }
             catch (ClusterStateUnavailableException)
             {

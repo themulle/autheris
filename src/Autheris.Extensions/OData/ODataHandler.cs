@@ -505,6 +505,19 @@ public sealed partial class ODataHandler(
                 ErrorMessage: unEx.Message
             );
         }
+        catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
+        {
+            // Issue #447 (REQ-ATR-04): stable code and fixed text, also in verbose mode (no source name, no sub-reason).
+            _logger.LogWarning("OData query for {Table} refused: the data source does not allow this transport.", table);
+            const string transportDenied = "Access to the data source is not allowed over this transport.";
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: 403,
+                Payload: ODataResponseFormatter.FormatErrorResponse(Autheris.Domain.Exceptions.TransportNotAllowedException.Code, transportDenied),
+                ErrorCode: Autheris.Domain.Exceptions.TransportNotAllowedException.Code,
+                ErrorMessage: transportDenied
+            );
+        }
         catch (Autheris.Domain.Exceptions.GatewaySecurityException secEx)
         {
             _logger.LogWarning("OData query for {Table} forbidden: {Message}", table, secEx.Message);

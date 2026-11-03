@@ -392,7 +392,11 @@ public static partial class WebSqlEndpoints
 
         try
         {
-            var status = await statementManager.GetStatusOrWaitAsync(statementId, user, owner, tenantId, waitTimeout, ct);
+            var status = await statementManager.GetStatusOrWaitAsync(
+                statementId, user, owner, tenantId, waitTimeout,
+                httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
+                    ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
+                ct);
             await WriteTrinoStatementResponseAsync(httpContext, status, ct);
         }
         catch (KeyNotFoundException)

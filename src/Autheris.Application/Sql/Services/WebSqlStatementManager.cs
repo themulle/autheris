@@ -160,6 +160,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         var sessionCts = new CancellationTokenSource();
         var sw = Stopwatch.StartNew();
 
+        var sources = new SourceHolder();
         var executionTask = Task.Run(async () =>
         {
             using var scope = _scopeFactory.CreateScope();
@@ -181,10 +182,18 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             }
 
             var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-            return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionCts.Token).ConfigureAwait(false);
+            try
+            {
+                return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionCts.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                // Issue #447: the sources the choke points checked, kept to re-check later pages (REQ-ATR-10).
+                sources.Names = scope.ServiceProvider.GetService<IDataSourceTransportGate>()?.CheckedSources ?? [];
+            }
         }, sessionCts.Token);
 
-        var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask, ingress);
+        var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask, ingress, sources);
         _sessions[statementId] = session;
 
         return await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
@@ -196,6 +205,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
+        DataSourceTransportFlags ingress = DataSourceTransportFlags.None,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statementId);
@@ -211,7 +221,70 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         }
 
         ValidateSessionOwnership(session, owner, tenantId);
-        return await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
+
+        // Issue #447 (SEC-ATR-05, REQ-ATR-10): the statement is only served over the ingress that created it, and every page is
+        // re-checked against the live source configuration. A denial returns a FAILED status without data.
+        if (await RecheckTransportAsync(session, owner, tenantId, ingress, ct).ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
+        var status = await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
+        if (status.State == "FINISHED" &&
+            await RecheckTransportAsync(session, owner, tenantId, ingress, ct).ConfigureAwait(false) is { } deniedAfterWait)
+        {
+            return deniedAfterWait;
+        }
+
+        return status;
+    }
+
+    private async Task<StatementExecutionStatus?> RecheckTransportAsync(
+        StatementSession session, Sid owner, TenantId tenantId, DataSourceTransportFlags ingress, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var provider = scope.ServiceProvider;
+        var gate = provider.GetService<IDataSourceTransportGate>() ?? DenyAllTransportGate.Instance;
+        try
+        {
+            if (ingress != DataSourceTransportFlags.None)
+            {
+                provider.GetService<IIngressTransportContext>()?.Set(ingress);
+            }
+
+            // The audit context of this fresh scope carries the fetching caller, so the denial event names the right actor and tenant.
+            if (provider.GetService<Autheris.Domain.Audit.AuditContext>() is { } auditContext)
+            {
+                auditContext.ActorSid = owner;
+                auditContext.TenantId = tenantId;
+            }
+
+            if (session.Ingress != ingress)
+            {
+                var recorder = provider.GetService<ITransportDenialRecorder>();
+                if (recorder != null)
+                {
+                    await recorder.RecordDenialAsync(
+                        new TransportDenial("statement-binding", null, ingress, TransportDecisionReason.IngressMismatch), ct).ConfigureAwait(false);
+                }
+
+                throw new Autheris.Domain.Exceptions.TransportNotAllowedException(null, ingress);
+            }
+
+            var names = session.Sources.Names;
+            if (names.Count > 0)
+            {
+                await gate.EnsureCatalogSourcesAsync(names, ct).ConfigureAwait(false);
+            }
+
+            return null;
+        }
+        catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
+        {
+            return new StatementExecutionStatus(
+                session.StatementId, "FAILED", null, null, null, "Access denied.", session.Stopwatch.ElapsedMilliseconds,
+                ErrorCode: Autheris.Domain.Exceptions.TransportNotAllowedException.Code);
+        }
     }
 
     public Task<bool> CancelStatementAsync(
@@ -262,6 +335,11 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         return BuildStatus(session);
     }
 
+    /// <summary>A transport denial, also when the governed pipeline wrapped it (the mapper walks the inner exception chain).</summary>
+    private static bool IsTransportDenial(Exception? ex) =>
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped) &&
+        string.Equals(mapped.Code, Autheris.Domain.Exceptions.TransportNotAllowedException.Code, StringComparison.Ordinal);
+
     private StatementExecutionStatus BuildStatus(StatementSession session)
     {
         long elapsedMillis = session.Stopwatch.ElapsedMilliseconds;
@@ -285,7 +363,8 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         {
             var ex = session.ExecutionTask.Exception?.InnerException ?? session.ExecutionTask.Exception;
             _logger?.Error(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
-            return new StatementExecutionStatus(session.StatementId, "FAILED", null, null, null, SanitizeErrorMessage(ex), elapsedMillis);
+            return new StatementExecutionStatus(session.StatementId, "FAILED", null, null, null, SanitizeErrorMessage(ex), elapsedMillis,
+                ErrorCode: IsTransportDenial(ex) ? Autheris.Domain.Exceptions.TransportNotAllowedException.Code : null);
         }
 
         if (session.ExecutionTask.IsCompletedSuccessfully)
@@ -417,6 +496,11 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         return "The SQL statement could not be executed. Contact support with the trace id.";
     }
 
+    private sealed class SourceHolder
+    {
+        public volatile IReadOnlyList<string> Names = [];
+    }
+
     private sealed class StatementSession(
         string statementId,
         TenantId tenantId,
@@ -425,8 +509,10 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         Stopwatch stopwatch,
         CancellationTokenSource cts,
         Task<GovernedSqlResult> executionTask,
-        DataSourceTransportFlags ingress)
+        DataSourceTransportFlags ingress,
+        SourceHolder sources)
     {
+        public SourceHolder Sources { get; } = sources;
         public string StatementId { get; } = statementId;
         public TenantId TenantId { get; } = tenantId;
         public string UserSid { get; } = userSid;

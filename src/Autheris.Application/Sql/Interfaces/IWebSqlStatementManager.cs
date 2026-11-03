@@ -19,7 +19,8 @@ public sealed record StatementExecutionStatus(
     string? NextUri,
     string? ErrorMessage,
     long ElapsedTimeMillis,
-    IReadOnlyList<TrinoColumnType>? ColumnTypes = null);
+    IReadOnlyList<TrinoColumnType>? ColumnTypes = null,
+    string? ErrorCode = null);
 
 /// <summary>
 /// Manages asynchronous and synchronous WebSQL statement executions, supporting the Trino HTTP client protocol
@@ -51,6 +52,7 @@ public interface IWebSqlStatementManager
         Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
+        DataSourceTransportFlags ingress = DataSourceTransportFlags.None,
         CancellationToken ct = default);
 
     /// <summary>

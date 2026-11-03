@@ -42,6 +42,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IMcpToolExecutionHandler? _toolExecutionHandler;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
+    // Issue #447 (SEC-ATR-11): the in-process GraphQL request runs in the MCP request scope, so it inherits the stamped ingress.
+    // Without it HotChocolate would open a fresh scope with no ingress, which the transport gate denies.
+    private readonly IServiceProvider? _services;
+
     public GatewayMcpQueryExecutor(
         IRequestExecutorProvider executorProvider,
         IGatewayExecutionService gatewayExecutionService,
@@ -50,8 +54,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         IMcpProvenanceEnricher? provenanceEnricher = null,
         IPersistedToolValidator? persistedToolValidator = null,
         IMcpDatasetCatalog? datasetCatalog = null,
-        IMcpToolExecutionHandler? toolExecutionHandler = null)
+        IMcpToolExecutionHandler? toolExecutionHandler = null,
+        IServiceProvider? services = null)
     {
+        _services = services;
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -199,6 +205,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                 var requestBuilder = OperationRequestBuilder.New()
                     .SetDocument(tool.TargetGraphQLOperation)
+                    .SetServices(_services)
                     .AddGlobalState("ClaimsPrincipal", principal)
                     .AddGlobalState("CallerSecurityContext", new CallerSecurityContext(
                         effectiveCallerSid,
@@ -459,6 +466,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var requestBuilder = OperationRequestBuilder.New()
             .SetDocument(document)
+            .SetServices(_services)
             .AddGlobalState("ClaimsPrincipal", principal);
         if (variableValues != null)
         {

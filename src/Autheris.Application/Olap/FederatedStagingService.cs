@@ -33,6 +33,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly ILogger<FederatedStagingService> _logger;
     private readonly IEnumerable<IDataSourceExecutor>? _executors;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly ITableMetadataRepository? _metadataRepository;
 
     public FederatedStagingService(
@@ -42,8 +43,11 @@ public sealed class FederatedStagingService : IFederatedStagingService
         IOptions<GatewayOptions> gatewayOptions,
         ILogger<FederatedStagingService> logger,
         IEnumerable<IDataSourceExecutor>? executors = null,
-        ITableMetadataRepository? metadataRepository = null)
+        ITableMetadataRepository? metadataRepository = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _connectorRegistry = connectorRegistry ?? throw new ArgumentNullException(nameof(connectorRegistry));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
         _auditRepo = auditRepo ?? throw new ArgumentNullException(nameof(auditRepo));
@@ -95,6 +99,10 @@ public sealed class FederatedStagingService : IFederatedStagingService
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EnsureAllowed(
                 webSqlOptions, tenantId,
                 Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EffectiveDataSource(webSqlOptions, req.Metadata));
+
+            // Issue #447 C5 (SEC-ATR-11): every staged table's source must allow the ingress, in this authorization pass before any read.
+            await _transportGate.EnsureCatalogSourceAsync(
+                Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(req.Metadata), ct).ConfigureAwait(false);
 
             if (req.Metadata.RequiredFilterColumns.Length > 0 || req.Metadata.RequiredFilterColumnGroups.Length > 0)
             {
@@ -217,6 +225,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     Offset: 0);
 
                 subtreeSession.Items["TableMetadata"] = subtree.SyntheticMetadata;
+                subtreeSession.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
                 subtreeSession.Items["Subtree"] = subtree;
                 subtreeSession.Items["SubtreePlan"] = subtree;
                 subtreeSession.Items["SubtreeSql"] = subtree.Compiled.Sql;
@@ -370,6 +379,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 PushdownFilterSql: req.Decision.CombinedRowFilterSql,
                 Limit: budget.MaxStagedRowsPerTable + 1,
                 Offset: 0);
+            session.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
 
             if (req.PushdownFilter != null && req.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
@@ -474,6 +484,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                             Limit: budget.MaxStagedRowsPerTable + 1,
                             Offset: 0);
                         batchSession.Items[TableQueryItems.Filter] = batchFilter;
+                        batchSession.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
 
                         GovernedReadResult batchResult;
                         try

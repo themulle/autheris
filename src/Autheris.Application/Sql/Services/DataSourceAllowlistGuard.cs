@@ -72,6 +72,16 @@ public static class DataSourceAllowlistGuard
         return MapDataSource(webSqlOptions, source);
     }
 
+    /// <summary>
+    /// The catalog source name before <c>DataSourceMappings</c> (issue #447: the transport gate canonicalises it itself and echoes only the
+    /// logical name, never the physical key).
+    /// </summary>
+    public static string LogicalDataSource(TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return !string.IsNullOrWhiteSpace(metadata.Table?.SourceName) ? metadata.Table!.SourceName! : metadata.Identifier.Domain;
+    }
+
     /// <summary>Maps a data source name through <c>DataSourceMappings</c> (an unmapped or empty mapping keeps the name).</summary>
     public static string MapDataSource(WebSqlOptions webSqlOptions, string? name)
     {

@@ -61,6 +61,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly CompiledSqlAuditDigester _digester;
     private readonly IProviderExecutionGuard _executionGuard;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -73,8 +74,11 @@ public sealed partial class GovernedSqlExecutor
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
         IKeyVaultSecretProvider? secretProvider = null,
-        CompiledSqlAuditDigester? auditDigester = null)
+        CompiledSqlAuditDigester? auditDigester = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -333,6 +337,9 @@ public sealed partial class GovernedSqlExecutor
     {
         var compiled = rewrite.Compiled;
         string dsName = rewrite.DataSourceName;
+
+        // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
+        await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
 
         if (!dmlContext.IsDml)
         {

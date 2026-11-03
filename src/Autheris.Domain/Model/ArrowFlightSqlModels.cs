@@ -12,7 +12,9 @@ public sealed record FlightSqlTicket(
     string Query,
     DateTimeOffset CreatedAtUtc,
     string Signature,
-    string UserSid = ""
+    string UserSid = "",
+    // Issue #447 (SEC-ATR-05): the ingress transport the ticket was issued over; part of the signature. A ticket without it (None) is never served.
+    Autheris.Domain.Options.DataSources.DataSourceTransportFlags Ingress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None
 );
 
 public sealed record FlightSqlInfo(

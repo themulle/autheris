@@ -373,6 +373,21 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     }
 
                     ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);
+
+                    // Issue #447 (SEC-ATR-06): every root field of this table names its logical data source, so the transport gate
+                    // middleware can check the whole operation before any resolver runs.
+                    var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
+                    var rootFieldNames = new List<string> { table.QueryFieldName, $"{table.QueryFieldName}Connection" };
+                    if (_aggregationEnabled)
+                    {
+                        rootFieldNames.Add(AggregateTypeNames.For(table.TypeName).Field);
+                    }
+
+                    foreach (var rootFieldName in rootFieldNames)
+                    {
+                        d.Field(rootFieldName).Extend().OnBeforeCreate(
+                            definition => definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource)));
+                    }
                 }
             }));
         }

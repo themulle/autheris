@@ -24,6 +24,9 @@ public interface IIngressTransportContext
 /// <summary>Scoped, set-once implementation of <see cref="IIngressTransportContext"/>.</summary>
 public sealed class IngressTransportContext : IIngressTransportContext
 {
+    /// <summary>Key under which a caller stores its ingress in <c>ConnectorSessionContext.Items</c> so a connector that opens a new scope can copy it (SEC-ATR-05).</summary>
+    public const string SessionItemKey = "__IngressTransport";
+
     private readonly object _gate = new();
     private DataSourceTransportFlags _current = DataSourceTransportFlags.None;
 

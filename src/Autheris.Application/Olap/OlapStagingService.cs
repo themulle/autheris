@@ -47,8 +47,12 @@ public sealed class OlapStagingService(
     ILogger<OlapStagingService> logger,
     IFederationGate federationGate,
     ISqlEngine sqlEngine,
-    IOlapRequestLimiter requestLimiter) : IOlapStagingService
+    IOlapRequestLimiter requestLimiter,
+    Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null) : IOlapStagingService
 {
+    // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
+
     // Throttle for capacity-refusal audit records: one per tenant per minute (a refusal flood must not flood the audit store).
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> LastCapacityAudit = new(StringComparer.OrdinalIgnoreCase);
 
@@ -128,6 +132,10 @@ public sealed class OlapStagingService(
                     400,
                     TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing),
                     ErrorCode: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing);
+            case TransportNotAllowedException:
+                // Issue #447 (REQ-ATR-04): the stable code and the fixed text of every transport denial.
+                logger.LogWarning("OLAP read refused: the data source does not allow this transport.");
+                return new OlapStagingOutcome(403, "Access to the data source is not allowed over this transport.", ErrorCode: TransportNotAllowedException.Code);
             case GatewayForbiddenException:
                 logger.Warning(ex, "OLAP read denied by the governed pipeline. ({Code})", "OLAP_ACCESS_DENIED");
                 return new OlapStagingOutcome(403, "Access denied.", ErrorCode: "OLAP_ACCESS_DENIED");
@@ -373,6 +381,7 @@ public sealed class OlapStagingService(
                         PushdownFilterSql: table.Decision.CombinedRowFilterSql,
                         Limit: options.MaxStagedRowsPerTable + 1,
                         Offset: 0);
+                    session.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
 
                     // Architecture 2 / SQL2-5: the governed reader applies the row filter when the connector did not push it
                     // down, masks exactly once (SQL2-4) and checks the staging capacity before rows are kept (SQL2-2).
@@ -646,6 +655,9 @@ public sealed class OlapStagingService(
                 403,
                 isDev ? $"Access denied to table '{meta.Identifier}': {string.Join("; ", decision.DeniedReasons)}" : $"Access denied to table '{rawTableName}'.")));
         }
+
+        // Issue #447 C5 (SEC-ATR-08): after the tenant allowlist and the access decision, before any source is touched.
+        await _transportGate.EnsureCatalogSourceAsync(DataSourceAllowlistGuard.LogicalDataSource(meta), ct).ConfigureAwait(false);
 
         // MISC-03: the rule that GraphQL/WebSQL/streams enforce also holds for OLAP staging. The client SQL runs after staging, so it never
         // counts; only the tenant column, the typed row policy and whole identifiers of the decision's row filter do.

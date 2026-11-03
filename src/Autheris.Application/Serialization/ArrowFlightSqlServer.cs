@@ -100,9 +100,11 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         var now = DateTimeOffset.UtcNow;
         // SEC (Low): the ticket is bound to the issuing SID and tenant.
         var userSid = principal.GetUserSid()?.Value ?? string.Empty;
-        var signature = ComputeSignature(ticketId, tenant.Value, query, now, _signingSecret, userSid);
+        // Issue #447 (SEC-ATR-05): the ticket records (and signs) the ingress it was issued over; this server only serves Flight.
+        const Autheris.Domain.Options.DataSources.DataSourceTransportFlags issuingIngress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight;
+        var signature = ComputeSignature(ticketId, tenant.Value, query, now, _signingSecret, userSid, issuingIngress);
 
-        var ticket = new FlightSqlTicket(ticketId, tenant.Value, query, now, signature, userSid);
+        var ticket = new FlightSqlTicket(ticketId, tenant.Value, query, now, signature, userSid, issuingIngress);
 
         return new FlightSqlInfo(query, UnknownSchemaJson, UnknownRowCount, ticket, System.Array.Empty<string>());
     }
@@ -147,6 +149,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         FlightSqlTicket ticket,
         ClaimsPrincipal principal,
         TenantId? callerTenant = null,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags callerIngress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ticket);
@@ -158,7 +161,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         }
 
         // SEC-FLIGHT-01: Cryptographic signature verification
-        var expectedSignature = ComputeSignature(ticket.TicketId, ticket.TenantId, ticket.Query, ticket.CreatedAtUtc, _signingSecret, ticket.UserSid ?? string.Empty);
+        var expectedSignature = ComputeSignature(ticket.TicketId, ticket.TenantId, ticket.Query, ticket.CreatedAtUtc, _signingSecret, ticket.UserSid ?? string.Empty, ticket.Ingress);
         if (!CryptographicOperations.FixedTimeEquals(
             Encoding.UTF8.GetBytes(ticket.Signature),
             Encoding.UTF8.GetBytes(expectedSignature)))
@@ -190,6 +193,26 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         if (_scopeFactory == null)
         {
             throw new GatewayNotImplementedException("Arrow Flight SQL requires the governed SQL execution service.");
+        }
+
+        // Issue #447 (SEC-ATR-05): a ticket is only served over the ingress that issued it; a ticket without a (signed) ingress is never served.
+        if (ticket.Ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None || ticket.Ingress != callerIngress)
+        {
+            using var denyScope = _scopeFactory.CreateScope();
+            if (denyScope.ServiceProvider.GetService<Autheris.Domain.Audit.AuditContext>() is { } auditContext)
+            {
+                auditContext.ActorSid = new Sid(callerSid);
+                auditContext.TenantId = tenantOfCaller;
+            }
+
+            if (denyScope.ServiceProvider.GetService<Autheris.Application.DataSources.ITransportDenialRecorder>() is { } recorder)
+            {
+                await recorder.RecordDenialAsync(
+                    new Autheris.Application.DataSources.TransportDenial(
+                        "flight-ticket", null, callerIngress, Autheris.Application.DataSources.TransportDecisionReason.IngressMismatch), ct).ConfigureAwait(false);
+            }
+
+            throw new TransportNotAllowedException(null, callerIngress);
         }
 
         GovernedSqlResult result;
@@ -251,9 +274,15 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         return new RecordBatch(schema, batch.Arrays, batch.Length);
     }
 
-    public static string ComputeSignature(string ticketId, string tenantId, string query, DateTimeOffset createdAt, string secret, string userSid = "")
+    public static string ComputeSignature(string ticketId, string tenantId, string query, DateTimeOffset createdAt, string secret, string userSid = "",
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None)
     {
         var raw = $"{ticketId}:{tenantId}:{userSid}:{query}:{createdAt.ToUnixTimeSeconds()}";
+        if (ingress != Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None)
+        {
+            raw += $":{(int)ingress}";
+        }
+
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexStringLower(hash);

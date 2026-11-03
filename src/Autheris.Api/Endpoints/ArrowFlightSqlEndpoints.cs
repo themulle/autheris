@@ -80,7 +80,11 @@ public static class ArrowFlightSqlEndpoints
 
             ArrowStreamWriter? writer = null;
             long totalRows = 0;
-            await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, EndpointSecurity.GetRequestTenant(context), context.RequestAborted))
+            await foreach (var batch in server.DoGetStreamAsync(
+                ticket, context.User, EndpointSecurity.GetRequestTenant(context),
+                context.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
+                    ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
+                context.RequestAborted))
             {
                 totalRows += batch.Length;
                 auditContext?.RecordMetrics(totalRows, null);

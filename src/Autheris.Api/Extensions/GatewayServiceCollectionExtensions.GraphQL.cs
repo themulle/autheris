@@ -199,7 +199,10 @@ public static partial class GatewayServiceCollectionExtensions
             .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
+            // Issue #447 (SEC-ATR-06): transport gate for every root field of the compiled operation, before any resolver runs.
+            .UseRequest<Autheris.GraphQL.Interceptors.TransportGateMiddleware>()
             .UseOperationExecution()
+            .UseField<Autheris.GraphQL.Interceptors.TransportIngressFieldMiddleware>()
             .AddApplicationService<IHostEnvironment>()
             .AddApplicationService<ErrorSanitizingFilter>()
             .AddApplicationService<WebSocketAuthInterceptor>()

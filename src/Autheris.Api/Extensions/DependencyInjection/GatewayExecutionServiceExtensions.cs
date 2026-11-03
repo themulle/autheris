@@ -87,7 +87,8 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<IRebacEvaluator>(),
             sp.GetRequiredService<IMandatoryRowFilterResolver>(),
             typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>(),
-            auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>()));
+            auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            transportGate: sp.GetService<Autheris.Application.DataSources.IDataSourceTransportGate>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         // SQLA-06 follow-up (SQLA06F-C8): the secured-source builder is registered wherever the tree service is; without it a subquery policy is denied.

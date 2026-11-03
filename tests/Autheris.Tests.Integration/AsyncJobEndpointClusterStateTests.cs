@@ -40,7 +40,7 @@ public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<WebApplica
 
     private sealed class UnavailableJobManager : IAsyncQueryJobManager
     {
-        public Task<AsyncJobDescriptor> SubmitJobAsync(AsyncQueryJobRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+        public Task<AsyncJobDescriptor> SubmitJobAsync(AsyncQueryJobRequest request, ClaimsPrincipal user, TenantId tenantId, Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None, CancellationToken ct = default) =>
             request.Query == "limit" ? throw new AsyncJobQueueLimitExceededException(50) : throw new ClusterStateUnavailableException();
 
         public Task<AsyncJobDescriptor?> GetJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>

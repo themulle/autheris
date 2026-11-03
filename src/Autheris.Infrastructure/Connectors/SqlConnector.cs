@@ -135,6 +135,7 @@ public sealed class SqlConnector : IAutherisConnector
             var dsContext = CreateExecutionContext(session);
 
             using var scope = _scopeFactory.CreateScope();
+            CopyIngress(session, scope);
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
                 ?? throw new InvalidOperationException("No SQL table read executor is registered.");
 
@@ -153,9 +154,24 @@ public sealed class SqlConnector : IAutherisConnector
 
             // WP-ARC-B-02: the read runs through the governed pipeline (planner + compiler + binder), resolved in its own scope.
             using var scope = _scopeFactory.CreateScope();
+            CopyIngress(session, scope);
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
                 ?? throw new InvalidOperationException("No SQL table read executor is registered.");
             return await executor.ExecuteAsync(dsContext, ct);
+        }
+
+        /// <summary>
+        /// Issue #447 SEC-ATR-05: the new scope carries the caller's ingress (stored in the session by the gated caller). A session without it
+        /// leaves the scope unset, which the transport gate denies (fail-closed).
+        /// </summary>
+        private static void CopyIngress(ConnectorSessionContext session, IServiceScope scope)
+        {
+            if (session.Items.TryGetValue(Autheris.Application.DataSources.IngressTransportContext.SessionItemKey, out var ingress) &&
+                ingress is Autheris.Domain.Options.DataSources.DataSourceTransportFlags flags &&
+                Autheris.Application.DataSources.IngressTransportContext.IsSingleKnownFlag(flags))
+            {
+                scope.ServiceProvider.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Set(flags);
+            }
         }
 
         private DataSourceExecutionContext CreateExecutionContext(ConnectorSessionContext session)

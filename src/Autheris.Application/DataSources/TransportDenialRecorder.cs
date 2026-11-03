@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -58,7 +59,8 @@ public sealed class TransportDenialRecorder : ITransportDenialRecorder
             var logical = TransportNotAllowedException.SanitizeName(denial.LogicalName);
             var entry = new AuditLogEntry
             {
-                TenantId = _auditContext.TenantId,
+                // DT-A-6: a scope without a resolved tenant (a background scope that did not copy one) is audited in the platform bucket.
+                TenantId = _auditContext.TenantId.Value is null ? TenantId.Platform : _auditContext.TenantId,
                 EventType = AuditEventTypes.TransportNotAllowed,
                 ActorSid = _auditContext.ActorSid,
                 TargetTable = logical,
