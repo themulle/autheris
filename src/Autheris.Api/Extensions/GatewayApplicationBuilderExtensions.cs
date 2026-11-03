@@ -168,6 +168,7 @@ public static class GatewayApplicationBuilderExtensions
         // a headless, deterministic machine-to-machine API without HTML multiplexing.
         var gqlEndpoint = app.MapGraphQL(endpoint)
             .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447 (SEC-ATR-02)
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)

@@ -4,7 +4,9 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.DataSources;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -14,7 +16,8 @@ using Microsoft.Extensions.Logging;
 public sealed class McpStdioRunner(
     IMcpProtocolHandler protocolHandler,
     ILogger<McpStdioRunner>? logger = null,
-    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null) : IMcpStdioRunner
+    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null,
+    IIngressTransportContext? ingressTransport = null) : IMcpStdioRunner
 {
     private readonly IMcpProtocolHandler _protocolHandler = protocolHandler ?? throw new ArgumentNullException(nameof(protocolHandler));
     private readonly ILogger<McpStdioRunner>? _logger = logger;
@@ -35,6 +38,10 @@ public sealed class McpStdioRunner(
         {
             throw new InvalidOperationException("The MCP stdio session has no tenant: pass one or configure Gateway:Tenancy:DefaultTenantId.");
         }
+
+        // Issue #447 (SEC-ATR-02): stdio has no endpoint metadata and no ingress middleware, so this entry point stamps Mcp itself,
+        // in the DI scope that also serves the protocol handler. A runner built without a context leaves the ingress unset (denied).
+        ingressTransport?.Set(DataSourceTransportFlags.Mcp);
 
         var session = _protocolHandler.CreateSession(servicePrincipalId, sessionTenant);
         _logger?.LogInformation("Started MCP Stdio session '{SessionId}' for principal '{Principal}'.", session.SessionId, servicePrincipalId);

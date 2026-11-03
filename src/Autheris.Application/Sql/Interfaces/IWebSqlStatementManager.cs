@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
+using Autheris.Domain.Options.DataSources;
 
 /// <summary>
 /// Status and result representation of a governed WebSQL statement execution, compatible with the Trino REST client protocol.
@@ -37,6 +38,7 @@ public interface IWebSqlStatementManager
         Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
+        DataSourceTransportFlags ingress = DataSourceTransportFlags.None,
         CancellationToken ct = default);
 
     /// <summary>

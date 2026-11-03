@@ -16,6 +16,8 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
+using Autheris.Application.DataSources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -76,6 +78,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         Sid owner,
         TenantId tenantId,
         TimeSpan waitTimeout,
+        DataSourceTransportFlags ingress = DataSourceTransportFlags.None,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -160,6 +163,13 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         var executionTask = Task.Run(async () =>
         {
             using var scope = _scopeFactory.CreateScope();
+            // Issue #447 (SEC-ATR-05): the background scope carries the ingress of the submitting request. An unstamped submit
+            // (None) leaves the scope unset, which the transport gate denies.
+            if (ingress != DataSourceTransportFlags.None)
+            {
+                scope.ServiceProvider.GetService<IIngressTransportContext>()?.Set(ingress);
+            }
+
             var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
             var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
             var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
@@ -174,7 +184,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             return await sqlService.ExecuteQueryBufferedAsync(request, user, tenantId, sessionCts.Token).ConfigureAwait(false);
         }, sessionCts.Token);
 
-        var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask);
+        var session = new StatementSession(statementId, tenantId, userSid, DateTimeOffset.UtcNow, sw, sessionCts, executionTask, ingress);
         _sessions[statementId] = session;
 
         return await WaitForSessionAsync(session, waitTimeout, ct).ConfigureAwait(false);
@@ -414,7 +424,8 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         DateTimeOffset createdAt,
         Stopwatch stopwatch,
         CancellationTokenSource cts,
-        Task<GovernedSqlResult> executionTask)
+        Task<GovernedSqlResult> executionTask,
+        DataSourceTransportFlags ingress)
     {
         public string StatementId { get; } = statementId;
         public TenantId TenantId { get; } = tenantId;
@@ -423,6 +434,9 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         public Stopwatch Stopwatch { get; } = stopwatch;
         public CancellationTokenSource Cts { get; } = cts;
         public Task<GovernedSqlResult> ExecutionTask { get; } = executionTask;
+
+        /// <summary>The ingress transport that submitted the statement (SEC-ATR-05 binding input).</summary>
+        public DataSourceTransportFlags Ingress { get; } = ingress;
         public volatile bool IsCancelled;
     }
 }

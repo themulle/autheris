@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -23,7 +24,9 @@ public static class ArrowFlightSqlEndpoints
 
     public static IEndpointRouteBuilder MapArrowFlightSqlEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/v1/flight/sql/info", async (
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.ArrowFlight);
+        ingress.MapPost("/api/v1/flight/sql/info", async (
             FlightSqlQueryRequest request,
             HttpContext context,
             IArrowFlightSqlServer server) =>
@@ -44,7 +47,7 @@ public static class ArrowFlightSqlEndpoints
             }
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapGet("/api/v1/flight/sql/tables", async (
+        ingress.MapGet("/api/v1/flight/sql/tables", async (
             string? schema,
             HttpContext context,
             IArrowFlightSqlServer server) =>
@@ -61,7 +64,7 @@ public static class ArrowFlightSqlEndpoints
             }
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapPost("/api/v1/flight/sql/stream", HandleStreamAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+        ingress.MapPost("/api/v1/flight/sql/stream", HandleStreamAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
     }

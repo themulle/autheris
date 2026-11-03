@@ -234,6 +234,11 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         try
         {
             using var scope = _scopeFactory.CreateScope();
+            // Issue #447 (SEC-ATR-02/05): jobs are submitted only through the WebSql-ingress /api/v1/jobs routes, so the worker scope
+            // is stamped WebSql explicitly (no HTTP pipeline here).
+            // A host without the context registration leaves the ingress unset, which the transport gate denies (fail-closed).
+            scope.ServiceProvider.GetService<Autheris.Application.DataSources.IIngressTransportContext>()
+                ?.Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql);
             var sqlExec = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
             // SR-H-05 defence in depth: re-derive the bounds server-side; the queued request is never trusted.

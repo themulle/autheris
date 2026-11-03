@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -20,7 +21,7 @@ public static class AsyncJobEndpoints
 {
     public static IEndpointRouteBuilder MapAsyncJobEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/jobs");
+        var group = app.MapGroup("/api/v1/jobs").WithIngressTransport(DataSourceTransportFlags.WebSql);
 
         group.MapPost("/query", async (
             AsyncQueryJobRequest request,

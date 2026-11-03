@@ -152,7 +152,9 @@ public static partial class WebSqlEndpoints
                     RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino),
                     Transport = "Trino"
                 };
-                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, owner, tenantId, timeout, ct);
+                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, owner, tenantId, timeout,
+                    httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
+                        ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);
                 return;
             }

@@ -91,6 +91,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
+            StampFlightIngress(scope);
             var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
             await sqlService.ValidateAsync(query, principal, tenant, ct).ConfigureAwait(false);
         }
@@ -194,6 +195,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         GovernedSqlResult result;
         using (var scope = _scopeFactory.CreateScope())
         {
+            StampFlightIngress(scope);
             var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
             var request = new GovernedSqlQueryRequest(ticket.Query, RowLimit: FlightSqlRowLimit(), Transport: SqlTransports.FlightSql);
             result = await sqlService.ExecuteQueryBufferedAsync(request, principal, new TenantId(ticket.TenantId), ct).ConfigureAwait(false);
@@ -203,6 +205,14 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
     }
 
     /// <summary>Gateway:RowLimits:FlightSql (falling back to WebSql), never above Arrow:MaxExportRows.</summary>
+    /// <summary>
+    /// Issue #447 (SEC-ATR-02): the Flight server opens its own DI scopes and only ever serves the Flight transport, so each of them is
+    /// stamped ArrowFlight explicitly (a fresh scope has no ingress and would be denied).
+    /// </summary>
+    private static void StampFlightIngress(Microsoft.Extensions.DependencyInjection.IServiceScope scope) =>
+        scope.ServiceProvider.GetService<Autheris.Application.DataSources.IIngressTransportContext>()
+            ?.Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight);
+
     private SqlRowLimit FlightSqlRowLimit()
     {
         var options = _options.Value;
