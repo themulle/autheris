@@ -1,4 +1,4 @@
-namespace Autheris.Application.Docs.Services;
+namespace Autheris.Infrastructure.Docs;
 
 using System;
 using System.Collections.Concurrent;
@@ -13,6 +13,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Docs.Services;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 

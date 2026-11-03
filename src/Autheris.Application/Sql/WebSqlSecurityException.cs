@@ -1,4 +1,4 @@
-namespace Autheris.Domain.Common;
+namespace Autheris.Application.Sql;
 
 using System;
 using System.Security;

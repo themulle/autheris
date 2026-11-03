@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
+using Autheris.Api.Mcp;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance.Interfaces;

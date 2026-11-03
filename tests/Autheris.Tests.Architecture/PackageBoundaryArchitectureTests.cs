@@ -1,5 +1,5 @@
-using Autheris.Application.Docs.Services;
-using Autheris.Application.Mcp.Services;
+using Autheris.Api.Mcp;
+using Autheris.Infrastructure.Docs;
 using NetArchTest.Rules;
 using Shouldly;
 using Xunit;
