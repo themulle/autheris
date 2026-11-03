@@ -599,7 +599,7 @@
 0598 Autheris.Application.Mcp.Interfaces.IMcpQueryExecutor Scoped key=- type:Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor
 0599 Autheris.Application.Mcp.Interfaces.IAiDataGuardrailService Scoped key=- type:Autheris.Application.Mcp.Services.AiDataGuardrailService
 0600 Autheris.Application.Mcp.Interfaces.IMcpProtocolHandler Scoped key=- type:Autheris.Application.Mcp.Services.McpProtocolHandler
-0601 Autheris.Application.Mcp.Interfaces.IMcpStdioRunner Scoped key=- type:Autheris.Application.Mcp.Services.McpStdioRunner
+0601 Autheris.Application.Mcp.Interfaces.IMcpStdioRunner Scoped key=- type:Autheris.Api.Mcp.McpStdioRunner
 0602 Microsoft.Extensions.Hosting.IHostedService Singleton key=- type:Autheris.GraphQL.Mcp.McpSchemaDiscoveryService
 0603 Microsoft.Extensions.Hosting.IHostedService Singleton key=- type:Autheris.Application.Docs.Services.DocStoreStartupSyncService
 0604 Autheris.Application.Mcp.Interfaces.IHitLStepUpApprovalService Singleton key=- type:Autheris.Application.Mcp.Services.HitLStepUpApprovalService

@@ -1,4 +1,4 @@
-namespace Autheris.Application.Mcp.Services;
+namespace Autheris.Api.Mcp;
 
 using System;
 using System.IO;

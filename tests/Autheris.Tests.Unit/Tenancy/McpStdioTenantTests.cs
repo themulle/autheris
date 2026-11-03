@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Api.Mcp;
 using Autheris.Application.Identity;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;

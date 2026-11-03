@@ -9,6 +9,7 @@ using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Docs.Services;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
+using Autheris.Infrastructure.Docs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
