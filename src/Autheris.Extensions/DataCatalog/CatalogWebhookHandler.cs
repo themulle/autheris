@@ -424,9 +424,9 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
-            // Ignore parsing failures on malformed third-party webhooks
+            logger.LogWarning("Catalog webhook payload could not be parsed ({ExceptionType}).", ex.GetType().Name);
         }
 
         return tables;

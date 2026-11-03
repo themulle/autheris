@@ -14,12 +14,12 @@ using Xunit;
 /// <summary>
 /// Core-side regression tests for security review 2026-10-02: H-20 (dbt -> SQL endpoint files) and M-32 (catalog merge ratchet).
 /// </summary>
-public sealed class SecurityReview20261002ExtensionsCoreTests : IDisposable
+public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
 {
     private readonly string _root;
     private readonly string _queriesDir;
 
-    public SecurityReview20261002ExtensionsCoreTests()
+    public SqlEndpointDbtSyncAndCatalogMergeSecurityTests()
     {
         _root = Path.Combine(Path.GetTempPath(), "sr20261002_" + Guid.NewGuid().ToString("N"));
         _queriesDir = Path.Combine(_root, "queries");

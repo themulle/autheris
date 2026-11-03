@@ -41,7 +41,7 @@ using Xunit;
 /// Regression tests for Remediation Round 3 of repeated security review findings
 /// (RR-L6-01, RR-L6-02, RR-L6-03, RR-L3-01, RR-L3-02, RR-L3-04, RR-L3-05, RR-L3-06).
 /// </summary>
-public sealed class RepeatedReviewRound3Tests
+public sealed class DynamicMaskingAndConnectorGuardTests
 {
     // =========================================================================
     // Layer 6: Privacy & Dynamic Masking

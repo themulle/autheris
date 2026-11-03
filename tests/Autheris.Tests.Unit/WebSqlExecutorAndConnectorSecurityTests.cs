@@ -39,7 +39,7 @@ using Xunit;
 /// Regression tests for the WebSQL / SQL executor findings of the security review 2026-10-02
 /// (C-01, C-03, H-10, H-13, M-10, M-20).
 /// </summary>
-public sealed class SecurityReview20261002WebSqlTests
+public sealed class WebSqlExecutorAndConnectorSecurityTests
 {
     private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
     {

@@ -7,6 +7,7 @@ using System.Text.Json;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;

@@ -27,7 +27,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-public class SecurityWave2ExpertTests
+public class DevPresetAndGovernanceFailClosedSecurityTests
 {
     [Fact]
     public void QuickstartProfile_InProduction_ThrowsValidationException_FailClosed()

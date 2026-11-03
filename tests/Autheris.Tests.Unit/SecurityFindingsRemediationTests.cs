@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Common;
 using Autheris.Domain.Security;
 using System;
 using System.ComponentModel.DataAnnotations;
@@ -130,7 +131,7 @@ public class SecurityFindingsRemediationTests
         var mockEnv = Substitute.For<IWebHostEnvironment>();
         mockEnv.EnvironmentName.Returns("Development");
 
-        var schemeOptionsMonitor = new TestOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
+        var schemeOptionsMonitor = new StaticOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
         var handler = new BasicAuthenticationHandler(
             schemeOptionsMonitor,
             NullLoggerFactory.Instance,
@@ -347,13 +348,6 @@ public class SecurityFindingsRemediationTests
         DeclarativeHttpDataSourceExecutor.IsForbiddenMetadataHost("kubernetes.default.svc.cluster.local").ShouldBeTrue();
 
         DeclarativeHttpDataSourceExecutor.IsForbiddenMetadataHost("api.corp.com").ShouldBeFalse();
-    }
-
-    private sealed class TestOptionsMonitor<T>(T currentValue) : IOptionsMonitor<T>
-    {
-        public T CurrentValue => currentValue;
-        public T Get(string? name) => currentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
     [Fact]

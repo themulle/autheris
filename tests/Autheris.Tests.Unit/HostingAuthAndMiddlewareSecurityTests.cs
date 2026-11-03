@@ -36,7 +36,7 @@ using Xunit;
 /// <summary>
 /// Security review 2026-10-02, work package D1 (hosting, authentication, middleware, GraphQL server).
 /// </summary>
-public sealed class SecurityReview20261002HostingTests
+public sealed class HostingAuthAndMiddlewareSecurityTests
 {
     private static readonly Func<string, string?> NoEnvironmentVariables = _ => null;
 

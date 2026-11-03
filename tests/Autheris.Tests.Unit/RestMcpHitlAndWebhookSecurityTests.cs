@@ -32,7 +32,7 @@ using Xunit;
 /// <summary>
 /// Security review 2026-10-02, work package D2: REST endpoints, MCP sessions, HitL and ITSM webhooks.
 /// </summary>
-public class SecurityReview20261002EndpointTests
+public class RestMcpHitlAndWebhookSecurityTests
 {
     // =========================================================================
     // C-05: HitL / Four-Eyes approval
@@ -436,7 +436,7 @@ public class SecurityReview20261002EndpointTests
     [Fact]
     public async Task H06_SqliteRepository_TicketLookupIsTenantBound_AndActivationOnlyFromPending()
     {
-        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "h06_contacts");
         var table = new Table { Id = Guid.NewGuid(), SourceName = tableId.Domain, SchemaName = tableId.Schema, TableName = tableId.TableName, IsActive = true };
         var meta = await repo.UpsertTableMetadataAsync(new TableMetadata
@@ -757,20 +757,5 @@ public class SecurityReview20261002EndpointTests
         public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default) => throw new NotSupportedException();
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default) => throw new NotSupportedException();
-    }
-
-    private sealed class StubEpochValidationService : IEpochValidationService
-    {
-        public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
-            => Task.FromResult(true);
-
-        public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult(1L);
-
-        public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(new Dictionary<TableIdentifier, long>());
     }
 }

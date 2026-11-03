@@ -32,7 +32,7 @@ namespace Autheris.Tests.Unit.Governance;
 /// - Issue #26: Scope-specific masks/denies (monotonic hardening)
 /// - Issue #29: App.Read & per-scope quota/budgets
 /// </summary>
-public sealed class Wave2GovernanceTests
+public sealed class DeclarativeConsentAndAccessIntrospectionTests
 {
     [Fact]
     public async Task Issue40_DeclarativeConsentApply_DryRun_DoesNotPersist_ReturnsDiff()

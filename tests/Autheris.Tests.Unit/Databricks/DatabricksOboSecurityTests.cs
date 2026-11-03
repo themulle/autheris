@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Databricks;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;

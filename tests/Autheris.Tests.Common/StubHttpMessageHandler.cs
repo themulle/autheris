@@ -1,9 +1,22 @@
 namespace Autheris.Tests.Common;
 
 /// <summary>Delegating-free HTTP handler that answers every request through a supplied function and records requests.</summary>
-public sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+public sealed class StubHttpMessageHandler : HttpMessageHandler
 {
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responder;
     private readonly List<HttpRequestMessage> _requests = [];
+
+    public StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
+    {
+        ArgumentNullException.ThrowIfNull(responder);
+        _responder = (req, _) => Task.FromResult(responder(req));
+    }
+
+    public StubHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
+    {
+        ArgumentNullException.ThrowIfNull(responder);
+        _responder = responder;
+    }
 
     public IReadOnlyList<HttpRequestMessage> Requests
     {
@@ -23,6 +36,6 @@ public sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponse
             _requests.Add(request);
         }
 
-        return Task.FromResult(responder(request));
+        return _responder(request, cancellationToken);
     }
 }

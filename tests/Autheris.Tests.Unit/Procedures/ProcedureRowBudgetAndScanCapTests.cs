@@ -26,7 +26,7 @@ namespace Autheris.Tests.Unit.Procedures;
 /// PLAN-PROC-152-INC2 WP-A: row budget decided before the invoke, scan cap, limit applied only after the row scope
 /// (SEC-PROC152I2-01..06 and -14).
 /// </summary>
-public class ProcedureLimitsInc2Tests
+public class ProcedureRowBudgetAndScanCapTests
 {
     private const string ScopedHeader = """
         -- @name get_cranes

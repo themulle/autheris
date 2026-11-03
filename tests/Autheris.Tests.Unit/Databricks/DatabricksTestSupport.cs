@@ -6,6 +6,7 @@ using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
+using Autheris.Tests.Common;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,25 +28,6 @@ internal sealed class FakeDatabricksHandler(Func<RecordedRequest, HttpResponseMe
         }
 
         return router(recorded);
-    }
-}
-
-internal sealed class CapturingLogger<T> : ILogger<T>
-{
-    public List<string> Lines { get; } = [];
-
-    /// <summary>The same lines with their level (to assert that something was logged as Critical).</summary>
-    public List<(LogLevel Level, string Text)> Entries { get; } = [];
-
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-    public bool IsEnabled(LogLevel logLevel) => true;
-
-    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-    {
-        var line = formatter(state, exception) + (exception is null ? string.Empty : exception.ToString());
-        Lines.Add(line);
-        Entries.Add((logLevel, line));
     }
 }
 

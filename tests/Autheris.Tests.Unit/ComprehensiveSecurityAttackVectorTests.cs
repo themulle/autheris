@@ -160,7 +160,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var now = DateTimeOffset.UtcNow;
@@ -199,7 +199,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var now = DateTimeOffset.UtcNow;
@@ -226,7 +226,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var staleTimestamp = DateTimeOffset.UtcNow.AddMinutes(-15);
@@ -260,7 +260,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var futureTimestamp = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -294,7 +294,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
             }
         });
 
-        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        var governanceRepo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
         var handler = new ItsmWebhookHandler(new TestSecretProvider(secretBytes), governanceRepo, options, NullLogger<ItsmWebhookHandler>.Instance);
 
         var oldTimestamp = DateTimeOffset.UtcNow.AddMinutes(-30);
@@ -633,7 +633,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [Fact]
     public async Task SqliteGovernanceRepository_AuditTampering_ModifyingActorSid_BreaksHashChain()
     {
-        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
 
         var entry1 = new AuditLogEntry
         {
@@ -668,7 +668,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [Fact]
     public async Task SqliteGovernanceRepository_AuditTampering_ModifyingDecision_BreaksHashChain()
     {
-        using var repo = GovernanceStoreFactory.CreateSqlite(new StubEpochValidationService());
+        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
 
         var entry1 = new AuditLogEntry
         {
@@ -698,21 +698,6 @@ public sealed class ComprehensiveSecurityAttackVectorTests
 
         // Verification must detect the tampering
         (await repo.VerifyAuditHashChainAsync()).ShouldBeFalse();
-    }
-
-    private sealed class StubEpochValidationService : IEpochValidationService
-    {
-        public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
-            => Task.FromResult(true);
-
-        public Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.CompletedTask;
-
-        public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult(1L);
-
-        public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(new Dictionary<TableIdentifier, long>());
     }
 
     private sealed class TestSecretProvider(byte[] secretBytes) : IKeyVaultSecretProvider

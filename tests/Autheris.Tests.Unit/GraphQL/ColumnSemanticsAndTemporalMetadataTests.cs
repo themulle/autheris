@@ -5,7 +5,7 @@ using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
 
-public sealed class Wave4ColumnSemanticsAndTemporalTests
+public sealed class ColumnSemanticsAndTemporalMetadataTests
 {
     [Fact]
     public void TableColumn_WithDbtMeta_ExposesTypedColumnSemantics()

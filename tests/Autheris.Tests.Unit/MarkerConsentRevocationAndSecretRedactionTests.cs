@@ -16,7 +16,7 @@ namespace Autheris.Tests.Unit;
 /// Round 4 (FIX-O): core-side parts of E-05 / EX-02 (marker-based consent queries and system revocation in the
 /// SQLite repository) and EX-16 (secret provider exception messages without the secret reference).
 /// </summary>
-public sealed class Round4OpenMetadataCoreTests : IDisposable
+public sealed class MarkerConsentRevocationAndSecretRedactionTests : IDisposable
 {
     private static readonly Guid SyncMarker = new("0e3d5c1a-7b2f-4c8e-9a61-5f0d2b7c4e19");
     private static readonly TableIdentifier SeededTable = new("finance", "dbo", "finance_table_1");

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,7 +18,7 @@ public sealed class WormConfigurationStartupAuditorTests
     [Fact]
     public async Task StartAsync_MintsEpochOneChainedToGenesis_AndInitializesCurrentConfigHash()
     {
-        var monitor = new TestOptionsMonitor<GatewayOptions>(new GatewayOptions { Classification = new ClassificationOptions() });
+        var monitor = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { Classification = new ClassificationOptions() });
         var audit = new WormConfigurationAuditService(monitor, NullLogger<WormConfigurationAuditService>.Instance, environment: WormTestEnvironment.Development);
         audit.CurrentConfigHash.ShouldBeNull();
 
@@ -48,14 +49,5 @@ public sealed class WormConfigurationStartupAuditorTests
         await sut.StartAsync(CancellationToken.None);
 
         await audit.Received(1).AuditConfigurationSnapshotAsync("STARTUP", Arg.Any<string>(), Arg.Any<CancellationToken>());
-    }
-
-    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
-    {
-        public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
-        public T CurrentValue { get; private set; }
-        public void SetCurrent(T val) => CurrentValue = val;
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

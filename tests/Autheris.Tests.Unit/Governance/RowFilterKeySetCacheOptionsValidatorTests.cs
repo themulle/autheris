@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Application.Policy;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

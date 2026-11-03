@@ -123,8 +123,8 @@ Value and risk: H/M/L. Size: S/M/L. BP means behaviour-preserving.
 | ARCH-MNT-22 | Dialect repository dedup (REV-05) | 2.1 item 1 | Shared helpers plus a dialect strategy, starting with ConsentGrants and Outbox pairs | H | M | L | 2-4 per step | tenant/audit predicates must not drop | yes |
 | ARCH-MNT-23 | Test reliability (REV-01, 02, 04) | 15 wall-clock asserts; 110 `Task.Delay`/`Sleep` in Unit; 5 env-var files | Correctness asserts, signal/`WaitUntil` helper, `FakeTimeProvider`, `EnvVarScope` helper | H | L | M | ~17 | none | yes (tests) |
 | ARCH-MNT-24 | docs/plans housekeeping | 2.6 | Delete the 4 merged plans; list them under "Completed plans" in the master | L | L | S | 5 | none | yes |
-| ARCH-MNT-25 | Test file naming and shared fakes (REV-10) | 45 round-named test files; about 10 fakes redefined | Rename by feature; move fakes to Tests.Common | M | L | M | many | none | yes |
-| ARCH-MNT-26 | Catch-site audit (REV-07) | 875 catch sites | Read-only audit of log-less `catch (Exception)` in security paths | M | L | M | 0 (report) | security relevant | yes |
+| ARCH-MNT-25 | Test file naming and shared fakes (REV-10) | 45 round-named test files; about 10 fakes redefined | Rename by feature; move fakes to Tests.Common (`2026-11-03-plan-arch-mnt-25-26-test-hygiene-and-catch-audit.md`) | M | L | M | many | none | yes |
+| ARCH-MNT-26 | Catch-site audit (REV-07) | 875 catch sites | Read-only audit of log-less `catch (Exception)` in security paths + 3 narrowing fixes (`2026-11-03-plan-arch-mnt-25-26-test-hygiene-and-catch-audit.md`) | M | L | M | 3 (report + fixes) | security relevant | yes |
 
 ### 3.1 ARCH-MNT-15: bounded ANTLR DFA caches
 

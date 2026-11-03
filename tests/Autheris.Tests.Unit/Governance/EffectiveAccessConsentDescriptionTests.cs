@@ -22,7 +22,7 @@ using Xunit;
 using static Autheris.Tests.Unit.Mcp.ScopeLevelTestKit;
 
 /// <summary>PLAN-GOV-158-INC1 WP-158-4: the stored consent description in the access explanation (decisions 5, 9, 10; SEC-GOV158I1-08..10, 14).</summary>
-public sealed class Issue158Inc1ExplainDescriptionTests
+public sealed class EffectiveAccessConsentDescriptionTests
 {
     private const string Group = "S-1-GRP-MEMBER";
     private const string ForeignGroup = "S-1-GRP-FOREIGN";

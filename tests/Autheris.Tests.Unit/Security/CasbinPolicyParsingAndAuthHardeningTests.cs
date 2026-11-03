@@ -33,7 +33,7 @@ using Xunit;
 /// Regression tests for the second remediation round of the repeated security review
 /// (RR-L4-05, RR-L4-06, RR-L5-02, RR-L5-03, RR-L2-03, RR-L2-04, RV-04).
 /// </summary>
-public sealed class RepeatedReviewRound2Tests
+public sealed class CasbinPolicyParsingAndAuthHardeningTests
 {
     private static readonly TenantId Tenant = new("tenant-rr2");
 

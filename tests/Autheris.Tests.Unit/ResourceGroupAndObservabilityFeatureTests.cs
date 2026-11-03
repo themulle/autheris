@@ -27,7 +27,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 
-public sealed class Wave2MarketFeaturesTests
+public sealed class ResourceGroupAndObservabilityFeatureTests
 {
     // =========================================================================
     // 1. F-PERF-08: Hierarchical Resource Groups & Workload Queuing Tests

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Startup;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;

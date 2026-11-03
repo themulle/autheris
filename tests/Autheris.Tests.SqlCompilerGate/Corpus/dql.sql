@@ -1188,55 +1188,55 @@ SELECT * FROM api.ufn_GetCraneTelemetry(@crane_id, DEFAULT, @tenant_id)
 -- @id f0a9c6efbf7f class=select expected=accept source=tests/Autheris.Tests.Unit/ProcedureEndpointTests.cs
 SELECT * FROM api.fn_Telemetry(@tenant_id, @region)
 
--- @id 1d9cc5317cb4 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 1d9cc5317cb4 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT * FROM "public.employees"
 
--- @id 241a32fea502 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 241a32fea502 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT id FROM employees FOR VERSION AS OF 1
 
--- @id 343efbe59ea3 class=select expected=reject source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 343efbe59ea3 class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT id FROM employees -- comment
 
--- @id 41db4630fc1e class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 41db4630fc1e class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT ts_stat('SELECT 1'), id FROM employees
 
--- @id 4e4fff613bef class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 4e4fff613bef class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT region, count(*), max(id), round(avg(id), 2), lower(name), coalesce(region, 'n/a'),
 
--- @id 538532c3cb55 class=select expected=reject source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 538532c3cb55 class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT (name).f(1) FROM employees
 
--- @id 54bd2cee63c1 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 54bd2cee63c1 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT e.id, o.id FROM employees e JOIN orders o ON e.id = o.id
 
--- @id 5b477a10fa29 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 5b477a10fa29 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT $$x$$, id FROM orders
 
--- @id 6797143a4766 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 6797143a4766 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT len(name), isnull(region, 'n/a') FROM orders
 
--- @id 8c86d4030f99 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 8c86d4030f99 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT load_extension('x'), id FROM employees
 
--- @id 8dfe6d270026 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 8dfe6d270026 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT len(name) FROM orders
 
--- @id 9b02f3861d7b class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id 9b02f3861d7b class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT setval('s', 1), id FROM employees
 
--- @id b30687f06b75 class=select expected=reject source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id b30687f06b75 class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT mytype::f(1) FROM employees
 
--- @id bc123ef8d7a6 class=select expected=reject source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id bc123ef8d7a6 class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT name[1].f() FROM employees
 
--- @id c3edab642599 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id c3edab642599 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT md5(name) FROM employees
 
--- @id ec71bba276d8 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id ec71bba276d8 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT id FROM employees FOR TIMESTAMP AS OF TIMESTAMP '2026-01-01 00:00:00'
 
--- @id ed8f55ed7261 class=select expected=accept source=tests/Autheris.Tests.Unit/Round4ParserGatewayTests.cs
+-- @id ed8f55ed7261 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
 SELECT id FROM orders LIMIT 5
 
 -- @id 99de70515144 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/ArrowExportRebacBodyTests.cs
@@ -1395,13 +1395,13 @@ SELECT id, txt, bin FROM lob
 -- @id 0e76f7d80ea4 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/RepeatedReviewRound2Tests.cs
 SELECT * FROM "Orders" a JOIN orders b ON a.id = b.id
 
--- @id 3969a478400b class=select expected=accept source=tests/Autheris.Tests.Unit/Security/RepeatedReviewRound3Tests.cs
+-- @id 3969a478400b class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DynamicMaskingAndConnectorGuardTests.cs
 SELECT 1; DROP TABLE orders;
 
--- @id 6750faece3ed class=select expected=accept source=tests/Autheris.Tests.Unit/Security/RepeatedReviewRound3Tests.cs
+-- @id 6750faece3ed class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DynamicMaskingAndConnectorGuardTests.cs
 SELECT * FROM range(1000000000)
 
--- @id ec7b9c91d951 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/RepeatedReviewRound3Tests.cs
+-- @id ec7b9c91d951 class=select expected=accept source=tests/Autheris.Tests.Unit/Security/DynamicMaskingAndConnectorGuardTests.cs
 SELECT id, ssn FROM hr.employees
 
 -- @id d14a5f222d7a class=select expected=accept source=tests/Autheris.Tests.Unit/Security/Sql6JoinGuardrailTests.cs
@@ -1534,34 +1534,34 @@ SELECT 1
 -- @id aa8bec0a07c1 class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002ExtensionsCoreTests.cs
 SELECT "customer_id", "segment"
 
--- @id 8e46e00993b9 class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002InfraTests.cs
+-- @id 8e46e00993b9 class=select expected=accept source=tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 SELECT seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid DESC LIMIT 1
 
--- @id f53c965f218f class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002InfraTests.cs
+-- @id f53c965f218f class=select expected=accept source=tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 SELECT seq FROM AUDIT_LOG_ENTRIES ORDER BY rowid
 
--- @id 01635629ed3c class=select expected=reject source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id 01635629ed3c class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT query_to_xml('SELECT * FROM hr.salaries', true, false, ''), id FROM employees
 
--- @id 0a641f2db62d class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id 0a641f2db62d class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT id FROM inactive_orders
 
--- @id 1a0e77c3216b class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id 1a0e77c3216b class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT id, ssn FROM employees
 
--- @id 1e441336cae4 class=select expected=reject source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id 1e441336cae4 class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT id, '__gql_mk0' FROM employees
 
--- @id 760d5a56c85d class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id 760d5a56c85d class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT id, name FROM public.employees
 
--- @id cb7bbe8adfae class=select expected=reject source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id cb7bbe8adfae class=select expected=reject source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT * FROM hr_salaries
 
--- @id cc751fa17b93 class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id cc751fa17b93 class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT id, name FROM employees
 
--- @id e8e1f01209ac class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReview20261002WebSqlTests.cs
+-- @id e8e1f01209ac class=select expected=accept source=tests/Autheris.Tests.Unit/WebSqlExecutorAndConnectorSecurityTests.cs
 SELECT query_to_xml('SELECT * FROM hr.salaries', true, false, '')
 
 -- @id 50a4d03b48d4 class=select expected=accept source=tests/Autheris.Tests.Unit/SecurityReviewG3EndpointAuthzTests.cs
@@ -3505,101 +3505,101 @@ SELECT * FROM TABLE(pg.system.query(query => 'SELECT * FROM orders'))
 -- @id f9f5fce33d48 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityRemediationTests.cs
 SELECT sys_context('USERENV', 'SESSION_USER')
 
--- @id 062b3070a088 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 062b3070a088 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT 'hello\nworld' FROM orders
 
--- @id 09100acccbf1 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 09100acccbf1 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT e'test' FROM orders
 
--- @id 0ae96afb5e64 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 0ae96afb5e64 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT E'foo bar' FROM orders
 
--- @id 191f3ea488ae class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 191f3ea488ae class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT * FROM srv.db.dbo.orders
 
--- @id 1b05e1ef07ed class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 1b05e1ef07ed class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT 1 FROM orders -- end of line comment
 
--- @id 1ce5c1684e02 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 1ce5c1684e02 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT /* standard comment */ 1 FROM orders
 
--- @id 22f4dc7117ce class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 22f4dc7117ce class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT * FROM orders FOR TIMESTAMP AS OF '2026-01-01'
 
--- @id 267425fa8356 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 267425fa8356 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT E'hello' FROM orders
 
--- @id 344ecec6a35d class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 344ecec6a35d class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT txid_current()
 
--- @id 3bb69f1bd76a class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 3bb69f1bd76a class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT id FROM orders LIMIT 20
 
--- @id 402fa0c00fd4 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 402fa0c00fd4 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT /* /* double */ */ 1 FROM orders
 
--- @id 4773bbae5a0a class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 4773bbae5a0a class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT has_dbaccess('master')
 
--- @id 6ef0b5929a22 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 6ef0b5929a22 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT pg_get_expr('1', 1)
 
--- @id 70379360d6ec class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 70379360d6ec class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT /* outer /* nested */ comment */ 1 FROM orders
 
--- @id 7cb077c0bb0f class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 7cb077c0bb0f class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT pg_stat_reset()
 
--- @id 8e9f139a801b class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 8e9f139a801b class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT * FROM "my.table"
 
--- @id 912c7f8fa0c1 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 912c7f8fa0c1 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT '\' FROM orders
 
--- @id 9426f97264b3 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id 9426f97264b3 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT * FROM orders FOR VERSION AS OF 100
 
--- @id a08bb3c0ad09 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id a08bb3c0ad09 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT 'O''Reilly' FROM orders
 
--- @id a4fd4e225570 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id a4fd4e225570 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT 'abc\'def' FROM orders
 
--- @id aafc01bdb169 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id aafc01bdb169 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT is_srvrolemember('sysadmin')
 
--- @id ac7cbbd6fc71 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id ac7cbbd6fc71 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT suser_sname()
 
--- @id b320eec417e6 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id b320eec417e6 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 select * from test_ß_ä_ı
 
--- @id b34919c0786f class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id b34919c0786f class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT fn_dblog(NULL, NULL)
 
--- @id c3604080a819 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id c3604080a819 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT pg_notify('chan', 'payload')
 
--- @id c80c1be44c56 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id c80c1be44c56 class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT * FROM server.database.schema.table
 
--- @id dba682075e47 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id dba682075e47 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT id, name FROM orders ORDER BY id
 
--- @id de1d3d05a986 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id de1d3d05a986 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT inet_server_addr()
 
--- @id df1f1d15d442 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id df1f1d15d442 class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT version()
 
--- @id f69a796a99df class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id f69a796a99df class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT $$line1
 line2$$ FROM orders
 
--- @id f8e21c279bae class=select expected=reject source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id f8e21c279bae class=select expected=reject source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT $$dollar string$$ FROM orders
 
--- @id feeece7907cf class=select expected=accept source=tests/TrinoSqlEngine.Tests/SecurityReview20261002SqTests.cs
+-- @id feeece7907cf class=select expected=accept source=tests/TrinoSqlEngine.Tests/SqlParserLexerAndRewriterDifferentialTests.cs
 SELECT * FROM mycatalog.myschema.mytable
 
 -- @id 2971a560a09a class=select expected=accept source=tests/TrinoSqlEngine.Tests/Sql1BracketLexerDifferentialTests.cs

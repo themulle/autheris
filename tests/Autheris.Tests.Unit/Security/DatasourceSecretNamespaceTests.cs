@@ -160,7 +160,7 @@ public sealed class DatasourceSecretNamespaceTests
     public async Task DeclarativeHttpExecutor_DatasourceRefToOperatorKey_FailsWithoutSendingSecret()
     {
         var sentRequests = new List<HttpRequestMessage>();
-        var handler = new DelegatingHandlerStub(req =>
+        var handler = new StubHttpMessageHandler(req =>
         {
             sentRequests.Add(req);
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -235,11 +235,5 @@ public sealed class DatasourceSecretNamespaceTests
         });
 
         sentRequests.ShouldBeEmpty();
-    }
-
-    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(handler(request));
     }
 }

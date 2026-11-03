@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Hosting;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,19 +20,6 @@ using Xunit;
 /// <summary>PLAN-OPS-150 WP-A: opt-in cold-path timing listener (D-150 WP-A, SEC-OPS150-12).</summary>
 public sealed class ColdPathTimingTests
 {
-    private sealed class CapturingLogger : ILogger<ColdPathTimingListener>
-    {
-        public List<string> Messages { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state)
-            where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Messages.Add(formatter(state, exception));
-    }
-
     private static IHostEnvironment Env(string name)
     {
         var env = Substitute.For<IHostEnvironment>();
@@ -68,7 +56,7 @@ public sealed class ColdPathTimingTests
     [Fact]
     public void ColdPathTimingListener_LogsStageNamesAndDurations_NoDocumentText()
     {
-        var logger = new CapturingLogger();
+        var logger = new CapturingLogger<ColdPathTimingListener>();
         var listener = new ColdPathTimingListener(logger);
 
         listener.ParseDocument(null!).Dispose();
@@ -91,7 +79,7 @@ public sealed class ColdPathTimingTests
     [Fact]
     public void ColdPathTimingListener_StopsAfterThreeOperations()
     {
-        var logger = new CapturingLogger();
+        var logger = new CapturingLogger<ColdPathTimingListener>();
         var listener = new ColdPathTimingListener(logger);
 
         for (var i = 0; i < 6; i++)

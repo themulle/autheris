@@ -33,18 +33,6 @@ public sealed class McpDatasetDisplayNameTests
     private const string SharedId = "sales.dbo.shared_t";
     private const string Distinct = "ZQX-Distinct-Display-Name";
 
-    private sealed class CapturingLogger<T> : ILogger<T>
-    {
-        public List<string> Lines { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Lines.Add(formatter(state, exception) + " " + exception);
-    }
-
     private static TableMetadata Row(string displayName, DatasetVisibility visibility = DatasetVisibility.Full, string name = "shared_t")
     {
         var t = Wp0.Table("sales", name, "Short text", ["id"]);

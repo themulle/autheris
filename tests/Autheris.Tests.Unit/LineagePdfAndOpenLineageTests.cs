@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -22,14 +23,6 @@ using Xunit;
 
 public class LineagePdfAndOpenLineageTests
 {
-    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(handler(request));
-        }
-    }
-
     // NSubstitute cannot proxy the ReadOnlySpan parameters of IAuditAnchorSigner (invalid program), so a plain stub is used.
     private sealed class FixedSigner(string signature) : IAuditAnchorSigner
     {
@@ -87,7 +80,7 @@ public class LineagePdfAndOpenLineageTests
     {
         // Arrange
         string? capturedBody = null;
-        var mockHandler = new DelegatingHandlerStub(req =>
+        var mockHandler = new StubHttpMessageHandler(req =>
         {
             capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             req.Method.ShouldBe(HttpMethod.Post);

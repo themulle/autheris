@@ -36,9 +36,9 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// Regressionstests für die GraphQL-Befunde (Abschnitt 6) des Security Reviews vom 2026-10-02.
+/// Security regression tests for GraphQL subscriptions, CDC governors, and Apollo Federation signature validation.
 /// </summary>
-public sealed class SecurityReview20261002GraphQLTests
+public sealed class GraphQlSubscriptionAndFederationSecurityTests
 {
     private sealed class IsolatedHttpContextAccessor(HttpContext context) : IHttpContextAccessor
     {

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -19,7 +20,7 @@ public sealed class ClassificationWorkflowStateMachineTests
     {
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance);
 
         var ownerSid = "S-1-5-21-finance-owner";
@@ -60,7 +61,7 @@ public sealed class ClassificationWorkflowStateMachineTests
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         // Step-up tokens are verified (SR-H-04), so a verification service is mandatory here.
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance,
             totpService: new SrH04FakeTotpService("valid-mfa-token-12345"),
             totpSecretStore: new SrH04FakeTotpSecretStore());
@@ -117,7 +118,7 @@ public sealed class ClassificationWorkflowStateMachineTests
     {
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance);
 
         var proposal = new TableClassificationProposal(
@@ -182,7 +183,7 @@ public sealed class ClassificationWorkflowStateMachineTests
         };
 
         var stateMachine = new ClassificationWorkflowStateMachine(
-            new TestOptionsMonitor<GatewayOptions>(options),
+            new StaticOptionsMonitor<GatewayOptions>(options),
             NullLogger<ClassificationWorkflowStateMachine>.Instance);
 
         var publicTable = new TableClassificationProposal(
@@ -212,13 +213,5 @@ public sealed class ClassificationWorkflowStateMachineTests
             DateTimeOffset.UtcNow);
 
         stateMachine.CanZeroTouchAutoApprove(disputedTable).ShouldBeFalse();
-    }
-
-    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
-    {
-        public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
-        public T CurrentValue { get; }
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

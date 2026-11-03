@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -64,7 +65,7 @@ public class AuthenticationSecurityTests
             env = mockEnv;
         }
 
-        var schemeOptionsMonitor = new TestOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
+        var schemeOptionsMonitor = new StaticOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
         var handler = new BasicAuthenticationHandler(
             schemeOptionsMonitor,
             NullLoggerFactory.Instance,
@@ -267,7 +268,7 @@ public class AuthenticationSecurityTests
             env = mockEnv;
         }
 
-        var schemeOptionsMonitor = new TestOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
+        var schemeOptionsMonitor = new StaticOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions());
         var validator = new TrustedProxyValidator(Options.Create(options));
         var handler = new ForwardAuthAuthenticationHandler(
             schemeOptionsMonitor,
@@ -618,13 +619,5 @@ public class AuthenticationSecurityTests
 
         var isGlobalGov = Autheris.Api.Endpoints.EndpointSecurity.IsGlobalGovernanceAdmin(principal);
         isGlobalGov.ShouldBe(expectedGlobalGov);
-    }
-
-    private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
-    {
-        public T CurrentValue { get; }
-        public TestOptionsMonitor(T currentValue) => CurrentValue = currentValue;
-        public T Get(string? name) => CurrentValue;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

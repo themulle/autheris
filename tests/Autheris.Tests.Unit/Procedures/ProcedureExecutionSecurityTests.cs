@@ -25,7 +25,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>PLAN-PROC-152-INC1: governed procedures INC-1 security slice (SEC-PROC152-01..11).</summary>
-public class ProcedureSecurityInc1Tests
+public class ProcedureExecutionSecurityTests
 {
     private const string NotFound = "Procedure endpoint not found.";
     private static readonly TenantId Tenant = new("tenant-a");

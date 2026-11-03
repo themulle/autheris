@@ -21,6 +21,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Autheris.Tests.Common\CapturingLogger.cs" Link="TestSupport\CapturingLogger.cs" />
+    <Compile Include="..\Autheris.Tests.Common\StubHttpMessageHandler.cs" Link="TestSupport\StubHttpMessageHandler.cs" />
     <Compile Include="..\Autheris.Tests.Common\TestTenants.cs" Link="TestSupport\TestTenants.cs" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
   </ItemGroup>
