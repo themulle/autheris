@@ -30,7 +30,15 @@ public static class GatewayDataSourceServiceExtensions
 
         services.TryAddSingleton<IValidateOptions<DataSourceConfigurationOptions>, DataSourceOptionsValidator>();
 
+        services.AddSingleton<IValidateOptions<DataSourceConfigurationOptions>>(
+            new Autheris.Api.Configuration.Validation.DataSourceTransportRawValueValidator(section));
+
         services.TryAddSingleton<IDataSourceOptionsResolver, HierarchicalDataSourceOptionsResolver>();
+
+        // Issue #447: ingress stamping and the fail-closed transport gate (enforcement call sites arrive with WP-3).
+        services.TryAddScoped<IIngressTransportContext, IngressTransportContext>();
+        services.TryAddScoped<ITransportDenialRecorder, TransportDenialRecorder>();
+        services.TryAddScoped<IDataSourceTransportGate, DataSourceTransportGate>();
         services.Replace(ServiceDescriptor.Singleton<IDataSourceTelemetryPolicyProvider, HierarchicalDataSourceTelemetryPolicyProvider>());
 
         return services;

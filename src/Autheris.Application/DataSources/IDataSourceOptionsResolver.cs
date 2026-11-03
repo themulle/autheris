@@ -21,7 +21,8 @@ public interface IDataSourceOptionsResolver
     bool TryResolve(string? dataSourceName, out EffectiveDataSourceProfile profile);
 
     /// <summary>
-    /// Checks whether the specified ingress transport is authorized for the given data source (SEC-DS05-03).
+    /// Maps a caller-supplied (logical) data source name through <c>WebSql.DataSourceMappings</c> to the name a profile is keyed by.
+    /// An unmapped name is returned unchanged; a blank name yields an empty string (Issue #447, SEC-ATR-08).
     /// </summary>
-    bool IsTransportAllowed(string? dataSourceName, DataSourceTransportFlags transport);
+    string CanonicalName(string? dataSourceName);
 }

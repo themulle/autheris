@@ -112,6 +112,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.CallerAttributeServiceSetChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TrustedDocumentsReplaced] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TrustedDocumentsRetired] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.TransportNotAllowed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeSimulationRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DataCatalogSync] = AuditFailurePolicy.FailClosed,
     };

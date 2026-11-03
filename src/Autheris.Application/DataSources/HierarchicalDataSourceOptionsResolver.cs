@@ -4,6 +4,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Data;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Options.Observability;
@@ -23,8 +24,10 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     private readonly List<IDisposable> _subscriptions = new();
     private readonly object _syncRoot = new();
 
-    private volatile FrozenDictionary<string, EffectiveDataSourceProfile> _profiles = FrozenDictionary<string, EffectiveDataSourceProfile>.Empty;
-    private volatile EffectiveDataSourceProfile _defaultProfile = default!;
+    // SEC-ATR-10: profiles and the default profile are swapped together as one immutable snapshot.
+    private sealed record Snapshot(FrozenDictionary<string, EffectiveDataSourceProfile> Profiles, EffectiveDataSourceProfile DefaultProfile);
+
+    private volatile Snapshot _snapshot = null!;
 
     public HierarchicalDataSourceOptionsResolver(
         IOptionsMonitor<DataSourceConfigurationOptions> dataSourceOptions,
@@ -37,17 +40,17 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
 
         Rebuild();
 
-        var subConfig = _dataSourceOptions.OnChange(_ => Rebuild());
+        var subConfig = _dataSourceOptions.OnChange(_ => RebuildKeepingLastGood());
         if (subConfig != null) _subscriptions.Add(subConfig);
 
         if (_gatewayOptions != null)
         {
-            var subGateway = _gatewayOptions.OnChange(_ => Rebuild());
+            var subGateway = _gatewayOptions.OnChange(_ => RebuildKeepingLastGood());
             if (subGateway != null) _subscriptions.Add(subGateway);
         }
         if (_telemetryOptions != null)
         {
-            var subTelemetry = _telemetryOptions.OnChange(_ => Rebuild());
+            var subTelemetry = _telemetryOptions.OnChange(_ => RebuildKeepingLastGood());
             if (subTelemetry != null) _subscriptions.Add(subTelemetry);
         }
     }
@@ -55,43 +58,63 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     /// <inheritdoc />
     public EffectiveDataSourceProfile Resolve(string? dataSourceName)
     {
+        var snapshot = _snapshot;
         if (string.IsNullOrWhiteSpace(dataSourceName))
         {
-            return _defaultProfile;
+            return snapshot.DefaultProfile;
         }
 
-        if (_profiles.TryGetValue(dataSourceName, out var profile))
+        if (snapshot.Profiles.TryGetValue(dataSourceName, out var profile))
         {
             return profile;
         }
 
-        return _defaultProfile;
+        return snapshot.DefaultProfile;
     }
 
     /// <inheritdoc />
     public bool TryResolve(string? dataSourceName, out EffectiveDataSourceProfile profile)
     {
+        var snapshot = _snapshot;
         if (string.IsNullOrWhiteSpace(dataSourceName))
         {
-            profile = _defaultProfile;
+            profile = snapshot.DefaultProfile;
             return false;
         }
 
-        if (_profiles.TryGetValue(dataSourceName, out var resolved))
+        if (snapshot.Profiles.TryGetValue(dataSourceName, out var resolved))
         {
             profile = resolved;
             return true;
         }
 
-        profile = _defaultProfile;
+        profile = snapshot.DefaultProfile;
         return false;
     }
 
-    /// <inheritdoc />
-    public bool IsTransportAllowed(string? dataSourceName, DataSourceTransportFlags transport)
+    /// <summary>
+    /// SEC-ATR-10: a failed rebuild (for example an options source that throws) keeps the last good snapshot instead of failing open or
+    /// leaving a half-built map.
+    /// </summary>
+    private void RebuildKeepingLastGood()
     {
-        var profile = Resolve(dataSourceName);
-        return (profile.AllowedTransports & transport) == transport;
+        try
+        {
+            Rebuild();
+        }
+        catch (Exception)
+        {
+            // keep the last good snapshot; the options validators report the broken configuration
+        }
+    }
+
+    /// <inheritdoc />
+    public string CanonicalName(string? dataSourceName)
+    {
+        var webSql = _gatewayOptions?.CurrentValue?.WebSql;
+        return webSql == null
+            ? string.IsNullOrWhiteSpace(dataSourceName) ? string.Empty : dataSourceName
+            : DataSourceAllowlistGuard.MapDataSource(webSql, dataSourceName);
     }
 
     private void Rebuild()
@@ -138,6 +161,10 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
                 }
             }
 
+            // SEC-ATR-10 / decision 5: every configured WebSQL source name gets a profile built from Defaults, so a legitimately
+            // configured source never reads as unknown. Explicit profiles are never overwritten (the map is keyed by name).
+            AddWebSqlSourceNames(gateway?.WebSql, names);
+
             foreach (var name in names)
             {
                 DataSourceProfileOptions? profileOptions = null;
@@ -159,8 +186,53 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
                 dict[name] = profile;
             }
 
-            _defaultProfile = defaultProfile;
-            _profiles = dict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+            _snapshot = new Snapshot(dict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase), defaultProfile);
+        }
+    }
+
+    private static void AddWebSqlSourceNames(WebSqlOptions? webSql, HashSet<string> names)
+    {
+        if (webSql == null)
+        {
+            return;
+        }
+
+        AddName(webSql.DefaultDataSourceName, names);
+
+        if (webSql.AllowedDataSources != null)
+        {
+            foreach (var name in webSql.AllowedDataSources)
+            {
+                AddName(name, names);
+            }
+        }
+
+        if (webSql.DataSourceMappings != null)
+        {
+            foreach (var mapped in webSql.DataSourceMappings.Values)
+            {
+                AddName(mapped, names);
+            }
+        }
+
+        if (webSql.TenantDataSourceAllowlist != null)
+        {
+            foreach (var list in webSql.TenantDataSourceAllowlist.Values)
+            {
+                if (list == null) continue;
+                foreach (var name in list)
+                {
+                    AddName(name, names);
+                }
+            }
+        }
+    }
+
+    private static void AddName(string? name, HashSet<string> names)
+    {
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            names.Add(name);
         }
     }
 
@@ -261,8 +333,10 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             ?? fallbackDefaults.DefaultIsolationLevel
             ?? (connectionOptions?.ReadUncommitted == true ? IsolationLevel.ReadUncommitted : IsolationLevel.ReadCommitted);
 
+        // SEC-ATR-01 / decision 13: a profile without the key inherits Defaults, then All; an explicit None stays None.
         DataSourceTransportFlags transports = profileOptions?.AllowedTransports
-            ?? fallbackDefaults.AllowedTransports;
+            ?? fallbackDefaults.AllowedTransports
+            ?? DataSourceTransportFlags.All;
 
         // 4. Caching & Staging Guardrails
         bool cachingEnabled = profileOptions?.CachingEnabled

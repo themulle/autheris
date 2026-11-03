@@ -99,7 +99,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "SYNC_FAILED",
         "GDPR_SUBJECT_SCOPE_UNRESOLVED",
         // Relay keyset pagination
-        "KEYSET_PAGINATION_UNAVAILABLE"
+        "KEYSET_PAGINATION_UNAVAILABLE",
+        // Issue #447 (SEC-ATR-08): fixed text without the data source name.
+        "TRANSPORT_NOT_ALLOWED"
     };
 
     /// <summary>
@@ -109,6 +111,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     private static readonly Dictionary<string, string> FixedClientMessages = new(StringComparer.OrdinalIgnoreCase)
     {
         ["KEYSET_PAGINATION_UNAVAILABLE"] = "Keyset pagination is unavailable for this table or caller.",
+        ["TRANSPORT_NOT_ALLOWED"] = "Access to the data source is not allowed over this transport.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,

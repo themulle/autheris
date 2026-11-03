@@ -99,6 +99,8 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<ReadOnlyTokenMiddleware>(
             new PathString(ResolveGraphQlPath(gatewayOptions)),
             new PathString(ResolveMcpBasePath(gatewayOptions)));
+        // Issue #447 (SEC-ATR-02): stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
+        app.UseMiddleware<IngressTransportMiddleware>();
         app.UseAuthorization();
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
