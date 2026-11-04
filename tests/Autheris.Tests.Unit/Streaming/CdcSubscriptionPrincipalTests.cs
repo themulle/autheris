@@ -7,6 +7,7 @@ using Autheris.Application.Events.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
@@ -115,6 +116,19 @@ public sealed class CdcSubscriptionPrincipalTests
 
         capture.IsSuccess.ShouldBeFalse();
         capture.Error.ShouldBe(CdcSnapshotCaptureError.TooLarge);
+    }
+
+    [Fact]
+    public void Capture_WithRestrictedScope_FailsWithRestrictedScopeError()
+    {
+        var restrictedPolicy = RestrictedScopePolicy.FromOptions(new RestrictedScopeOptions { Enabled = true, Scopes = ["restricted-analytics"] });
+        var admin = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S"), new Claim(ClaimTypes.Role, "Admin"), new Claim("scp", "restricted-analytics")], "test"));
+
+        var capture = CdcSubscriptionPrincipal.Capture(admin, _options, restrictedPolicy);
+
+        capture.IsSuccess.ShouldBeFalse();
+        capture.Error.ShouldBe(CdcSnapshotCaptureError.RestrictedScope);
     }
 
     [Fact]

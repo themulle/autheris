@@ -244,6 +244,9 @@ public static partial class GatewayServiceCollectionExtensions
             gqlBuilder.ModifyServerOptions(opt => opt.EnableSchemaRequests = false);
         }
 
+        // GHSA-cj7m-c75j-6p6h: Explicitly ensure GraphQL request batching is disabled
+        gqlBuilder.ModifyServerOptions(opt => opt.Batching = HotChocolate.AspNetCore.AllowedBatching.None);
+
         return services;
     }
 }

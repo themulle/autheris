@@ -39,19 +39,22 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
     private readonly IRedisLockPubSubChannel? _pubSubChannel;
     private readonly IRoleResolverCache? _roleResolverCache;
     private readonly IAuditWriter? _auditWriter;
+    private readonly Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? _subscriptionStore;
 
     public IdentityDeprovisioningService(
         IIdentityStoreRepository storeRepository,
         ITokenRevocationService? tokenRevocationService = null,
         IRedisLockPubSubChannel? pubSubChannel = null,
         IRoleResolverCache? roleResolverCache = null,
-        IAuditWriter? auditWriter = null)
+        IAuditWriter? auditWriter = null,
+        Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? subscriptionStore = null)
     {
         _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
         _tokenRevocationService = tokenRevocationService;
         _pubSubChannel = pubSubChannel;
         _roleResolverCache = roleResolverCache;
         _auditWriter = auditWriter;
+        _subscriptionStore = subscriptionStore;
     }
 
     public async Task DeprovisionAndLockSubjectAsync(
@@ -89,6 +92,26 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
 
         // 5. Invalidate role cache
         _roleResolverCache?.Invalidate(realmId, userKey);
+
+        // 5b. GHSA-wvwx-q6jg-44wv: Remove CDC webhook subscriptions created by deprovisioned subject
+        if (_subscriptionStore != null)
+        {
+            try
+            {
+                var subs = await _subscriptionStore.ListSubscriptionsAsync(tenantId.Value, ct).ConfigureAwait(false);
+                foreach (var sub in subs)
+                {
+                    if (string.Equals(sub.CreatedBySid, userKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _subscriptionStore.RemoveSubscriptionAsync(tenantId.Value, sub.Id, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch
+            {
+                // Non-fatal if subscription store is unavailable
+            }
+        }
 
         // 6. Emit Tier-A WORM audit event
         if (_auditWriter != null)

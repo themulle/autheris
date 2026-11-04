@@ -586,6 +586,21 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task Submit_WhenUserLimitExceeded_ThrowsQueueLimitExceeded()
+    {
+        var manager = new AsyncQueryJobManager(_audit, environment: _env,
+            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 100, MaxActiveJobsPerUser = 2 }));
+
+        var user = User("alice", "tenant-1");
+        await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), user, new TenantId("tenant-1"));
+        await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 2"), user, new TenantId("tenant-1"));
+
+        var ex = await Should.ThrowAsync<AsyncJobQueueLimitExceededException>(
+            () => manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 3"), user, new TenantId("tenant-1")));
+        ex.Message.ShouldContain("user has reached the maximum");
+    }
+
+    [Fact]
     public async Task Submit_AfterWorkerStopped_IsRejectedAsStopped()
     {
         var manager = new AsyncQueryJobManager(_audit, environment: _env);

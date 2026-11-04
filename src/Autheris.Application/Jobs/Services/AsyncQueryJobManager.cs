@@ -308,22 +308,48 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             State: AsyncJobState.Queued,
             CreatedAt: _time.GetUtcNow());
 
-        // Per-tenant backlog cap: counted and reserved under one gate so concurrent submits cannot overshoot it.
-        var maxQueued = (_jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions()).MaxQueuedJobsPerTenant;
+        // Per-tenant, per-user and scratch quota backlog caps: counted and reserved under one gate so concurrent submits cannot overshoot them.
+        var jobOpts = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+        var maxQueued = jobOpts.MaxQueuedJobsPerTenant;
+        var maxUserJobs = jobOpts.MaxActiveJobsPerUser;
+        var maxScratchBytes = jobOpts.MaxScratchBytes;
         lock (_submitGate)
         {
             var active = 0;
+            var userActive = 0;
+            long scratchBytes = 0;
             foreach (var existing in _jobs.Values)
             {
-                if (!IsTerminal(existing.State) && string.Equals(existing.TenantId, tenantId.Value, StringComparison.Ordinal))
+                if (!IsTerminal(existing.State))
                 {
-                    active++;
+                    if (string.Equals(existing.TenantId, tenantId.Value, StringComparison.Ordinal))
+                    {
+                        active++;
+                    }
+                    if (!string.IsNullOrWhiteSpace(userSid) && string.Equals(existing.SubmittedByUserId, userSid, StringComparison.Ordinal))
+                    {
+                        userActive++;
+                    }
+                }
+                else if (existing.BytesProduced is { } bytes)
+                {
+                    scratchBytes += bytes;
                 }
             }
 
             if (active >= maxQueued)
             {
                 throw new AsyncJobQueueLimitExceededException(maxQueued);
+            }
+
+            if (maxUserJobs > 0 && userActive >= maxUserJobs)
+            {
+                throw new AsyncJobQueueLimitExceededException("The user has reached the maximum number of queued or running async jobs. Retry later.", maxUserJobs);
+            }
+
+            if (maxScratchBytes > 0 && scratchBytes >= maxScratchBytes)
+            {
+                throw new AsyncJobQueueLimitExceededException("The scratch disk quota for async job results has been exceeded. Retry later.", maxQueued);
             }
 
             _jobs[jobId] = descriptor;
