@@ -62,6 +62,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     }
 
     private readonly GraphQLOptions _graphQlOptions;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
+
+    /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447, REQ-ATR-08).</summary>
+    private System.Collections.Concurrent.ConcurrentDictionary<string, bool> _transportSeen = new(StringComparer.OrdinalIgnoreCase);
 
     public CatalogGraphQlTypeModule(
         ITableMetadataRepository metadataRepo,
@@ -72,8 +76,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         bool aggregationEnabled = true,
         bool crossSourceEnabled = false,
         bool metricsEnabled = true,
-        GraphQLOptions? graphQlOptions = null)
+        GraphQLOptions? graphQlOptions = null,
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
     {
+        _transportResolver = transportResolver;
         _aggregationEnabled = aggregationEnabled;
         _crossSourceEnabled = crossSourceEnabled;
         _metricsEnabled = metricsEnabled;
@@ -90,7 +96,55 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             ? "Offset pagination is not supported."
             : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Offset pagination is supported up to offset {maxAllowedOffset}.");
 
-    private Func<TableMetadata, bool>? GetTableFilter()
+    /// <summary>
+    /// Issue #447 REQ-ATR-08: the schema omits tables whose source does not allow GraphQL, so the schema never names a source the
+    /// transport may not read (the gate at the data path stays the enforcement point). <paramref name="record"/> notes each decision.
+    /// </summary>
+    private Func<TableMetadata, bool>? GetTableFilter(System.Collections.Concurrent.ConcurrentDictionary<string, bool>? record = null)
+    {
+        var inner = GetPartitionFilter();
+        var resolver = _transportResolver;
+        if (resolver is null)
+        {
+            return inner;
+        }
+
+        return meta =>
+        {
+            var source = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(meta);
+            var visible = Autheris.Application.DataSources.TransportDiscoveryFilter.IsSourceVisible(
+                resolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL, source);
+            if (record is not null)
+            {
+                record[source] = visible;
+            }
+
+            return visible && (inner is null || inner(meta));
+        };
+    }
+
+    /// <summary>True when a profile change flipped the GraphQL visibility of a source the schema was built with (forces a rebuild).</summary>
+    private bool TransportVisibilityChanged()
+    {
+        var resolver = _transportResolver;
+        if (resolver is null)
+        {
+            return false;
+        }
+
+        foreach (var (source, wasVisible) in _transportSeen)
+        {
+            if (Autheris.Application.DataSources.TransportDiscoveryFilter.IsSourceVisible(
+                    resolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL, source) != wasVisible)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Func<TableMetadata, bool>? GetPartitionFilter()
     {
         if (_graphQlOptions.SchemaPartitioning == GraphQlSchemaPartitioningMode.None)
         {
@@ -141,7 +195,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         try
         {
             var builtVer = Volatile.Read(ref _builtStructureVersion);
-            if (_versionProvider != null && builtVer >= 0)
+            var transportChanged = TransportVisibilityChanged();
+            if (!transportChanged && _versionProvider != null && builtVer >= 0)
             {
                 try
                 {
@@ -168,7 +223,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 return false;
             }
 
-            if (string.Equals(current, _built.Fingerprint, StringComparison.Ordinal))
+            if (!transportChanged && string.Equals(current, _built.Fingerprint, StringComparison.Ordinal))
             {
                 return false;
             }
@@ -219,8 +274,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         CatalogSchemaModel schemaModel;
         try
         {
-            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(), cancellationToken)
+            var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(seen), cancellationToken)
                 .ConfigureAwait(false);
+            _transportSeen = seen;
             _currentSchemaModel = schemaModel;
             CurrentLookup = GetTableMetadataForField;
             _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);

@@ -21,7 +21,9 @@ public sealed partial class ODataHandler(
     Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
     Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
     Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
-    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null) : IODataHandler
+    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null,
+    Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
+    Autheris.Application.DataSources.IIngressTransportContext? ingress = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -47,6 +49,8 @@ public sealed partial class ODataHandler(
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache = memoryCache;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider = versionProvider;
     private readonly Autheris.Application.Tenancy.ITenantResolver? _tenantResolver = tenantResolver;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver = transportResolver;
+    private readonly Autheris.Application.DataSources.IIngressTransportContext? _ingress = ingress;
 
     /// <summary>
     /// DT-A-7: the default tenant is the catalog owner and may see every active table as a candidate (each still passes the table access
@@ -66,11 +70,15 @@ public sealed partial class ODataHandler(
 
         var isOwner = _tenantResolver?.IsDefaultTenant(tenant) == true;
         // DT-SC-08: the owner's widening is physical metadata only; other tenants' virtual tables are never candidates (shared rule).
+        // Issue #447 REQ-ATR-08: a source that does not allow the ingress transport is not a candidate (hidden, never an error);
+        // no ingress leaves the list unfiltered. The cached documents are keyed by the filtered tables (SEC-ATR-07).
+        var transport = _ingress?.Current ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None;
         return Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(allTables, tenant)
             .Where(t => t.Table.IsActive &&
                         (isOwner ||
                          string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)))
+                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)) &&
+                        Autheris.Application.DataSources.TransportDiscoveryFilter.IsVisible(_transportResolver, transport, t))
             .ToList();
     }
 

@@ -43,6 +43,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
     private readonly IConsentRepository? _consentRepository;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly string _signingSecret;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
 
     public ArrowFlightSqlServer(
         IArrowExportService exportService,
@@ -50,8 +51,10 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         IOptions<GatewayOptions> options,
         ILogger<ArrowFlightSqlServer> logger,
         IConsentRepository? consentRepository = null,
-        IServiceScopeFactory? scopeFactory = null)
+        IServiceScopeFactory? scopeFactory = null,
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
     {
+        _transportResolver = transportResolver;
         _exportService = exportService ?? throw new ArgumentNullException(nameof(exportService));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -129,6 +132,10 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         var tenantTables = tables
             .Where(t => t.Table.IsActive && GovernedSqlExecutionService.IsDataSourceQueryable(webSqlOptions, tenant, t.Identifier.Domain))
             .ToList();
+
+        // Issue #447 REQ-ATR-08: sources that do not allow Arrow Flight are hidden (no error, no name echo).
+        tenantTables = [.. Autheris.Application.DataSources.TransportDiscoveryFilter.Apply(
+            _transportResolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight, tenantTables)];
 
         // Wunsch 9: only tables the caller may discover (same rule as the GraphQL catalog and MCP).
         var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, tenant, _consentRepository, contract: null, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy), _options.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
