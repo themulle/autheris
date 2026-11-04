@@ -51,9 +51,20 @@ public static class CdcStreamAdminEndpoints
         return app;
     }
 
+    private static bool IsAuthorizedAdmin(HttpContext context)
+    {
+        var secContext = context.GetSecurityContext();
+        if (secContext is { IsAuthenticated: true })
+        {
+            return secContext.IsClusterAdmin || secContext.ClusterRoles.Contains("GovernanceAdmin");
+        }
+
+        return EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+    }
+
     internal static async Task<IResult> ListAsync(HttpContext context, CdcStreamAdminService service, CancellationToken ct)
     {
-        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        if (!IsAuthorizedAdmin(context))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -65,7 +76,7 @@ public static class CdcStreamAdminEndpoints
     internal static async Task<IResult> ResyncAsync(
         string id, bool discardUnreadable, string? confirmStreamId, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
     {
-        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        if (!IsAuthorizedAdmin(context))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -122,7 +133,7 @@ public static class CdcStreamAdminEndpoints
     internal static async Task<IResult> RotateImageKeyAsync(
         string id, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
     {
-        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        if (!IsAuthorizedAdmin(context))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
@@ -139,7 +150,7 @@ public static class CdcStreamAdminEndpoints
     internal static async Task<IResult> ResetWatermarkAsync(
         string id, ResetWatermarkRequest request, HttpContext context, CdcStreamAdminService service, IAuditWriter audit, CancellationToken ct)
     {
-        if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        if (!IsAuthorizedAdmin(context))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }

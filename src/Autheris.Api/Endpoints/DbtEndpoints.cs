@@ -433,7 +433,9 @@ public static class DbtEndpoints
         var caller = new DbtGovernanceImportCaller(
             new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers()),
             EndpointSecurity.GetRequestTenant(context),
-            EndpointSecurity.IsCanonicalClusterAdmin(context.User));
+            EndpointSecurity.IsCanonicalClusterAdmin(context.User),
+            EndpointSecurity.IsGlobalGovernanceAdmin(context.User),
+            security.HasRole("DataOwner") || (context.User?.IsInRole("DataOwner") == true));
 
         DbtSyncResult? syncResult = null;
         try

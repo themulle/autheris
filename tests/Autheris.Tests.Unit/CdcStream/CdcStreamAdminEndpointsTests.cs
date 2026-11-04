@@ -90,6 +90,32 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     }
 
     [Fact]
+    public async Task CdcStreamAdmin_TenantScopedGovernanceAdmin_Forbidden()
+    {
+        var claims = new List<Claim>
+        {
+            new("sub", "S-1-5-21-TENANTADMIN"),
+            new("tenant_id", "tenant-a"),
+            new(ClaimTypes.Role, "GovernanceAdmin")
+        };
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+        context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
+        {
+            UserSid = new Sid("S-1-5-21-TENANTADMIN"),
+            TenantId = new TenantId("tenant-a"),
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(["GovernanceAdmin"]),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "Bearer"
+        };
+
+        Status(await CdcStreamAdminEndpoints.ListAsync(context, Service(), default)).ShouldBe(403);
+        Status(await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, context, Service(), Audit(), default)).ShouldBe(403);
+        Status(await CdcStreamAdminEndpoints.RotateImageKeyAsync(Id.Value, context, Service(), Audit(), default)).ShouldBe(403);
+        Status(await CdcStreamAdminEndpoints.ResetWatermarkAsync(Id.Value, new ResetWatermarkRequest(new Dictionary<string, string>(), "test"), context, Service(), Audit(), default)).ShouldBe(403);
+    }
+
+    [Fact]
     public async Task List_ReturnsStreamsAndKekCounts_WithoutPayloadOrKeys()
     {
         _keys.Keys.Add(new CdcWrappedKey(Id, "d1", CdcKeyPurpose.Payload, "k1", [1, 2, 3], DateTimeOffset.UnixEpoch, null));

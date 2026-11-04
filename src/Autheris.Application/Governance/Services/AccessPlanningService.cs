@@ -929,7 +929,7 @@ public class AccessPlanningService : IAccessPlanningService
     public async Task<AdminPlanAccessResult?> GetPlanAsync(string planId, CancellationToken ct = default)
     {
         var stored = await _store.GetPlanAsync(planId, ct).ConfigureAwait(false);
-        return stored?.Result;
+        return stored is null ? null : stored.Result with { TenantId = stored.TenantId, AdminSid = stored.AdminSid };
     }
 
     internal void SweepExpired(bool force) => (_store as InMemoryAccessPlanStore)?.Sweep(force);

@@ -164,7 +164,7 @@ public sealed class DatasetDataEndpointsTests
     }
 
     [Fact]
-    public async Task HandleQueryThreePartAsync_TableNotFound_Returns404()
+    public async Task HandleQueryThreePartAsync_TableNotFound_Returns403()
     {
         var httpContext = CreateHttpContext();
         var queryService = Substitute.For<IGovernedDataQueryService>();
@@ -179,7 +179,7 @@ public sealed class DatasetDataEndpointsTests
             NullLoggerFactory.Instance,
             CancellationToken.None);
 
-        httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]
