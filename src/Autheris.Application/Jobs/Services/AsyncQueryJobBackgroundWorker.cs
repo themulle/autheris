@@ -1,6 +1,7 @@
 namespace Autheris.Application.Jobs.Services;
 
 using System;
+using System.Globalization;
 using System.IO;
 using System.Security.Claims;
 using System.Text.Json;
@@ -356,8 +357,13 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
         await using var writer = new StreamWriter(stream);
 
-        // Header
-        await writer.WriteLineAsync(string.Join(",", result.Columns)).ConfigureAwait(false);
+        // Header (escaped for formula injection & delimiter/quote safety)
+        var header = new string[result.Columns.Count];
+        for (int i = 0; i < result.Columns.Count; i++)
+        {
+            header[i] = EscapeCsv(result.Columns[i]);
+        }
+        await writer.WriteLineAsync(string.Join(",", header)).ConfigureAwait(false);
 
         // Rows
         foreach (var row in result.Rows)
@@ -383,10 +389,14 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
         // OWASP CSV Formula Injection defense (SEC-MED-16):
         // If the value starts with '=', '+', '-', '@', '\t', or '\r', prepend a single quote "'"
+        // unless the value is a valid numeric literal (e.g. negative or positive number).
         if (value.StartsWith('=') || value.StartsWith('+') || value.StartsWith('-') ||
             value.StartsWith('@') || value.StartsWith('\t') || value.StartsWith('\r'))
         {
-            value = "'" + value;
+            if (!decimal.TryParse(value, NumberStyles.Number | NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out _))
+            {
+                value = "'" + value;
+            }
         }
 
         if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))

@@ -2,6 +2,7 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -127,10 +128,13 @@ public static class FinOpsEndpoints
             return "\"\"";
         }
 
-        // Neutralize CSV formula injection (CWE-1236)
+        // Neutralize CSV formula injection (CWE-1236) unless valid numeric literal
         if (val.StartsWith('=') || val.StartsWith('+') || val.StartsWith('-') || val.StartsWith('@') || val.StartsWith('\t') || val.StartsWith('\r'))
         {
-            val = "'" + val;
+            if (!decimal.TryParse(val, NumberStyles.Number | NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out _))
+            {
+                val = "'" + val;
+            }
         }
 
         return "\"" + val.Replace("\"", "\"\"") + "\"";

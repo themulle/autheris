@@ -402,6 +402,10 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
     [InlineData("@SUM(A1:A10)", "'@SUM(A1:A10)")]
     [InlineData("\tmalicious", "'\tmalicious")]
     [InlineData("normal text", "normal text")]
+    [InlineData("-5", "-5")]
+    [InlineData("-12.34", "-12.34")]
+    [InlineData("+42", "+42")]
+    [InlineData("=HYPERLINK(\"http://evil.example\")", "\"'=HYPERLINK(\"\"http://evil.example\"\")\"")]
     public void EscapeCsv_NeutralizesFormulaInjection(string input, string expected)
     {
         var result = AsyncQueryJobBackgroundWorker.EscapeCsv(input);

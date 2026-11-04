@@ -167,4 +167,36 @@ public class HitLEndpointsTests
         (await _secretStore.HasSecretAsync(userSid)).ShouldBeTrue();
         (await _secretStore.GetSecretAsync(userSid)).ShouldBe(enrollment.SecretBase32);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task HitLApprove_NoEnrolledSecret_NoCode_Denied()
+    {
+        var hitlService = CreateHitLService();
+        var approverSid = "steward-no-secret";
+        // Do NOT enroll any secret in _secretStore for this approver
+
+        var requestTask = hitlService.RequestStepUpApprovalAsync(
+            "query_table",
+            "tenant-1",
+            "user-alice",
+            TableIdentifier.Parse("sales.orders"));
+
+        var pending = hitlService.GetPendingTickets("tenant-1");
+        pending.Count.ShouldBe(1);
+        var ticket = pending[0];
+
+        var context = CreateHttpContext(approverSid, role: "GovernanceAdmin", tenant: "tenant-1");
+        var approver = HitLEndpoints.BuildApproverContext(context);
+        approver.ShouldNotBeNull();
+
+        // Act: approver sends no TOTP code
+        var result = await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, approver, totpCode: null);
+
+        // Assert: must be denied because 2FA is required by default
+        result.IsApproved.ShouldBeFalse();
+        result.Message.ShouldNotBeNull();
+        result.Message.ShouldContain("TOTP 2FA code is required");
+        (await hitlService.GetTicketAsync(ticket.ApprovalId))!.Status.ShouldBe(HitLApprovalStatus.Pending);
+    }
 }
