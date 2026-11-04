@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -50,17 +51,19 @@ public static class AnalyticsEndpoints
 
     public static IEndpointRouteBuilder MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/v1/analytics/aggregate", HandleAggregateAsync)
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
+        ingress.MapPost("/api/v1/analytics/aggregate", HandleAggregateAsync)
             .WithName("ExecuteGovernedAggregation")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.AggregateQuery);
 
-        app.MapPost("/api/v1/analytics/metrics/query", HandleQueryMetricsAsync)
+        ingress.MapPost("/api/v1/analytics/metrics/query", HandleQueryMetricsAsync)
             .WithName("ExecuteSemanticMetricQuery")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.MetricQuery);
 
-        app.MapGet("/api/v1/analytics/metrics", HandleListMetricsAsync)
+        ingress.MapGet("/api/v1/analytics/metrics", HandleListMetricsAsync)
             .WithName("ListSemanticMetrics")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
@@ -166,6 +169,11 @@ public static class AnalyticsEndpoints
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationPrivacyRestrictedException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationPrivacyRestrictedException.ErrorCodeConst, AggregationPrivacyRestrictedException.FixedMessage, httpContext);
         }
+        catch (AggregationTimeBucketUnsupportedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationTimeBucketUnsupportedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationTimeBucketUnsupportedException.ErrorCodeConst, AggregationTimeBucketUnsupportedException.FixedMessage, httpContext);
+        }
         catch (Exception ex) when (IsNotSupportedRefusal(ex))
         {
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationErrorCodes.NotSupported);
@@ -263,6 +271,11 @@ public static class AnalyticsEndpoints
         {
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationPrivacyRestrictedException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationPrivacyRestrictedException.ErrorCodeConst, AggregationPrivacyRestrictedException.FixedMessage, httpContext);
+        }
+        catch (AggregationTimeBucketUnsupportedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationTimeBucketUnsupportedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationTimeBucketUnsupportedException.ErrorCodeConst, AggregationTimeBucketUnsupportedException.FixedMessage, httpContext);
         }
         catch (Exception ex) when (IsNotSupportedRefusal(ex))
         {

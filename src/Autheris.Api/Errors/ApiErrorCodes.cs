@@ -26,6 +26,9 @@ public static class ApiErrorCodes
     public const string AccessDenied = "ACCESS_DENIED";
     public const string CrossTenantAccessForbidden = "CROSS_TENANT_ACCESS_FORBIDDEN";
     public const string TenantUnresolved = "TENANT_UNRESOLVED";
+
+    /// <summary>Issue #447: the data source does not allow the ingress transport (also for an unknown source, SEC-ATR-08).</summary>
+    public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
     public const string TenantClaimInvalid = "TENANT_CLAIM_INVALID";
     public const string ConsentTenantInvalid = "CONSENT_TENANT_INVALID";
     public const string ReadOnlyToken = "READ_ONLY_TOKEN";

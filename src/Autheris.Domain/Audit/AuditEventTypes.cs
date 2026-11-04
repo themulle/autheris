@@ -150,5 +150,8 @@ public static class AuditEventTypes
     // Issue #281: app-scoped trusted GraphQL documents
     public const string TrustedDocumentsReplaced = "TRUSTED_DOCUMENTS_REPLACED";
     public const string TrustedDocumentsRetired = "TRUSTED_DOCUMENTS_RETIRED";
+
+    // Issue #447: a data source refused the ingress transport of the request (fail-closed gate)
+    public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
 }
 

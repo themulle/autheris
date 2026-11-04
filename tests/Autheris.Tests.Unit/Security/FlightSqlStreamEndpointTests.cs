@@ -37,7 +37,7 @@ public sealed class FlightSqlStreamEndpointTests
     private static async Task<HttpContext> StreamAsync(RecordBatch batch)
     {
         var server = Substitute.For<IArrowFlightSqlServer>();
-        server.DoGetStreamAsync(Arg.Any<FlightSqlTicket>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+        server.DoGetStreamAsync(Arg.Any<FlightSqlTicket>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId?>(), Arg.Any<Autheris.Domain.Options.DataSources.DataSourceTransportFlags>(), Arg.Any<CancellationToken>())
             .Returns(Yield(batch));
         var context = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
         context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1"), new Claim("tenant_id", "tenant-1")], "Test"));

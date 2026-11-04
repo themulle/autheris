@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
@@ -29,7 +30,7 @@ public static class CatalogApiEndpoints
 {
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/catalog");
+        var group = app.MapGroup("/api/v1/catalog").WithIngressTransport(DataSourceTransportFlags.Rest);
 
         group.MapGet("/datasets", async (
             ICatalogDiscoveryService discoveryService,
@@ -299,7 +300,8 @@ public static class CatalogApiEndpoints
         // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
         // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
         MapDatasetCatalogRoutes(group);
-        MapDatasetCatalogRoutes(app.MapGroup("/api/catalog"));
+        var legacyCatalog = app.MapGroup("/api/catalog").WithIngressTransport(DataSourceTransportFlags.Rest);
+        MapDatasetCatalogRoutes(legacyCatalog);
 
         // Issue #107: object level of the row filter key-set cache strategy (same authorization and dataset resolution as /keys).
         group.MapGet("/datasets/{id}/row-filter-strategy", GovernanceEndpoints.GetDatasetRowFilterStrategyAsync)

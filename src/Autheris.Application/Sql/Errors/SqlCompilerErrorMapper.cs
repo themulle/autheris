@@ -103,6 +103,11 @@ public static class SqlCompilerErrorMapper
 
     private static readonly Func<Exception, SqlErrorMapping?>[] Rules =
     [
+        // Issue #447 (REQ-ATR-04): a transport denial keeps its own code and the fixed text (no source name); the row precedes every
+        // SecurityException row, which would otherwise turn it into SQL_POLICY_DENIED / SQL_POLICY_VIOLATION and hide the cause.
+        e => e is TransportNotAllowedException
+            ? new SqlErrorMapping(403, TransportNotAllowedException.Code, "Access to the data source is not allowed over this transport.")
+            : null,
         // A parser time budget overrun and parser-slot exhaustion are ParseCanceledExceptions with a TimeoutException cause (FastSqlEngine):
         // a limit, not a syntax error. This row precedes the syntax row, which would otherwise match first.
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,

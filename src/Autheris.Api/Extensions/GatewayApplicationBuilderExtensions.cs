@@ -99,6 +99,8 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<ReadOnlyTokenMiddleware>(
             new PathString(ResolveGraphQlPath(gatewayOptions)),
             new PathString(ResolveMcpBasePath(gatewayOptions)));
+        // Issue #447 (SEC-ATR-02): stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
+        app.UseMiddleware<IngressTransportMiddleware>();
         app.UseAuthorization();
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
@@ -166,6 +168,7 @@ public static class GatewayApplicationBuilderExtensions
         // a headless, deterministic machine-to-machine API without HTML multiplexing.
         var gqlEndpoint = app.MapGraphQL(endpoint)
             .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447 (SEC-ATR-02)
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)

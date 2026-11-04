@@ -501,8 +501,23 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxResponseRows = 10 } });
 
-        await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
             fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]) { Limit = 11 }, null));
+        ex.ErrorCode.ShouldBe("INVALID_QUERY_OPTION");
+    }
+
+    [Fact]
+    public async Task RootOffsetOutOfRange_IsRejected()
+    {
+        var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxAllowedOffset = 100 } });
+
+        var exNeg = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]) { Limit = 5, Offset = -1 }, null));
+        exNeg.ErrorCode.ShouldBe("INVALID_QUERY_OPTION");
+
+        var exOver = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]) { Limit = 5, Offset = 101 }, null));
+        exOver.ErrorCode.ShouldBe("INVALID_QUERY_OPTION");
     }
 
     [Fact]
@@ -803,7 +818,15 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             orderAccess: parentSide ? restricted : null,
             lineAccess: parentSide ? null : restricted);
 
-        await Should.ThrowAsync<GatewayInvalidQueryException>(() => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), OrdersWithLines(3), null));
+        if (level == ColumnAccessLevel.Mask)
+        {
+            var ex = await Should.ThrowAsync<FilterOnMaskedColumnException>(() => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), OrdersWithLines(3), null));
+            ex.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
+        }
+        else
+        {
+            await Should.ThrowAsync<GatewayInvalidQueryException>(() => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), OrdersWithLines(3), null));
+        }
         fixture.Factory.Opened.ShouldBe(0);
     }
 }

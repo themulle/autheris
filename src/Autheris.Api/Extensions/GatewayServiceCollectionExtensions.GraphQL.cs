@@ -142,7 +142,8 @@ public static partial class GatewayServiceCollectionExtensions
             aggregationEnabled: gatewayOptions.GraphQL.Aggregation.Enabled,
             crossSourceEnabled: gatewayOptions.IsCrossSourceEnabled,
             metricsEnabled: (gatewayOptions.GraphQL.Metrics?.Enabled ?? true) && gatewayOptions.GraphQL.Aggregation.Enabled,
-            graphQlOptions: gatewayOptions.GraphQL));
+            graphQlOptions: gatewayOptions.GraphQL,
+            transportResolver: sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>()));
         services.AddSingleton<ICatalogSchemaDiagnostics>(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>());
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddOptions<RevocationWatchOptions>()
@@ -199,7 +200,10 @@ public static partial class GatewayServiceCollectionExtensions
             .UseOperationCompiler()
             .UseOperationVariableCoercion()
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
+            // Issue #447 (SEC-ATR-06): transport gate for every root field of the compiled operation, before any resolver runs.
+            .UseRequest<Autheris.GraphQL.Interceptors.TransportGateMiddleware>()
             .UseOperationExecution()
+            .UseField<Autheris.GraphQL.Interceptors.TransportIngressFieldMiddleware>()
             .AddApplicationService<IHostEnvironment>()
             .AddApplicationService<ErrorSanitizingFilter>()
             .AddApplicationService<WebSocketAuthInterceptor>()

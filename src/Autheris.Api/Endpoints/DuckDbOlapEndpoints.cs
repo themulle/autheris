@@ -1,4 +1,5 @@
 using Autheris.Api.Errors;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Application.Common;
 using System;
 using System.Security.Claims;
@@ -24,7 +25,9 @@ public static class DuckDbOlapEndpoints
 
     public static IEndpointRouteBuilder MapDuckDbOlapEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/v1/olap/query", HandleOlapQueryAsync)
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
+        ingress.MapPost("/api/v1/olap/query", HandleOlapQueryAsync)
            .WithName("ExecuteDuckDbOlapQueryV1")
            .WithTags("Analytics & OLAP")
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);

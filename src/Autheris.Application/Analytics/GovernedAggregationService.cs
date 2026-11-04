@@ -53,6 +53,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     private readonly IConsentResolutionService? _resolutionService;
     private readonly IGovernedSqlExecutionService? _sqlExecutionService;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly IAuditWriter? _auditWriter;
     private readonly IGovernedTableReadPlanner _planner;
     private readonly AnalyticsOptions _analyticsOptions;
@@ -80,8 +81,11 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IGovernedTableReadPlanner? planner = null,
         IDifferentialPrivacyEngine? dpEngine = null,
         ICallerAttributeRegistry? callerAttributeRegistry = null,
-        ILogger<GovernedAggregationService>? logger = null)
+        ILogger<GovernedAggregationService>? logger = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
@@ -114,8 +118,11 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IGovernedTableReadPlanner? planner = null,
         IDifferentialPrivacyEngine? dpEngine = null,
         ICallerAttributeRegistry? callerAttributeRegistry = null,
-        ILogger<GovernedAggregationService>? logger = null)
+        ILogger<GovernedAggregationService>? logger = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
         _accessResolver = accessResolver ?? (gatewayExecutionService as ITableAccessResolver);

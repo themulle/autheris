@@ -336,6 +336,10 @@ public sealed partial class GovernedAggregationService
         IReadOnlyList<AggregateSelection> resolvedAggregates,
         CancellationToken ct)
     {
+        // Issue #447 C4 (SEC-ATR-07/08): after the access decision the caller resolved, before the planner, executor or any read.
+        await _transportGate.EnsureCatalogSourceAsync(
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
+
         // WP-2 (F-1): a SQL table is aggregated in the database by the governed planner, so no row cap applies. The in-memory branches
         // below serve the other source types and deployments without a SQL execution service.
         bool usePlanner = UsesPlanner(metadata);
@@ -446,7 +450,7 @@ public sealed partial class GovernedAggregationService
                 bool sourceTruncated = sqlResult.Rows.Count > sqlLimit;
                 var plannedRows = sourceTruncated ? sqlResult.Rows.Take(sqlLimit).ToList() : sqlResult.Rows;
                 return new BucketRead(
-                    BuildBucketsFromPlannedSqlResult(plannedRows, groupByColumns, resolvedAggregates, planned.CountColumnAlias, query.TimeBuckets),
+                    BuildBucketsFromPlannedSqlResult(plannedRows, groupByColumns, resolvedAggregates, planned.CountColumnAlias, query.TimeBuckets, planned.BucketKeyShapes),
                     sourceTruncated);
             }
 

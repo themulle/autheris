@@ -29,7 +29,7 @@ public sealed class GovernedTableReadPlannerSqliteBucketTests
             insert.ExecuteNonQuery();
         }
 
-        var (_, groupBy) = GovernedTableReadPlanner.BuildTimeBucketExpression("ts", new TimeBucketSpecification("ts", interval, timeZone), DatabaseDialect.Sqlite);
+        var (_, groupBy, _) = GovernedTableReadPlanner.BuildTimeBucketExpression("ts", new TimeBucketSpecification("ts", interval, timeZone), DatabaseDialect.Sqlite);
         using var select = connection.CreateCommand();
         select.CommandText = $"SELECT {groupBy} FROM t ORDER BY rowid";
         using var reader = select.ExecuteReader();
@@ -74,18 +74,27 @@ public sealed class GovernedTableReadPlannerSqliteBucketTests
     }
 
     [Fact]
-    public void SqliteHourBucketBerlin_DstAware()
+    public void SqliteBucket_Week_ReturnsMondayDate()
     {
-        // Winter: UTC+1 -> 10:30 UTC is 11:xx; summer: UTC+2 -> 15:30 UTC is 17:xx.
+        // 2025-01-15 is Wednesday. Monday of that week is 2025-01-13.
+        Keys(TimeBucketInterval.Week, "UTC", "2025-01-15 10:00:00").ShouldBe(["2025-01-13"]);
+    }
+
+    [Fact]
+    public void SqliteBucket_Hour_ReturnsZoneAlignedUtcInstant()
+    {
+        // Winter: UTC+1. Instant 10:30 UTC -> 10:00 UTC.
+        // Summer: UTC+2. Instant 15:30 UTC -> 15:00 UTC.
         var keys = Keys(TimeBucketInterval.Hour, "Europe/Berlin", "2025-01-15 10:30:00", "2025-07-15 15:30:00");
 
-        keys.ShouldBe(["2025-01-15 11:00:00", "2025-07-15 17:00:00"]);
+        keys.ShouldBe(["2025-01-15 10:00:00", "2025-07-15 15:00:00"]);
     }
 
     [Fact]
     public void SqliteHourBucketBerlin_ChangeoverInstants()
     {
         // 2025-03-30 01:00 UTC switches Berlin from +01:00 to +02:00; 2025-10-26 01:00 UTC switches back.
+        // Fold hours on 2025-10-26 stay distinct UTC instants: 00:00:00 and 01:00:00.
         Keys(
                 TimeBucketInterval.Hour,
                 "Europe/Berlin",
@@ -93,12 +102,22 @@ public sealed class GovernedTableReadPlannerSqliteBucketTests
                 "2025-03-30 01:00:00",
                 "2025-10-26 00:59:59",
                 "2025-10-26 01:00:00")
-            .ShouldBe(["2025-03-30 01:00:00", "2025-03-30 03:00:00", "2025-10-26 02:00:00", "2025-10-26 02:00:00"]);
+            .ShouldBe(["2025-03-30 00:00:00", "2025-03-30 01:00:00", "2025-10-26 00:00:00", "2025-10-26 01:00:00"]);
     }
 
     [Fact]
     public void SqliteHourBucket_HalfHourZone()
     {
-        Keys(TimeBucketInterval.Hour, "Asia/Kolkata", "2025-07-15 10:10:00").ShouldBe(["2025-07-15 15:00:00"]);
+        Keys(TimeBucketInterval.Hour, "Asia/Kolkata", "2025-07-15 10:10:00").ShouldBe(["2025-07-15 09:30:00"]);
+    }
+
+    [Fact]
+    public void SqliteBucket_DateColumn_IgnoresZone()
+    {
+        var (select, groupBy, shape) = GovernedTableReadPlanner.BuildTimeBucketExpression(
+            "d", new TimeBucketSpecification("d", TimeBucketInterval.Day, "Europe/Berlin"), DatabaseDialect.Sqlite, "date");
+        shape.ShouldBe(Autheris.Application.Data.Interfaces.TimeBucketKeyShape.Date);
+        groupBy.ShouldBe("strftime('%Y-%m-%d', \"d\")");
+        groupBy.ShouldNotContain("datetime");
     }
 }

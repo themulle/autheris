@@ -7,6 +7,8 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.DataSources;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -113,6 +115,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     private async Task<GovernedSqlResult> QueryAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? parameters = null, string[]? roles = null)
     {
         using var scope = Scope();
+        scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql); // #447: a direct service call is a WebSql ingress
         var service = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
         return await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, parameters), User(tenant, roles ?? []), new TenantId(tenant));
     }

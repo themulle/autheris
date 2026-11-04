@@ -37,4 +37,5 @@ public sealed record GovernedSqlExecutionDependencies(
     ITableReadConcurrencyGate? ConcurrencyGate = null,
     IDbSessionContextInitializer? SessionInitializer = null,
     IKeyVaultSecretProvider? SecretProvider = null,
-    CompiledSqlAuditDigester? AuditDigester = null);
+    CompiledSqlAuditDigester? AuditDigester = null,
+    Autheris.Application.DataSources.IDataSourceTransportGate? TransportGate = null);

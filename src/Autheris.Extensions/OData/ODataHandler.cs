@@ -21,7 +21,9 @@ public sealed partial class ODataHandler(
     Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
     Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
     Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
-    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null) : IODataHandler
+    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null,
+    Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
+    Autheris.Application.DataSources.IIngressTransportContext? ingress = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -47,6 +49,8 @@ public sealed partial class ODataHandler(
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache = memoryCache;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider = versionProvider;
     private readonly Autheris.Application.Tenancy.ITenantResolver? _tenantResolver = tenantResolver;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver = transportResolver;
+    private readonly Autheris.Application.DataSources.IIngressTransportContext? _ingress = ingress;
 
     /// <summary>
     /// DT-A-7: the default tenant is the catalog owner and may see every active table as a candidate (each still passes the table access
@@ -66,11 +70,15 @@ public sealed partial class ODataHandler(
 
         var isOwner = _tenantResolver?.IsDefaultTenant(tenant) == true;
         // DT-SC-08: the owner's widening is physical metadata only; other tenants' virtual tables are never candidates (shared rule).
+        // Issue #447 REQ-ATR-08: a source that does not allow the ingress transport is not a candidate (hidden, never an error);
+        // no ingress leaves the list unfiltered. The cached documents are keyed by the filtered tables (SEC-ATR-07).
+        var transport = _ingress?.Current ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None;
         return Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(allTables, tenant)
             .Where(t => t.Table.IsActive &&
                         (isOwner ||
                          string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)))
+                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)) &&
+                        Autheris.Application.DataSources.TransportDiscoveryFilter.IsVisible(_transportResolver, transport, t))
             .ToList();
     }
 
@@ -218,6 +226,13 @@ public sealed partial class ODataHandler(
         return $"odata:tables:{principal.GetTenantId().Value}:{hash}";
     }
 
+    /// <summary>
+    /// The authorized-tables entry also depends on the transports the sources allow (they hide tables, REQ-ATR-08), so the key carries the
+    /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447, REQ-ATR-10).
+    /// </summary>
+    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal) =>
+        BuildAuthorizedTablesCacheKey(principal) is { } key ? $"{key}:g{_transportResolver?.Generation ?? 0}" : null;
+
     private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
         if (principal?.Identity?.IsAuthenticated != true)
@@ -227,7 +242,7 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null)
         {
-            var cacheKey = BuildAuthorizedTablesCacheKey(principal);
+            var cacheKey = AuthorizedTablesCacheKey(principal);
             if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
             {
                 return (cachedTables, true);
@@ -283,7 +298,7 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null && complete)
         {
-            var cacheKey = BuildAuthorizedTablesCacheKey(principal);
+            var cacheKey = AuthorizedTablesCacheKey(principal);
             if (cacheKey != null)
             {
                 SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
@@ -503,6 +518,19 @@ public sealed partial class ODataHandler(
                 Payload: ODataResponseFormatter.FormatErrorResponse("UNAUTHORIZED", unEx.Message),
                 ErrorCode: "UNAUTHORIZED",
                 ErrorMessage: unEx.Message
+            );
+        }
+        catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
+        {
+            // Issue #447 (REQ-ATR-04): stable code and fixed text, also in verbose mode (no source name, no sub-reason).
+            _logger.LogWarning("OData query for {Table} refused: the data source does not allow this transport.", table);
+            const string transportDenied = "Access to the data source is not allowed over this transport.";
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: 403,
+                Payload: ODataResponseFormatter.FormatErrorResponse(Autheris.Domain.Exceptions.TransportNotAllowedException.Code, transportDenied),
+                ErrorCode: Autheris.Domain.Exceptions.TransportNotAllowedException.Code,
+                ErrorMessage: transportDenied
             );
         }
         catch (Autheris.Domain.Exceptions.GatewaySecurityException secEx)

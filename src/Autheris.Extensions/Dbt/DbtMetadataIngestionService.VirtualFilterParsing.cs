@@ -2,6 +2,7 @@ namespace Autheris.Extensions.Dbt;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Text.Json;
 using Autheris.Application.VirtualFilters;
@@ -221,5 +222,184 @@ public sealed partial class DbtMetadataIngestionService
             Uncovered = uncovered,
             Bindings = bindings
         };
+    }
+
+    private static ImmutableArray<string>? ParseMetaRequiredFilterColumns(IReadOnlyDictionary<string, string>? meta)
+    {
+        if (meta == null) return null;
+        if (!meta.TryGetValue("required_filter_columns", out var val) &&
+            !meta.TryGetValue("requiredFilterColumns", out val))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(val)) return ImmutableArray<string>.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(val);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                var list = new List<string>();
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    var s = el.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) list.Add(s);
+                }
+                return list.ToImmutableArray();
+            }
+        }
+        catch (JsonException)
+        {
+            // fallback to comma-separated
+        }
+
+        var parts = val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.ToImmutableArray();
+    }
+
+    private static ImmutableArray<ImmutableArray<string>>? ParseMetaRequiredFilterColumnGroups(IReadOnlyDictionary<string, string>? meta)
+    {
+        if (meta == null) return null;
+        if (!meta.TryGetValue("required_filter_column_groups", out var val) &&
+            !meta.TryGetValue("requiredFilterColumnGroups", out val))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(val)) return ImmutableArray<ImmutableArray<string>>.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(val);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                var outer = new List<ImmutableArray<string>>();
+                foreach (var groupEl in doc.RootElement.EnumerateArray())
+                {
+                    if (groupEl.ValueKind == JsonValueKind.Array)
+                    {
+                        var inner = new List<string>();
+                        foreach (var el in groupEl.EnumerateArray())
+                        {
+                            var s = el.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) inner.Add(s);
+                        }
+                        outer.Add(inner.ToImmutableArray());
+                    }
+                }
+                return outer.ToImmutableArray();
+            }
+        }
+        catch (JsonException)
+        {
+            // invalid format
+        }
+
+        return ImmutableArray<ImmutableArray<string>>.Empty;
+    }
+
+    /// <summary>Stored required filter columns (a conjunction) missing from the incoming set; each one is a relaxation.</summary>
+    private static List<string> RemovedRequiredFilterColumns(ImmutableArray<string> stored, ImmutableArray<string> incoming)
+    {
+        var incomingSet = new HashSet<string>(incoming.IsDefault ? ImmutableArray<string>.Empty : incoming, StringComparer.OrdinalIgnoreCase);
+        return (stored.IsDefault ? ImmutableArray<string>.Empty : stored).Where(c => !incomingSet.Contains(c)).ToList();
+    }
+
+    /// <summary>
+    /// Required filter column groups are alternatives (any group satisfies the requirement). Relaxations: a stored group that is
+    /// missing from the incoming groups (also when only its columns changed), and, when groups are stored, an incoming group that
+    /// is not at least as strict as (a superset of) a stored group, because it adds a weaker alternative.
+    /// </summary>
+    private static List<string> RelaxedRequiredFilterColumnGroups(ImmutableArray<ImmutableArray<string>> stored, ImmutableArray<ImmutableArray<string>> incoming)
+    {
+        static List<(string Text, HashSet<string> Set)> ToSets(ImmutableArray<ImmutableArray<string>> groups) =>
+            (groups.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : groups)
+                .Select(g => g.IsDefault ? ImmutableArray<string>.Empty : g)
+                .Select(g => (string.Join(", ", g), new HashSet<string>(g, StringComparer.OrdinalIgnoreCase)))
+                .ToList();
+
+        var storedSets = ToSets(stored);
+        var incomingSets = ToSets(incoming);
+        var result = new List<string>();
+        foreach (var (text, set) in storedSets)
+        {
+            if (!incomingSets.Any(i => i.Set.SetEquals(set)))
+            {
+                result.Add($"removing required filter column group [{text}]");
+            }
+        }
+
+        if (storedSets.Count > 0)
+        {
+            foreach (var (text, set) in incomingSets)
+            {
+                if (!storedSets.Any(s => set.IsSupersetOf(s.Set)))
+                {
+                    result.Add($"adding the weaker required filter column group [{text}]");
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static ImmutableArray<string>? ParseJsonRequiredFilterColumns(JsonElement item)
+    {
+        if (!item.TryGetProperty("required_filter_columns", out var prop) &&
+            !item.TryGetProperty("requiredFilterColumns", out prop))
+        {
+            return null;
+        }
+
+        if (prop.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<string>();
+            foreach (var el in prop.EnumerateArray())
+            {
+                var s = el.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) list.Add(s);
+            }
+            return list.ToImmutableArray();
+        }
+
+        if (prop.ValueKind == JsonValueKind.String)
+        {
+            var val = prop.GetString();
+            if (string.IsNullOrWhiteSpace(val)) return ImmutableArray<string>.Empty;
+            return val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToImmutableArray();
+        }
+
+        return ImmutableArray<string>.Empty;
+    }
+
+    private static ImmutableArray<ImmutableArray<string>>? ParseJsonRequiredFilterColumnGroups(JsonElement item)
+    {
+        if (!item.TryGetProperty("required_filter_column_groups", out var prop) &&
+            !item.TryGetProperty("requiredFilterColumnGroups", out prop))
+        {
+            return null;
+        }
+
+        if (prop.ValueKind == JsonValueKind.Array)
+        {
+            var outer = new List<ImmutableArray<string>>();
+            foreach (var groupEl in prop.EnumerateArray())
+            {
+                if (groupEl.ValueKind == JsonValueKind.Array)
+                {
+                    var inner = new List<string>();
+                    foreach (var el in groupEl.EnumerateArray())
+                    {
+                        var s = el.GetString();
+                        if (!string.IsNullOrWhiteSpace(s)) inner.Add(s);
+                    }
+                    outer.Add(inner.ToImmutableArray());
+                }
+            }
+            return outer.ToImmutableArray();
+        }
+
+        return ImmutableArray<ImmutableArray<string>>.Empty;
     }
 }

@@ -59,7 +59,7 @@ public sealed class CatalogSurfaceDispositionTests
     {
         var source = File.ReadAllText(RepoFile("src", "Autheris.Api", "Endpoints", "ODataEndpoints.cs"));
 
-        var routes = Regex.Count(source, @"ConfigureOpenApiAuth\(app\.MapGet\(");
+        var routes = Regex.Count(source, @"ConfigureOpenApiAuth\((?:app|ingress)\.MapGet\(");
         var checks = Regex.Count(source, @"var authCheck = CheckOpenApiAuth\(context\);");
 
         routes.ShouldBeGreaterThan(0);

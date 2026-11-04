@@ -19,7 +19,8 @@ public sealed partial class GovernanceMigrationTestSeamTests
         "ExcessPrivilegeOverride",
         "RuntimeDdlAuditOverride",
         "AdditionalSteps",
-        "StepVersionCapOverride"
+        "StepVersionCapOverride",
+        "AcquireLockOverride"
     ];
 
     private static string Root()

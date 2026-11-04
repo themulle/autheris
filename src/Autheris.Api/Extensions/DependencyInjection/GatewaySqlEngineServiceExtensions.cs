@@ -65,7 +65,8 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddScoped<SqlTableReadExecutor>(sp => new SqlTableReadExecutor(
             sp.GetRequiredService<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>(),
             () => sp.GetRequiredService<IGovernedSqlExecutionService>(),
-            sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()));
+            sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>(),
+            sp.GetService<Autheris.Application.DataSources.IIngressTransportContext>()));
         services.AddScoped<IDataSourceExecutor>(sp => sp.GetRequiredService<SqlTableReadExecutor>());
         services.AddSingleton<IDataSourceExecutor, DeclarativeHttpDataSourceExecutor>();
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();

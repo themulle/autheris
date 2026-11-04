@@ -21,7 +21,14 @@ public interface IDataSourceOptionsResolver
     bool TryResolve(string? dataSourceName, out EffectiveDataSourceProfile profile);
 
     /// <summary>
-    /// Checks whether the specified ingress transport is authorized for the given data source (SEC-DS05-03).
+    /// Maps a caller-supplied (logical) data source name through <c>WebSql.DataSourceMappings</c> to the name a profile is keyed by.
+    /// An unmapped name is returned unchanged; a blank name yields an empty string (Issue #447, SEC-ATR-08).
     /// </summary>
-    bool IsTransportAllowed(string? dataSourceName, DataSourceTransportFlags transport);
+    string CanonicalName(string? dataSourceName);
+
+    /// <summary>
+    /// Increases after every reload that swapped the profile snapshot. A cache of anything derived from the allowed transports keys on it,
+    /// so a reload that newly denies a source never serves a stale entry (Issue #447, REQ-ATR-10). Resolvers without reload report 0.
+    /// </summary>
+    long Generation => 0;
 }

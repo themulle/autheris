@@ -475,7 +475,7 @@ public static partial class TreeSqlCompiler
         var column = metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
         if (column == null || !SafeNameRegex().IsMatch(column) || decision.GetEffectiveColumnAccess(column, metadata) == ColumnAccessLevel.Deny)
         {
-            throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' does not exist or is not accessible.");
+            throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' does not exist or is not accessible.", "INVALID_QUERY");
         }
         return column;
     }
@@ -484,9 +484,18 @@ public static partial class TreeSqlCompiler
     private static string ResolveClearColumn(TableMetadata metadata, TableAccessDecision decision, string requested)
     {
         var column = metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
-        if (column == null || !SafeNameRegex().IsMatch(column) || decision.GetEffectiveColumnAccess(column, metadata) != ColumnAccessLevel.Clear)
+        if (column == null || !SafeNameRegex().IsMatch(column))
         {
-            throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' cannot be used for filtering, sorting or joining.");
+            throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' cannot be used for filtering, sorting or joining.", "INVALID_QUERY");
+        }
+        var access = decision.GetEffectiveColumnAccess(column, metadata);
+        if (access == ColumnAccessLevel.Mask)
+        {
+            throw new FilterOnMaskedColumnException(column);
+        }
+        if (access != ColumnAccessLevel.Clear)
+        {
+            throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' cannot be used for filtering, sorting or joining.", "INVALID_QUERY");
         }
         return column;
     }

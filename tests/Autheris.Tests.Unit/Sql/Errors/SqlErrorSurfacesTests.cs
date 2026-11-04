@@ -200,7 +200,7 @@ public sealed class SqlErrorSurfacesTests
     public async Task Flight_MapsStatusAndCode_WithoutMessage(string environment)
     {
         var server = Substitute.For<IArrowFlightSqlServer>();
-        server.DoGetStreamAsync(Arg.Any<FlightSqlTicket>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+        server.DoGetStreamAsync(Arg.Any<FlightSqlTicket>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId?>(), Arg.Any<Autheris.Domain.Options.DataSources.DataSourceTransportFlags>(), Arg.Any<CancellationToken>())
             .Returns(_ => ThrowingStream(new WebSqlPolicyException(HostileMarker)));
         var context = Context(environment);
         context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1"), new Claim("tenant_id", "t")], "Test"));

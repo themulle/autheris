@@ -27,11 +27,8 @@ WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOC
 WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
 
         public const string SelectActiveTableEntitiesSql = @"SELECT t.id, t.source_type, t.source_name, t.schema_name, t.table_name,
-       t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active,
-       t.data_source_type, t.http_endpoint_json, t.plugin_name,
-       t.description, t.long_description, t.doc_source,
-       t.required_filter_columns_json, t.texts_json,
-       t.min_group_size, t.non_personal
+       t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active, t.data_source_type, t.http_endpoint_json, t.plugin_name,
+       t.description, t.long_description, t.doc_source, t.required_filter_columns_json, t.texts_json, t.min_group_size, t.non_personal
 FROM TABLES t
 WHERE t.is_active = 1";
 
@@ -676,15 +673,11 @@ RETURNING structure_version, content_version;";
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, add, remove, actor, ct), ct);
 
-    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
-        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
-        WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, visibility, actor, ct), ct);
+    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) => DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, visibility, actor, ct), ct);
 
-    public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
-        TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>
-        WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetPrivacyAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, minGroupSize, nonPersonal, actor, ct), ct);
+    public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) => DatasetCatalogStore.SetPrivacyAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, minGroupSize, nonPersonal, actor, ct), ct);
 
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch; the local metadata entry is dropped after the commit.</summary>
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Data;
+using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Data.Services;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
@@ -180,46 +181,75 @@ public sealed partial class GovernedAggregationService
         return new ComputedBucket(groupKey, count, aggValues, sums, avgs, mins, maxs, bucketRows, isMergedOther);
     }
 
-    private const string PlannedBucketKeyFormat = "yyyy-MM-dd'T'HH:mm:ss";
-
-    private static bool IsTimeBucketColumn(IReadOnlyList<TimeBucketSpecification>? timeBuckets, string column)
+    /// <summary>
+    /// #449: normalizes a driver temporal value of a planned time-bucket column to the canonical offset or date string.
+    /// </summary>
+    internal static object? NormalizePlannedBucketKey(object? value, TimeBucketSpecification spec, TimeBucketKeyShape shape)
     {
-        if (timeBuckets is null)
+        if (value is null or DBNull)
         {
-            return false;
+            return null;
         }
 
-        foreach (var tb in timeBuckets)
-        {
-            if (string.Equals(tb.Column, column, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
+        var zone = TimeBucketKeys.ResolveZone(spec.TimeZone);
 
-        return false;
+        return shape switch
+        {
+            TimeBucketKeyShape.UtcInstant => NormalizeUtcInstant(value, zone),
+            TimeBucketKeyShape.ZoneWall => NormalizeZoneWall(value, zone),
+            TimeBucketKeyShape.Date => NormalizeDate(value),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), $"Unsupported shape '{shape}'.")
+        };
     }
 
-    /// <summary>
-    /// #333 (SEC-PGP-06): a driver temporal value of a bucketed column becomes the invariant, zone-local wall-clock text that the SQLite branch
-    /// returns. The kind is ignored on purpose (the bucket is already in the bucket zone); zoned columns are refused by the planner, so the
-    /// offset of a <see cref="DateTimeOffset"/> carries no information. Null and non-temporal values pass through unchanged.
-    /// </summary>
-    internal static object? NormalizePlannedBucketKey(object? value) => value switch
+    private static string NormalizeUtcInstant(object value, TimeZoneInfo zone)
     {
-        DateTime dt => dt.ToString(PlannedBucketKeyFormat, CultureInfo.InvariantCulture),
-        DateTimeOffset dto => dto.DateTime.ToString(PlannedBucketKeyFormat, CultureInfo.InvariantCulture),
-        DateOnly d => d.ToDateTime(TimeOnly.MinValue).ToString(PlannedBucketKeyFormat, CultureInfo.InvariantCulture),
-        _ => value
-    };
+        DateTimeOffset instant = value switch
+        {
+            DateTimeOffset dto => dto,
+            DateTime dt => new DateTimeOffset(dt.Kind == DateTimeKind.Local ? dt.ToUniversalTime() : dt, TimeSpan.Zero),
+            string s when DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto) => dto,
+            _ => throw new AggregationTimeBucketUnsupportedException()
+        };
+        return TimeBucketKeys.FormatInstant(instant, zone);
+    }
+
+    private static string NormalizeZoneWall(object value, TimeZoneInfo zone)
+    {
+        DateTime wallStart = value switch
+        {
+            DateTime dt => dt,
+            DateTimeOffset dto => dto.DateTime,
+            DateOnly d => d.ToDateTime(TimeOnly.MinValue),
+            string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) => dt,
+            _ => throw new AggregationTimeBucketUnsupportedException()
+        };
+        return TimeBucketKeys.FormatWall(wallStart, zone);
+    }
+
+    private static string NormalizeDate(object value)
+    {
+        DateOnly date = value switch
+        {
+            DateOnly d => d,
+            DateTime dt => DateOnly.FromDateTime(dt),
+            DateTimeOffset dto => DateOnly.FromDateTime(dto.DateTime),
+            string s when DateOnly.TryParseExact(s, TimeBucketKeys.DateKeyFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) => d,
+            string s when DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) => DateOnly.FromDateTime(dt),
+            _ => throw new AggregationTimeBucketUnsupportedException()
+        };
+        return TimeBucketKeys.FormatDate(date);
+    }
 
     private static List<ComputedBucket> BuildBucketsFromPlannedSqlResult(
         IReadOnlyList<IReadOnlyDictionary<string, object?>> sqlRows,
         IReadOnlyList<string> groupByColumns,
         IReadOnlyList<AggregateSelection> aggregates,
         string countColumnAlias,
-        IReadOnlyList<TimeBucketSpecification>? timeBuckets = null)
+        IReadOnlyList<TimeBucketSpecification>? timeBuckets = null,
+        IReadOnlyDictionary<string, TimeBucketKeyShape>? bucketShapes = null)
     {
+        var bucketMap = timeBuckets?.ToDictionary(b => b.Column, b => b, StringComparer.OrdinalIgnoreCase);
         var buckets = new List<ComputedBucket>(sqlRows.Count);
         foreach (var row in sqlRows)
         {
@@ -227,7 +257,15 @@ public sealed partial class GovernedAggregationService
             foreach (var gCol in groupByColumns)
             {
                 var keyValue = GetRowValue(row, gCol);
-                groupKey[gCol] = IsTimeBucketColumn(timeBuckets, gCol) ? NormalizePlannedBucketKey(keyValue) : keyValue;
+                if (bucketMap != null && bucketMap.TryGetValue(gCol, out var spec))
+                {
+                    var shape = bucketShapes != null && bucketShapes.TryGetValue(gCol, out var s) ? s : TimeBucketKeyShape.ZoneWall;
+                    groupKey[gCol] = NormalizePlannedBucketKey(keyValue, spec, shape);
+                }
+                else
+                {
+                    groupKey[gCol] = keyValue;
+                }
             }
 
             long count = Convert.ToInt64(GetRowValue(row, countColumnAlias) ?? 0L, CultureInfo.InvariantCulture);
@@ -459,211 +497,6 @@ public sealed partial class GovernedAggregationService
         return MergePreAggregatedBuckets(emptyKey, survivingBuckets, aggregates, isMergedOther: false).ToGroupRow();
     }
 
-    internal static EffectiveMinGroupSize Resolve(
-        TableMetadata metadata,
-        AggregationQuery query,
-        OperatorFloor operatorFloor,
-        AnalyticsPrivacyOptions? privacy = null,
-        ILogger? logger = null)
-    {
-        return Resolve([metadata], query, operatorFloor, privacy, logger);
-    }
-
-    internal static EffectiveMinGroupSize Resolve(
-        IReadOnlyList<TableMetadata> tables,
-        AggregationQuery query,
-        OperatorFloor operatorFloor,
-        AnalyticsPrivacyOptions? privacy = null,
-        ILogger? logger = null)
-    {
-        if (tables is null || tables.Count == 0)
-        {
-            int defaultVal = Math.Max(1, operatorFloor.Value);
-            return new EffectiveMinGroupSize(defaultVal, operatorFloor.IsExplicit ? MinGroupSizeSource.Operator : MinGroupSizeSource.Default);
-        }
-
-        privacy ??= new AnalyticsPrivacyOptions();
-        int floor = operatorFloor.Value;
-        var source = operatorFloor.IsExplicit ? MinGroupSizeSource.Operator : MinGroupSizeSource.Default;
-        bool operatorExplicit = operatorFloor.IsExplicit;
-
-        // 1. Check if any catalog value raises the floor
-        foreach (var table in tables)
-        {
-            if (table.EffectiveMinGroupSize is { } c && c > floor)
-            {
-                floor = c;
-                source = MinGroupSizeSource.Catalog;
-            }
-        }
-
-        // 2. Check catalog lowering when no explicit operator floor was set
-        if (!operatorExplicit && floor == operatorFloor.Value)
-        {
-            bool allEligible = true;
-            int? minCatalogValue = null;
-
-            foreach (var table in tables)
-            {
-                var c = table.EffectiveMinGroupSize;
-                if (!c.HasValue || c.Value >= floor)
-                {
-                    allEligible = false;
-                    break;
-                }
-
-                if (!IsCatalogLoweringEligible(table, c.Value, privacy, logger))
-                {
-                    allEligible = false;
-                    break;
-                }
-
-                minCatalogValue = minCatalogValue.HasValue
-                    ? Math.Max(minCatalogValue.Value, c.Value)
-                    : c.Value;
-            }
-
-            if (allEligible && minCatalogValue.HasValue && minCatalogValue.Value < floor)
-            {
-                floor = minCatalogValue.Value;
-                source = MinGroupSizeSource.Catalog;
-            }
-        }
-
-        // 3. Request override may only raise
-        if (query?.MinGroupSizeOverride is { } req && req > floor)
-        {
-            floor = req;
-            source = MinGroupSizeSource.Request;
-        }
-
-        return new EffectiveMinGroupSize(Math.Max(1, floor), source);
-    }
-
-    private static bool IsCatalogLoweringEligible(
-        TableMetadata metadata,
-        int candidateFloor,
-        AnalyticsPrivacyOptions? privacy,
-        ILogger? logger)
-    {
-        try
-        {
-            if (privacy?.AllowCatalogLowering != true)
-            {
-                logger?.LogDebug("Lowering refused for table {Table}: capability disabled", metadata.Table.TableName);
-                return false;
-            }
-
-            if (metadata.NonPersonal == false)
-            {
-                logger?.LogDebug("Lowering refused for table {Table}: governance overlay NonPersonal is false", metadata.Table.TableName);
-                return false;
-            }
-
-            if (metadata.NonPersonal == true)
-            {
-                // Governance overlay explicitly marks table non-personal
-            }
-            else if (metadata.Table.NonPersonal)
-            {
-                if (privacy.AllowSourceDeclaredLowering != true)
-                {
-                    logger?.LogDebug("Lowering refused for table {Table}: source-declared NonPersonal requires AllowSourceDeclaredLowering", metadata.Table.TableName);
-                    return false;
-                }
-            }
-            else
-            {
-                logger?.LogDebug("Lowering refused for table {Table}: not non-personal", metadata.Table.TableName);
-                return false;
-            }
-
-            int minFloor = privacy.CatalogMinGroupSizeFloor;
-            if (candidateFloor < minFloor)
-            {
-                logger?.LogDebug("Lowering refused for table {Table}: below catalog floor ceiling", metadata.Table.TableName);
-                return false;
-            }
-
-            if (metadata.Columns is null || metadata.Columns.Count == 0)
-            {
-                logger?.LogDebug("Lowering refused for table {Table}: columns unloaded or empty", metadata.Table.TableName);
-                return false;
-            }
-
-            if (metadata.Table.IsHighlySensitive)
-            {
-                logger?.LogDebug("Lowering refused for table {Table}: highly sensitive", metadata.Table.TableName);
-                return false;
-            }
-
-            if (metadata.Table.Tags is { Count: > 0 } tags)
-            {
-                foreach (var tag in tags)
-                {
-                    if (tag.Contains("pii", StringComparison.OrdinalIgnoreCase) ||
-                        tag.Contains("sensitive", StringComparison.OrdinalIgnoreCase))
-                    {
-                        logger?.LogDebug("Lowering refused for table {Table}: table-level sensitivity tags present", metadata.Table.TableName);
-                        return false;
-                    }
-                }
-            }
-
-            foreach (var col in metadata.Columns)
-            {
-                if (TableAccessDecision.IsCatalogSensitive(col.ColumnName, metadata))
-                {
-                    logger?.LogDebug("Lowering refused for table {Table}: sensitive columns present", metadata.Table.TableName);
-                    return false;
-                }
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            logger?.LogDebug(ex, "Lowering refused for table {Table}: exception during evaluation", metadata.Table?.TableName ?? "<unknown>");
-            return false;
-        }
-    }
-
-    internal static int ResolveEffectiveMinGroupSize(TableMetadata metadata, AggregationQuery query, int defaultMinGroupSize = 1)
-    {
-        return Resolve(metadata, query, new OperatorFloor(defaultMinGroupSize, false)).Value;
-    }
-
-    private EffectiveMinGroupSize ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata)
-    {
-        int resolved = _hasExplicitAnalyticsOptions
-            ? _analyticsOptions.Privacy.DefaultMinGroupSize
-            : 1;
-        bool explicitOverride = false;
-
-        foreach (var candidateKey in CandidateTableKeys(query.Table))
-        {
-            if (_analyticsOptions.TableMinimumGroupSizes.TryGetValue(candidateKey, out var tableMin))
-            {
-                resolved = tableMin;
-                explicitOverride = true;
-                break;
-            }
-        }
-
-        foreach (var candidateKey in CandidateTableKeys(query.Table))
-        {
-            if (_analyticsOptions.Privacy.Datasets.TryGetValue(candidateKey, out var dsOverride) && dsOverride.MinGroupSize.HasValue)
-            {
-                resolved = dsOverride.MinGroupSize.Value;
-                explicitOverride = true;
-                break;
-            }
-        }
-
-        // Issue #448: Catalog-owned minimum group size resolution with lowering support for non-personal tables.
-        return Resolve(metadata, query, new OperatorFloor(resolved, explicitOverride), _analyticsOptions.Privacy, _logger);
-    }
-
     private SmallGroupStrategy ResolveEffectiveSmallGroupStrategy(AggregationQuery query, TableMetadata metadata)
     {
         var configured = ResolveConfiguredSmallGroupStrategy(query, metadata);
@@ -856,13 +689,15 @@ public sealed partial class GovernedAggregationService
         return best;
     }
 
-    private static object? NormalizeComparable(object? value) =>
+    internal static object? NormalizeComparable(object? value) =>
         value switch
         {
             null or DBNull => null,
             int or long or short or byte or decimal or double or float => ToDecimal(value),
             DateTimeOffset dto => dto.UtcTicks,
             DateTime dt => dt.ToUniversalTime().Ticks,
+            string s when DateTimeOffset.TryParseExact(s, TimeBucketKeys.TimestampKeyFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto) => dto.UtcTicks,
+            string s when DateOnly.TryParseExact(s, TimeBucketKeys.DateKeyFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) => d.ToDateTime(TimeOnly.MinValue).Ticks,
             _ => Convert.ToString(value, CultureInfo.InvariantCulture)
         };
 
@@ -927,55 +762,89 @@ public sealed partial class GovernedAggregationService
         }
     }
 
-    private static object? TruncateValueToTimeBucket(object? val, TimeBucketSpecification spec)
+    internal static object? TruncateValueToTimeBucket(object? val, TimeBucketSpecification spec)
     {
         if (val is null or DBNull)
         {
             return val;
         }
 
+        var tzi = TimeBucketKeys.ResolveZone(spec.TimeZone);
+
+        if (val is DateOnly d)
+        {
+            DateOnly truncatedDate = spec.Interval switch
+            {
+                TimeBucketInterval.Year => new DateOnly(d.Year, 1, 1),
+                TimeBucketInterval.Month => new DateOnly(d.Year, d.Month, 1),
+                TimeBucketInterval.Quarter => new DateOnly(d.Year, ((d.Month - 1) / 3) * 3 + 1, 1),
+                TimeBucketInterval.Week => d.AddDays(-(7 + ((int)d.DayOfWeek - (int)DayOfWeek.Monday)) % 7),
+                _ => d // Hour or Day
+            };
+            return TimeBucketKeys.FormatDate(truncatedDate);
+        }
+
         DateTimeOffset dto;
         if (val is DateTime dt)
         {
-            dto = dt.Kind == DateTimeKind.Unspecified
-                ? new DateTimeOffset(dt, TimeSpan.Zero)
-                : new DateTimeOffset(dt);
+            dto = dt.Kind switch
+            {
+                DateTimeKind.Unspecified => new DateTimeOffset(dt, TimeSpan.Zero),
+                DateTimeKind.Utc => new DateTimeOffset(dt),
+                _ => new DateTimeOffset(dt.ToUniversalTime(), TimeSpan.Zero)
+            };
         }
         else if (val is DateTimeOffset o)
         {
             dto = o;
         }
-        else if (val is string s && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDto))
+        else if (val is string s)
         {
-            dto = parsedDto;
+            if (DateOnly.TryParseExact(s, TimeBucketKeys.DateKeyFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dateVal))
+            {
+                DateOnly truncatedDate = spec.Interval switch
+                {
+                    TimeBucketInterval.Year => new DateOnly(dateVal.Year, 1, 1),
+                    TimeBucketInterval.Month => new DateOnly(dateVal.Year, dateVal.Month, 1),
+                    TimeBucketInterval.Quarter => new DateOnly(dateVal.Year, ((dateVal.Month - 1) / 3) * 3 + 1, 1),
+                    TimeBucketInterval.Week => dateVal.AddDays(-(7 + ((int)dateVal.DayOfWeek - (int)DayOfWeek.Monday)) % 7),
+                    _ => dateVal
+                };
+                return TimeBucketKeys.FormatDate(truncatedDate);
+            }
+
+            if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedDto))
+            {
+                dto = parsedDto;
+            }
+            else
+            {
+                throw new AggregationTimeBucketUnsupportedException();
+            }
         }
         else
         {
-            return val;
-        }
-
-        TimeZoneInfo tzi;
-        try
-        {
-            tzi = TimeZoneInfo.FindSystemTimeZoneById(spec.TimeZone);
-        }
-        catch
-        {
-            tzi = TimeZoneInfo.Utc;
+            throw new AggregationTimeBucketUnsupportedException();
         }
 
         var local = TimeZoneInfo.ConvertTime(dto, tzi);
-        DateTimeOffset truncated = spec.Interval switch
+
+        if (spec.Interval == TimeBucketInterval.Hour)
         {
-            TimeBucketInterval.Hour => new DateTimeOffset(local.Year, local.Month, local.Day, local.Hour, 0, 0, local.Offset),
-            TimeBucketInterval.Day => new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, local.Offset),
-            TimeBucketInterval.Week => new DateTimeOffset(local.Date.AddDays(-(7 + (local.DayOfWeek - DayOfWeek.Monday)) % 7), local.Offset),
-            TimeBucketInterval.Month => new DateTimeOffset(local.Year, local.Month, 1, 0, 0, 0, local.Offset),
-            TimeBucketInterval.Quarter => new DateTimeOffset(local.Year, ((local.Month - 1) / 3) * 3 + 1, 1, 0, 0, 0, local.Offset),
-            TimeBucketInterval.Year => new DateTimeOffset(local.Year, 1, 1, 0, 0, 0, local.Offset),
-            _ => local
+            var instant = dto.AddMinutes(-local.Minute).AddSeconds(-local.Second).AddMilliseconds(-local.Millisecond).AddMicroseconds(-local.Microsecond);
+            return TimeBucketKeys.FormatInstant(instant, tzi);
+        }
+
+        DateTime wallDate = spec.Interval switch
+        {
+            TimeBucketInterval.Day => new DateTime(local.Year, local.Month, local.Day, 0, 0, 0),
+            TimeBucketInterval.Week => new DateTime(local.Year, local.Month, local.Day, 0, 0, 0).AddDays(-(7 + ((int)local.DayOfWeek - (int)DayOfWeek.Monday)) % 7),
+            TimeBucketInterval.Month => new DateTime(local.Year, local.Month, 1, 0, 0, 0),
+            TimeBucketInterval.Quarter => new DateTime(local.Year, ((local.Month - 1) / 3) * 3 + 1, 1, 0, 0, 0),
+            TimeBucketInterval.Year => new DateTime(local.Year, 1, 1, 0, 0, 0),
+            _ => local.DateTime
         };
 
-        return truncated.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture);
+        return TimeBucketKeys.FormatWall(wallDate, tzi);
     }
 }
