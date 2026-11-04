@@ -303,8 +303,39 @@ public sealed class TimeZoneEmissionTests
         var positional = Handbuilt(a => [new ParameterReference("p", PositionalIndex: 1), a[1], a[2]]);
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Assert.Throws<SqlTimeZoneException>(() => GenerateValidated(dialect, positional)).Code);
 
-        var wrongArity = Handbuilt(a => [a[0], a[1]]);
+        var wrongArity = Handbuilt(a => [a[0]]);
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Assert.Throws<SqlTimeZoneException>(() => GenerateValidated(dialect, wrongArity)).Code);
+    }
+
+    [Fact]
+    public void TwoArg_Postgres_SingleAtTimeZone_ZoneBound()
+    {
+        var compiled = Compile(TargetSqlDialect.PostgreSql, "SELECT convert_timezone('Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e");
+        Assert.Matches(@"(?i)\(\(\[?""?e""?\]?\.\[?""?OccurredAtTz""?\]?\) AT TIME ZONE \$\d+\)", compiled.Sql);
+        Assert.Equal(["Europe/Berlin"], Zones(compiled).Select(z => (string)z.Value!).ToArray());
+    }
+
+    [Fact]
+    public void TwoArg_SqlServer_CastDatetime2_WindowsIdBound()
+    {
+        var compiled = Compile(TargetSqlDialect.SqlServer, "SELECT convert_timezone('Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e");
+        Assert.Matches(@"(?i)CAST\(\(\[?e\]?\.\[?OccurredAtTz\]?\) AT TIME ZONE @p\d+ AS datetime2\)", compiled.Sql);
+        Assert.Equal(["W. Europe Standard Time"], Zones(compiled).Select(z => (string)z.Value!).ToArray());
+    }
+
+    [Fact]
+    public void TwoArg_DuckDb_Refused()
+    {
+        var ex = Assert.Throws<SqlTimeZoneException>(() => Compile(TargetSqlDialect.DuckDb, "SELECT convert_timezone('Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e"));
+        Assert.Equal(GovernedSqlErrorCodes.FunctionUnsupportedDialect, ex.Code);
+    }
+
+    [Fact]
+    public void TwoArg_Federated_Refused()
+    {
+        var statement = CompilerTestHelpers.Build("SELECT convert_timezone('Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e");
+        var ex = Assert.Throws<SqlTimeZoneException>(() => TimeZoneConversion.ValidateFederated(statement, duckDbAvailable: true));
+        Assert.Equal(GovernedSqlErrorCodes.FunctionUnsupportedDialect, ex.Code);
     }
 
     [Theory, MemberData(nameof(TimeZoneTestSupport.DialectData), MemberType = typeof(TimeZoneTestSupport))]

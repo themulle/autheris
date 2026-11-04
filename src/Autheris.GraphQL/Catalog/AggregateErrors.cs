@@ -42,6 +42,18 @@ internal static class AggregateErrors
     public static GraphQLException InvalidFunctionForType() => Create(AggregationErrorCodes.InvalidFunctionForType, InvalidFunctionMessage);
 
     public static GraphQLException ResultTypeMismatch() => Create(AggregationErrorCodes.ResultTypeMismatch, ResultTypeMismatchMessage);
+
+    public const string TimeBucketUnsupportedMessage = "Time bucketing is not supported for this column.";
+
+    public static GraphQLException TimeBucketUnsupported(string? field = null, string? bucket = null)
+    {
+        var builder = ErrorBuilder.New()
+            .SetMessage(TimeBucketUnsupportedMessage)
+            .SetCode(AggregationErrorCodes.TimeBucketUnsupported);
+        if (field != null) builder.SetExtension("field", field);
+        if (bucket != null) builder.SetExtension("bucket", bucket);
+        return new GraphQLException(builder.Build());
+    }
 }
 
 /// <summary>Maps engine and service failures to the fixed typed errors; unknown failures are not mapped (the error filter sanitises them).</summary>
@@ -62,6 +74,7 @@ internal static class AggregateFailureMapper
         // #389 (I389-SC-03): by type only, never by message; the derived type must precede the GatewayInvalidQueryException arm.
         AggregationPrivacyRestrictedException => AggregateErrors.Create(AggregationErrorCodes.PrivacyRestricted, AggregationPrivacyRestrictedException.FixedMessage),
         AggregationFilterRejectedException => AggregateErrors.Create(AggregationFilterRejectedException.ErrorCodeConst, AggregationFilterRejectedException.FixedMessage),
+        AggregationTimeBucketUnsupportedException => AggregateErrors.TimeBucketUnsupported(),
         GatewayInvalidQueryException or ArgumentException => AggregateErrors.ArgumentInvalid(),
         // #333 (SEC-PGP-03): compiler refusals of planner output are fixed 4xx/UNAVAILABLE answers; no exception text, inner exception or SQL is passed on.
         TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneUnavailable } => AggregateErrors.Create("UNAVAILABLE", "The database is currently unavailable."),

@@ -52,9 +52,20 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     /// <summary>
     /// <c>(((ts) AT TIME ZONE from) AT TIME ZONE to)</c>: a <c>timestamp without time zone</c> read as local time of <c>from</c> is a <c>timestamptz</c> instant,
     /// the second operator returns the local wall clock of <c>to</c> as <c>timestamp without time zone</c>. The session <c>TimeZone</c> plays no part.
+    /// Under 2 arguments: <c>((ts) AT TIME ZONE to)</c> converts a <c>timestamptz</c> instant directly to local wall clock.
     /// </summary>
     protected override void FormatConvertTimeZone(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context)
     {
+        if (fn.Arguments.Count == 2)
+        {
+            builder.Append("((");
+            GenerateExpression(fn.Arguments[1], ref builder, context);
+            builder.Append(") AT TIME ZONE ");
+            AppendZoneArgument(ref builder, fn.Arguments[0], context);
+            builder.Append(')');
+            return;
+        }
+
         builder.Append("(((");
         GenerateExpression(fn.Arguments[2], ref builder, context);
         builder.Append(") AT TIME ZONE ");
@@ -63,6 +74,9 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
         AppendZoneArgument(ref builder, fn.Arguments[1], context);
         builder.Append(')');
     }
+
+    protected override void FormatConvertTimeZoneZoned(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context) =>
+        FormatConvertTimeZone(ref builder, fn, context);
 
     /// <summary>Virtual filters (phase 7b): <c>(x + (n) * INTERVAL '1 unit')</c>; on the governed path the amount is bound.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)

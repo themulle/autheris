@@ -202,4 +202,18 @@ public sealed class ErrorSanitizingFilterCodeTests
         result.Code.ShouldBe("INTERNAL_SERVER_ERROR");
         result.Message.ShouldNotContain("ssn");
     }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void TimeBucketUnsupported_SanitizerPassesOutsideDevelopment(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage("secret internal type leak").SetCode("AGGREGATION_TIME_BUCKET_UNSUPPORTED").Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("AGGREGATION_TIME_BUCKET_UNSUPPORTED");
+        result.Message.ShouldBe("Time bucketing is not supported for this column.");
+        result.Message.ShouldNotContain("secret");
+    }
 }

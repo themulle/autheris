@@ -28,9 +28,22 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     /// <summary>
     /// <c>CAST(((ts) AT TIME ZONE from) AT TIME ZONE to AS datetime2)</c>: the first operator reads the plain value as local time of <c>from</c>, the second
     /// moves the instant to <c>to</c>, and the cast to <c>datetime2</c> keeps the local date and time and drops the offset. Both zones are bound (Windows ids).
+    /// Under 2 arguments: <c>CAST((ts) AT TIME ZONE to AS datetime2)</c> converts a <c>datetimeoffset</c> directly to local wall clock.
     /// </summary>
     protected override void FormatConvertTimeZone(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context)
     {
+        if (fn.Arguments.Count == 2)
+        {
+            builder.Append("CAST((");
+            GenerateExpression(fn.Arguments[1], ref builder, context);
+            builder.Append(") AT TIME ZONE ");
+            AppendZoneArgument(ref builder, fn.Arguments[0], context);
+            builder.Append(" AS ");
+            AppendStructural(ref builder, context, "datetime2");
+            builder.Append(')');
+            return;
+        }
+
         builder.Append("CAST(((");
         GenerateExpression(fn.Arguments[2], ref builder, context);
         builder.Append(") AT TIME ZONE ");
@@ -41,6 +54,9 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         AppendStructural(ref builder, context, "datetime2");
         builder.Append(')');
     }
+
+    protected override void FormatConvertTimeZoneZoned(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context) =>
+        FormatConvertTimeZone(ref builder, fn, context);
 
     /// <summary>
     /// T-SQL requires a terminating semicolon after MERGE. It is appended exactly once, as the last character, and registered with

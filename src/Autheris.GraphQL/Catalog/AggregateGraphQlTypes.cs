@@ -235,7 +235,8 @@ internal static class AggregateGraphQlTypes
 
             var result = await ctx.Service<IGovernedAggregationService>()
                 .ExecuteAggregationAsync(principal, query, ctx.RequestAborted).ConfigureAwait(false);
-            return AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates);
+            var bucketColumns = parsed.TimeBuckets?.Select(b => b.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates, bucketColumns);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && AggregateFailureMapper.ForAggregate(ex) is { } mapped)
         {

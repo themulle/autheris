@@ -18,6 +18,9 @@ public static class AggregationErrorCodes
     /// <summary>The differential-privacy policy refuses the aggregate (MIN/MAX, repeated function/column pair, missing measure bounds).</summary>
     public const string PrivacyRestricted = "AGGREGATION_PRIVACY_RESTRICTED";
 
+    /// <summary>Time bucketing is not supported for this column (data type, non-UTC zone on Databricks/Oracle, etc.).</summary>
+    public const string TimeBucketUnsupported = "AGGREGATION_TIME_BUCKET_UNSUPPORTED";
+
     /// <summary>The governed compiler does not support the aggregation for this dataset (translation limit, any dialect or construct).</summary>
     public const string NotSupported = "AGGREGATION_NOT_SUPPORTED";
 }

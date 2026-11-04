@@ -110,14 +110,32 @@ internal sealed class TimeZoneCallValidator : ColumnScopeTracker
 
         // A qualified spelling (schema.convert_timezone) is never the function: it fails validation instead of passing through.
         if (node.Name.Parts.Count != 1) throw Argument();
-        if (node.Arguments.Count != 3 || node.Distinct || node.Filter is not null || node.Window is not null || node.OrderWithin is not null || node.IsStar)
+        if ((node.Arguments.Count != 2 && node.Arguments.Count != 3) || node.Distinct || node.Filter is not null || node.Window is not null || node.OrderWithin is not null || node.IsStar)
         {
             throw Argument();
         }
 
-        CheckZone(node.Arguments[0]);
-        CheckZone(node.Arguments[1]);
-        CheckTimestamp(node.Arguments[2]);
+        if (node.Arguments.Count == 2)
+        {
+            if (StripParentheses(node.Arguments[1]) is not ColumnReference)
+            {
+                throw Argument();
+            }
+
+            if (options.Federated || options.Dialect == TargetSqlDialect.DuckDb)
+            {
+                throw new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect);
+            }
+
+            CheckZone(node.Arguments[0]);
+            CheckZonedTimestamp(node.Arguments[1]);
+        }
+        else
+        {
+            CheckZone(node.Arguments[0]);
+            CheckZone(node.Arguments[1]);
+            CheckTimestamp(node.Arguments[2]);
+        }
 
         _depth++;
         try
@@ -185,6 +203,20 @@ internal sealed class TimeZoneCallValidator : ColumnScopeTracker
         if (options.Federated || Resolve(column) is not { } resolved) throw Argument();
         if (IsMasked(resolved)) throw Argument();
         if (!PlainTimestampClassifier.IsPlain(options.Dialect, resolved.Column.DataType)) throw Argument();
+    }
+
+    private void CheckZonedTimestamp(Expression ts)
+    {
+        ts = StripParentheses(ts);
+        if (ts is ColumnReference column)
+        {
+            if (options.Federated || Resolve(column) is not { } resolved) throw Argument();
+            if (IsMasked(resolved)) throw Argument();
+            if (!PlainTimestampClassifier.IsZoned(options.Dialect, resolved.Column.DataType)) throw Argument();
+            return;
+        }
+
+        throw Argument();
     }
 
     private void CheckCastOperand(Expression operand)

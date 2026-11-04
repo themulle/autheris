@@ -78,6 +78,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "AGGREGATION_DISABLED",
         "AGG_NEGATED_FILTER_REJECTED",
         "AGGREGATION_PRIVACY_RESTRICTED",
+        "AGGREGATION_TIME_BUCKET_UNSUPPORTED",
         "AGGREGATION_NOT_SUPPORTED",
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
@@ -132,6 +133,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGGREGATION_ON_MASKED_COLUMN"] = "A requested column is masked for the current caller and cannot be used in an aggregation.",
         ["AGG_NEGATED_FILTER_REJECTED"] = "The aggregation filter is rejected by the privacy policy.",
         ["AGGREGATION_PRIVACY_RESTRICTED"] = "The requested aggregate is not available under the privacy policy.",
+        ["AGGREGATION_TIME_BUCKET_UNSUPPORTED"] = "Time bucketing is not supported for this column.",
         ["AGGREGATION_NOT_SUPPORTED"] = "The requested aggregation is not supported for this dataset.",
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
@@ -170,7 +172,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     {
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",
-        "READ_ONLY_TOKEN"
+        "READ_ONLY_TOKEN",
+        "AGGREGATION_TIME_BUCKET_UNSUPPORTED"
     };
 
     private static readonly string[] SensitivePatterns =

@@ -188,6 +188,20 @@ public sealed class AggregationPrivacyRestrictedException : GatewayInvalidQueryE
 }
 
 /// <summary>
+/// #450: time bucketing is not supported for this column (data type not temporal, non-UTC zone on Databricks/Oracle, etc.).
+/// </summary>
+public sealed class AggregationTimeBucketUnsupportedException : GatewayInvalidQueryException
+{
+    public const string ErrorCodeConst = AggregationErrorCodes.TimeBucketUnsupported;
+    public const string FixedMessage = "Time bucketing is not supported for this column.";
+
+    public AggregationTimeBucketUnsupportedException()
+        : base(FixedMessage, ErrorCodeConst)
+    {
+    }
+}
+
+/// <summary>
 /// Thrown when an aggregation would have to read at least the in-memory row cap: the aggregate over a truncated prefix would be wrong,
 /// so the call fails closed (<c>AGGREGATION_ROW_CAP_EXCEEDED</c>) instead of returning a silently truncated result.
 /// </summary>

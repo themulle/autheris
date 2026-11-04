@@ -123,11 +123,11 @@ public sealed class TimeBucketingQueryPlanningTests
             Filter: null,
             OrderBy: null,
             Limit: 100,
-            TimeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Hour, "Europe/Berlin")]);
+            TimeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day, "Europe/Berlin")]);
 
         var planned = planner.PlanAggregate(intent, metadata, decision);
 
-        planned.Sql.ShouldContain("strftime('%Y-%m-%d %H:00:00', datetime(\"created_at\", ");
+        planned.Sql.ShouldContain("strftime('%Y-%m-%d', datetime(\"created_at\", ");
     }
 
     [Fact]
