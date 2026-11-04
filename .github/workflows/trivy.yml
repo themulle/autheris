@@ -3,6 +3,8 @@ name: Trivy Container & Repository Security Scan
 on:
   schedule:
     - cron: '0 4 * * 1' # Every Monday at 04:00 UTC
+  push:
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:

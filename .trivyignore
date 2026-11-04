@@ -1,7 +1,14 @@
 # .trivyignore
 # Autheris Supply-Chain & Container Security Ignore List
 # Each entry MUST have an issue/CVE identifier, justification, and expiration date.
-# Reviewed: 2026-10-09
+# Reviewed: 2026-11-04
 
-# Example format:
-# CVE-2026-XXXXX # Exp: 2026-12-31, Justification: False positive in base image, no code execution path
+# Base image libpcre2-8-0 (Ubuntu 24.04 Noble) - upstream candidate 10.42-4ubuntu2.2 pending publication in noble-updates mirrors
+CVE-2026-103111 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+CVE-2026-86145 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+CVE-2026-89156 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+CVE-2026-89157 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+CVE-2026-89158 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+CVE-2026-89160 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+CVE-2026-89161 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 10.42-4ubuntu2.2 pending in Ubuntu noble-updates
+
