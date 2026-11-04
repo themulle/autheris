@@ -37,6 +37,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly IConsentRepository? _consentRepository;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CatalogDiscoveryService> _logger;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
     private readonly long _maxSpecDownloadBytes;
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
@@ -61,8 +62,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         IConsentResolutionService? consentResolution = null,
         IConsentRepository? consentRepository = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
     {
+        _transportResolver = transportResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _consentResolution = consentResolution;
         _consentRepository = consentRepository;
@@ -492,12 +495,37 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                     BaseUrl: endpoint?.BaseUrl,
                     IsConfigured: isConfigured,
                     Status: table.Table.IsActive ? "active" : "inactive",
-                    CreatedAt: DateTimeOffset.UtcNow
-                );
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    AllowedTransports: EffectiveTransportsOf(table));
             }
         }
 
         return sources.Values.ToList();
+    }
+
+    /// <summary>
+    /// Issue #447 (REQ-ATR-11): the effective <c>AllowedTransports</c> of the table's source (a source without a profile inherits
+    /// <c>Defaults</c>). Administrator-only data; null when no resolver is wired or the profile cannot be read.
+    /// </summary>
+    private IReadOnlyList<string>? EffectiveTransportsOf(TableMetadata table)
+    {
+        if (_transportResolver is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var source = _transportResolver.CanonicalName(Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table));
+            var profile = _transportResolver.TryResolve(source, out var explicitProfile) && explicitProfile is not null
+                ? explicitProfile
+                : _transportResolver.Resolve(source);
+            return Autheris.Application.DataSources.TransportFlagNames.Of(profile.AllowedTransports);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     /// <summary>

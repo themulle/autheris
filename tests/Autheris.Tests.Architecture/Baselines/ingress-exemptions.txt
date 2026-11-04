@@ -173,6 +173,7 @@ route /ui/swagger | static docs, swagger or Nitro portal page; no data access
 route /ui/swagger/assets/{file} | static docs, swagger or Nitro portal page; no data access
 
 # --- src files that create DI scopes or call Task.Run (copy = stamps/copies ingress; exempt = reviewed) ---
+scope src/Autheris.Api/Configuration/Validation/DataSourceTransportConfigurationReporter.cs | startup/reload advisory logging only: reads catalog source names once at start, reaches no data executor or connector (issue #447 WP-5; needs security approval, SEC-ATR-13)
 scope src/Autheris.Api/Extensions/DependencyInjection/DataApiServiceExtensions.cs | exempt: VirtualSystemTablesHostedService registration; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/GraphQlExecutorGate.cs | exempt: GraphQL warmup probe/eviction Task.Run; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/StartupWarmupService.cs | exempt: startup warmup Task.Run bound; no request ingress, reaches no governed data

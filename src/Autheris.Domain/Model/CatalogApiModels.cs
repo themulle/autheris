@@ -52,7 +52,8 @@ public sealed record CatalogDatasourceSummary(
     bool IsConfigured,
     string Status,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    IReadOnlyList<string>? AllowedTransports = null);
 
 public sealed record PrincipalResolutionItem(
     string Sid,

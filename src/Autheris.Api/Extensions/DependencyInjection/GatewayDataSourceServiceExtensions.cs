@@ -39,6 +39,17 @@ public static class GatewayDataSourceServiceExtensions
         services.TryAddScoped<IIngressTransportContext, IngressTransportContext>();
         services.TryAddScoped<ITransportDenialRecorder, TransportDenialRecorder>();
         services.TryAddScoped<IDataSourceTransportGate, DataSourceTransportGate>();
+        // Issue #447 REQ-ATR-09: warns about sources that allow no reachable transport (start and reload); never fails the start.
+        services.AddHostedService(sp =>
+        {
+            var gateway = sp.GetRequiredService<IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();
+            return new Autheris.Api.Configuration.Validation.DataSourceTransportConfigurationReporter(
+                sp.GetRequiredService<IOptionsMonitor<DataSourceConfigurationOptions>>(),
+                () => gateway.CurrentValue,
+                listener => gateway.OnChange(options => listener(options)),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Configuration.Validation.DataSourceTransportConfigurationReporter>>(),
+                sp.GetService<IServiceScopeFactory>());
+        });
         services.Replace(ServiceDescriptor.Singleton<IDataSourceTelemetryPolicyProvider, HierarchicalDataSourceTelemetryPolicyProvider>());
 
         return services;
