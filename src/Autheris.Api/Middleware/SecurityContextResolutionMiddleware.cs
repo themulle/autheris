@@ -75,9 +75,18 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
     /// <summary>B-1: a tenant whose id collides case-insensitively with another configured tenant is denied (fail closed); so is any request whose guard cannot be resolved.</summary>
     private async Task<bool> DenyCollidingTenantAsync(HttpContext context, SecurityPrincipalContext securityContext)
     {
+        // Allow ClusterAdmin calling POST /api/admin/tenant-registry/{tenantId}/resolve-collision through collision gate
+        if (securityContext.IsClusterAdmin &&
+            HttpMethods.IsPost(context.Request.Method) &&
+            context.Request.Path.Value?.StartsWith("/api/admin/tenant-registry/", StringComparison.OrdinalIgnoreCase) == true &&
+            context.Request.Path.Value?.EndsWith("/resolve-collision", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return false;
+        }
+
         var guard = ResolveGuard(context);
         var unresolved = guard == null;
-        if (!unresolved && (!guard!.HasCollisions || !guard.IsDenied(securityContext.TenantId.Value)))
+        if (!unresolved && (!guard!.HasCollisions || !guard.IsDenied(securityContext.ResolvedTenant?.Value ?? securityContext.TenantId.Value)))
         {
             return false;
         }
@@ -163,7 +172,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             var audit = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
             await audit.RecordBestEffortAsync(new AuditLogEntry
             {
-                TenantId = securityContext.TenantId,
+                TenantId = securityContext.ResolvedTenant ?? TenantId.Platform,
                 EventType = AuditEventTypes.TenantCollisionDenied,
                 ActorSid = securityContext.UserSid,
                 TargetTable = string.Empty,
@@ -246,6 +255,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         var authOptions = context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value.Plugins.Auth;
 
         if (securityContext.IsAuthenticated &&
+            securityContext.ResolvedTenant is { } pluginTenant &&
             authOptions?.Enabled == true &&
             authOptions.AllowRoleEnrichment &&
             authPluginHost != null &&
@@ -253,7 +263,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         {
             var pluginContext = new PluginSecurityContext
             {
-                TenantId = securityContext.TenantId,
+                TenantId = pluginTenant,
                 UserSid = securityContext.UserSid,
                 GroupSids = securityContext.GroupSids,
                 ExistingTenantRoles = securityContext.TenantRoles,

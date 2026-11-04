@@ -125,6 +125,13 @@ internal static class AuditSqlCore
 
         if (anchor == null) return null;
 
+        if (anchor.Sequence < 0 || string.IsNullOrEmpty(anchor.EntryHash) || string.IsNullOrEmpty(anchor.Signature))
+        {
+            logger?.LogError("External audit anchor has invalid sequence or hash.");
+            invalid = true;
+            return null;
+        }
+
         var expected = ComputeAnchorSignature(anchorKey, anchor.Sequence, anchor.EntryHash, anchor.UpdatedAt);
         if (!FixedTimeEqualsString(expected, anchor.Signature))
         {
@@ -605,7 +612,7 @@ internal static class AuditSqlCore
             return new AuditChainVerificationResult(false, position, expectedPrevHash);
         }
 
-        if (anchor != null && anchor.Sequence > 0 && (anchor.Sequence > position || !anchorEntryMatched))
+        if (anchor != null && anchor.Sequence >= 0 && (anchor.Sequence > position || !anchorEntryMatched))
         {
             flagViolation($"External signed anchor claims seq {anchor.Sequence}, but DB chain ended at position {position}.");
             return new AuditChainVerificationResult(false, position, expectedPrevHash);

@@ -205,7 +205,8 @@ public sealed class IdentityRealmRegistryTests
 
         var customRealm = new IdentityRealm("custom", IdentityRealmKind.GenericOidc, new TenantBindingSpecification(TenantBindingKind.Fixed, "t1"), RealmGroupSource.None, RealmProvisioningMode.None, issuers: ["https://example.com"]);
         registry.RegisterRealm(customRealm);
-        registry.GetDefaultRealm()?.Id.ShouldBe("custom");
+        // Arbitrary realms do not become the default unless configured
+        registry.GetDefaultRealm().ShouldBeNull();
 
         var entraRealm = new IdentityRealm("workforce-entra", IdentityRealmKind.EntraWorkforce, new TenantBindingSpecification(TenantBindingKind.Fixed, "t1"), RealmGroupSource.None, RealmProvisioningMode.None, issuers: ["https://login.microsoftonline.com"]);
         registry.RegisterRealm(entraRealm);
@@ -214,6 +215,41 @@ public sealed class IdentityRealmRegistryTests
         var defaultRealm = new IdentityRealm("default", IdentityRealmKind.GenericOidc, new TenantBindingSpecification(TenantBindingKind.Fixed, "t1"), RealmGroupSource.None, RealmProvisioningMode.None, issuers: ["https://default.com"]);
         registry.RegisterRealm(defaultRealm);
         registry.GetDefaultRealm()?.Id.ShouldBe("default");
+
+        var options = new IdentityRealmsOptions { DefaultRealm = "custom" };
+        registry.Initialize(options);
+        registry.GetDefaultRealm()?.Id.ShouldBe("custom");
+    }
+
+    [Fact]
+    public void IdentityRealmRegistry_ResolveRealmForScheme_IsDeterministicAndIsolated()
+    {
+        var registry = new IdentityRealmRegistry();
+        var entra = new IdentityRealm("workforce-entra", IdentityRealmKind.EntraWorkforce, TenantBindingSpecification.Unbound(), issuers: ["https://login.microsoftonline.com"]);
+        var basic = new IdentityRealm("basic-realm", IdentityRealmKind.Basic, TenantBindingSpecification.Unbound());
+        var forward = new IdentityRealm("forward-realm", IdentityRealmKind.ForwardAuth, TenantBindingSpecification.Unbound());
+        registry.RegisterRealm(entra);
+        registry.RegisterRealm(basic);
+        registry.RegisterRealm(forward);
+
+        // Basic scheme maps to Basic realm, never entra
+        var resolvedBasic = registry.ResolveRealmForScheme(null, "Basic");
+        resolvedBasic.ShouldNotBeNull();
+        resolvedBasic.Id.ShouldBe("basic-realm");
+
+        // ForwardAuth scheme maps to ForwardAuth realm, never entra
+        var resolvedForward = registry.ResolveRealmForScheme(null, "ForwardAuth");
+        resolvedForward.ShouldNotBeNull();
+        resolvedForward.Id.ShouldBe("forward-realm");
+
+        // Unregistered token issuer returns null, never falling back to basic/forward/entra
+        var resolvedUnknownIssuer = registry.ResolveRealmForScheme("https://unknown-attacker.com", "Bearer");
+        resolvedUnknownIssuer.ShouldBeNull();
+
+        // Registered issuer resolves strictly
+        var resolvedEntra = registry.ResolveRealmForScheme("https://login.microsoftonline.com", "Bearer");
+        resolvedEntra.ShouldNotBeNull();
+        resolvedEntra.Id.ShouldBe("workforce-entra");
     }
 
     [Fact]

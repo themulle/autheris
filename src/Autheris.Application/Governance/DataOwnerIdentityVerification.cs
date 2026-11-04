@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 
 /// <summary>Outcome of the identity check of a principal the dbt import wants to make a data owner (I393B-SC-04).</summary>
@@ -37,7 +38,7 @@ public sealed class ScimDataOwnerIdentityVerifier(IIdentityRealmRegistry? realmR
 {
     public async Task<OwnerIdentityStatus> VerifyAsync(TenantId tenant, string sid, CancellationToken ct = default)
     {
-        var realms = realmRegistry?.GetAllRealms().ToList() ?? [];
+        var realms = realmRegistry?.GetAllRealms().Where(r => r.Provisioning == RealmProvisioningMode.Scim).ToList() ?? [];
         if (realms.Count == 0)
         {
             return OwnerIdentityStatus.NotConfigured;

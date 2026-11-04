@@ -303,7 +303,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to parse dbt manifest stream.");
-            return new DbtSyncResult(false, 0, 0, 0, [], $"Manifest parse failure: {ex.Message}");
+            return new DbtSyncResult(false, 0, 0, 0, [], "Manifest parse failure.");
         }
 
         // EXT-07: Filter models by caller tenant
@@ -672,7 +672,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ColumnMaskingRules = existingMeta.ColumnMaskingRules,
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                        Indexes = existingMeta.Indexes,
+                        Indexes = existingMeta.Indexes, PhysicalIndexes = existingMeta.PhysicalIndexes,
                         PredefinedSyntheticSamples = mergedSamples
                     };
 
@@ -680,10 +680,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     if (model.DeclaredKeys is { } declared)
                     {
                         updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
-
-                        // Issue #427: Reconcile physical key directions for SQL tables
-                        updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
                     }
+
+                    // Issue #427: Reconcile physical key directions for SQL tables
+                    updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
 
                     if (mergedSamples != null)
                     {
@@ -716,7 +716,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to auto-sync dbt model '{ModelName}' to SQL endpoints directory.", model.Name);
-                    warnings.Add($"SQL endpoint auto-sync rejected for dbt model: {ex.Message}");
+                    warnings.Add("SQL endpoint auto-sync rejected for dbt model.");
                 }
             }
         }
@@ -1098,7 +1098,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
         using var doc = await JsonDocument.ParseAsync(
             governanceStream,
-            new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip },
+            new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip, MaxDepth = 64 },
             ct).ConfigureAwait(false);
         var root = doc.RootElement;
 
@@ -1530,7 +1530,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     Columns = updatedCols,
                     ColumnMaskingRules = updatedMaskingRules,
                     PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
-                    PrimaryKeyDirections = existingMeta.PrimaryKeyDirections
+                    PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
+                    Indexes = existingMeta.Indexes, PhysicalIndexes = existingMeta.PhysicalIndexes
                 };
 
                 pendingUpserts.Add(updatedMetadata);
@@ -1598,7 +1599,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 }
                 catch (Exception ex)
                 {
-                    warnings.Add($"Failed to import virtual filter '{filter.Name}': {ex.Message}");
+                    _logger.LogWarning(ex, "Failed to import virtual filter '{FilterName}'", filter.Name);
+                    warnings.Add($"Failed to import virtual filter '{filter.Name}'.");
                 }
             }
 
@@ -1610,7 +1612,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 }
                 catch (Exception ex)
                 {
-                    warnings.Add($"Failed to import access profile '{profile.Name}': {ex.Message}");
+                    _logger.LogWarning(ex, "Failed to import access profile '{ProfileName}'", profile.Name);
+                    warnings.Add($"Failed to import access profile '{profile.Name}'.");
                 }
             }
         }

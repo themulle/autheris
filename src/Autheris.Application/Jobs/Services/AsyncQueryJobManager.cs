@@ -14,6 +14,7 @@ using Autheris.Application.Jobs.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -128,7 +129,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
                     if (attempt == attempts)
                     {
                         TombstoneCheckFailures.Add(1);
-                        _logger.LogWarning(ex, "Cluster state unavailable while checking job {JobId} for a remote cancel; proceeding.", next.JobId);
+                        _logger.LogWarning(ex, "Cluster state unavailable while checking job {JobId} for a remote cancel; proceeding.", LogSanitizer.Sanitize(next.JobId));
                     }
                     else
                     {
@@ -221,7 +222,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             }
 
             ClusterWriteFailures.Add(1);
-            _logger.LogError(ex, "Could not write the cluster record of job {JobId}; the local state is kept.", descriptor.JobId);
+            _logger.LogError(ex, "Could not write the cluster record of job {JobId}; the local state is kept.", LogSanitizer.Sanitize(descriptor.JobId));
         }
     }
 
@@ -367,7 +368,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             if (recordWritten)
             {
                 try { await _cluster!.RemoveAsync(RecordKey(descriptor.TenantId, jobId), CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "Could not remove the cluster record of rejected job {JobId}.", jobId); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "Could not remove the cluster record of rejected job {JobId}.", LogSanitizer.Sanitize(jobId)); }
             }
 
             if (_activeCts.TryRemove(jobId, out var failedCts))
@@ -406,7 +407,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             if (!string.Equals(job.TenantId, tenantId.Value, StringComparison.Ordinal) ||
                 !string.Equals(job.SubmittedByUserId, userSid, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", job.JobId);
+                _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", LogSanitizer.Sanitize(job.JobId));
                 await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
                 return null;
             }
@@ -429,7 +430,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         if (!string.Equals(record.TenantId, tenantId.Value, StringComparison.Ordinal) ||
             !string.Equals(record.OwnerSid, userSid, StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", record.JobId);
+            _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", LogSanitizer.Sanitize(record.JobId));
             await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             return null;
         }
@@ -738,7 +739,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         }
         catch (ClusterStateUnavailableException ex)
         {
-            _logger.LogWarning(ex, "Could not signal the owner node of job {JobId}; the tombstone stops the job at its next state write.", record.JobId);
+            _logger.LogWarning(ex, "Could not signal the owner node of job {JobId}; the tombstone stops the job at its next state write.", LogSanitizer.Sanitize(record.JobId));
         }
 
         var cancelled = current with
@@ -775,7 +776,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             !string.Equals(job.SubmittedByUserId, signal.RequesterSid, StringComparison.OrdinalIgnoreCase))
         {
             // Not requested by the job's owner: a forged or misrouted signal changes nothing.
-            _logger.LogWarning("Ignored async job cancel signal for job {JobId}: requester is not the owner.", signal.JobId);
+            _logger.LogWarning("Ignored async job cancel signal for job {JobId}: requester is not the owner.", LogSanitizer.Sanitize(signal.JobId));
             return;
         }
 
@@ -785,13 +786,13 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             var tombstone = await _cluster.GetAsync<AsyncJobCancelTombstone>(TombstoneKey(signal.TenantId, signal.JobId), ct).ConfigureAwait(false);
             if (tombstone is null || !string.Equals(tombstone.RequesterSid, signal.RequesterSid, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogWarning("Ignored async job cancel signal for job {JobId}: no matching cancel tombstone.", signal.JobId);
+                _logger.LogWarning("Ignored async job cancel signal for job {JobId}: no matching cancel tombstone.", LogSanitizer.Sanitize(signal.JobId));
                 return;
             }
         }
         catch (ClusterStateUnavailableException ex)
         {
-            _logger.LogWarning(ex, "Ignored async job cancel signal for job {JobId}: cluster state unavailable.", signal.JobId);
+            _logger.LogWarning(ex, "Ignored async job cancel signal for job {JobId}: cluster state unavailable.", LogSanitizer.Sanitize(signal.JobId));
             return;
         }
 
@@ -877,7 +878,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to record audit event for job {JobId}", job.JobId);
+            _logger.LogError(ex, "Failed to record audit event for job {JobId}", LogSanitizer.Sanitize(job.JobId));
             if (string.Equals(decision, "ALLOW", StringComparison.Ordinal))
             {
                 // Fail-closed: an ALLOW outcome (e.g. a result download) must never happen without its audit record.
@@ -910,7 +911,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Failed to record access-denied audit event for job {JobId}", jobId);
+            _logger.LogError(ex, "Failed to record access-denied audit event for job {JobId}", LogSanitizer.Sanitize(jobId));
         }
     }
 }

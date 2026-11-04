@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Identity.Services;
+using Autheris.Domain.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using StackExchange.Redis;
@@ -61,7 +62,7 @@ public sealed class RedisLockPubSubChannel : IRedisLockPubSubChannel, IDisposabl
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to publish lock message for user '{UserKey}' to Redis channel '{Channel}'.", message.UserKey, ChannelName);
+                _logger.LogWarning(ex, "Failed to publish lock message for user '{UserKey}' to Redis channel '{Channel}'.", LogSanitizer.Sanitize(message.UserKey), ChannelName);
             }
         }
     }

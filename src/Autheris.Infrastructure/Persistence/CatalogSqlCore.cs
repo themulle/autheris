@@ -755,7 +755,7 @@ WHERE rm.member_sid = @sid";
 
                     targetColDesc = canOverwriteColDesc ? col.Description : existingCol.Description;
                     targetColLongDesc = canOverwriteColLongDesc ? col.LongDescription : existingCol.LongDescription;
-                    targetColDocSource = canOverwriteColDesc ? (incomingColSource ?? existingCol.DocSource) : existingCol.DocSource;
+                    targetColDocSource = (canOverwriteColDesc || canOverwriteColLongDesc) ? (incomingColSource ?? existingCol.DocSource) : existingCol.DocSource;
                 }
             }
             else

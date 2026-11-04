@@ -88,6 +88,7 @@ public sealed partial class DbtMetadataIngestionService
                 return reconciled.Metadata;
             }
 
+            warnings.Add($"Table '{updatedMetadata.Identifier}': KEY_DIRECTION_AUDIT_FAILED");
             return reconciled.WithoutPhysical;
         }
 
@@ -102,7 +103,7 @@ public sealed partial class DbtMetadataIngestionService
     {
         if (_auditWriter is null)
         {
-            return true;
+            return false;
         }
 
         try

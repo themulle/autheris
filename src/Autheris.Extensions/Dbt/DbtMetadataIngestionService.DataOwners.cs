@@ -169,7 +169,8 @@ public sealed partial class DbtMetadataIngestionService
             return (OwnerFailure("dbt_owner_cap_exceeded", warnings), null);
         }
 
-        var request = new DataOwnerAssignmentRequest(collector.Specs, replace, DryRun: true, MaxNewOwners: MaxNewOwnersPerImport);
+        var callerIds = CallerIdentifiers(caller);
+        var request = new DataOwnerAssignmentRequest(collector.Specs, replace, DryRun: true, MaxNewOwners: MaxNewOwnersPerImport, CallerIdentifiers: callerIds);
         DataOwnerAssignmentResult preCheck;
         try
         {
@@ -184,6 +185,15 @@ public sealed partial class DbtMetadataIngestionService
         if (!preCheck.Success)
         {
             return (OwnerFailure(preCheck.ErrorCode ?? "dbt_owner_apply_failed", warnings, preCheck.ErrorTable), null);
+        }
+
+        // MED-05: Double-check post-resolution self-assignment against changes
+        foreach (var change in preCheck.Changes.Where(c => c.Kind is DataOwnerChangeKind.OwnerCreated or DataOwnerChangeKind.OwnerAssigned))
+        {
+            if (callerIds.Any(cid => OwnerIdentifier.AreSame(cid, change.OwnerSid)))
+            {
+                return (OwnerFailure("dbt_owner_self_assignment_denied", warnings, change.Table.ToString()), null);
+            }
         }
 
         var identity = new Dictionary<string, OwnerIdentityStatus>(StringComparer.OrdinalIgnoreCase);
@@ -244,7 +254,7 @@ public sealed partial class DbtMetadataIngestionService
         try
         {
             var result = await _ownerAssignments!
-                .ApplyTableOwnerAssignmentsAsync(new DataOwnerAssignmentRequest(collector.Specs, replace, DryRun: false, MaxNewOwners: MaxNewOwnersPerImport), ct)
+                .ApplyTableOwnerAssignmentsAsync(new DataOwnerAssignmentRequest(collector.Specs, replace, DryRun: false, MaxNewOwners: MaxNewOwnersPerImport, CallerIdentifiers: CallerIdentifiers(caller)), ct)
                 .ConfigureAwait(false);
             if (result.Success)
             {

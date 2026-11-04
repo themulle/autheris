@@ -11,6 +11,7 @@ using Autheris.Application.Data.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
@@ -457,5 +458,70 @@ public sealed class CatalogGraphQlConnectionTests
         var json = result.ToJson();
         json.ShouldContain("\"errors\":");
         json.ShouldContain("KEYSET_PAGINATION_UNAVAILABLE");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ExecuteConnection_UnauthorizedQuery_ReturnsAccessDenied_BeforePaginationErrors()
+    {
+        // SEC-RG-08: Even with invalid pagination (e.g. first: -5), an unauthorized caller must see ACCESS_DENIED
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns<JsonDocument>(_ => throw new GatewayForbiddenException("Access denied."));
+
+        var executor = await CreateExecutorAsync();
+
+        var query = @"
+            query {
+                sales_dbo_customersConnection(first: -5) {
+                    edges {
+                        node {
+                            id
+                        }
+                    }
+                }
+            }";
+
+        var result = await executor.ExecuteAsync(query);
+        var json = result.ToJson();
+        json.ShouldContain("\"errors\":");
+        json.ShouldContain("ACCESS_DENIED");
+        json.ShouldNotContain("INVALID_QUERY");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ExecuteConnection_NonKeysetOrderBy_ReturnsInvalidQuery()
+    {
+        // HIGH-02: Non-keyset column in orderBy on *Connection is rejected post-authorization with INVALID_QUERY
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("[{\"id\":1,\"name\":\"Customer 1\"}]"));
+
+        var executor = await CreateExecutorAsync();
+
+        var query = @"
+            query {
+                sales_dbo_customersConnection(first: 2, orderBy: [{ status: ASC }]) {
+                    edges {
+                        node {
+                            id
+                        }
+                    }
+                }
+            }";
+
+        var result = await executor.ExecuteAsync(query);
+        var json = result.ToJson();
+        json.ShouldContain("\"errors\":");
+        json.ShouldContain("INVALID_QUERY");
     }
 }

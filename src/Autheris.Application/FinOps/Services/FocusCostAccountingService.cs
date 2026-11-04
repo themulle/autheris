@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.State;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -74,7 +75,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         if (shared == null)
         {
             _localSpend.AddOrUpdate(tenantId, totalBilled, (_, current) => current + totalBilled);
-            _logger.LogWarning("F-AI-08 Recorded local fallback spend of {Cost} EUR for tenant {Tenant} due to unavailable shared cluster store.", totalBilled, tenantId);
+            _logger.LogWarning("F-AI-08 Recorded local fallback spend of {Cost} EUR for tenant {Tenant} due to unavailable shared cluster store.", totalBilled, LogSanitizer.Sanitize(tenantId));
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -120,7 +121,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
 
         _logger.LogDebug(
             "F-AI-08 FinOps recorded usage for tenant {Tenant}: Billed {Cost} EUR (Tokens: {Tokens}, Compute: {ComputeMs}ms)",
-            tenantId, totalBilled, promptTokens + completionTokens, computeMs);
+            LogSanitizer.Sanitize(tenantId), totalBilled, promptTokens + completionTokens, computeMs);
 
         await ValueTask.CompletedTask;
     }
@@ -134,7 +135,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unavailable for tenant {Tenant}; accounting locally.", tenantId);
+            _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unavailable for tenant {Tenant}; accounting locally.", LogSanitizer.Sanitize(tenantId));
             return null;
         }
     }
@@ -171,7 +172,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 clusterStoreFailed = true;
-                _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unreadable for tenant {Tenant}; failing closed on budget enforcement.", tenantId);
+                _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unreadable for tenant {Tenant}; failing closed on budget enforcement.", LogSanitizer.Sanitize(tenantId));
             }
         }
 
@@ -182,13 +183,13 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         {
             _logger.LogWarning(
                 "F-AI-08 Hard budget cap EXCEEDED for tenant {Tenant}! Current spend: {Spend} EUR, limit: {Limit} EUR",
-                tenantId, currentSpend, budgetLimit);
+                LogSanitizer.Sanitize(tenantId), currentSpend, budgetLimit);
         }
         else if (isWarning)
         {
             _logger.LogInformation(
                 "F-AI-08 Soft budget cap reached for tenant {Tenant}! Current spend: {Spend} EUR, limit: {Limit} EUR (threshold: {Ratio:P0})",
-                tenantId, currentSpend, budgetLimit, options.SoftCapRatio);
+                LogSanitizer.Sanitize(tenantId), currentSpend, budgetLimit, options.SoftCapRatio);
         }
 
         return await ValueTask.FromResult(new BudgetStatus(isExceeded, isWarning, currentSpend, budgetLimit, tenantId));

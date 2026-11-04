@@ -63,11 +63,27 @@ public sealed class FinOpsBudgetMiddleware
                 return;
             }
 
-            tenantId = secContext.TenantId.Value;
-            principalId = secContext.UserSid.Value;
+            if (secContext.ResolvedTenant is { } resolvedTenant)
+            {
+                tenantId = resolvedTenant.Value;
+                principalId = secContext.UserSid.Value;
+            }
+            else
+            {
+                // Global operator without tenant is not subject to per-tenant budget limit
+                await _next(context).ConfigureAwait(false);
+                return;
+            }
         }
         else
         {
+            if (context.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() is not null ||
+                context.User?.Identity?.IsAuthenticated != true)
+            {
+                await _next(context).ConfigureAwait(false);
+                return;
+            }
+
             // DT-SC-03: an authenticated caller always has a resolved tenant (claims transformation); a missing or invalid claim
             // throws (TenantUnresolved / TenantClaimInvalid) instead of skipping the budget check.
             tenantId = context.User.GetTenantId().Value!;

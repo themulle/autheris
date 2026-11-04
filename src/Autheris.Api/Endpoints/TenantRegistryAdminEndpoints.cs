@@ -54,15 +54,7 @@ public static class TenantRegistryAdminEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.InvalidTenantId, "tenantId is not a valid tenant id.");
         }
 
-        TenantId actorTenant;
-        try
-        {
-            actorTenant = context.User.GetTenantId();
-        }
-        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
+        TenantId actorTenant = context.GetSecurityContext()?.ResolvedTenant ?? TenantId.Platform;
 
         var resolution = await registry.ResolveCollisionAsync(keep, body?.ExpectedCurrent, ct).ConfigureAwait(false);
         if (resolution.Status == TenantCollisionResolutionStatus.NotFound)

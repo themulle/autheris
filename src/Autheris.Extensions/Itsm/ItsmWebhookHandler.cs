@@ -184,7 +184,7 @@ public sealed class ItsmWebhookHandler(
             var secretKey = ResolveWebhookSecret(instanceId);
             if (secretKey == null)
             {
-                logger.LogError("Webhook rejected: No dedicated webhook secret (itsm:webhook-secret:<instanceId>) is configured for ITSM instance '{InstanceId}'.", instanceId);
+                logger.LogError("Webhook rejected: No dedicated webhook secret (itsm:webhook-secret:<instanceId>) is configured for ITSM instance '{InstanceId}'.", SanitizeForLog(instanceId));
                 return false;
             }
 
@@ -354,13 +354,13 @@ public sealed class ItsmWebhookHandler(
             GatewayDiagnostics.CrossTenantMismatchCounter.Add(1);
             logger.LogError(
                 "CROSS_TENANT_WEBHOOK_MISMATCH: Callback for ticket {TicketId} came from an unassigned instance {InstanceId}.",
-                payload.TicketId, logInstanceId);
+                SanitizeForLog(payload.TicketId), logInstanceId);
             return false; // Streng verweigern!
         }
 
         if (request == null)
         {
-            logger.LogWarning("Webhook discarded: Unknown TicketId '{TicketId}' for instance '{InstanceId}'.", payload.TicketId, logInstanceId);
+            logger.LogWarning("Webhook discarded: Unknown TicketId '{TicketId}' for instance '{InstanceId}'.", SanitizeForLog(payload.TicketId), logInstanceId);
             return false;
         }
 
@@ -377,7 +377,7 @@ public sealed class ItsmWebhookHandler(
         // 6. Idempotente Bearbeitung (nur PENDING_EXTERNAL_APPROVAL darf bearbeitet werden)
         if (!string.Equals(request.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Webhook ignoriert: Request befindet sich bereits im Status '{Status}'", request.Status);
+            logger.LogInformation("Webhook ignoriert: Request befindet sich bereits im Status '{Status}'", SanitizeForLog(request.Status));
             return true;
         }
 
@@ -386,7 +386,7 @@ public sealed class ItsmWebhookHandler(
 
         if (string.Equals(payload.Action, "REJECT", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) abgelehnt.", request.Id, payload.TicketId, payload.System);
+            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) abgelehnt.", request.Id, SanitizeForLog(payload.TicketId), SanitizeForLog(payload.System));
             try
             {
                 await governanceRepo.RejectConsentRequestAsync(
@@ -406,7 +406,7 @@ public sealed class ItsmWebhookHandler(
 
         if (string.Equals(payload.Action, "APPROVE", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) approved. Running approval step...", request.Id, payload.TicketId, payload.System);
+            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) approved. Running approval step...", request.Id, SanitizeForLog(payload.TicketId), SanitizeForLog(payload.System));
 
             // SEC M-2: Route approval through ApproveConsentRequestStepAsync to enforce separation of duties,
             // approver != requester check, and four-eyes verification rather than bypassing directly to ActivateConsentAsync.
@@ -436,11 +436,11 @@ public sealed class ItsmWebhookHandler(
 
         if (string.Equals(payload.Action, "IGNORE", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Webhook ignoriert: Ticket-Status ergibt weder Genehmigung noch Ablehnung (Ticket {TicketId}).", payload.TicketId);
+            logger.LogInformation("Webhook ignoriert: Ticket-Status ergibt weder Genehmigung noch Ablehnung (Ticket {TicketId}).", SanitizeForLog(payload.TicketId));
             return true;
         }
 
-        logger.LogWarning("Webhook ignoriert: Unbekannte Action '{Action}'", payload.Action);
+        logger.LogWarning("Webhook ignoriert: Unbekannte Action '{Action}'", SanitizeForLog(payload.Action));
         return false;
     }
 
@@ -468,27 +468,7 @@ public sealed class ItsmWebhookHandler(
     /// SEC H-06: The instance comes from the signed payload only. An (unsigned) header instance must match it.
     /// Only in signature-bypass mode (insecure getting started) the header is accepted as fallback.
     /// </summary>
-    private static string SanitizeForLog(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        var sanitized = new StringBuilder(value.Length);
-        foreach (var ch in value)
-        {
-            if (ch == '\r' || ch == '\n')
-            {
-                sanitized.Append(' ');
-                continue;
-            }
-
-            sanitized.Append(char.IsControl(ch) ? ' ' : ch);
-        }
-
-        return sanitized.ToString();
-    }
+    private static string SanitizeForLog(string? value) => LogSanitizer.Sanitize(value);
 
     private string? ResolveInstanceId(string? payloadInstanceId, string? headerInstanceId, bool bypassSignature)
     {

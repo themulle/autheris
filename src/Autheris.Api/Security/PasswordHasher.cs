@@ -6,6 +6,13 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Konscious.Security.Cryptography;
 
+public enum PasswordVerificationDiagnostic
+{
+    Argon2idParametersOutsideBounds,
+    Pbkdf2IterationsOutsideBounds,
+    PlaintextOrUnsaltedProhibitedInProduction
+}
+
 /// <summary>
 /// Cryptographic password hashing and verification utility supporting Argon2id and PBKDF2.
 /// </summary>
@@ -92,7 +99,7 @@ public static class PasswordHasher
         string storedHash,
         string username,
         bool isDevelopment,
-        Action<string>? logError = null)
+        Action<PasswordVerificationDiagnostic>? onDiagnostic = null)
     {
         ArgumentNullException.ThrowIfNull(inputPassword);
         if (string.IsNullOrWhiteSpace(storedHash))
@@ -103,20 +110,19 @@ public static class PasswordHasher
         // 1. Argon2id: $argon2id$v=19$m=65536,t=3,p=1$salt$hash
         if (storedHash.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase))
         {
-            return VerifyArgon2id(inputPassword, storedHash, username, logError);
+            return VerifyArgon2id(inputPassword, storedHash, username, onDiagnostic);
         }
 
         // 2. PBKDF2: $pbkdf2$iterations$salt$hash
         if (storedHash.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase))
         {
-            return VerifyPbkdf2(inputPassword, storedHash, username, logError);
+            return VerifyPbkdf2(inputPassword, storedHash, username, onDiagnostic);
         }
 
         // 3. Plaintext or unsalted SHA-256 (strictly Development only)
         if (!isDevelopment)
         {
-            string userHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username)))[..12];
-            logError?.Invoke($"Basic authentication rejected user (hash: {userHash}): Plaintext or unsalted passwords are strictly prohibited outside of Development.");
+            onDiagnostic?.Invoke(PasswordVerificationDiagnostic.PlaintextOrUnsaltedProhibitedInProduction);
             return false;
         }
 
@@ -146,7 +152,7 @@ public static class PasswordHasher
         string inputPassword,
         string storedHash,
         string username,
-        Action<string>? logError)
+        Action<PasswordVerificationDiagnostic>? onDiagnostic)
     {
         // Format: empty, "argon2id", "v=19", "m=...,t=...,p=...", salt, hash
         string[] parts = storedHash.Split('$');
@@ -168,8 +174,7 @@ public static class PasswordHasher
             iterations < MinArgon2Iterations || iterations > MaxArgon2Iterations ||
             parallelism < MinArgon2Parallelism || parallelism > MaxArgon2Parallelism)
         {
-            string userHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username)))[..12];
-            logError?.Invoke($"Basic authentication rejected user (hash: {userHash}): Argon2id cost parameters outside permitted bounds (m={memoryKb}, t={iterations}, p={parallelism}).");
+            onDiagnostic?.Invoke(PasswordVerificationDiagnostic.Argon2idParametersOutsideBounds);
             return false;
         }
 
@@ -235,7 +240,7 @@ public static class PasswordHasher
         string inputPassword,
         string storedHash,
         string username,
-        Action<string>? logError)
+        Action<PasswordVerificationDiagnostic>? onDiagnostic)
     {
         // Format: empty, "pbkdf2", iterations, salt_b64, hash_b64
         string[] parts = storedHash.Split('$');
@@ -246,8 +251,7 @@ public static class PasswordHasher
 
         if (iterations < MinPbkdf2Iterations || iterations > MaxPbkdf2Iterations)
         {
-            string userHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username)))[..12];
-            logError?.Invoke($"Basic authentication rejected user (hash: {userHash}): PBKDF2 iteration count {iterations} outside permitted range.");
+            onDiagnostic?.Invoke(PasswordVerificationDiagnostic.Pbkdf2IterationsOutsideBounds);
             return false;
         }
 

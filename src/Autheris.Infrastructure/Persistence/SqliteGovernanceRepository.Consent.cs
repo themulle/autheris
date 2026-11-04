@@ -220,7 +220,9 @@ public partial class SqliteGovernanceRepository
         CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        return await ConsentSqlCore.ReadActiveConsentsByRequestIdAsync(scope.Connection, consentRequestId, atTime, includeNotYetValid: true, ct).ConfigureAwait(false);
+        var consents = await ConsentSqlCore.ReadActiveConsentsByRequestIdAsync(scope.Connection, consentRequestId, atTime, includeNotYetValid: false, ct).ConfigureAwait(false);
+        await HydrateConsentsBatchAsync(scope.Connection, consents, ct).ConfigureAwait(false);
+        return consents;
     }
 
     public async Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default)
@@ -434,10 +436,18 @@ public partial class SqliteGovernanceRepository
     public async Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default)
     {
         await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
-        using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM CONSENT_REQUESTS WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", requestId.ToString());
-        await cmd.ExecuteNonQueryAsync(ct);
+        var conn = scope.Connection;
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ConsentSqlCore.DeleteConsentRequestRowsAsync(conn, tx, requestId, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            throw;
+        }
     }
 
     public async Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default)
@@ -764,8 +774,10 @@ public partial class SqliteGovernanceRepository
     public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default)
     {
         await using var scope = await ReadScopeAsync(ct).ConfigureAwait(false);
-        return await ConsentSqlCore.ReadExpiringConsentRowsAsync(
+        var consents = await ConsentSqlCore.ReadExpiringConsentRowsAsync(
             scope.Connection, ConsentSql.SelectExpiringConsentsSql, DateTimeOffset.UtcNow, threshold, maxResults, ct).ConfigureAwait(false);
+        await HydrateConsentsBatchAsync(scope.Connection, consents, ct).ConfigureAwait(false);
+        return consents;
     }
 
     public async Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default)

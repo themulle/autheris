@@ -320,6 +320,9 @@ RETURNING structure_version, content_version;";
                 prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, allActiveTableIds, ct).ConfigureAwait(false);
             }
 
+            var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
+                conn, null, CatalogKeyDefinitionStore.Sqlite, ct).ConfigureAwait(false);
+
             var results = new List<TableMetadata>(activeTables.Count);
             foreach (var (id, identifier, table) in activeTables)
             {
@@ -349,6 +352,8 @@ RETURNING structure_version, content_version;";
                     continue;
                 }
 
+                rowFilterStrategies.TryGetValue(id, out var rowFilterEvaluation);
+
                 var meta = new TableMetadata
                 {
                     Table = table,
@@ -358,7 +363,8 @@ RETURNING structure_version, content_version;";
                     PrimaryKeyColumns = pkColumns,
                     PrimaryKeyDirections = pkDirections,
                     Indexes = indexes,
-                    PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(id, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>()
+                    PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(id, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>(),
+                    RowFilterEvaluation = rowFilterEvaluation
                 };
 
                 try
@@ -450,7 +456,7 @@ RETURNING structure_version, content_version;";
 
                     targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
                     targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
-                    targetDocSource = canOverwriteDesc ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
+                    targetDocSource = (canOverwriteDesc || canOverwriteLongDesc) ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
                 }
                 else
                 {
@@ -562,16 +568,7 @@ RETURNING structure_version, content_version;";
             DocumentationSource = targetDocSource
         };
 
-        return new TableMetadata
-        {
-            Identifier = metadata.Identifier,
-            Table = updatedTable,
-            Columns = metadata.Columns,
-            ColumnMaskingRules = metadata.ColumnMaskingRules,
-            PrimaryKeyColumns = persistedPks,
-            PrimaryKeyDirections = persistedPkDirections,
-            Indexes = persistedIndexes
-        };
+        return (await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false))!;
     }
 
     public async Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(

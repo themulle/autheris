@@ -189,30 +189,112 @@ internal static class ConnectionGraphQlTypes
             }
         }
 
-        // 1. Resolve Primary Key Columns
-        var pkCols = table.Metadata.PrimaryKeyColumns.Count > 0
-            ? table.Metadata.PrimaryKeyColumns
-            : table.Metadata.Indexes.FirstOrDefault(idx => idx.IsUnique)?.Columns;
+        // 1. Resolve Primary Key Columns via BulkStreamKey
+        var streamKey = BulkStreamKey.TryResolve(table.Metadata);
+        bool keysetUnavailable = streamKey is null || streamKey.Columns.Count == 0;
+        var pkCols = streamKey?.Columns ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var defaultDirections = streamKey?.Directions;
 
-        if (pkCols == null || pkCols.Count == 0)
+        GraphQLException? deferredError = null;
+        if (keysetUnavailable)
         {
-            throw new GraphQLException(ErrorBuilder.New()
+            deferredError = new GraphQLException(ErrorBuilder.New()
                 .SetMessage("Table requires a primary key or unique index for keyset pagination.")
                 .SetCode("KEYSET_PAGINATION_UNAVAILABLE")
                 .Build());
         }
 
-        var directions = ResolveKeyDirections(table.Metadata, pkCols);
-
         // 2. Parse arguments
-        int first = ctx.ArgumentValue<int?>("first") ?? 100;
-
-        if (first < 0 || first > maxResponseRows)
+        int first = 100;
+        bool pageRangeViolated = false;
+        if (ctx.Selection.Arguments.TryGetValue("first", out var firstArg) && firstArg?.ValueLiteral != null)
         {
-            throw new GraphQLException(ErrorBuilder.New()
+            var pageNum = ReadPageNumber(firstArg.ValueLiteral, ctx);
+            if (pageNum.Invalid)
+            {
+                pageRangeViolated = true;
+            }
+            else if (pageNum.Value is { } val)
+            {
+                if (val < 0 || val > maxResponseRows)
+                {
+                    pageRangeViolated = true;
+                }
+                else
+                {
+                    first = (int)val;
+                }
+            }
+        }
+        else if (ctx.ArgumentValue<int?>("first") is { } directFirst)
+        {
+            if (directFirst < 0 || directFirst > maxResponseRows)
+            {
+                pageRangeViolated = true;
+            }
+            else
+            {
+                first = directFirst;
+            }
+        }
+
+        if (pageRangeViolated)
+        {
+            deferredError ??= new GraphQLException(ErrorBuilder.New()
                 .SetMessage(GatewayPageRangeException.FixedMessage)
                 .SetCode("INVALID_QUERY")
                 .Build());
+        }
+
+        // Validate orderBy against keyset columns sequence / prefix (HIGH-02)
+        var callerOrders = GraphQlTreeBuilder.ParseOrderByArgument(ctx.Selection, table, ctx);
+        var effectiveDirections = new List<KeyColumnDirection>(pkCols.Count);
+        if (callerOrders != null && callerOrders.Count > 0)
+        {
+            if (callerOrders.Count > pkCols.Count)
+            {
+                deferredError ??= new GraphQLException(ErrorBuilder.New()
+                    .SetMessage("The query is invalid.")
+                    .SetCode("INVALID_QUERY")
+                    .Build());
+            }
+            else
+            {
+                for (int i = 0; i < callerOrders.Count; i++)
+                {
+                    if (i >= pkCols.Count || !string.Equals(callerOrders[i].Column, pkCols[i], StringComparison.OrdinalIgnoreCase))
+                    {
+                        deferredError ??= new GraphQLException(ErrorBuilder.New()
+                            .SetMessage("The query is invalid.")
+                            .SetCode("INVALID_QUERY")
+                            .Build());
+                        break;
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < pkCols.Count; i++)
+        {
+            if (callerOrders != null && i < callerOrders.Count)
+            {
+                effectiveDirections.Add(callerOrders[i].Descending ? KeyColumnDirection.Descending : KeyColumnDirection.Ascending);
+            }
+            else
+            {
+                var dir = defaultDirections != null && defaultDirections.Count > i
+                    ? defaultDirections[i]
+                    : KeyColumnDirection.Ascending;
+                effectiveDirections.Add(dir);
+            }
+        }
+
+        // Default Ordering based on key columns and effective directions
+        var defaultOrdering = new List<TreeOrder>(pkCols.Count);
+        for (int i = 0; i < pkCols.Count; i++)
+        {
+            bool isDesc = effectiveDirections[i] == KeyColumnDirection.Descending;
+            defaultOrdering.Add(new TreeOrder(pkCols[i], isDesc));
         }
 
         string? after = ctx.ArgumentValue<string?>("after");
@@ -243,7 +325,7 @@ internal static class ConnectionGraphQlTypes
         var selectedColumns = CollectSelectedNodeColumns(ctx);
         var whereFilter = GraphQlTreeBuilder.ParseWhereArgument(ctx.Selection, table, ctx);
 
-        // Build KeysetCursorContext
+        // Build KeysetCursorContext with effectiveDirections
         var cursorContext = KeysetCursorContextFactory.ForGraphQl(
             tenantId: tenantId.Value,
             metadata: table.Metadata,
@@ -251,52 +333,91 @@ internal static class ConnectionGraphQlTypes
             callerSid: callerSid,
             filter: whereFilter,
             select: selectedColumns,
-            keyDirections: directions);
+            keyDirections: effectiveDirections);
 
         // 5. Decode cursor and build seek predicate if 'after' is supplied
         TreeFilter? seekPredicate = null;
         if (!string.IsNullOrWhiteSpace(after))
         {
-            IReadOnlyDictionary<string, object?> pkValues;
             try
             {
-                pkValues = cursorEncoder.DecodeCursor(after, table.Metadata, cursorContext);
+                var pkValues = cursorEncoder.DecodeCursor(after, table.Metadata, cursorContext);
+                seekPredicate = BuildSeekPredicate(table.Metadata, pkCols, effectiveDirections, pkValues);
             }
             catch (InvalidCursorException ex)
             {
-                throw new GraphQLException(ErrorBuilder.New()
+                deferredError ??= new GraphQLException(ErrorBuilder.New()
                     .SetMessage(ex.Message)
                     .SetCode("INVALID_QUERY")
                     .Build());
             }
-
-            seekPredicate = BuildSeekPredicate(table.Metadata, pkCols, directions, pkValues);
         }
 
-        // 6. Default Ordering based on key columns and directions
-        var defaultOrdering = new List<TreeOrder>(pkCols.Count);
-        for (int i = 0; i < pkCols.Count; i++)
-        {
-            bool isDesc = directions != null && directions.Count > i && directions[i] == KeyColumnDirection.Descending;
-            defaultOrdering.Add(new TreeOrder(pkCols[i], isDesc));
-        }
+        int effectiveLimit = (deferredError != null || keysetUnavailable) ? 0 : first;
 
-        // 7. Build Connection Tree Node
+        // 6. Build Connection Tree Node
         var queryNode = GraphQlTreeBuilder.BuildConnectionTree(
             ctx,
             table,
             schemaModel,
-            first,
+            effectiveLimit,
             maxResponseRows,
             seekPredicate,
             pkCols,
             defaultOrdering);
+
+        // Pre-execution SEC-412 masked columns check and registration
+        var maskedColumns = treeService.GetMaskedColumns(principal, queryNode, opId);
+        if (maskedColumns != null)
+        {
+            foreach (var pk in pkCols)
+            {
+                if (maskedColumns.Any(m => m.Path.Count == 0 && string.Equals(m.Column, pk, StringComparison.OrdinalIgnoreCase)))
+                {
+                    deferredError ??= new GraphQLException(ErrorBuilder.New()
+                        .SetMessage("Keyset pagination is unavailable when primary key columns are masked.")
+                        .SetCode("KEYSET_PAGINATION_UNAVAILABLE")
+                        .Build());
+                    break;
+                }
+            }
+
+            RegisterMaskedColumns(ctx, maskedColumns);
+        }
 
         // SEC-RG-08: Execute tree query
         JsonDocument doc;
         try
         {
             doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted).ConfigureAwait(false);
+        }
+        catch (GatewayForbiddenException)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
+        }
+        catch (Autheris.Application.Data.Relations.CrossSourceRelationException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
+        }
+        catch (GatewaySecurityException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode ?? "ACCESS_DENIED").Build());
+        }
+        catch (KeysetStreamingUnavailableException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("KEYSET_PAGINATION_UNAVAILABLE").Build());
+        }
+        catch (GatewayThrottledException ex)
+        {
+            if (httpContext != null && !httpContext.Response.HasStarted)
+            {
+                httpContext.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetMessage(ex.Message)
+                .SetCode("TOO_MANY_REQUESTS")
+                .SetExtension("retryAfterSeconds", ex.RetryAfterSeconds)
+                .Build());
         }
         catch (GatewayPageRangeException)
         {
@@ -313,37 +434,27 @@ internal static class ConnectionGraphQlTypes
                 .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
                 .Build());
         }
-        catch (GatewayForbiddenException)
+        catch (Exception ex)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
-        }
-        catch (GatewayThrottledException ex)
-        {
-            if (httpContext != null && !httpContext.Response.HasStarted)
+            var classified = Autheris.Application.Common.DataAccessErrorClassifier.Classify(ex);
+            if (classified == Autheris.Application.Common.DataAccessErrorKind.Timeout)
             {
-                httpContext.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                throw new GraphQLException(ErrorBuilder.New().SetMessage("The database query timed out.").SetCode("TIMEOUT").Build());
             }
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("TOO_MANY_REQUESTS").Build());
+            if (classified == Autheris.Application.Common.DataAccessErrorKind.Unavailable)
+            {
+                throw new GraphQLException(ErrorBuilder.New().SetMessage("The database is currently unavailable.").SetCode("UNAVAILABLE").Build());
+            }
+            throw;
+        }
+
+        if (deferredError != null)
+        {
+            throw deferredError;
         }
 
         using (doc)
         {
-            // SEC-412 Check: If any PK column is masked for the caller, reject keyset pagination (fail closed)
-            var maskedColumns = treeService.GetMaskedColumns(principal, queryNode, opId);
-            if (maskedColumns != null)
-            {
-                foreach (var pk in pkCols)
-                {
-                    if (maskedColumns.Any(m => m.Path.Count == 0 && string.Equals(m.Column, pk, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        throw new GraphQLException(ErrorBuilder.New()
-                            .SetMessage("Keyset pagination is unavailable when primary key columns are masked.")
-                            .SetCode("KEYSET_PAGINATION_UNAVAILABLE")
-                            .Build());
-                    }
-                }
-            }
-
             var root = doc.RootElement.Clone();
             var list = new List<JsonElement>();
             if (root.ValueKind == JsonValueKind.Array)
@@ -385,13 +496,66 @@ internal static class ConnectionGraphQlTypes
                 StartCursor: edges.Count > 0 ? edges[0].Cursor : null,
                 EndCursor: edges.Count > 0 ? edges[^1].Cursor : null);
 
+            ctx.ContextData["AutherisRowsReturned"] = edges.Count;
             return new GraphQlConnection(edges, pageInfo, edges.Count);
+        }
+    }
+
+    private const string MaskedColumnKeysContextKey = "AutherisMaskedColumnKeys";
+
+    private static void RegisterMaskedColumns(IResolverContext ctx, IReadOnlyList<TreeMaskedColumn>? masked)
+    {
+        if (masked is null || masked.Count == 0)
+        {
+            return;
+        }
+
+        System.Collections.Concurrent.ConcurrentDictionary<string, byte> keys;
+        lock (ctx.ContextData)
+        {
+            if (!ctx.ContextData.TryGetValue(MaskedColumnKeysContextKey, out var existing) ||
+                existing is not System.Collections.Concurrent.ConcurrentDictionary<string, byte> found)
+            {
+                found = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+                ctx.ContextData[MaskedColumnKeysContextKey] = found;
+            }
+            keys = found;
+        }
+
+        foreach (var m in masked)
+        {
+            keys[string.Join('/', m.Path.Prepend(ctx.ResponseName)) + "\u001f" + m.Column] = 0;
+            keys[string.Join('/', new[] { ctx.ResponseName, "edges", "node" }.Concat(m.Path)) + "\u001f" + m.Column] = 0;
+        }
+    }
+
+    private readonly record struct PageNumber(long? Value, bool Invalid);
+
+    private static PageNumber ReadPageNumber(IValueNode node, IResolverContext context)
+    {
+        switch (node)
+        {
+            case NullValueNode:
+                return default;
+            case IntValueNode iv:
+                return long.TryParse(iv.Value, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+                    ? new PageNumber(parsed, false)
+                    : new PageNumber(iv.Value.StartsWith('-') ? long.MinValue : long.MaxValue, false);
+            case VariableNode vn:
+                var variables = context.Variables;
+                if (variables.TryGetValue<IValueNode>(vn.Name.Value, out var literal) && literal != null)
+                {
+                    return literal is VariableNode ? default : ReadPageNumber(literal, context);
+                }
+                return default;
+            default:
+                return new PageNumber(null, true);
         }
     }
 
     private static IReadOnlyList<string> CollectSelectedNodeColumns(IResolverContext ctx)
     {
-        var result = new List<string>();
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var connectionSelectionSet = ctx.Operation.GetSelectionSet(ctx.Selection);
         foreach (var sel in connectionSelectionSet.Selections)
         {
@@ -419,7 +583,7 @@ internal static class ConnectionGraphQlTypes
             }
         }
 
-        return result;
+        return result.ToList();
     }
 
     private static TreeFilter BuildSeekPredicate(
@@ -455,27 +619,9 @@ internal static class ConnectionGraphQlTypes
         return orBranches.Count == 1 ? orBranches[0] : new TreeOrFilter(orBranches);
     }
 
-    private static IReadOnlyList<KeyColumnDirection>? ResolveKeyDirections(TableMetadata metadata, IReadOnlyList<string> pkCols)
-    {
-        if (metadata.PrimaryKeyColumns.Count > 0 && metadata.PrimaryKeyDirections.Count > 0)
-        {
-            return metadata.PrimaryKeyDirections;
-        }
-
-        var matchingIndex = metadata.Indexes.FirstOrDefault(idx =>
-            idx.Columns.Count == pkCols.Count &&
-            idx.Columns.SequenceEqual(pkCols, StringComparer.OrdinalIgnoreCase));
-        if (matchingIndex?.Directions is { Count: > 0 } indexDirs)
-        {
-            return indexDirs;
-        }
-
-        return null;
-    }
-
     private static object? ReadElementValue(JsonElement elem) => elem.ValueKind switch
     {
-        JsonValueKind.Number => elem.TryGetInt64(out var l) ? (elem.TryGetInt32(out var i) ? i : l) : elem.GetDouble(),
+        JsonValueKind.Number => elem.TryGetInt64(out var l) ? l : elem.TryGetDecimal(out var d) ? d : elem.GetDouble(),
         JsonValueKind.String => elem.GetString(),
         JsonValueKind.True => true,
         JsonValueKind.False => false,

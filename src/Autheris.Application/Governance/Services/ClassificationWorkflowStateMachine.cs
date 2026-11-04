@@ -6,6 +6,7 @@ using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -148,7 +149,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
 
         if (isReject)
         {
-            _logger.LogInformation("Proposal {ProposalId} rejected by {Reviewer}.", proposal.ProposalId, request.ReviewerSid);
+            _logger.LogInformation("Proposal {ProposalId} rejected by {Reviewer}.", proposal.ProposalId, LogSanitizer.Sanitize(request.ReviewerSid));
             result = new TableClassificationApprovalResult(
                 Success: true,
                 NewStatus: "REJECTED",
@@ -166,7 +167,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                  string.Equals(proposal.DataOwnerSid, reviewerSid, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("SoD Violation: Data Owner {Sid} attempted to act as Governance Reviewer on proposal {ProposalId}.",
-                proposal.DataOwnerSid, proposal.ProposalId);
+                LogSanitizer.Sanitize(proposal.DataOwnerSid), proposal.ProposalId);
 
             result = new TableClassificationApprovalResult(
                 Success: false,
@@ -223,7 +224,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                 var distinctViolation = CheckDistinctApprovers(proposal, reviewerSid, isGovRole);
                 if (distinctViolation != null)
                 {
-                    _logger.LogWarning("Four-eyes violation on proposal {ProposalId}: {Reason}", proposal.ProposalId, distinctViolation);
+                    _logger.LogWarning("Four-eyes violation on proposal {ProposalId}: {Reason}", proposal.ProposalId, LogSanitizer.Sanitize(distinctViolation));
                     Diagnostics.ClassificationDiagnostics.RecordSodViolation(proposal.TableIdentifier.ToQualifiedName());
                     Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "BLOCKED_SOD");
                     return Fail(proposal, request, "DISTINCT_APPROVER_REQUIRED", distinctViolation, recordTransition: false);
@@ -264,7 +265,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                     !await _totpService!.VerifyAndConsumeTotpAsync(reviewerSid, secret, request.StepUpAuthToken!, ct).ConfigureAwait(false))
                 {
                     _logger.LogWarning("Invalid or consumed Step-Up 2FA token submitted by {Reviewer} for proposal {ProposalId}.",
-                        request.ReviewerSid, proposal.ProposalId);
+                        LogSanitizer.Sanitize(request.ReviewerSid), proposal.ProposalId);
 
                     result = new TableClassificationApprovalResult(
                         Success: false,

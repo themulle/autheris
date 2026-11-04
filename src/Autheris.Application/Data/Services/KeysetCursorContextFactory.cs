@@ -234,6 +234,7 @@ public static class KeysetCursorContextFactory
                 writer.WriteString("type", "comp");
                 writer.WriteString("column", comp.Column?.ToLowerInvariant());
                 writer.WriteString("op", comp.Operator.ToString().ToLowerInvariant());
+                writer.WriteBoolean("nullOp", comp.BindNullOperand);
                 writer.WritePropertyName("value");
                 WriteObjectValue(writer, comp.Value);
                 break;

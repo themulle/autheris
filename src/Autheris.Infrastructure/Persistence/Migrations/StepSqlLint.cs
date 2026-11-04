@@ -67,10 +67,11 @@ internal static class StepSqlLint
             violations.Add("the phase3 marker id is malformed");
         }
 
-        var lookupVariables = DeclaredFromDefaultConstraintLookup.Matches(string.Join(";", Normalize(normalizedSql)))
+        var strippedSql = StripComments(normalizedSql);
+        var lookupVariables = DeclaredFromDefaultConstraintLookup.Matches(string.Join(";", Normalize(strippedSql)))
             .Select(m => m.Groups[1].Value.ToLowerInvariant())
             .ToHashSet(StringComparer.Ordinal);
-        var statements = Normalize(DynamicDropConstraint.Replace(normalizedSql, m =>
+        var statements = Normalize(DynamicDropConstraint.Replace(strippedSql, m =>
         {
             if (!lookupVariables.Contains(m.Groups["v"].Value.ToLowerInvariant()))
             {
@@ -206,6 +207,40 @@ internal static class StepSqlLint
         }
 
         return sql.Length;
+    }
+
+    private static string StripComments(string sql)
+    {
+        var sb = new System.Text.StringBuilder(sql.Length);
+        var i = 0;
+        while (i < sql.Length)
+        {
+            var c = sql[i];
+            if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                var end = sql.IndexOf('\n', i + 2);
+                i = end < 0 ? sql.Length : end + 1;
+                sb.Append(' ');
+            }
+            else if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                var end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? sql.Length : end + 2;
+                sb.Append(' ');
+            }
+            else if (c == '\'')
+            {
+                var end = SkipQuoted(sql, i, '\'');
+                sb.Append(sql.AsSpan(i, end - i));
+                i = end;
+            }
+            else
+            {
+                sb.Append(c);
+                i++;
+            }
+        }
+        return sb.ToString();
     }
 
     private static Regex Re(string pattern) => new(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);

@@ -5,6 +5,7 @@ using System.Security.Claims;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Options;
 using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Logging;
@@ -90,8 +91,15 @@ public sealed class TenantResolver : ITenantResolver
                     return new TenantResolution(TenantResolutionOutcome.Invalid, null);
                 }
 
-                claim = realm.TenantBinding.ResolveClaim(principal);
-                fromRealm = true;
+                if (realm.TenantBinding.Kind == TenantBindingKind.Unbound)
+                {
+                    claim = TenantClaimReader.Read(principal);
+                }
+                else
+                {
+                    claim = realm.TenantBinding.ResolveClaim(principal);
+                    fromRealm = true;
+                }
             }
             else
             {

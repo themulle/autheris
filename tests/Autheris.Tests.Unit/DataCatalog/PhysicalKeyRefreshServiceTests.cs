@@ -32,7 +32,7 @@ public sealed class PhysicalKeyRefreshServiceTests
     private readonly IEpochValidationService _epochService = Substitute.For<IEpochValidationService>();
     private readonly Sid _actor = new("user:alice");
 
-    private static TableMetadata CreateSqlTable(string domain, string schema, string table, string[] pk, KeyColumnDirection[]? pkDirs = null) => new()
+    private static TableMetadata CreateSqlTable(string domain, string schema, string table, string[] pk, KeyColumnDirection[]? pkDirs = null, string[]? columns = null) => new()
     {
         Identifier = new TableIdentifier(domain, schema, table),
         Table = new Table
@@ -44,6 +44,7 @@ public sealed class PhysicalKeyRefreshServiceTests
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },
+        Columns = (columns ?? pk).Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList(),
         PrimaryKeyColumns = pk,
         PrimaryKeyDirections = pkDirs ?? [],
         Indexes = []
@@ -157,5 +158,83 @@ public sealed class PhysicalKeyRefreshServiceTests
         result.TablesScanned.ShouldBe(1);
         result.Details.Count.ShouldBe(1);
         result.Details[0].Table.ShouldContain("orders");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PhysicalKeyRefreshService_WhenTenantRestricted_OnlyRefreshesTenantTables()
+    {
+        var tenantOrders = CreateSqlTable("default", "dbo", "orders", ["id"]) with { OwnerTenantId = "tenant-a" };
+        var otherOrders = CreateSqlTable("default", "dbo", "other", ["id"]) with { OwnerTenantId = "tenant-b" };
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([tenantOrders, otherOrders]);
+
+        var physicalKey = new PhysicalKey(true, true, ["id"], [A]);
+        var snapshot = new PhysicalKeySnapshot(PhysicalKeySnapshotState.Known, [physicalKey], TargetSqlDialect.SqlServer);
+        _physicalKeys.ReadAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult(snapshot));
+
+        var service = new PhysicalKeyRefreshService(
+            _metadataRepo,
+            _physicalKeys,
+            _auditWriter,
+            _epochService,
+            null,
+            NullLogger<PhysicalKeyRefreshService>.Instance);
+
+        var request = new PhysicalKeyRefreshRequest(DryRun: true);
+        var result = await service.RefreshDatasourceKeysAsync("default", request, _actor, new TenantId("tenant-a"), CancellationToken.None);
+
+        result.TablesScanned.ShouldBe(1);
+        result.Details.Count.ShouldBe(1);
+        result.Details[0].Table.ShouldContain("orders");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PhysicalKeyRefreshService_WhenNonUniqueIndexesChanged_AuditsAndPersistsAndInvalidatesEpoch()
+    {
+        var orders = CreateSqlTable("default", "dbo", "orders", ["id"], [A], columns: ["id", "created_at"]);
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([orders]);
+
+        var physicalIndexRepo = Substitute.For<IPhysicalIndexRepository>();
+        var nonUniqueIdx = new PhysicalNonUniqueIndex(["created_at"], [D]);
+        var snapshot = new PhysicalKeySnapshot(
+            PhysicalKeySnapshotState.Known,
+            [new PhysicalKey(true, true, ["id"], [A])],
+            TargetSqlDialect.SqlServer,
+            new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Known, [nonUniqueIdx]));
+
+        _physicalKeys.ReadAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult(snapshot));
+
+        var service = new PhysicalKeyRefreshService(
+            _metadataRepo,
+            _physicalKeys,
+            _auditWriter,
+            _epochService,
+            physicalIndexRepo,
+            NullLogger<PhysicalKeyRefreshService>.Instance);
+
+        var request = new PhysicalKeyRefreshRequest(DryRun: false);
+        var result = await service.RefreshDatasourceKeysAsync("default", request, _actor, CancellationToken.None);
+
+        result.IndexesUpdated.ShouldBe(1);
+
+        // Required audit before persistence
+        await _auditWriter.Received(1).RecordRequiredAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == AuditEventTypes.CatalogPhysicalIndexesChanged &&
+                e.ActorSid == _actor &&
+                e.TargetTable == orders.Identifier.ToString()),
+            Arg.Any<CancellationToken>());
+
+        await physicalIndexRepo.Received(1).ReplacePhysicalIndexesAsync(
+            orders.Identifier,
+            Arg.Any<IReadOnlyList<PhysicalIndexDefinition>>(),
+            Arg.Any<CancellationToken>());
+
+        await _epochService.Received(1).InvalidateEpochAsync(orders.Identifier, Arg.Any<CancellationToken>());
     }
 }

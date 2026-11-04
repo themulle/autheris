@@ -93,7 +93,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         Func<string, string, RelationCardinality?>? relationLookup = null,
         AggregationOptions? aggregation = null,
         int maxExecutionDepth = 25,
-        Func<string, TableMetadata?>? tableMetadataLookup = null)
+        Func<string, TableMetadata?>? tableMetadataLookup = null,
+        ICatalogRelationRegistry? relationRegistry = null)
     {
         var rule = new QueryCostAnalyzerRule(
             int.MaxValue,
@@ -105,7 +106,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
             aggregateFieldCostWeight: aggregation?.AggregateFieldCostWeight ?? AggregationOptions.DefaultAggregateFieldCostWeight,
             maxGroupByColumns: aggregation?.MaxGroupByColumns ?? AggregationOptions.DefaultMaxGroupByColumns,
             maxAggregates: aggregation?.MaxAggregates ?? AggregationOptions.DefaultMaxAggregates,
-            tableMetadataLookup: tableMetadataLookup);
+            tableMetadataLookup: tableMetadataLookup,
+            relationRegistry: relationRegistry);
         return rule.ComputeCost(document, schema, variableValues);
     }
 
@@ -259,6 +261,26 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         string.Equals(name, "last", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(name, "limit", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(name, "take", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsConnectionField(FieldNode field, IOutputFieldDefinition? fieldDef)
+    {
+        if (fieldDef?.Type is not null)
+        {
+            var named = UnwrapType(fieldDef.Type);
+            if (named is INameProvider np && np.Name.EndsWith("Connection", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        if (field.Name.Value.EndsWith("Connection", StringComparison.Ordinal) &&
+            (field.Arguments.Any(a => a.Name.Value is "first" or "after") || fieldDef is null))
+        {
+            return true;
+        }
+
+        return false;
+    }
 
     private static int SafeAdd(int a, int b) => (int)Math.Min((long)int.MaxValue, (long)a + b);
 
@@ -420,10 +442,22 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     isList = field.Arguments.Any(a => IsRowLimitArgument(a.Name.Value));
                 }
 
+                bool isConnection = IsConnectionField(field, fieldDef);
+                bool isSyntheticConnectionContainer = currentType is not null &&
+                    ((currentType.Name.EndsWith("Connection", StringComparison.Ordinal) && field.Name.Value == "edges") ||
+                     (currentType.Name.EndsWith("Edge", StringComparison.Ordinal) && field.Name.Value == "node"));
+
+                if (isSyntheticConnectionContainer)
+                {
+                    isList = false;
+                }
+
+                bool isPagedList = (isList || isConnection) && !isSyntheticConnectionContainer;
+
                 // SEC M-13: Pagination wird unabhängig vom Rückgabetyp erkannt (auch Objekt-Payloads wie TableRecordPayload).
-                bool acceptsPagination = fieldDef != null
+                bool acceptsPagination = !isSyntheticConnectionContainer && (isConnection || (fieldDef != null
                     ? fieldDef.Arguments.Any(a => IsRowLimitArgument(a.Name))
-                    : field.Arguments.Any(a => IsRowLimitArgument(a.Name.Value));
+                    : field.Arguments.Any(a => IsRowLimitArgument(a.Name.Value))));
 
                 if (acceptsPagination)
                 {
@@ -550,10 +584,10 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                         }
                     }
 
-                    if (treeField && !limitArgumentPresent)
+                    if ((treeField || isConnection) && !limitArgumentPresent)
                     {
                         // An omitted page size is the field's default page (argument default), which is exactly what executes.
-                        requestedLimit = treeDefault;
+                        requestedLimit = isConnection ? Math.Min(100, _maxResponseRows) : treeDefault;
                     }
 
                     if (rejectedAtExecution)
@@ -575,6 +609,10 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     {
                         effectiveRows = 10;
                     }
+                    else if (isConnection)
+                    {
+                        effectiveRows = Math.Min(100, _maxResponseRows);
+                    }
                     else if (!isList && !limitIsVariable)
                     {
                         effectiveRows = Math.Min(DefaultPayloadPageSize, _maxResponseRows);
@@ -585,12 +623,12 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                         effectiveRows = _maxResponseRows;
                     }
 
-                    int multiplier = (isList && effectiveRows > 1) ? _defaultListMultiplier : _payloadRowMultiplier;
+                    int multiplier = (isPagedList && effectiveRows > 1) ? _defaultListMultiplier : _payloadRowMultiplier;
 
                     bool isRootField = currentDepth <= 1 || (currentType != null && currentType == schema.QueryType);
 
-                    // Issue #421 (WP-D of #417): Apply surcharge multiplier if root list plan has no usable index
-                    if (isRootField && isList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
+                    // Issue #421 (WP-D of #417) / CRIT-02: Apply surcharge multiplier if root list plan has no usable index
+                    if (isRootField && isPagedList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
                     {
                         var tableMeta = _tableMetadataLookup?.Invoke(field.Name.Value)
                             ?? (_tableMetadataLookup != null && field.Name.Value.EndsWith("Connection", StringComparison.Ordinal)
@@ -600,9 +638,10 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                         if (tableMeta != null)
                         {
+                            var visibleColumns = tableMeta.Columns.Select(c => c.ColumnName).ToList();
                             var orderBy = IndexUsabilityEvaluator.ExtractOrderBy(field.Arguments.FirstOrDefault(a => a.Name.Value == "orderBy"), variableValues);
                             var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(field.Arguments.FirstOrDefault(a => a.Name.Value == "where"), variableValues);
-                            if (!IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleColumns: null, orderBy, filterColumns))
+                            if (!IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleColumns, orderBy, filterColumns))
                             {
                                 multiplier = (int)Math.Min((long)int.MaxValue, (long)Math.Ceiling(multiplier * _costOptions.UnindexedRootListSurchargeMultiplier));
                             }
@@ -613,11 +652,11 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                     if (field.SelectionSet != null)
                     {
-                        // SEC M-9: Multiply nested list selection costs by effectiveRows using saturating arithmetic
+                        // SEC M-9 / CRIT-02: Multiply nested list selection costs by effectiveRows using saturating arithmetic
                         var maskingCost = CalculateMaskingCost(field.SelectionSet, fragments, activeFragments, maskingCostCache, currentDepth + 1);
                         var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues, currentDepth + 1);
                         var totalChild = SafeAdd(maskingCost, childCost);
-                        if (isList)
+                        if (isPagedList)
                         {
                             var nestedCost = (int)Math.Min((long)int.MaxValue, (long)totalChild * Math.Max(1, effectiveRows));
                             cost = SafeAdd(cost, nestedCost);
@@ -870,101 +909,5 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
             }
         }
         return maskingCost;
-    }
-
-    private static bool IsMaskedCandidate(string fieldName)
-    {
-        return fieldName.Contains("email", StringComparison.OrdinalIgnoreCase) ||
-               fieldName.Contains("iban", StringComparison.OrdinalIgnoreCase) ||
-               fieldName.Contains("salary", StringComparison.OrdinalIgnoreCase) ||
-               fieldName.Contains("ssn", StringComparison.OrdinalIgnoreCase) ||
-               fieldName.Contains("creditcard", StringComparison.OrdinalIgnoreCase) ||
-               fieldName.Contains("mask", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsListType(IType type)
-    {
-        var current = type;
-        while (current is IWrapperType wrapper)
-        {
-            if (current.Kind == TypeKind.List) return true;
-            current = wrapper.InnerType;
-        }
-        return current.Kind == TypeKind.List;
-    }
-
-    private static IType UnwrapType(IType type)
-    {
-        var current = type;
-        while (current is IWrapperType wrapper)
-        {
-            current = wrapper.InnerType;
-        }
-        return current;
-    }
-
-    private bool IsVerifiedSingleObjectRelation(
-        IObjectTypeDefinition? currentType,
-        string fieldName,
-        IOutputFieldDefinition? fieldDef)
-    {
-        // SEC-GOV177-05: Multiplier 1.0 is ONLY permitted when the schema field and catalog metadata
-        // explicitly verify RelationCardinality.OneToOne or RelationCardinality.ManyToOne and IsListType == false.
-        // Ambiguous, uncataloged, union, interface, or unverified field types MUST fail closed and apply DefaultListMultiplier (10).
-
-        if (fieldDef != null && IsListType(fieldDef.Type))
-        {
-            return false;
-        }
-
-        string? typeName = currentType?.Name;
-
-        // 1. Direct relation lookup delegate if provided
-        if (_relationLookup != null && !string.IsNullOrEmpty(typeName))
-        {
-            var card = _relationLookup(typeName, fieldName);
-            if (card is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
-            {
-                return true;
-            }
-        }
-
-        // 2. CatalogRelationRegistry check
-        var reg = _relationRegistry ?? CatalogRelationRegistry.Current;
-        if (!string.IsNullOrEmpty(typeName) && reg.TryGetCardinality(typeName, fieldName, out var registryCard))
-        {
-            if (registryCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
-            {
-                return true;
-            }
-        }
-
-        // 3. Schema directive check on field definition
-        if (fieldDef is IDirectivesProvider dirProvider)
-        {
-            var dir = dirProvider.Directives.FirstOrDefault("relation") ??
-                      dirProvider.Directives.FirstOrDefault("cardinality");
-            if (dir != null)
-            {
-                if (dir.Arguments.TryGetValue("cardinality", out var cVal) && cVal is StringValueNode sn)
-                {
-                    if (Enum.TryParse<RelationCardinality>(sn.Value, true, out var parsedCard) &&
-                        parsedCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
-                    {
-                        return true;
-                    }
-                }
-                if (dir.Arguments.TryGetValue("value", out var vVal) && vVal is StringValueNode svn)
-                {
-                    if (Enum.TryParse<RelationCardinality>(svn.Value, true, out var parsedCard) &&
-                        parsedCard is RelationCardinality.OneToOne or RelationCardinality.ManyToOne)
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
     }
 }

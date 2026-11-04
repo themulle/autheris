@@ -14,6 +14,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -163,7 +164,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         // SEC-IRC-01: Authenticate caller and enforce fail-closed authorization
         if (principal.Identity?.IsAuthenticated != true)
         {
-            _logger.LogWarning("Unauthenticated attempt to load Iceberg table '{Namespace}.{Table}' for tenant '{Tenant}'.", @namespace, table, tenantId);
+            _logger.LogWarning("Unauthenticated attempt to load Iceberg table '{Namespace}.{Table}' for tenant '{Tenant}'.", LogSanitizer.Sanitize(@namespace), LogSanitizer.Sanitize(table), LogSanitizer.Sanitize(tenantId));
             await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
             {
                 TenantId = new TenantId(tenantId),
@@ -274,13 +275,13 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         // Wunsch 9: unknown and inactive tables answer exactly like denied ones, so the endpoint cannot probe the catalog.
         if (tableMeta == null || !tableMeta.Table.IsActive)
         {
-            _logger.LogWarning("Iceberg table {Namespace}.{Table} not found or inactive in tenant {Tenant}; answering as denied.", @namespace, table, tenantId);
+            _logger.LogWarning("Iceberg table {Namespace}.{Table} not found or inactive in tenant {Tenant}; answering as denied.", LogSanitizer.Sanitize(@namespace), LogSanitizer.Sanitize(table), LogSanitizer.Sanitize(tenantId));
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
 
         if (_consentService == null || _consentRepo == null)
         {
-            _logger.LogError("Iceberg table {TableId} requested but consent services are not configured; denying (fail-closed).", tableId);
+            _logger.LogError("Iceberg table {TableId} requested but consent services are not configured; denying (fail-closed).", LogSanitizer.Sanitize(tableId.ToString()));
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
 
@@ -304,7 +305,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             userSid, groupSids, roles, tableId, activeConsents, tableMeta.Dialect, allUserSids: null, callerScopes: scopes.Count > 0 ? scopes : null);
         if (!decision.IsAllowed)
         {
-            _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
+            _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", LogSanitizer.Sanitize(userSid.Value), LogSanitizer.Sanitize(tableId.ToString()));
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
 
@@ -313,7 +314,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenant, tableMeta), ct).ConfigureAwait(false);
         if (mandatory.IsDenied || mandatory.PredicateSql != null)
         {
-            _logger.LogWarning("Virtual filters apply to user {User} on Iceberg table {TableId}; raw access refused", userSid, tableId);
+            _logger.LogWarning("Virtual filters apply to user {User} on Iceberg table {TableId}; raw access refused", LogSanitizer.Sanitize(userSid.Value), LogSanitizer.Sanitize(tableId.ToString()));
             throw new SecurityException($"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' is restricted by virtual filters.");
         }
 
@@ -323,7 +324,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             var rebacAllowed = await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenant, userSid, tableId, ct).ConfigureAwait(false);
             if (!rebacAllowed)
             {
-                _logger.LogWarning("ReBAC denied user {User} access to Iceberg table {TableId}", userSid, tableId);
+                _logger.LogWarning("ReBAC denied user {User} access to Iceberg table {TableId}", LogSanitizer.Sanitize(userSid.Value), LogSanitizer.Sanitize(tableId.ToString()));
                 throw new SecurityException($"Access to table '{@namespace}.{table}' denied by ReBAC policy.");
             }
         }
@@ -362,7 +363,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             var abac = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct).ConfigureAwait(false);
             if (!abac.IsAllowed)
             {
-                _logger.LogWarning("Casbin ABAC denied user {User} raw access to Iceberg table {TableId}", userSid, tableId);
+                _logger.LogWarning("Casbin ABAC denied user {User} raw access to Iceberg table {TableId}", LogSanitizer.Sanitize(userSid.Value), LogSanitizer.Sanitize(tableId.ToString()));
                 throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
             }
 
