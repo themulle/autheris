@@ -52,6 +52,14 @@ public sealed record TableAggregateIntent(
     string? Transport = null,
     IReadOnlyList<TimeBucketSpecification>? TimeBuckets = null);
 
+/// <summary>Shape of the raw SQL time-bucket value before key formatting (#449, #450).</summary>
+public enum TimeBucketKeyShape
+{
+    UtcInstant,
+    ZoneWall,
+    Date
+}
+
 /// <summary>
 /// Planned Trino SQL statement for a governed aggregation query (#28, #37).
 /// </summary>
@@ -60,7 +68,8 @@ public sealed record PlannedTableAggregate(
     IReadOnlyDictionary<string, object?> Parameters,
     IReadOnlyList<string> GroupByColumns,
     IReadOnlyList<AggregateSelection> Aggregates,
-    string CountColumnAlias);
+    string CountColumnAlias,
+    IReadOnlyDictionary<string, TimeBucketKeyShape>? BucketKeyShapes = null);
 
 /// <summary>
 /// WP-ARC-B-01: shared governed table-read planner. Authorizes columns against the <see cref="TableAccessDecision"/>, guards

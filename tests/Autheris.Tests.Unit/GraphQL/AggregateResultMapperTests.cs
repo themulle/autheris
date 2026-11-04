@@ -287,4 +287,57 @@ public sealed class AggregateResultMapperTests
         dto.Count.ShouldBe(12L);
         typeof(AggregateResultDto).GetProperties().Select(p => p.Name).ShouldNotContain("SuppressedRowsCount");
     }
+
+    [Fact]
+    public void Map_BucketColumn_PassesOffsetKeyVerbatim()
+    {
+        var ts = Col("ts", CatalogFieldType.DateTime);
+        var table = TableOf(ts);
+        var offsetKey = "2026-10-06T00:00:00+02:00";
+        var row = Row(new Dictionary<string, object?> { ["ts"] = offsetKey }, 1, new Dictionary<string, object?> { ["count"] = 1L });
+
+        var dto = AggregateResultMapper.Map(
+            Result([row], 1),
+            table,
+            [ts],
+            [Agg("count", AggregateFunction.Count, null)],
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ts" });
+
+        dto.Groups.Single().Key["ts"].ShouldBe(offsetKey);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Map_BucketColumn_NonStringKey_ResultTypeMismatch()
+    {
+        var ts = Col("ts", CatalogFieldType.DateTime);
+        var table = TableOf(ts);
+        var row = Row(new Dictionary<string, object?> { ["ts"] = DateTime.UtcNow }, 1, new Dictionary<string, object?> { ["count"] = 1L });
+
+        var ex = Should.Throw<GraphQLException>(() => AggregateResultMapper.Map(
+            Result([row], 1),
+            table,
+            [ts],
+            [Agg("count", AggregateFunction.Count, null)],
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ts" }));
+
+        ex.Errors.Single().Code.ShouldBe(AggregationErrorCodes.ResultTypeMismatch);
+    }
+
+    [Fact]
+    public void Map_NonBucketDateTimeColumn_Unchanged()
+    {
+        var ts = Col("ts", CatalogFieldType.DateTime);
+        var table = TableOf(ts);
+        var dt = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
+        var row = Row(new Dictionary<string, object?> { ["ts"] = dt }, 1, new Dictionary<string, object?> { ["count"] = 1L });
+
+        var dto = AggregateResultMapper.Map(
+            Result([row], 1),
+            table,
+            [ts],
+            [Agg("count", AggregateFunction.Count, null)]);
+
+        dto.Groups.Single().Key["ts"].ShouldBe("2026-03-04T05:06:07.0000000Z");
+    }
 }

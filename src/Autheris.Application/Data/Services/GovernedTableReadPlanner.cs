@@ -187,6 +187,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         var timeBucketMap = intent.TimeBuckets?
             .ToDictionary(b => b.Column, b => b, StringComparer.OrdinalIgnoreCase);
 
+        var bucketShapes = new Dictionary<string, TimeBucketKeyShape>(StringComparer.OrdinalIgnoreCase);
         var resolvedAggregates = new List<AggregateSelection>();
         var selectItems = new List<string>();
         var groupByExpressions = new List<string>();
@@ -194,9 +195,10 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         {
             if (timeBucketMap != null && timeBucketMap.TryGetValue(gCol, out var bucketSpec))
             {
-                var (selectExpr, groupByExpr) = BuildTimeBucketExpression(gCol, bucketSpec, metadata.Dialect, metadata.GetColumn(gCol)?.DataType);
+                var (selectExpr, groupByExpr, keyShape) = BuildTimeBucketExpression(gCol, bucketSpec, metadata.Dialect, metadata.GetColumn(gCol)?.DataType);
                 selectItems.Add(selectExpr);
                 groupByExpressions.Add(groupByExpr);
+                bucketShapes[gCol] = keyShape;
             }
             else
             {
@@ -361,7 +363,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             ? new Dictionary<string, object?>()
             : new Dictionary<string, object?>((IEnumerable<KeyValuePair<string, object?>>)intent.Filter.Parameters, StringComparer.Ordinal);
 
-        return new PlannedTableAggregate(sb.ToString(), parameters, groupByCols, resolvedAggregates, GroupCountColumnAlias);
+        return new PlannedTableAggregate(sb.ToString(), parameters, groupByCols, resolvedAggregates, GroupCountColumnAlias, bucketShapes);
     }
 
     private static bool IsNumericDataType(string? dataType)
@@ -576,7 +578,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
         }
     }
 
-    internal static (string SelectExpr, string GroupByExpr) BuildTimeBucketExpression(
+    internal static (string SelectExpr, string GroupByExpr, TimeBucketKeyShape KeyShape) BuildTimeBucketExpression(
         string columnName,
         TimeBucketSpecification spec,
         DatabaseDialect dialect,
@@ -607,58 +609,133 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             case DatabaseDialect.PostgreSql:
             case DatabaseDialect.SqlServer:
             {
-                // #333 (SEC-PGP-01/-02): canonical Trino SQL for the AST compiler, which translates it per dialect. The source is a plain
-                // timestamp or a date cast to one; zoned, unknown or non-temporal types are refused (they would depend on the session time zone).
                 var quoted = DataApiFilterTranslator.QuoteIdentifier(columnName);
-                string src;
+                var targetDialect = SqlDialectMapper.ToTargetDialect(dialect);
+
                 if (ColumnValueKinds.IsDateOnly(dataType))
                 {
-                    src = $"CAST({quoted} AS timestamp)";
-                }
-                else if (TrinoSqlEngine.Ast.Security.PlainTimestampClassifier.IsPlain(SqlDialectMapper.ToTargetDialect(dialect), dataType))
-                {
-                    src = quoted;
-                }
-                else
-                {
-                    throw new ArgumentException("Time bucketing requires a date or a timestamp without time zone column.");
+                    // D3: date columns ignore the zone and stay yyyy-MM-dd; HOUR on a date column yields the date key.
+                    var dateUnit = spec.Interval == TimeBucketInterval.Hour ? "day" : unit;
+                    var expr = $"date_trunc('{dateUnit}', CAST({quoted} AS timestamp))";
+                    return ($"{expr} AS {quoted}", expr, TimeBucketKeyShape.Date);
                 }
 
-                if (!string.Equals(timeZone, "UTC", StringComparison.Ordinal))
+                bool isZoned = TrinoSqlEngine.Ast.Security.PlainTimestampClassifier.IsZoned(targetDialect, dataType);
+                bool isPlain = TrinoSqlEngine.Ast.Security.PlainTimestampClassifier.IsPlain(targetDialect, dataType);
+                if (!isZoned && !isPlain)
                 {
-                    // Only a registry key reaches the text (ordinal match, at most 64 characters); the quote is doubled as a second guard.
-                    src = $"convert_timezone('UTC', '{timeZone.Replace("'", "''", StringComparison.Ordinal)}', {src})";
+                    throw new AggregationTimeBucketUnsupportedException();
                 }
 
-                var expr = $"date_trunc('{unit}', {src})";
-                return ($"{expr} AS {quoted}", expr);
+                string escZone = timeZone.Replace("'", "''", StringComparison.Ordinal);
+
+                if (spec.Interval == TimeBucketInterval.Hour)
+                {
+                    // REQ-TBZ-15 (D2): HOUR buckets group by the zone-aligned UTC instant.
+                    // The bucket instant is date_add('minute', -m, date_trunc('hour', date_add('minute', m, U))).
+                    // U is the UTC plain timestamp.
+                    string u = isZoned ? $"convert_timezone('UTC', {quoted})" : quoted;
+
+                    if (ZoneHourAlignment.TryGetMinutePart(timeZone, out int m))
+                    {
+                        string hourExpr;
+                        if (m == 0)
+                        {
+                            hourExpr = $"date_trunc('hour', {u})";
+                        }
+                        else
+                        {
+                            hourExpr = $"date_add('minute', {-m}, date_trunc('hour', date_add('minute', {m}, {u})))";
+                        }
+                        return ($"{hourExpr} AS {quoted}", hourExpr, TimeBucketKeyShape.UtcInstant);
+                    }
+
+                    // Fallback for Lord Howe (minute part varies): group by wall hour.
+                    string wallSrc = isZoned
+                        ? $"convert_timezone('{escZone}', {quoted})"
+                        : (string.Equals(timeZone, "UTC", StringComparison.Ordinal)
+                            ? quoted
+                            : $"convert_timezone('UTC', '{escZone}', {quoted})");
+                    var wallExpr = $"date_trunc('hour', {wallSrc})";
+                    return ($"{wallExpr} AS {quoted}", wallExpr, TimeBucketKeyShape.ZoneWall);
+                }
+
+                // Intervals other than HOUR: group by local wall time.
+                string src = isZoned
+                    ? $"convert_timezone('{escZone}', {quoted})"
+                    : (string.Equals(timeZone, "UTC", StringComparison.Ordinal)
+                        ? quoted
+                        : $"convert_timezone('UTC', '{escZone}', {quoted})");
+
+                var truncExpr = $"date_trunc('{unit}', {src})";
+                return ($"{truncExpr} AS {quoted}", truncExpr, TimeBucketKeyShape.ZoneWall);
             }
             case DatabaseDialect.Sqlite:
             {
-                // #326 (SEC-RG-12): the local time is the UTC value shifted by the zone's offset at that instant; the offset arms are generated
-                // from an allowlisted zone only (SqliteZoneOffsetTable), never from caller text.
+                if (ColumnValueKinds.IsDateOnly(dataType))
+                {
+                    string expr = unit switch
+                    {
+                        "year" => $"strftime('%Y-01-01', {quotedCol})",
+                        "month" => $"strftime('%Y-%m-01', {quotedCol})",
+                        "quarter" => $"date({quotedCol}, 'start of month', CASE WHEN strftime('%m', {quotedCol}) IN ('02', '05', '08', '11') THEN '-1 months' WHEN strftime('%m', {quotedCol}) IN ('03', '06', '09', '12') THEN '-2 months' ELSE '-0 months' END)",
+                        "week" => $"date({quotedCol}, '-6 days', 'weekday 1')",
+                        _ => $"strftime('%Y-%m-%d', {quotedCol})"
+                    };
+                    return ($"{expr} AS {quotedCol}", expr, TimeBucketKeyShape.Date);
+                }
+
                 string utc = $"datetime({quotedCol})";
                 string local = string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase)
                     ? utc
                     : $"datetime({quotedCol}, {SqliteZoneOffsetTable.OffsetModifier(timeZone, utc)})";
 
-                string expr = unit switch
+                if (spec.Interval == TimeBucketInterval.Hour)
                 {
-                    "hour" => $"strftime('%Y-%m-%d %H:00:00', {local})",
+                    if (ZoneHourAlignment.TryGetMinutePart(timeZone, out int m))
+                    {
+                        string hourExpr;
+                        if (m == 0)
+                        {
+                            hourExpr = $"strftime('%Y-%m-%d %H:00:00', {utc})";
+                        }
+                        else
+                        {
+                            hourExpr = $"datetime(strftime('%Y-%m-%d %H:00:00', datetime({utc}, '+{m} minutes')), '{-m} minutes')";
+                        }
+                        return ($"{hourExpr} AS {quotedCol}", hourExpr, TimeBucketKeyShape.UtcInstant);
+                    }
+
+                    string wallHourExpr = $"strftime('%Y-%m-%d %H:00:00', {local})";
+                    return ($"{wallHourExpr} AS {quotedCol}", wallHourExpr, TimeBucketKeyShape.ZoneWall);
+                }
+
+                string dateOrWallExpr = unit switch
+                {
                     "day" => $"strftime('%Y-%m-%d', {local})",
-                    "week" => $"strftime('%Y-%W', {local})",
+                    "week" => $"date({local}, '-6 days', 'weekday 1')",
                     "month" => $"strftime('%Y-%m-01', {local})",
-                    // #325: the first day of the quarter, in the same key shape as MONTH.
                     "quarter" => $"date({local}, 'start of month', CASE WHEN strftime('%m', {local}) IN ('02', '05', '08', '11') THEN '-1 months' WHEN strftime('%m', {local}) IN ('03', '06', '09', '12') THEN '-2 months' ELSE '-0 months' END)",
                     "year" => $"strftime('%Y-01-01', {local})",
                     _ => $"strftime('%Y-%m-%d', {local})"
                 };
-                return ($"{expr} AS {quotedCol}", expr);
+
+                var shape = unit == "week" ? TimeBucketKeyShape.Date : TimeBucketKeyShape.ZoneWall;
+                return ($"{dateOrWallExpr} AS {quotedCol}", dateOrWallExpr, shape);
             }
             default:
             {
+                if (!string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new AggregationTimeBucketUnsupportedException();
+                }
+
+                var shape = spec.Interval == TimeBucketInterval.Hour
+                    ? TimeBucketKeyShape.UtcInstant
+                    : (ColumnValueKinds.IsDateOnly(dataType) ? TimeBucketKeyShape.Date : TimeBucketKeyShape.ZoneWall);
+
                 var expr = $"date_trunc('{unit}', {quotedCol})";
-                return ($"{expr} AS {quotedCol}", expr);
+                return ($"{expr} AS {quotedCol}", expr, shape);
             }
         }
     }

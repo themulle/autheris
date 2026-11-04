@@ -166,6 +166,11 @@ public static class AnalyticsEndpoints
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationPrivacyRestrictedException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationPrivacyRestrictedException.ErrorCodeConst, AggregationPrivacyRestrictedException.FixedMessage, httpContext);
         }
+        catch (AggregationTimeBucketUnsupportedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationTimeBucketUnsupportedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationTimeBucketUnsupportedException.ErrorCodeConst, AggregationTimeBucketUnsupportedException.FixedMessage, httpContext);
+        }
         catch (Exception ex) when (IsNotSupportedRefusal(ex))
         {
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationErrorCodes.NotSupported);
@@ -263,6 +268,11 @@ public static class AnalyticsEndpoints
         {
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationPrivacyRestrictedException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationPrivacyRestrictedException.ErrorCodeConst, AggregationPrivacyRestrictedException.FixedMessage, httpContext);
+        }
+        catch (AggregationTimeBucketUnsupportedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationTimeBucketUnsupportedException.ErrorCodeConst);
+            return SafeErrorResults.BadRequest(AggregationTimeBucketUnsupportedException.ErrorCodeConst, AggregationTimeBucketUnsupportedException.FixedMessage, httpContext);
         }
         catch (Exception ex) when (IsNotSupportedRefusal(ex))
         {

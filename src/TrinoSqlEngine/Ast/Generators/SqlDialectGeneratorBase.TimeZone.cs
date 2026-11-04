@@ -21,16 +21,27 @@ public abstract partial class SqlDialectGeneratorBase
         if (!EmitsTimeZoneConversion) throw new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect);
         if (!context.IsBound) throw NoBoundForm("time zone conversion", TargetDialect);
         if (!context.TimeZoneCallsValidated) throw new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument);
-        if (fn.Name.Parts.Count != 1 || fn.Arguments.Count != 3 || fn.Distinct || fn.Filter is not null || fn.Window is not null || fn.OrderWithin is not null || fn.IsStar)
+        if (fn.Name.Parts.Count != 1 || (fn.Arguments.Count != 2 && fn.Arguments.Count != 3) || fn.Distinct || fn.Filter is not null || fn.Window is not null || fn.OrderWithin is not null || fn.IsStar)
         {
             throw new SqlTimeZoneException(GovernedSqlErrorCodes.TimeZoneArgument);
         }
 
-        FormatConvertTimeZone(ref builder, fn, context);
+        if (fn.Arguments.Count == 2)
+        {
+            FormatConvertTimeZoneZoned(ref builder, fn, context);
+        }
+        else
+        {
+            FormatConvertTimeZone(ref builder, fn, context);
+        }
     }
 
     /// <summary>The conversion of <c>convert_timezone(from_zone, to_zone, ts)</c> to the local wall-clock plain timestamp of <c>to_zone</c> (Q-130-2).</summary>
     protected virtual void FormatConvertTimeZone(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context) =>
+        throw new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect);
+
+    /// <summary>The conversion of <c>convert_timezone(to_zone, zoned_ts)</c> to the local wall-clock plain timestamp of <c>to_zone</c>.</summary>
+    protected virtual void FormatConvertTimeZoneZoned(ref ValueStringBuilder builder, FunctionCallExpression fn, SqlEmitterContext context) =>
         throw new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect);
 
     /// <summary>
