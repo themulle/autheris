@@ -43,6 +43,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "UNAVAILABLE",
         "COLUMN_NOT_RELEASED",
         "FILTER_ON_MASKED_COLUMN",
+        "INVALID_QUERY_OPTION",
         "COST_LIMIT",
         "ROW_LIMIT",
         // Issue #107: fixed message without table or rule names (SEC-RF107-08).
@@ -224,7 +225,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayPageRangeException)
         {
             gatewayOutcome = true;
-            error = MapGatewayOutcome(error, Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage, "INVALID_QUERY");
+            error = MapGatewayOutcome(error, Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage, "INVALID_QUERY_OPTION");
         }
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayInvalidQueryException)
         {

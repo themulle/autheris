@@ -82,7 +82,7 @@ public sealed class Issue341ErrorMappingTests
 
         var result = CreateFilter(env).OnError(error);
 
-        result.Code.ShouldBe("INVALID_QUERY");
+        result.Code.ShouldBe("INVALID_QUERY_OPTION");
         result.Message.ShouldBe(Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage);
         // A1-S4: the enumeration shield still recognizes the page-range error.
         GraphQlEnumerationShieldMiddleware.IsPageRangeError(result).ShouldBeTrue();

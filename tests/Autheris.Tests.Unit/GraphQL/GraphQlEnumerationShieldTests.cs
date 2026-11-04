@@ -25,7 +25,7 @@ public sealed class GraphQlEnumerationShieldTests
 
         public string Public() => "ok";
 
-        public string Ranged() => throw new GraphQLException(ErrorBuilder.New().SetMessage("The page size or offset is out of range.").SetCode("INVALID_QUERY").Build());
+        public string Ranged() => throw new GraphQLException(ErrorBuilder.New().SetMessage("The page size or offset is out of range.").SetCode("INVALID_QUERY_OPTION").Build());
 
         public string Forged() => throw new GraphQLException(ErrorBuilder.New().SetMessage("The page size or offset is out of range. Table 'hr.salaries'.").SetCode("INVALID_QUERY").Build());
 
@@ -122,7 +122,7 @@ public sealed class GraphQlEnumerationShieldTests
     }
 
     private const string ProductionValidationBody = "{\"errors\":[{\"message\":\"The GraphQL request is invalid.\",\"extensions\":{\"code\":\"GRAPHQL_VALIDATION_FAILED\"}}]}";
-    private const string PageRangeBody = "{\"errors\":[{\"message\":\"The page size or offset is out of range.\",\"extensions\":{\"code\":\"INVALID_QUERY\"}}]}";
+    private const string PageRangeBody = "{\"errors\":[{\"message\":\"The page size or offset is out of range.\",\"extensions\":{\"code\":\"INVALID_QUERY_OPTION\"}}]}";
 
     private static async Task<string> CompactAsync(IRequestExecutor executor, string query)
     {
