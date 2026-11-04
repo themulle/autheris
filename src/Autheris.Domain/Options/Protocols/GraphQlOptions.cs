@@ -54,6 +54,9 @@ public sealed class GraphQLOptions
     /// <summary>Issue #281: runtime-managed, app-scoped trusted documents (<c>Gateway:GraphQL:AppScopedTrustedDocuments</c>).</summary>
     public AppScopedTrustedDocumentsOptions AppScopedTrustedDocuments { get; init; } = new();
 
+    /// <summary>Issue #443: Slow-list reporting in GraphQL response extensions (<c>Gateway:GraphQL:SlowLists</c>).</summary>
+    public GraphQLSlowListReportOptions SlowLists { get; init; } = new();
+
     /// <summary>Issue #254: ERP table GraphQL schema partitioning mode.</summary>
     public GraphQlSchemaPartitioningMode SchemaPartitioning { get; init; } = GraphQlSchemaPartitioningMode.None;
     public List<string> PartitionAllowedDomains { get; init; } = [];
@@ -79,6 +82,14 @@ public sealed class GraphQLMetricsOptions
 {
     /// <summary>Enable the queryMetrics GraphQL root field. Default true.</summary>
     public bool Enabled { get; init; } = true;
+}
+
+/// <summary>Issue #443: options for slow-list reporting in GraphQL response extensions (<c>Gateway:GraphQL:SlowLists</c>).</summary>
+public sealed class GraphQLSlowListReportOptions
+{
+    public bool Enabled { get; init; } = false;
+    [Range(50, 600000)] public int ThresholdMs { get; init; } = 1000;
+    [Range(1, 5)] public int MaxEntries { get; init; } = 3;
 }
 
 /// <summary>#112: switches and bounds of the typed GraphQL aggregation surface.</summary>
