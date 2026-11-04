@@ -116,7 +116,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     if (!IsWholeRowName(name, tbl, alias) || !HasMaskingForTable(tbl))
                         continue;
 
-                    var columns = _options.TableColumns(tbl);
+                    var columns = CachedColumns(tbl);
                     if (columns != null && columns.Any(c => c.Equals(name, StringComparison.OrdinalIgnoreCase)))
                         continue; // a real column that merely shares the table's name
 
@@ -363,7 +363,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private void AddTableMaskedColumns(string normalizedTableName, IReadOnlyList<SqlIdentifier>? columnAliases, HashSet<string> result)
     {
-        var cols = _options.TableColumns(normalizedTableName);
+        var cols = CachedColumns(normalizedTableName);
         if (cols == null) return;
         for (int i = 0; i < cols.Count; i++)
         {

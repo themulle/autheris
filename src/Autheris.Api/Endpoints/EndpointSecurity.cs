@@ -22,7 +22,7 @@ internal static class EndpointSecurity
     /// <summary>
     /// Phase 1: Resolves the canonical SecurityPrincipalContext established by SecurityContextResolutionMiddleware.
     /// </summary>
-    public static SecurityPrincipalContext GetSecurityContext(HttpContext context)
+    public static SecurityPrincipalContext GetSecurityContext(this HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 

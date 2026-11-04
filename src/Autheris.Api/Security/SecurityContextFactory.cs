@@ -117,11 +117,6 @@ public static class SecurityContextFactory
             justification = jva.ToString().Trim();
         }
 
-        // 6. Extract Client IP
-        var clientIp = context.RequestServices?.GetService(typeof(Autheris.Application.Interfaces.IClientIpResolver)) is Autheris.Application.Interfaces.IClientIpResolver ipResolver
-            ? ipResolver.ResolveClientIp()
-            : context.Connection.RemoteIpAddress;
-
         return BuildContext(context, caller, userSid, groupSids, tenantRoles, clusterRoles, finalTenant, false, source, tenantSelectedByHeader, justification);
     }
 

@@ -162,12 +162,12 @@ public sealed class Wp4ReviewFindingsTests
         var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: resolver);
         var principal = Principal(new Claim("sub", "u"));
 
-        await transformation.TransformAsync(principal);
-        await transformation.TransformAsync(principal);
+        var transformed1 = await transformation.TransformAsync(principal);
+        var transformed2 = await transformation.TransformAsync(transformed1);
 
-        principal.FindFirst(TenantSourceClaim.ClaimType)!.Value.ShouldBe(TenantSourceClaim.Default);
-        principal.FindAll(TenantSourceClaim.ClaimType).Count().ShouldBe(1);
-        principal.FindFirst("tenant_id")!.Value.ShouldBe("dflt");
+        transformed2.FindFirst(TenantSourceClaim.ClaimType)!.Value.ShouldBe(TenantSourceClaim.Default);
+        transformed2.FindAll(TenantSourceClaim.ClaimType).Count().ShouldBe(1);
+        transformed2.FindFirst("tenant_id")!.Value.ShouldBe("dflt");
     }
 
     [Fact]
@@ -178,8 +178,8 @@ public sealed class Wp4ReviewFindingsTests
         var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: resolver);
         var principal = Principal(new Claim("sub", "u"), new Claim(TenantSourceClaim.ClaimType, TenantSourceClaim.Realm));
 
-        await transformation.TransformAsync(principal);
+        var transformed = await transformation.TransformAsync(principal);
 
-        principal.FindFirst(TenantSourceClaim.ClaimType)!.Value.ShouldBe(TenantSourceClaim.Default);
+        transformed.FindFirst(TenantSourceClaim.ClaimType)!.Value.ShouldBe(TenantSourceClaim.Default);
     }
 }

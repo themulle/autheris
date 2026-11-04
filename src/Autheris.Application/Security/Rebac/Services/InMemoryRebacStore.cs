@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
@@ -43,7 +44,7 @@ public sealed class InMemoryRebacStore : IRebacStore
         var key = BuildKey(tuple.User, tuple.Relation, tuple.Object);
         store[key] = tuple;
 
-        _logger.LogDebug("F-SEC-04 ReBAC added tuple {Tuple}", tuple);
+        _logger.LogDebug("F-SEC-04 ReBAC added tuple {Tuple}", FormatTupleForLog(tuple));
         return ValueTask.CompletedTask;
     }
 
@@ -67,7 +68,7 @@ public sealed class InMemoryRebacStore : IRebacStore
             var removed = store.TryRemove(key, out _);
             if (removed)
             {
-                _logger.LogDebug("F-SEC-04 ReBAC removed tuple {Tuple}", tuple);
+                _logger.LogDebug("F-SEC-04 ReBAC removed tuple {Tuple}", FormatTupleForLog(tuple));
             }
             return ValueTask.FromResult(removed);
         }
@@ -153,9 +154,12 @@ public sealed class InMemoryRebacStore : IRebacStore
     {
         var tenant = NormalizeTenant(tenantId);
         _tenantStores.TryRemove(tenant, out _);
-        _logger.LogInformation("F-SEC-04 ReBAC cleared all tuples for tenant '{Tenant}'", tenant);
+        _logger.LogInformation("F-SEC-04 ReBAC cleared all tuples for tenant '{Tenant}'", LogSanitizer.Sanitize(tenant));
         return ValueTask.CompletedTask;
     }
+
+    private static string FormatTupleForLog(RebacTuple tuple) =>
+        $"({LogSanitizer.Sanitize(tuple.TenantId)}: {LogSanitizer.Sanitize(tuple.User)}#{LogSanitizer.Sanitize(tuple.Relation)}@{LogSanitizer.Sanitize(tuple.Object)})";
 
     // DT-A-9: a store operation without a tenant fails closed; there is no implicit tenant.
     private static string NormalizeTenant(string? tenantId) =>

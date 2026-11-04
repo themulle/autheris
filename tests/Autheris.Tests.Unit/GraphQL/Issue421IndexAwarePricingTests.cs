@@ -294,6 +294,161 @@ public sealed class Issue421IndexAwarePricingTests
         unindexedCost.ShouldBe(indexedCost);
     }
 
+    [Fact]
+    public void HasUsableIndex_IndexedOrderByWithUnindexedWhere_ReturnsFalse()
+    {
+        // HIGH-03: Indexed orderBy must not mask an unindexed where filter
+        var metadata = CreateTable(
+            pk: ["id"],
+            pkDirections: [KeyColumnDirection.Ascending]);
+
+        var orderBy = new List<(string, string)> { ("id", "ASC") };
+        var filter = new List<string> { "unindexedCol" };
+
+        var isUsable = IndexUsabilityEvaluator.HasUsableIndex(
+            metadata,
+            visibleColumns: null,
+            orderBy: orderBy,
+            filterColumns: filter);
+
+        isUsable.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HasUsableIndex_IndexedOrderByWithIndexedWhere_ReturnsTrue()
+    {
+        var metadata = CreateTable(
+            pk: ["id"],
+            pkDirections: [KeyColumnDirection.Ascending],
+            physicalIndexes: [new PhysicalIndexDefinition(["customer_id"], [])]);
+
+        var orderBy = new List<(string, string)> { ("id", "ASC") };
+        var filter = new List<string> { "customer_id" };
+
+        var isUsable = IndexUsabilityEvaluator.HasUsableIndex(
+            metadata,
+            visibleColumns: null,
+            orderBy: orderBy,
+            filterColumns: filter);
+
+        isUsable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void HasUsableIndex_UnresolvedVariableMarker_ReturnsFalse()
+    {
+        var metadata = CreateTable(pk: ["id"]);
+
+        var filter = new List<string> { IndexUsabilityEvaluator.UnresolvedVariableMarker };
+        var isUsable = IndexUsabilityEvaluator.HasUsableIndex(metadata, visibleColumns: null, orderBy: null, filterColumns: filter);
+        isUsable.ShouldBeFalse();
+
+        var orderBy = new List<(string, string)> { (IndexUsabilityEvaluator.UnresolvedVariableMarker, "ASC") };
+        var isUsableOrder = IndexUsabilityEvaluator.HasUsableIndex(metadata, visibleColumns: null, orderBy: orderBy, filterColumns: null);
+        isUsableOrder.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HasUsableIndex_OrDisjunction_OneBranchUnindexed_ReturnsFalse()
+    {
+        var metadata = CreateTable(
+            pk: ["id"],
+            indexes: [new TableIndexDefinition("idx_tenant", ["tenant_id"], IsUnique: false)]);
+
+        // Branch 0 (id) is indexed; Branch 1 (unindexedCol) is not indexed
+        var filter = new List<string>
+        {
+            $"{IndexUsabilityEvaluator.OrBranchPrefix}0:id",
+            $"{IndexUsabilityEvaluator.OrBranchPrefix}1:unindexedCol"
+        };
+
+        var isUsable = IndexUsabilityEvaluator.HasUsableIndex(metadata, visibleColumns: null, orderBy: null, filterColumns: filter);
+        isUsable.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HasUsableIndex_OrDisjunction_AllBranchesIndexed_ReturnsTrue()
+    {
+        var metadata = CreateTable(
+            pk: ["id"],
+            indexes: [new TableIndexDefinition("idx_tenant", ["tenant_id"], IsUnique: false)]);
+
+        // Both Branch 0 (id) and Branch 1 (tenant_id) are index-backed
+        var filter = new List<string>
+        {
+            $"{IndexUsabilityEvaluator.OrBranchPrefix}0:id",
+            $"{IndexUsabilityEvaluator.OrBranchPrefix}1:tenant_id"
+        };
+
+        var isUsable = IndexUsabilityEvaluator.HasUsableIndex(metadata, visibleColumns: null, orderBy: null, filterColumns: filter);
+        isUsable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ExtractFilterColumns_ScanOperator_DoesNotCreditColumn()
+    {
+        // where: { name: { contains: "foo" } }
+        var arg = new ArgumentNode("where", new ObjectValueNode(
+            new ObjectFieldNode("name", new ObjectValueNode(
+                new ObjectFieldNode("contains", new StringValueNode("foo"))))));
+
+        var cols = IndexUsabilityEvaluator.ExtractFilterColumns(arg);
+        cols.ShouldNotBeNull();
+        cols.ShouldContain(IndexUsabilityEvaluator.UnusableFilterMarker);
+    }
+
+    [Fact]
+    public void ExtractFilterColumns_SeekableOperator_CreditsColumn()
+    {
+        // where: { id: { eq: 1 } }
+        var arg = new ArgumentNode("where", new ObjectValueNode(
+            new ObjectFieldNode("id", new ObjectValueNode(
+                new ObjectFieldNode("eq", new IntValueNode(1))))));
+
+        var cols = IndexUsabilityEvaluator.ExtractFilterColumns(arg);
+        cols.ShouldNotBeNull();
+        cols.ShouldContain("id");
+    }
+
+    [Fact]
+    public void ExtractFilterColumns_NotOperator_DoesNotCreditInnerColumn()
+    {
+        // where: { not: { id: { eq: 1 } } }
+        var arg = new ArgumentNode("where", new ObjectValueNode(
+            new ObjectFieldNode("not", new ObjectValueNode(
+                new ObjectFieldNode("id", new ObjectValueNode(
+                    new ObjectFieldNode("eq", new IntValueNode(1))))))));
+
+        var cols = IndexUsabilityEvaluator.ExtractFilterColumns(arg);
+        cols.ShouldNotBeNull();
+        cols.ShouldContain(IndexUsabilityEvaluator.UnusableFilterMarker);
+    }
+
+    [Fact]
+    public void ExtractOrderBy_UnresolvedVariable_ReturnsMarker()
+    {
+        var arg = new ArgumentNode("orderBy", new VariableNode("orderVar"));
+        var orders = IndexUsabilityEvaluator.ExtractOrderBy(arg, variableValues: null);
+        orders.ShouldNotBeNull();
+        orders.Count.ShouldBe(1);
+        orders[0].FieldName.ShouldBe(IndexUsabilityEvaluator.UnresolvedVariableMarker);
+    }
+
+    [Fact]
+    public void ExtractOrderBy_ResolvedVariable_ReturnsOrders()
+    {
+        var arg = new ArgumentNode("orderBy", new VariableNode("orderVar"));
+        var vars = new Dictionary<string, object?>
+        {
+            ["orderVar"] = new List<object> { new Dictionary<string, object?> { ["id"] = "DESC" } }
+        };
+        var orders = IndexUsabilityEvaluator.ExtractOrderBy(arg, variableValues: vars);
+        orders.ShouldNotBeNull();
+        orders.Count.ShouldBe(1);
+        orders[0].FieldName.ShouldBe("id");
+        orders[0].Direction.ShouldBe("DESC");
+    }
+
     private static TableMetadata CreateTable(
         IReadOnlyList<string>? pk = null,
         IReadOnlyList<KeyColumnDirection>? pkDirections = null,

@@ -92,12 +92,9 @@ public static class GraphQlTreeBuilder
 
         // 1. Arguments: where and orderBy from connection selection
         var whereFilter = ParseWhereArgument(currentSelection, rootTable, context);
-        var orderByList = ParseOrderByArgument(currentSelection, rootTable, context);
-
-        if ((orderByList == null || orderByList.Count == 0) && defaultOrdering != null && defaultOrdering.Count > 0)
-        {
-            orderByList = defaultOrdering;
-        }
+        var orderByList = (defaultOrdering != null && defaultOrdering.Count > 0)
+            ? defaultOrdering
+            : ParseOrderByArgument(currentSelection, rootTable, context);
 
         TreeFilter? effectiveWhere = null;
         if (whereFilter != null && seekPredicate != null)
@@ -116,7 +113,6 @@ public static class GraphQlTreeBuilder
         var relations = new List<TreeRelationNode>();
 
         var connectionSelectionSet = operation.GetSelectionSet(currentSelection);
-        Selection? nodeSelection = null;
         foreach (var sel in connectionSelectionSet.Selections)
         {
             if (!sel.IsIncluded(context.IncludeConditionFlags)) continue;
@@ -128,48 +124,42 @@ public static class GraphQlTreeBuilder
                     if (!edgeSel.IsIncluded(context.IncludeConditionFlags)) continue;
                     if (string.Equals(edgeSel.Field.Name, "node", StringComparison.Ordinal))
                     {
-                        nodeSelection = edgeSel;
-                        break;
+                        var nodeSelectionSet = operation.GetSelectionSet(edgeSel);
+                        foreach (var nodeSel in nodeSelectionSet.Selections)
+                        {
+                            if (!nodeSel.IsIncluded(context.IncludeConditionFlags)) continue;
+                            var fieldName = nodeSel.Field.Name;
+                            if (fieldName.StartsWith("__", StringComparison.Ordinal)) continue;
+
+                            var col = rootTable.Columns.FirstOrDefault(c => string.Equals(c.FieldName, fieldName, StringComparison.Ordinal));
+                            if (col != null)
+                            {
+                                columns.Add(col.ColumnName);
+                                continue;
+                            }
+
+                            var rel = rootTable.Relations.FirstOrDefault(r => string.Equals(r.FieldName, fieldName, StringComparison.Ordinal));
+                            if (rel != null && schema.TablesByIdentifier.TryGetValue(rel.TargetTableIdentifier, out var targetTable))
+                            {
+                                var childNode = BuildNode(
+                                    context,
+                                    nodeSel,
+                                    operation,
+                                    targetTable,
+                                    schema,
+                                    TreeSqlCompiler.MaxLimit,
+                                    isRoot: false,
+                                    depth: 1);
+
+                                relations.Add(new TreeRelationNode(
+                                    ResponseKey: nodeSel.ResponseName,
+                                    ParentColumns: rel.ParentColumns,
+                                    ChildColumns: rel.ChildColumns,
+                                    IsList: rel.IsList,
+                                    Child: childNode));
+                            }
+                        }
                     }
-                }
-            }
-        }
-
-        if (nodeSelection != null)
-        {
-            var nodeSelectionSet = operation.GetSelectionSet(nodeSelection);
-            foreach (var sel in nodeSelectionSet.Selections)
-            {
-                if (!sel.IsIncluded(context.IncludeConditionFlags)) continue;
-                var fieldName = sel.Field.Name;
-                if (fieldName.StartsWith("__", StringComparison.Ordinal)) continue;
-
-                var col = rootTable.Columns.FirstOrDefault(c => string.Equals(c.FieldName, fieldName, StringComparison.Ordinal));
-                if (col != null)
-                {
-                    columns.Add(col.ColumnName);
-                    continue;
-                }
-
-                var rel = rootTable.Relations.FirstOrDefault(r => string.Equals(r.FieldName, fieldName, StringComparison.Ordinal));
-                if (rel != null && schema.TablesByIdentifier.TryGetValue(rel.TargetTableIdentifier, out var targetTable))
-                {
-                    var childNode = BuildNode(
-                        context,
-                        sel,
-                        operation,
-                        targetTable,
-                        schema,
-                        TreeSqlCompiler.MaxLimit,
-                        isRoot: false,
-                        depth: 1);
-
-                    relations.Add(new TreeRelationNode(
-                        ResponseKey: sel.ResponseName,
-                        ParentColumns: rel.ParentColumns,
-                        ChildColumns: rel.ChildColumns,
-                        IsList: rel.IsList,
-                        Child: childNode));
                 }
             }
         }

@@ -31,7 +31,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
 
         if (httpContext.Response.HasStarted)
         {
-            logger.LogError(exception, "Unhandled exception after the response started for {Path}.", httpContext.Request.Path);
+            logger.LogError(exception, "Unhandled exception after the response started for {Path}.", Autheris.Domain.Diagnostics.LogSanitizer.Sanitize(httpContext.Request.Path));
             return false;
         }
 
@@ -46,7 +46,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
 
         if (httpContext.RequestAborted.IsCancellationRequested)
         {
-            logger.LogInformation("Request {Path} cancelled by the client ({ExceptionType}). TraceId={TraceId}", httpContext.Request.Path, exception.GetType().Name, traceId);
+            logger.LogInformation("Request {Path} cancelled by the client ({ExceptionType}). TraceId={TraceId}", Autheris.Domain.Diagnostics.LogSanitizer.Sanitize(httpContext.Request.Path), exception.GetType().Name, traceId);
             httpContext.Response.StatusCode = ClientClosedRequest;
             return true;
         }
@@ -69,6 +69,11 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             retryAfter = throttled.RetryAfterSeconds;
             code = "TOO_MANY_REQUESTS";
         }
+        else if (exception is GatewayInvalidQueryException invalidQuery)
+        {
+            (status, title, retryAfter) = Map(exception);
+            code = ApiErrorCodes.Resolve(status, invalidQuery.ErrorCode);
+        }
         else
         {
             (status, title, retryAfter) = Map(exception);
@@ -85,11 +90,11 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
 
         if (status >= StatusCodes.Status500InternalServerError)
         {
-            logger.LogError(exception, "Unhandled exception for {Path} mapped to {Status}. TraceId={TraceId}", httpContext.Request.Path, status, traceId);
+            logger.LogError(exception, "Unhandled exception for {Path} mapped to {Status}. TraceId={TraceId}", Autheris.Domain.Diagnostics.LogSanitizer.Sanitize(httpContext.Request.Path), status, traceId);
         }
         else
         {
-            logger.LogWarning("Request {Path} rejected with {Status} ({ExceptionType}). TraceId={TraceId}", httpContext.Request.Path, status, exception.GetType().Name, traceId);
+            logger.LogWarning("Request {Path} rejected with {Status} ({ExceptionType}). TraceId={TraceId}", Autheris.Domain.Diagnostics.LogSanitizer.Sanitize(httpContext.Request.Path), status, exception.GetType().Name, traceId);
         }
 
         httpContext.Response.Clear();
@@ -128,7 +133,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         BadHttpRequestException { StatusCode: StatusCodes.Status414UriTooLong } => (StatusCodes.Status414UriTooLong, "The request URI is too long.", null),
         BadHttpRequestException { StatusCode: StatusCodes.Status431RequestHeaderFieldsTooLarge } => (StatusCodes.Status431RequestHeaderFieldsTooLarge, "The request headers are too large.", null),
         BadHttpRequestException => (StatusCodes.Status400BadRequest, "The request is malformed.", null),
-        GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
+        GatewayInvalidQueryException => (StatusCodes.Status400BadRequest, "The query is invalid.", null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
         Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
         // API-06: migrations still pending: fail closed with a retryable 503 instead of a 500 plus error log.

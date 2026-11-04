@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -526,5 +527,5 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
     }
 
-    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+    private static string ForLog(string? value) => LogSanitizer.Sanitize(value);
 }

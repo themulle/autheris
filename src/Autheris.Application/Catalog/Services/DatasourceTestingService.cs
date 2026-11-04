@@ -14,6 +14,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -237,7 +238,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         }
         catch (SecurityException secEx)
         {
-            _logger.LogWarning(secEx, "SSRF attempt blocked for datasource test on {Uri}", probeUri);
+            _logger.LogWarning(secEx, "SSRF attempt blocked for datasource test on {Uri}", LogSanitizer.Sanitize(probeUri.ToString()));
             var redactedMsg = SecretScrubber.Redact(secEx.Message);
             await AppendAuditAsync(datasourceId, user, isSuccess: false, redactedMsg, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
@@ -559,7 +560,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             }
 
             // The id comes from the route: strip line breaks so it cannot forge log entries (CodeQL log injection).
-            var safeDatasourceId = datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeDatasourceId = LogSanitizer.Sanitize(datasourceId);
             _logger.LogWarning("Datasource test failed for {DatasourceId} ({Category}, {ExceptionType}).", safeDatasourceId, details["Category"], ex.GetType().Name);
             await AppendAuditAsync(datasourceId, user, isSuccess: false, message, ct).ConfigureAwait(false);
             return SqlFailure(datasourceId, dsType, sw, message, description, details);
@@ -608,7 +609,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             // DT-SC-03: the audit belongs to the caller's resolved tenant; a caller without a valid tenant claim gets no audit row (never a "default" bucket).
             if (Autheris.Domain.Tenancy.TenantClaimReader.Read(user) is not { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } callerTenant)
             {
-                _logger.LogWarning("Datasource testing audit skipped for {DatasourceId}: the caller has no valid tenant claim.", datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty));
+                _logger.LogWarning("Datasource testing audit skipped for {DatasourceId}: the caller has no valid tenant claim.", LogSanitizer.Sanitize(datasourceId));
                 return;
             }
 
@@ -635,7 +636,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to append datasource testing audit log for {DatasourceId}", datasourceId.Replace("\r", string.Empty).Replace("\n", string.Empty));
+            _logger.LogError(ex, "Failed to append datasource testing audit log for {DatasourceId}", LogSanitizer.Sanitize(datasourceId));
         }
     }
 }

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -31,7 +32,7 @@ public sealed class SchemaSunsettingService(ILogger<SchemaSunsettingService>? lo
 
         _logger.LogInformation(
             "Registered sunsetting rule for '{Table}.{Field}'. Deprecated: {DeprecatedAt:yyyy-MM-dd}, Sunset: {SunsetAt:yyyy-MM-dd}",
-            rule.TargetTable, rule.FieldName, rule.DeprecatedAt, rule.SunsetAt);
+            LogSanitizer.Sanitize(rule.TargetTable), LogSanitizer.Sanitize(rule.FieldName), rule.DeprecatedAt, rule.SunsetAt);
 
         return ValueTask.CompletedTask;
     }

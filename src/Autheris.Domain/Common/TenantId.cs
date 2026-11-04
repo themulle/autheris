@@ -61,7 +61,7 @@ public readonly record struct TenantId
             tenantId = default;
             return false;
         }
-        tenantId = new TenantId(value);
+        tenantId = new TenantId(value, false);
         return true;
     }
 

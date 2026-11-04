@@ -1,13 +1,18 @@
-namespace Autheris.Api.Middleware;
-
+using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Security;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Tenancy;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+
+namespace Autheris.Api.Middleware;
 
 public sealed class SubjectLockoutMiddleware
 {
@@ -22,6 +27,12 @@ public sealed class SubjectLockoutMiddleware
 
     public async Task InvokeAsync(HttpContext context, IIdentityStoreRepository? identityStore)
     {
+        if (context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
         if (context.User?.Identity?.IsAuthenticated == true && identityStore != null)
         {
             var userKey = context.User.FindFirst("oid")?.Value
@@ -31,7 +42,8 @@ public sealed class SubjectLockoutMiddleware
             if (!string.IsNullOrWhiteSpace(userKey))
             {
                 var realmId = context.User.FindFirst("autheris:realm")?.Value ?? "default";
-                var tenantId = context.User.GetTenantId();
+                var tenantId = context.GetSecurityContext()?.ResolvedTenant
+                    ?? (TenantClaimReader.Read(context.User) is { Kind: ClaimTenantKind.Valid } c ? c.Tenant : TenantId.Platform);
 
                 bool isLocked;
                 try
@@ -41,7 +53,7 @@ public sealed class SubjectLockoutMiddleware
                 catch (Exception ex)
                 {
                     // Fail closed on store failure (AppSec requirement)
-                    _logger.LogError(ex, "Failed to verify subject lockout for user {UserKey} in realm {RealmId}. Failing closed.", userKey, realmId);
+                    _logger.LogError(ex, "Failed to verify subject lockout for user {UserKey} in realm {RealmId}. Failing closed.", LogSanitizer.Sanitize(userKey), LogSanitizer.Sanitize(realmId));
                     context.Response.Headers.RetryAfter = "5";
                     await ApiProblems.WriteAsync(context, StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "Identity verification service is temporarily unavailable.", context.RequestAborted).ConfigureAwait(false);
                     return;
@@ -49,7 +61,7 @@ public sealed class SubjectLockoutMiddleware
 
                 if (isLocked)
                 {
-                    _logger.LogWarning("Subject {UserKey} in realm {RealmId} is locked. Denying request.", userKey, realmId);
+                    _logger.LogWarning("Subject {UserKey} in realm {RealmId} is locked. Denying request.", LogSanitizer.Sanitize(userKey), LogSanitizer.Sanitize(realmId));
                     await ApiProblems.WriteAsync(context, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "The subject account has been administratively locked or deprovisioned.", context.RequestAborted).ConfigureAwait(false);
                     return;
                 }

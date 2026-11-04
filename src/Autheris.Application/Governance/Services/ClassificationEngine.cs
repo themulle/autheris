@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -84,7 +85,7 @@ public sealed class ClassificationEngine : IClassificationEngine
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "AI pre-classification failed for table {Table}; falling back to deterministic regex classifier.", context.TableIdentifier);
+                    _logger.LogWarning(ex, "AI pre-classification failed for table {Table}; falling back to deterministic regex classifier.", LogSanitizer.Sanitize(context.TableIdentifier.ToString()));
                 }
             }
         }

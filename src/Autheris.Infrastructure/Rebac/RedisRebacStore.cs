@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -61,7 +62,7 @@ public sealed class RedisRebacStore : IRebacStore
         {
             throw new InvalidOperationException("Failed to commit ReBAC add transaction to Redis.");
         }
-        _logger.LogDebug("RR-L4-04 ReBAC added tuple {Tuple} (redis)", normalized);
+        _logger.LogDebug("RR-L4-04 ReBAC added tuple {Tuple} (redis)", FormatTupleForLog(normalized));
     }
 
     public async ValueTask AddTuplesAsync(IEnumerable<RebacTuple> tuples, CancellationToken ct = default)
@@ -94,7 +95,7 @@ public sealed class RedisRebacStore : IRebacStore
         bool removed = await delTask.ConfigureAwait(false);
         if (removed)
         {
-            _logger.LogDebug("RR-L4-04 ReBAC removed tuple {Tuple} (redis)", tuple);
+            _logger.LogDebug("RR-L4-04 ReBAC removed tuple {Tuple} (redis)", FormatTupleForLog(tuple));
         }
         return removed;
     }
@@ -238,8 +239,11 @@ public sealed class RedisRebacStore : IRebacStore
             await db.KeyDeleteAsync(TenantHashKey(tenant)).ConfigureAwait(false);
         }
 
-        _logger.LogInformation("RR-L4-04 ReBAC cleared all tuples for tenant '{Tenant}' (redis)", tenant);
+        _logger.LogInformation("RR-L4-04 ReBAC cleared all tuples for tenant '{Tenant}' (redis)", LogSanitizer.Sanitize(tenant));
     }
+
+    private static string FormatTupleForLog(RebacTuple tuple) =>
+        $"({LogSanitizer.Sanitize(tuple.TenantId)}: {LogSanitizer.Sanitize(tuple.User)}#{LogSanitizer.Sanitize(tuple.Relation)}@{LogSanitizer.Sanitize(tuple.Object)})";
 
     private static void ValidateTuple(RebacTuple tuple)
     {

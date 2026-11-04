@@ -160,6 +160,12 @@ public sealed class CatalogGraphQlMap(
                     else if (field.Name.Value.EndsWith("Connection", StringComparison.Ordinal) &&
                              walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value[..^10], out table))
                     {
+                        walk.Tables.Add(table.Identifier);
+                        if (field.SelectionSet != null && !CollectConnection(field.SelectionSet, table, walk, depth + 1))
+                        {
+                            return false;
+                        }
+                        break;
                     }
                     else
                     {
@@ -186,6 +192,96 @@ public sealed class CatalogGraphQlMap(
                         return false;
                     }
 
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool CollectConnection(SelectionSetNode set, CatalogTableType table, Walk walk, int depth)
+    {
+        if (depth > MaxSelectionDepth)
+        {
+            return false;
+        }
+
+        foreach (var selection in set.Selections)
+        {
+            if (!walk.Visit())
+            {
+                return false;
+            }
+
+            switch (selection)
+            {
+                case FieldNode field when field.Name.Value.StartsWith("__", StringComparison.Ordinal) ||
+                                          field.Name.Value is "pageInfo" or "totalCount":
+                    break;
+                case FieldNode field when field.Name.Value == "edges":
+                    if (field.SelectionSet != null && !CollectConnectionEdges(field.SelectionSet, table, walk, depth + 1))
+                    {
+                        return false;
+                    }
+                    break;
+                case InlineFragmentNode inline:
+                    if (!CollectConnection(inline.SelectionSet, table, walk, depth + 1))
+                    {
+                        return false;
+                    }
+                    break;
+                case FragmentSpreadNode spread:
+                    if (!walk.Spread(spread.Name.Value, RootContext, fragment => CollectConnection(fragment.SelectionSet, table, walk, depth + 1)))
+                    {
+                        return false;
+                    }
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool CollectConnectionEdges(SelectionSetNode set, CatalogTableType table, Walk walk, int depth)
+    {
+        if (depth > MaxSelectionDepth)
+        {
+            return false;
+        }
+
+        foreach (var selection in set.Selections)
+        {
+            if (!walk.Visit())
+            {
+                return false;
+            }
+
+            switch (selection)
+            {
+                case FieldNode field when field.Name.Value.StartsWith("__", StringComparison.Ordinal) ||
+                                          field.Name.Value is "cursor":
+                    break;
+                case FieldNode field when field.Name.Value == "node":
+                    if (field.SelectionSet != null && !CollectTable(field.SelectionSet, table, walk, depth + 1))
+                    {
+                        return false;
+                    }
+                    break;
+                case InlineFragmentNode inline:
+                    if (!CollectConnectionEdges(inline.SelectionSet, table, walk, depth + 1))
+                    {
+                        return false;
+                    }
+                    break;
+                case FragmentSpreadNode spread:
+                    if (!walk.Spread(spread.Name.Value, RootContext, fragment => CollectConnectionEdges(fragment.SelectionSet, table, walk, depth + 1)))
+                    {
+                        return false;
+                    }
                     break;
                 default:
                     return false;

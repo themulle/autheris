@@ -127,6 +127,7 @@ public sealed class PhysicalKeyRefreshEndpointTests
             "unknown-ds",
             Arg.Any<PhysicalKeyRefreshRequest>(),
             Arg.Any<Sid>(),
+            Arg.Any<TenantId?>(),
             Arg.Any<CancellationToken>())
             .ThrowsAsync(new KeyNotFoundException("Datasource unknown-ds not found"));
 
@@ -163,6 +164,7 @@ public sealed class PhysicalKeyRefreshEndpointTests
             "default",
             Arg.Any<PhysicalKeyRefreshRequest>(),
             Arg.Any<Sid>(),
+            Arg.Any<TenantId?>(),
             Arg.Any<CancellationToken>())
             .Returns(expected);
 

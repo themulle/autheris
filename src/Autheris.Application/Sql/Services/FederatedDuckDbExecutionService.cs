@@ -213,11 +213,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
         }
 
-        if (rawSql.Contains(GovernedSqlExecutionService.ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
-        }
-
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(rawSql, null, out _);
         var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
 
@@ -267,10 +262,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
-        if (request.Sql.Contains(GovernedSqlExecutionService.ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
-        }
 
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
         var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);

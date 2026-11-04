@@ -56,7 +56,7 @@ const resolvers = {
       let sql = 'SELECT id, title, artist_id FROM "albums"';
       const params = [];
       if (where?.title?._like) {
-        params.push(where.title._like.replace(/%/g, '%'));
+        params.push(where.title._like);
         sql += ` WHERE title ILIKE $1`;
       } else if (where?.title?._eq) {
         params.push(where.title._eq);

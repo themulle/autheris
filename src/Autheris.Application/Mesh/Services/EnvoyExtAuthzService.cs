@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mesh.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -117,7 +118,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         }
         catch (Autheris.Domain.Exceptions.GatewaySecurityException ex)
         {
-            _logger.LogWarning("ext_authz denied: the caller has no valid tenant ({Code}).", ex.ErrorCode);
+            _logger.LogWarning("ext_authz denied: the caller has no valid tenant ({Code}).", LogSanitizer.Sanitize(ex.ErrorCode));
             return EnvoyCheckResponse.Deny(403, "Forbidden: tenant unresolved.");
         }
 
@@ -464,5 +465,5 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         }
     }
 
-    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+    private static string ForLog(string? value) => LogSanitizer.Sanitize(value);
 }

@@ -2,6 +2,7 @@ namespace Autheris.Application.DataCatalog.Interfaces;
 
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
@@ -10,6 +11,13 @@ using Autheris.Domain.Security;
 /// </summary>
 public interface IPhysicalKeyRefreshService
 {
+    Task<PhysicalKeyRefreshResult> RefreshDatasourceKeysAsync(
+        string datasourceId,
+        PhysicalKeyRefreshRequest request,
+        Sid actor,
+        TenantId? restrictToTenant,
+        CancellationToken ct = default);
+
     Task<PhysicalKeyRefreshResult> RefreshDatasourceKeysAsync(
         string datasourceId,
         PhysicalKeyRefreshRequest request,

@@ -55,7 +55,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         catch (Exception ex)
         {
             GatewayDiagnostics.EventBusPublishFailedCounter.Add(1, new KeyValuePair<string, object?>("message_type", typeof(T).Name));
-            _logger.LogError(ex, "Failed to publish message of type {Type} to Redis channel {Channel}", typeof(T).Name, channel);
+            _logger.LogError(ex, "Failed to publish message of type {Type} to Redis channel {Channel}", typeof(T).Name, LogSanitizer.Sanitize(channel));
             throw;
         }
     }
@@ -73,7 +73,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to increment Redis counter {Key}", key);
+            _logger.LogError(ex, "Failed to increment Redis counter {Key}", LogSanitizer.Sanitize(key));
             throw;
         }
     }
@@ -96,7 +96,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Redis counter {Key}", key);
+            _logger.LogError(ex, "Failed to get Redis counter {Key}", LogSanitizer.Sanitize(key));
             throw;
         }
     }
@@ -125,7 +125,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
                 catch (Exception ex)
                 {
                     GatewayDiagnostics.EventBusHandlerFailedCounter.Add(1, new KeyValuePair<string, object?>("message_type", typeof(T).Name));
-                    _logger.LogError(ex, "Error processing Redis subscription event for channel {Channel}", channel);
+                    _logger.LogError(ex, "Error processing Redis subscription event for channel {Channel}", LogSanitizer.Sanitize(channel));
                 }
             });
         }

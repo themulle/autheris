@@ -13,16 +13,43 @@ using Autheris.Domain.Tenancy;
 /// </summary>
 internal static class TenantStamping
 {
+    public const string SourceClaimType = TenantSourceClaim.ClaimType;
+    public const string StatusClaimType = "autheris:tenant_status";
+
     // Identities this process stamped, with the source of the first stamping. A repeated transformation of the same identity keeps the
     // original source (the tenant claim it re-reads is the stamped one); an inbound autheris:tenant_source never gets here (identity unknown).
     private static readonly ConditionalWeakTable<ClaimsIdentity, string> Stamped = new();
 
     public static TenantResolution Apply(ClaimsIdentity identity, ITenantResolver resolver, bool realmBound)
     {
-        var restamp = Stamped.TryGetValue(identity, out var originalSource);
-        while (identity.FindFirst(TenantSourceClaim.ClaimType) is { } inbound)
+        var hasPriorDefault = identity.FindFirst(StatusClaimType) is not null &&
+                              identity.FindFirst(SourceClaimType)?.Value == TenantSourceClaim.Default;
+
+        var restamp = Stamped.TryGetValue(identity, out var originalSource) || hasPriorDefault;
+        if (hasPriorDefault && originalSource is null)
+        {
+            originalSource = TenantSourceClaim.Default;
+        }
+
+        while (identity.FindFirst(SourceClaimType) is { } inbound)
         {
             identity.RemoveClaim(inbound);
+        }
+        while (identity.FindFirst(StatusClaimType) is { } inboundStatus)
+        {
+            identity.RemoveClaim(inboundStatus);
+        }
+
+        if (restamp && originalSource == TenantSourceClaim.Default)
+        {
+            var names = TenantClaimReader.ClaimNames;
+            for (var i = 0; i < names.Count; i++)
+            {
+                while (identity.FindFirst(names[i]) is { } claim)
+                {
+                    identity.RemoveClaim(claim);
+                }
+            }
         }
 
         var resolution = resolver.Resolve(new ClaimsPrincipal(identity));
@@ -57,6 +84,7 @@ internal static class TenantStamping
             case TenantResolutionOutcome.DefaultAssigned:
                 source = TenantSourceClaim.Default;
                 identity.AddClaim(new Claim("tenant_id", resolution.Tenant!.Value.Value));
+                identity.AddClaim(new Claim(StatusClaimType, "default"));
                 break;
             case TenantResolutionOutcome.Invalid when realmBound:
                 // The realm itself named no valid tenant: a blank claim reads back as Invalid (never as absent or the default).
@@ -67,11 +95,15 @@ internal static class TenantStamping
         if (restamp && source is not null)
         {
             source = originalSource;
+            if (originalSource == TenantSourceClaim.Default && identity.FindFirst(StatusClaimType) is null)
+            {
+                identity.AddClaim(new Claim(StatusClaimType, "default"));
+            }
         }
 
         if (source is not null)
         {
-            identity.AddClaim(new Claim(TenantSourceClaim.ClaimType, source));
+            identity.AddClaim(new Claim(SourceClaimType, source));
             Stamped.AddOrUpdate(identity, restamp ? originalSource! : source);
         }
 

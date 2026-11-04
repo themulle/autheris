@@ -49,10 +49,14 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
     public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
     {
-        if (principal.Identity is not ClaimsIdentity identity || !identity.IsAuthenticated)
+        if (principal.Identity is not ClaimsIdentity originalIdentity || !originalIdentity.IsAuthenticated)
         {
             return principal;
         }
+
+        // Clone first to avoid mutating input principal in place (MED-06)
+        var normalizedPrincipal = ClaimsNormalizer.Normalize(principal);
+        var identity = (ClaimsIdentity)normalizedPrincipal.Identity!;
 
         // 1. Strip any client-supplied autheris:realm claim (AppSec requirement K-1)
         var clientRealmClaims = identity.FindAll(c => string.Equals(c.Type, "autheris:realm", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -61,17 +65,9 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             identity.RemoveClaim(c);
         }
 
-        // 2. Resolve authoritative realm
+        // 2. Resolve authoritative realm deterministically from scheme or issuer (CRIT-01)
         var issuer = identity.FindFirst("iss")?.Value;
-        IdentityRealm? realm = null;
-        if (_realmRegistry != null)
-        {
-            if (!string.IsNullOrWhiteSpace(issuer))
-            {
-                realm = _realmRegistry.ResolveRealmByIssuer(issuer);
-            }
-            realm ??= _realmRegistry.GetDefaultRealm();
-        }
+        IdentityRealm? realm = _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType);
 
         var realmId = realm?.RealmId ?? "workforce-entra";
 
@@ -88,8 +84,11 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
 
-        // DT-A-3 / DT-SC-05: the one tenant decision of the ingress. Inbound tenant_source claims are removed, the resolved tenant is stamped.
-        var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null && !tenantByClaims);
+        // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
+        // Inbound tenant_source claims are removed, the resolved tenant is stamped.
+        // realmBound is only true when the realm has an explicit binding (Fixed or ClaimMapped), not Unbound.
+        var isRealmBound = realm != null && !tenantByClaims && realm.TenantBinding.Kind != TenantBindingKind.Unbound;
+        var resolution = TenantStamping.Apply(identity, _tenantResolver, isRealmBound);
         if (realm == null || tenantByClaims)
         {
             // The unregistered fallback id is stamped after the tenant decision (the resolver must not treat it as a realm); route-realm guards read it.
@@ -109,7 +108,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             if (string.IsNullOrWhiteSpace(userKey))
             {
                 MarkDegraded(identity, realmId, "no user key");
-                return ClaimsNormalizer.Normalize(principal);
+                return normalizedPrincipal;
             }
 
             // The tenant of the role/right lookup is the resolved one; without a tenant (S6, ClusterAdmin only passes the gate later) the
@@ -117,7 +116,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             if (resolution.Tenant is not { } tenantId || tenantId.Value is null)
             {
                 MarkDegraded(identity, realmId, "tenant unresolved");
-                return ClaimsNormalizer.Normalize(principal);
+                return normalizedPrincipal;
             }
 
             var upn = identity.FindFirst("upn")?.Value ?? identity.FindFirst(ClaimTypes.Upn)?.Value;
@@ -171,7 +170,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             }
         }
 
-        return ClaimsNormalizer.Normalize(principal);
+        return normalizedPrincipal;
     }
 
     private void MarkDegraded(ClaimsIdentity identity, string realmId, string reason)

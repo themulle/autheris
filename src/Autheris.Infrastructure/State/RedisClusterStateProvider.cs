@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.State;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -123,7 +124,7 @@ end
     private ClusterStateUnavailableException Unavailable(string operation, string key, Exception ex)
     {
         RecordRedisFailure(operation);
-        _logger.LogWarning(ex, "Redis cluster state operation {Operation} failed for key {Key}.", operation, key);
+        _logger.LogWarning(ex, "Redis cluster state operation {Operation} failed for key {Key}.", operation, LogSanitizer.Sanitize(key));
         return new ClusterStateUnavailableException(operation, key, ex);
     }
 
@@ -197,7 +198,7 @@ end
         {
             // Documented contract: null means "store unavailable" for counters (never "zero").
             RecordRedisFailure("increment");
-            _logger.LogWarning(ex, "Failed to increment counter {Key} in Redis state store.", key);
+            _logger.LogWarning(ex, "Failed to increment counter {Key} in Redis state store.", LogSanitizer.Sanitize(key));
             return null;
         }
     }
@@ -252,7 +253,7 @@ end
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
             RecordRedisFailure("consume_budget");
-            _logger.LogError(ex, "Failed to execute atomic budget consume script for key {Key} in Redis state store.", key);
+            _logger.LogError(ex, "Failed to execute atomic budget consume script for key {Key} in Redis state store.", LogSanitizer.Sanitize(key));
             return (BudgetConsumeOutcome.StoreUnavailable, 0);
         }
     }
@@ -292,7 +293,7 @@ end
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing cluster event from channel {Channel}.", channel);
+                _logger.LogError(ex, "Error processing cluster event from channel {Channel}.", LogSanitizer.Sanitize(channel));
             }
         };
 
@@ -310,7 +311,7 @@ end
         catch (Exception ex)
         {
             RecordRedisFailure("handler");
-            _logger.LogError(ex, "Cluster event handler failed for channel {Channel}.", channel);
+            _logger.LogError(ex, "Cluster event handler failed for channel {Channel}.", LogSanitizer.Sanitize(channel));
         }
     }
 
@@ -444,7 +445,7 @@ end
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
             RecordRedisFailure("TryAcquireSlot");
-            _logger.LogWarning(ex, "Redis cluster state operation TryAcquireSlot failed for key {Key}.", setKey);
+            _logger.LogWarning(ex, "Redis cluster state operation TryAcquireSlot failed for key {Key}.", LogSanitizer.Sanitize(setKey));
             return null;
         }
     }
@@ -472,7 +473,7 @@ end
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
             RecordRedisFailure("RenewSlot");
-            _logger.LogWarning(ex, "Redis cluster state operation RenewSlot failed for key {Key}.", setKey);
+            _logger.LogWarning(ex, "Redis cluster state operation RenewSlot failed for key {Key}.", LogSanitizer.Sanitize(setKey));
             return false;
         }
     }
@@ -491,7 +492,7 @@ end
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {
             RecordRedisFailure("ReleaseSlot");
-            _logger.LogWarning(ex, "Redis cluster state operation ReleaseSlot failed for key {Key}.", setKey);
+            _logger.LogWarning(ex, "Redis cluster state operation ReleaseSlot failed for key {Key}.", LogSanitizer.Sanitize(setKey));
         }
     }
 

@@ -48,10 +48,18 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
         _logger = logger ?? NullLogger<PhysicalKeyRefreshService>.Instance;
     }
 
+    public Task<PhysicalKeyRefreshResult> RefreshDatasourceKeysAsync(
+        string datasourceId,
+        PhysicalKeyRefreshRequest request,
+        Sid actor,
+        CancellationToken ct = default)
+        => RefreshDatasourceKeysAsync(datasourceId, request, actor, null, ct);
+
     public async Task<PhysicalKeyRefreshResult> RefreshDatasourceKeysAsync(
         string datasourceId,
         PhysicalKeyRefreshRequest request,
         Sid actor,
+        TenantId? restrictToTenant,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(datasourceId);
@@ -69,6 +77,12 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
         }
 
         var tables = sourceTables;
+        if (restrictToTenant is { } tenant && !string.IsNullOrWhiteSpace(tenant.Value))
+        {
+            tables = tables.Where(t =>
+                string.Equals(t.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
         if (!string.IsNullOrWhiteSpace(request.TableFilter))
         {
             var filter = request.TableFilter.Trim();
@@ -83,6 +97,8 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
 
         foreach (var table in tables)
         {
+            var tableChanged = false;
+
             if (table.Table.DataSourceType != DataSourceType.Sql)
             {
                 details.Add(new TableKeyRefreshItem(
@@ -142,7 +158,7 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
                             reconciled.Metadata.PrimaryKeyDirections,
                             ct).ConfigureAwait(false);
 
-                        await _epochService.InvalidateEpochAsync(table.Identifier, ct).ConfigureAwait(false);
+                        tableChanged = true;
                     }
                     else
                     {
@@ -159,19 +175,37 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
                 var desiredIndexes = PhysicalNonUniqueIndexResolver.Resolve(table, snapshot);
                 if (desiredIndexes is not null && !PhysicalNonUniqueIndexResolver.SameList(table.PhysicalIndexes, desiredIndexes))
                 {
-                    indexesUpdated++;
                     if (!request.DryRun)
                     {
-                        try
+                        var audited = await TryAuditNonUniqueAsync(table, table.PhysicalIndexes.Count, desiredIndexes.Count, actor, ct).ConfigureAwait(false);
+                        if (audited)
                         {
-                            await _physicalIndexRepository.ReplacePhysicalIndexesAsync(table.Identifier, desiredIndexes, ct).ConfigureAwait(false);
+                            try
+                            {
+                                await _physicalIndexRepository.ReplacePhysicalIndexesAsync(table.Identifier, desiredIndexes, ct).ConfigureAwait(false);
+                                indexesUpdated++;
+                                tableChanged = true;
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                            {
+                                _logger.LogWarning(ex, "Failed to persist physical non-unique indexes for table {Table}", table.Identifier);
+                            }
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                        else
                         {
-                            _logger.LogWarning(ex, "Failed to persist physical non-unique indexes for table {Table}", table.Identifier);
+                            _logger.LogWarning("Audit failed for non-unique indexes on table {Table}; physical indexes not applied.", table.Identifier);
                         }
                     }
+                    else
+                    {
+                        indexesUpdated++;
+                    }
                 }
+            }
+
+            if (tableChanged)
+            {
+                await _epochService.InvalidateEpochAsync(table.Identifier, ct).ConfigureAwait(false);
             }
 
             details.Add(new TableKeyRefreshItem(
@@ -223,6 +257,48 @@ public sealed class PhysicalKeyRefreshService : IPhysicalKeyRefreshService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Audit record failed for table {Table}; changes will fail closed.", table.Identifier);
+            return false;
+        }
+    }
+
+    private async Task<bool> TryAuditNonUniqueAsync(
+        TableMetadata table,
+        int beforeCount,
+        int afterCount,
+        Sid actor,
+        CancellationToken ct)
+    {
+        try
+        {
+            var tenant = table.OwnerTenantId is { } owner
+                ? new TenantId(owner)
+                : TenantId.Platform;
+
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+            {
+                TenantId = tenant,
+                EventType = AuditEventTypes.CatalogPhysicalIndexesChanged,
+                ActorSid = actor,
+                TargetTable = table.Identifier.ToString(),
+                Decision = "ALLOW",
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    datasetId = table.Identifier.ToString(),
+                    beforeCount,
+                    afterCount
+                })
+            }, ct).ConfigureAwait(false);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (ex is OperationCanceledException && ct.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            _logger.LogWarning(ex, "Audit record failed for non-unique indexes on table {Table}; changes will fail closed.", table.Identifier);
             return false;
         }
     }

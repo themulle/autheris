@@ -74,7 +74,7 @@ internal static class DataOwnerAssignmentSqlCore
 
             foreach (var spec in tableSpec.Owners)
             {
-                var (row, error) = Resolve(owners, spec, created, request.MaxNewOwners, tableName, changes, table);
+                var (row, error) = Resolve(owners, spec, created, request.MaxNewOwners, tableName, changes, table, request.CallerIdentifiers);
                 if (error is not null)
                 {
                     return DataOwnerAssignmentResult.Failure(error, tableName);
@@ -120,7 +120,7 @@ internal static class DataOwnerAssignmentSqlCore
 
     private static (OwnerRow? Row, string? Error) Resolve(
         List<OwnerRow> owners, DataOwnerSpec spec, HashSet<string> created, int maxNewOwners, string tableName,
-        List<DataOwnerChange> changes, TableIdentifier table)
+        List<DataOwnerChange> changes, TableIdentifier table, IReadOnlyCollection<string>? callerIdentifiers)
     {
         if (spec.LookupOnly)
         {
@@ -130,7 +130,13 @@ internal static class DataOwnerAssignmentSqlCore
                 return (null, "dbt_owner_lookup_failed");
             }
 
-            return matches[0].IsActive ? (matches[0], null) : (null, "dbt_owner_inactive");
+            var matched = matches[0];
+            if (callerIdentifiers is { Count: > 0 } && matched.Identifiers().Any(i => callerIdentifiers.Any(c => OwnerIdentifier.AreSame(c, i))))
+            {
+                return (null, "dbt_owner_self_assignment_denied");
+            }
+
+            return matched.IsActive ? (matched, null) : (null, "dbt_owner_inactive");
         }
 
         var bySid = owners.Where(o => OwnerIdentifier.AreSame(o.Sid, spec.Sid)).ToList();
@@ -150,9 +156,19 @@ internal static class DataOwnerAssignmentSqlCore
             specIdentifiers.Add(spec.Email);
         }
 
+        if (callerIdentifiers is { Count: > 0 } && specIdentifiers.Any(i => callerIdentifiers.Any(c => OwnerIdentifier.AreSame(c, i))))
+        {
+            return (null, "dbt_owner_self_assignment_denied");
+        }
+
         if (bySid.Count == 1)
         {
             var row = bySid[0];
+            if (callerIdentifiers is { Count: > 0 } && row.Identifiers().Any(i => callerIdentifiers.Any(c => OwnerIdentifier.AreSame(c, i))))
+            {
+                return (null, "dbt_owner_self_assignment_denied");
+            }
+
             if (!row.IsActive)
             {
                 return (null, "dbt_owner_inactive");
@@ -178,6 +194,11 @@ internal static class DataOwnerAssignmentSqlCore
         if (CollidesWithOther(owners, null, specIdentifiers))
         {
             return (null, "dbt_owner_identifier_collision");
+        }
+
+        if (callerIdentifiers is { Count: > 0 } && callerIdentifiers.Any(c => OwnerIdentifier.AreSame(c, spec.Sid)))
+        {
+            return (null, "dbt_owner_self_assignment_denied");
         }
 
         var id = OwnerId(spec.Sid);

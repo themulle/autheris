@@ -240,6 +240,10 @@ public static class RebacEndpoints
         string tenant;
         if (secContext.IsClusterAdmin && !string.IsNullOrWhiteSpace(requestedTenant))
         {
+            if (InvalidTupleTenant(requestedTenant))
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidTenantId, "The tenant identifier is invalid.", request.HttpContext);
+            }
             tenant = requestedTenant;
         }
         else

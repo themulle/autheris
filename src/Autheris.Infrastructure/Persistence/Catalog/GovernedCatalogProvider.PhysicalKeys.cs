@@ -17,7 +17,7 @@ public sealed partial class GovernedCatalogProvider
 {
     /// <summary>Hard row cap while streaming (I403-SC-10).</summary>
     private const int MaxPhysicalKeyRows =
-        (TableKeyDefinitionValidator.MaxIndexesPerTable + TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable) * TableKeyDefinitionValidator.MaxColumnsPerKey;
+        (TableKeyDefinitionValidator.MaxIndexesPerTable + 1 + TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable) * TableKeyDefinitionValidator.MaxColumnsPerKey;
 
     /// <summary>Command timeout of the physical key read (I403-SC-10); the linked caller token applies as well.</summary>
     internal TimeSpan PhysicalKeyReadTimeout { get; init; } = TimeSpan.FromSeconds(30);
@@ -79,16 +79,25 @@ public sealed partial class GovernedCatalogProvider
             }
 
             var keyRows = rows.Where(static r => r.IsPrimaryKey || r.IsUnique).ToList();
-            if (!TryBuild(keyRows, out var keys))
+            var keysBuilt = TryBuild(keyRows, out var keys);
+
+            var nonUniqueRows = rows.Where(static r => !r.IsPrimaryKey && !r.IsUnique).ToList();
+            var nonUnique = nonUniqueOverflow
+                ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable)
+                : TryBuildNonUnique(nonUniqueRows, out var indexes)
+                    ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Known, indexes)
+                    : new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable);
+
+            if (keyRows.Count == 0 && nonUniqueRows.Count > 0 && nonUnique.State == PhysicalKeySnapshotState.Known)
+            {
+                return new PhysicalKeySnapshot(PhysicalKeySnapshotState.Known, [], target, nonUnique);
+            }
+
+            if (!keysBuilt)
             {
                 return PhysicalKeySnapshot.Unavailable;
             }
 
-            var nonUnique = nonUniqueOverflow
-                ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable)
-                : TryBuildNonUnique(rows.Where(static r => !r.IsPrimaryKey && !r.IsUnique).ToList(), out var indexes)
-                    ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Known, indexes)
-                    : new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable);
             return new PhysicalKeySnapshot(PhysicalKeySnapshotState.Known, keys, target, nonUnique);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -144,7 +153,7 @@ public sealed partial class GovernedCatalogProvider
             }
 
             result.Add(new PhysicalKey(first.IsPrimaryKey, first.IsClustered, columns, directions));
-            if (result.Count > TableKeyDefinitionValidator.MaxIndexesPerTable)
+            if (result.Count > TableKeyDefinitionValidator.MaxIndexesPerTable + (primaryKeys > 0 ? 1 : 0))
             {
                 return false;
             }

@@ -236,8 +236,8 @@ public sealed class AccessAuditMiddleware
                 "Unrouted request answered with {StatusCode} (sampled 1/{SampleInterval}): {Method} {Path}",
                 statusCode,
                 UnroutedLogSampleInterval,
-                context.Request.Method,
-                Truncate(context.Request.Path.Value ?? "/", 128));
+                LogSanitizer.Sanitize(context.Request.Method),
+                Truncate(LogSanitizer.Sanitize(context.Request.Path.Value ?? "/"), 128));
         }
     }
 

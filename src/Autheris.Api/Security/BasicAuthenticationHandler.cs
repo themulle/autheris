@@ -259,7 +259,21 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
                 // when the user is not found, ensuring uniform parsing, base64 decoding and cryptographic hashing times
                 // to defeat timing-based user enumeration.
                 var storedHashToVerify = configuredUser?.Password ?? _dummyStoredHash;
-                passwordVerified = PasswordHasher.VerifyPassword(password, storedHashToVerify, username, _isDevelopment, msg => Logger.LogError("{Message}", msg));
+                passwordVerified = PasswordHasher.VerifyPassword(password, storedHashToVerify, username, _isDevelopment, diag =>
+                {
+                    switch (diag)
+                    {
+                        case PasswordVerificationDiagnostic.PlaintextOrUnsaltedProhibitedInProduction:
+                            Logger.LogError("Basic authentication rejected user: Plaintext or unsalted passwords are strictly prohibited outside of Development.");
+                            break;
+                        case PasswordVerificationDiagnostic.Argon2idParametersOutsideBounds:
+                            Logger.LogError("Basic authentication rejected user: Argon2id cost parameters outside permitted bounds.");
+                            break;
+                        case PasswordVerificationDiagnostic.Pbkdf2IterationsOutsideBounds:
+                            Logger.LogError("Basic authentication rejected user: PBKDF2 iteration count outside permitted range.");
+                            break;
+                    }
+                });
             }
             finally
             {

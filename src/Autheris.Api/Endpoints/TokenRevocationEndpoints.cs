@@ -61,15 +61,20 @@ public static class TokenRevocationEndpoints
         // key that matches tokens of their own tenant only and never a canonical ClusterAdmin.
         // In a single-tenant deployment the scope is the legacy tenant, i.e. all non-ClusterAdmin tokens.
         bool isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
-        TenantId tenantId;
-        try
+        TenantId? resolvedTenant = context.GetSecurityContext()?.ResolvedTenant;
+        if (!isClusterAdmin && resolvedTenant is null)
         {
-            tenantId = context.User.GetTenantId();
+            try
+            {
+                resolvedTenant = context.User.GetTenantId();
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
+
+        TenantId tenantId = resolvedTenant ?? TenantId.Platform;
 
         string revocationKey = isClusterAdmin
             ? request.SubjectOrJti

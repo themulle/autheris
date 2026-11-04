@@ -67,7 +67,7 @@ public sealed class AuditWriter : IAuditWriter
         catch (Exception ex)
         {
             GatewayDiagnostics.AuditWriteFailedCounter.Add(1, new KeyValuePair<string, object?>("tier", "required"));
-            _logger.LogError(ex, "Required audit write failed for event {EventType}; failing closed.", entry.EventType);
+            _logger.LogError(ex, "Required audit write failed; failing closed.");
             throw new AuditUnavailableException("The audit store is unavailable (fail-closed).", ex);
         }
     }
@@ -86,7 +86,7 @@ public sealed class AuditWriter : IAuditWriter
         catch (Exception ex)
         {
             GatewayDiagnostics.AuditWriteFailedCounter.Add(1, new KeyValuePair<string, object?>("tier", "best_effort"));
-            _logger.LogWarning(ex, "Best-effort audit write failed for event {EventType}.", entry.EventType);
+            _logger.LogWarning(ex, "Best-effort audit write failed.");
         }
     }
 

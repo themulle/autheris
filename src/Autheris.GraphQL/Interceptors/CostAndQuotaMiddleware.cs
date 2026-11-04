@@ -100,13 +100,17 @@ public sealed class CostAndQuotaMiddleware
             return false;
         }
 
+        var relationRegistry = context.RequestServices.GetService<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>();
+        var analyticsOptions = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value;
         int cost = QueryCostAnalyzerRule.CalculateCost(
             doc,
             context.Schema,
             maxResponseRows: gatewayOptions.GraphQL?.MaxResponseRows ?? 1000,
             variableValues: BuildRuntimeVariables(context),
             costOptions: gatewayOptions.QueryCost,
-            maxExecutionDepth: QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL));
+            aggregation: analyticsOptions?.Aggregation,
+            maxExecutionDepth: QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL),
+            relationRegistry: relationRegistry);
         if (cost <= maxCost)
         {
             return false;
@@ -222,6 +226,7 @@ public sealed class CostAndQuotaMiddleware
 
         int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
         int maxExecutionDepth = QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions?.GraphQL);
+        var relationRegistry = services?.GetService<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>();
         int calculatedCost = QueryCostAnalyzerRule.CalculateCost(
             doc,
             context.Schema,
@@ -229,7 +234,8 @@ public sealed class CostAndQuotaMiddleware
             variableValues: runtimeVariables,
             costOptions: gatewayOptions?.QueryCost,
             aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation,
-            maxExecutionDepth: maxExecutionDepth);
+            maxExecutionDepth: maxExecutionDepth,
+            relationRegistry: relationRegistry);
 
         int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
         if (gatewayOptions is not null && EffectiveGatewayMaxCost(gatewayOptions) is > 0 and var effectiveGatewayMaxCost)

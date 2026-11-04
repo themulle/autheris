@@ -18,6 +18,8 @@ public static class IndividualGrantServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddOptions<IndividualGrantOptions>()
+            .ValidateOnStart();
         services.TryAddSingleton<IIndividualGrantLimits, IndividualGrantLimitsService>();
         services.PostConfigure<IndividualGrantOptions>(o =>
         {

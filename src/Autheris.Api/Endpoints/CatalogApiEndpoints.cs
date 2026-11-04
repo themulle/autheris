@@ -471,6 +471,25 @@ public static class CatalogApiEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
+        var gatewayOptions = (httpContext.RequestServices.GetService(typeof(IOptions<GatewayOptions>)) as IOptions<GatewayOptions>)?.Value ?? new GatewayOptions();
+        var defaultTenant = TenantResolver.EffectiveDefaultOf(gatewayOptions.Tenancy);
+        var scope = CallerScopeResolver.Resolve(httpContext.User, defaultTenant);
+
+        if (scope == CallerScope.None && httpContext.User.Identity?.IsAuthenticated == true &&
+            CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
+        {
+            return CallerScopeResolver.HasInvalidTenantClaim(httpContext.User)
+                ? ApiProblems.Forbidden(ApiErrorCodes.TenantClaimInvalid, "The tenant claim of the caller is invalid.", httpContext)
+                : ApiProblems.Forbidden(
+                    ApiErrorCodes.TenantUnresolved,
+                    "The principal has no resolvable tenant: carry a tenant claim or configure Gateway:Tenancy:DefaultTenantId.",
+                    httpContext);
+        }
+
+        TenantId? restrictToTenant = scope == CallerScope.Tenant
+            ? CallerScopeResolver.ResolutionOf(httpContext.User, defaultTenant).Tenant
+            : null;
+
         if (string.IsNullOrWhiteSpace(id) || !DatasourceTestingService.IsValidDatasourceId(id))
         {
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The datasource identifier is invalid.", httpContext);
@@ -488,7 +507,7 @@ public static class CatalogApiEndpoints
         try
         {
             var effectiveRequest = request ?? new PhysicalKeyRefreshRequest();
-            var result = await refreshService.RefreshDatasourceKeysAsync(id, effectiveRequest, actorSid, ct);
+            var result = await refreshService.RefreshDatasourceKeysAsync(id, effectiveRequest, actorSid, restrictToTenant, ct);
             return Results.Ok(result);
         }
         catch (KeyNotFoundException)

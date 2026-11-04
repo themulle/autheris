@@ -27,7 +27,8 @@ public sealed record DataOwnerAssignmentRequest(
     IReadOnlyList<TableOwnerAssignmentSpec> Tables,
     bool Replace,
     bool DryRun,
-    int MaxNewOwners = 1000);
+    int MaxNewOwners = 1000,
+    IReadOnlyCollection<string>? CallerIdentifiers = null);
 
 public enum DataOwnerChangeKind
 {

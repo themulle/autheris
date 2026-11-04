@@ -362,10 +362,12 @@ public static class DatasetDataEndpoints
                 writer.WriteNumberValue(l);
                 break;
             case float f:
-                writer.WriteNumberValue(f);
+                if (float.IsFinite(f)) writer.WriteNumberValue(f);
+                else writer.WriteNullValue();
                 break;
             case double d:
-                writer.WriteNumberValue(d);
+                if (double.IsFinite(d)) writer.WriteNumberValue(d);
+                else writer.WriteNullValue();
                 break;
             case decimal dec:
                 writer.WriteNumberValue(dec);

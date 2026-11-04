@@ -20,6 +20,11 @@ internal static class CatalogPhysicalIndexStore
     /// <summary>One stored index column row.</summary>
     internal readonly record struct Row(int IndexOrdinal, int ColumnOrdinal, string ColumnId, bool Descending);
 
+    internal sealed class PhysicalRows : List<Row>
+    {
+        internal bool Overflow { get; set; }
+    }
+
     private static string SelectSql(KeyDefinitionDialect dialect, string tableFilter) =>
         $@"SELECT i.table_id, i.index_ordinal, ic.column_ordinal, ic.table_column_id, ic.is_descending
            FROM {dialect.Prefix}{IndexTable} i
@@ -35,7 +40,7 @@ internal static class CatalogPhysicalIndexStore
         return batch.TryGetValue(tableId, out var rows) ? Assemble(columns, rows) : Array.Empty<PhysicalIndexDefinition>();
     }
 
-    /// <summary>Reads the raw rows of many tables, one query per chunk of table ids. A table above the row cap keeps only the rows within the cap.</summary>
+    /// <summary>Reads the raw rows of many tables, one query per chunk of table ids. A table above the row cap fails closed.</summary>
     internal static async Task<Dictionary<Guid, List<Row>>> ReadBatchAsync(
         DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, IReadOnlyList<Guid> tableIds, CancellationToken ct)
     {
@@ -68,17 +73,32 @@ internal static class CatalogPhysicalIndexStore
 
                 if (!result.TryGetValue(tid, out var rows))
                 {
-                    result[tid] = rows = [];
+                    result[tid] = rows = new PhysicalRows();
                 }
 
-                if (rows.Count < MaxRowsPerTable)
+                if (rows is PhysicalRows physicalRows && physicalRows.Overflow)
                 {
-                    rows.Add(new Row(
-                        Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture),
-                        Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture),
-                        reader.GetString(3),
-                        descending));
+                    continue;
                 }
+
+                if (rows.Count >= MaxRowsPerTable)
+                {
+                    if (rows is PhysicalRows pr) pr.Overflow = true;
+                    continue;
+                }
+
+                var indexOrdinal = Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture);
+                if (indexOrdinal > TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable)
+                {
+                    if (rows is PhysicalRows pr) pr.Overflow = true;
+                    continue;
+                }
+
+                rows.Add(new Row(
+                    indexOrdinal,
+                    Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture),
+                    reader.GetString(3),
+                    descending));
             }
         }
 
@@ -88,7 +108,7 @@ internal static class CatalogPhysicalIndexStore
     /// <summary>Builds the indexes from raw rows (ordered by index and column ordinal); an index with an unresolved column or an ordinal gap is dropped whole.</summary>
     internal static IReadOnlyList<PhysicalIndexDefinition> Assemble(IReadOnlyList<TableColumn> columns, IReadOnlyList<Row> rows)
     {
-        if (rows.Count == 0)
+        if (rows.Count == 0 || (rows is PhysicalRows { Overflow: true }))
         {
             return Array.Empty<PhysicalIndexDefinition>();
         }

@@ -28,7 +28,9 @@ public partial class SqliteGovernanceRepository : IPhysicalIndexRepository
 
                 // Queued inside the write scope: the scope disposal applies it under the write gate.
                 QueueMetadataInvalidation(table);
+                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct);
+                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
             }
             catch
             {

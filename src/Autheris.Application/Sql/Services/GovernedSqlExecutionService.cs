@@ -531,17 +531,17 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IReadOnlyDictionary<string, object?>? gatewayParameters,
         out IReadOnlyCollection<string> replacedNames)
     {
+        if (sql.Contains(ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
+        }
+
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         replacedNames = names;
         bool hasGateway = gatewayParameters is { Count: > 0 };
         if ((!hasGateway && (parameters == null || parameters.Count == 0)) || sql.IndexOf('@') < 0)
         {
             return sql;
-        }
-
-        if (sql.Contains(ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
         }
 
         var gatewayNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

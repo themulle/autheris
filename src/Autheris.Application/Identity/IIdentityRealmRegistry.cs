@@ -7,6 +7,7 @@ public interface IIdentityRealmRegistry
 {
     IdentityRealm? ResolveByIssuer(string issuer);
     IdentityRealm? ResolveRealmByIssuer(string issuer) => ResolveByIssuer(issuer);
+    IdentityRealm? ResolveRealmForScheme(string? issuer, string? authenticationType);
     IdentityRealm? GetRealm(string realmId);
     IdentityRealm? GetDefaultRealm();
     IReadOnlyList<IdentityRealm> GetAllRealms();

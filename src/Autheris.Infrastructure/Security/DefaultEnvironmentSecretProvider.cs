@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
+using Autheris.Domain.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -155,7 +156,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         var isInstanceSpecificItsmRef = secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) && IsInstanceSpecificReference(secretRef);
         if (isInstanceSpecificItsmRef)
         {
-            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", DescribeReference(secretRef));
+            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", SanitizeForLog(DescribeReference(secretRef)));
         }
         else if (secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(secretRef, "itsm-webhook-secret", StringComparison.OrdinalIgnoreCase) ||
@@ -301,15 +302,5 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
                string.Equals(host, "vault.azure.net", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string SanitizeForLog(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return value;
-        }
-
-        return value
-            .Replace("\r", string.Empty, StringComparison.Ordinal)
-            .Replace("\n", string.Empty, StringComparison.Ordinal);
-    }
+    private static string SanitizeForLog(string value) => LogSanitizer.Sanitize(value);
 }

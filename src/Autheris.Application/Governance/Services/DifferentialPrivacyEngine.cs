@@ -8,6 +8,7 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -203,7 +204,7 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
     }
 
     /// <summary>The client id is caller-supplied: strip line breaks so it cannot forge log entries.</summary>
-    private static string ForLog(string? value) => (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+    private static string ForLog(string? value) => LogSanitizer.Sanitize(value);
 
     private static double GenerateLaplaceNoise(double scale)
     {
