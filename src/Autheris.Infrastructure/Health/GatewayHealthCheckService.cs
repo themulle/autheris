@@ -1,4 +1,5 @@
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;
@@ -16,6 +17,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
     private readonly ILogger<GatewayHealthCheckService> _logger;
     private readonly IHostEnvironment? _environment;
     private readonly AuditChainIntegrityMonitor? _auditChainMonitor;
+    private readonly ICatalogSearchEngine? _catalogSearchEngine;
 
     public GatewayHealthCheckService(
         IOptions<GatewayOptions> options,
@@ -23,7 +25,8 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         IGovernanceRepository? governanceRepository = null,
         IConnectionMultiplexer? redisMultiplexer = null,
         IHostEnvironment? environment = null,
-        AuditChainIntegrityMonitor? auditChainMonitor = null)
+        AuditChainIntegrityMonitor? auditChainMonitor = null,
+        ICatalogSearchEngine? catalogSearchEngine = null)
     {
         _auditChainMonitor = auditChainMonitor;
         _options = options;
@@ -31,6 +34,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         _governanceRepository = governanceRepository;
         _redisMultiplexer = redisMultiplexer;
         _environment = environment;
+        _catalogSearchEngine = catalogSearchEngine;
     }
 
     public async Task<GatewayHealthReport> CheckHealthAsync(CancellationToken ct = default)
@@ -195,6 +199,18 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         else if (warnings.Count > 0)
         {
             _logger.LogDebug("Health check: security-relevant settings active (permitted): {Warnings}", string.Join(", ", warnings));
+        }
+
+        // 4. Catalog Search Index (Issue #458)
+        if (_catalogSearchEngine != null)
+        {
+            var isReady = _catalogSearchEngine.IsIndexReady;
+            var tableCount = _catalogSearchEngine.IndexedTableCount;
+            var lastIndexed = _catalogSearchEngine.LastIndexedAt;
+            var searchDesc = isReady
+                ? $"Catalog search index ready: {tableCount} tables indexed at {lastIndexed:O}."
+                : "Catalog search index warming or not initialized.";
+            components.Add(new HealthCheckComponentResult("CatalogSearchIndex", true, searchDesc));
         }
 
         return new GatewayHealthReport(overallHealthy, components);

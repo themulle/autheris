@@ -51,6 +51,7 @@ public static class SystemEndpoints
             IGatewaySystemMetricsService metricsService,
             IOptions<GatewayOptions> options,
             [FromServices] ICatalogSchemaDiagnostics? catalogDiagnostics,
+            [FromServices] Autheris.Domain.Interfaces.ICatalogSearchEngine? searchEngine,
             CancellationToken ct) =>
         {
             var sysOpts = options.Value.SystemMetrics;
@@ -73,7 +74,8 @@ public static class SystemEndpoints
                 version = metrics.Version,
                 uptime = metrics.Uptime,
                 components = metrics.Components,
-                graphQlCatalog = BuildCatalogDiagnostics(catalogDiagnostics, context.User)
+                graphQlCatalog = BuildCatalogDiagnostics(catalogDiagnostics, context.User),
+                catalogSearch = BuildCatalogSearchDiagnostics(searchEngine)
             }, statusCode: isAllHealthy ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -130,6 +132,21 @@ public static class SystemEndpoints
             omittedTableCount = omitted.Count,
             omittedTables = listed,
             omittedTablesTruncated = omitted.Count > listed.Length
+        };
+    }
+
+    private static object? BuildCatalogSearchDiagnostics(Autheris.Domain.Interfaces.ICatalogSearchEngine? searchEngine)
+    {
+        if (searchEngine == null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            isIndexReady = searchEngine.IsIndexReady,
+            indexedTableCount = searchEngine.IndexedTableCount,
+            lastIndexedAt = searchEngine.LastIndexedAt
         };
     }
 
