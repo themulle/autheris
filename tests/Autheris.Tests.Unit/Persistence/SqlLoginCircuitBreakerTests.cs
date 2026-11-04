@@ -128,6 +128,29 @@ public sealed class SqlLoginCircuitBreakerTests
     }
 
     [Fact]
+    public void GssIdentityRegistry_Kerberos_AllowsSame_RefusesDifferent()
+    {
+        var registry = new GssIdentityRegistry();
+        registry.ClaimKerberos("/etc/krb5.conf", "/etc/krb5.keytab", null);
+        Should.NotThrow(() => registry.ClaimKerberos("/etc/krb5.conf", "/etc/krb5.keytab", null));
+
+        var ex = Should.Throw<SecurityException>(() => registry.ClaimKerberos("/etc/krb5.conf", "/other/krb5.keytab", null));
+        ex.Message.ShouldContain("KRB5_CLIENT_KTNAME");
+    }
+
+    [Fact]
+    public void GssIdentityRegistry_RefusesMixedNtlmAndKerberos()
+    {
+        var reg1 = new GssIdentityRegistry();
+        reg1.Claim("DOM", "svc");
+        Should.Throw<SecurityException>(() => reg1.ClaimKerberos("/etc/krb5.conf", "/etc/krb5.keytab", null));
+
+        var reg2 = new GssIdentityRegistry();
+        reg2.ClaimKerberos("/etc/krb5.conf", "/etc/krb5.keytab", null);
+        Should.Throw<SecurityException>(() => reg2.Claim("DOM", "svc"));
+    }
+
+    [Fact]
     public void Describer_ReportsEffectiveLoginWithoutPassword()
     {
         var describer = new SqlSourceDescriber();

@@ -316,10 +316,18 @@ public static class StreamingCdcEndpoints
         }
 
         // Creator snapshot: authorisation of every delivered event is evaluated as this principal. Never taken from the request body.
-        var capture = CdcSubscriptionPrincipal.Capture(context.User, options);
+        var restrictedScopes = services.GetService<Autheris.Domain.Security.IRestrictedScopePolicy>();
+        var capture = CdcSubscriptionPrincipal.Capture(context.User, options, restrictedScopes);
         if (capture.Error == CdcSnapshotCaptureError.MissingSid)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (capture.Error == CdcSnapshotCaptureError.RestrictedScope)
+        {
+            return SafeErrorResults.Problem(
+                StatusCodes.Status403Forbidden, "CDC_RESTRICTED_SCOPE_FORBIDDEN",
+                "Tokens with restricted scopes cannot create CDC webhook subscriptions.", context);
         }
 
         if (!capture.IsSuccess)

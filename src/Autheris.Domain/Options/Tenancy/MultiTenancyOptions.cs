@@ -79,6 +79,12 @@ public sealed class AsyncJobOptions
     /// <summary>Maximum number of queued plus running jobs of one tenant on this node; further submits are rejected (HTTP 429).</summary>
     public int MaxQueuedJobsPerTenant { get; init; } = 50;
 
+    /// <summary>Maximum number of queued plus running jobs of one user (by SID/owner); further submits are rejected (HTTP 429).</summary>
+    public int MaxActiveJobsPerUser { get; init; } = 10;
+
+    /// <summary>Maximum total scratch bytes used by job result files; when exceeded, further submits are rejected (HTTP 429).</summary>
+    public long MaxScratchBytes { get; init; } = 1_073_741_824; // 1 GB
+
     /// <summary>Timeout applied when the client supplies none (or a non-positive one).</summary>
     public int DefaultTimeoutSeconds { get; init; } = 300;
 

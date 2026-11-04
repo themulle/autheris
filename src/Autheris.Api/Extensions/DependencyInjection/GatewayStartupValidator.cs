@@ -347,6 +347,8 @@ public static class GatewayStartupValidator
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         bool isContainer = IsTruthy(getEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"));
 
+        (string Name, SqlServerWindowsAuthMode Mode, string? Domain, string? User, string? KrbConfig, string? KrbKeytab, string? KrbCache)? firstGssSource = null;
+
         foreach (var (name, connection) in options.DataSources.Connections)
         {
             if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.SqlServer) || string.IsNullOrWhiteSpace(connection.ConnectionString))
@@ -387,6 +389,32 @@ public static class GatewayStartupValidator
                 var mode = SqlServerWindowsAuthConfigurator.ResolveEffectiveMode(winAuth!, getEnvironmentVariable);
                 if (mode == SqlServerWindowsAuthMode.Kerberos)
                 {
+                    var curKrb = (name, SqlServerWindowsAuthMode.Kerberos, (string?)null, (string?)null,
+                        winAuth!.KerberosConfigPath is null ? null : Path.GetFullPath(winAuth.KerberosConfigPath),
+                        winAuth.KerberosKeytabPath is null ? null : Path.GetFullPath(winAuth.KerberosKeytabPath),
+                        winAuth.KerberosCachePath is null ? null : Path.GetFullPath(winAuth.KerberosCachePath));
+                    if (firstGssSource is { } firstK)
+                    {
+                        if (firstK.Mode != SqlServerWindowsAuthMode.Kerberos)
+                        {
+                            throw new ValidationException(
+                                $"Security violation: SQL Server data source '{name}' uses Kerberos, but data source '{firstK.Name}' uses NTLM. " +
+                                "The native GSSAPI environment cannot mix Kerberos and native NTLM across data sources.");
+                        }
+                        if (!string.Equals(firstK.KrbConfig ?? string.Empty, curKrb.Item5 ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                            !string.Equals(firstK.KrbKeytab ?? string.Empty, curKrb.Item6 ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                            !string.Equals(firstK.KrbCache ?? string.Empty, curKrb.Item7 ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new ValidationException(
+                                $"Security violation: SQL Server data source '{name}' specifies different Kerberos configuration/credentials than data source '{firstK.Name}'. " +
+                                "The process-wide Kerberos environment supports only one identity/keytab across data sources.");
+                        }
+                    }
+                    else
+                    {
+                        firstGssSource = curKrb;
+                    }
+
                     if (!string.IsNullOrWhiteSpace(winAuth!.KerberosConfigPath) && !File.Exists(Path.GetFullPath(winAuth.KerberosConfigPath)))
                     {
                         throw new ValidationException(
@@ -401,7 +429,35 @@ public static class GatewayStartupValidator
                 }
                 else if (mode == SqlServerWindowsAuthMode.Ntlm)
                 {
-                    string? ntlmFile = !string.IsNullOrWhiteSpace(winAuth!.NtlmUserFilePath)
+                    bool isManaged = ManagedNtlmPolicy.Resolve(winAuth!.UseManagedNtlm, getEnvironmentVariable);
+                    if (!isManaged)
+                    {
+                        var (domainPart, userPart) = SqlServerWindowsAuthConfigurator.NormalizeDomainAndUser(winAuth.Domain, winAuth.Username);
+                        var curNtlm = (name, SqlServerWindowsAuthMode.Ntlm, domainPart, userPart, (string?)null, (string?)null, (string?)null);
+                        if (firstGssSource is { } firstN)
+                        {
+                            if (firstN.Mode == SqlServerWindowsAuthMode.Kerberos)
+                            {
+                                throw new ValidationException(
+                                    $"Security violation: SQL Server data source '{name}' uses native NTLM, but data source '{firstN.Name}' uses Kerberos. " +
+                                    "The native GSSAPI environment cannot mix Kerberos and native NTLM across data sources.");
+                            }
+                            if (!string.IsNullOrWhiteSpace(userPart) &&
+                                (!string.Equals(firstN.Domain ?? string.Empty, curNtlm.Item3 ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
+                                 !string.Equals(firstN.User ?? string.Empty, curNtlm.Item4 ?? string.Empty, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                throw new ValidationException(
+                                    $"Security violation: SQL Server data source '{name}' uses native NTLM with account '{curNtlm.Item3}\\{curNtlm.Item4}', but data source '{firstN.Name}' uses '{firstN.Domain}\\{firstN.User}'. " +
+                                    "The process-wide native NTLM environment supports only one account. Enable WindowsAuth.UseManagedNtlm=true to use different accounts.");
+                            }
+                        }
+                        else
+                        {
+                            firstGssSource = curNtlm;
+                        }
+                    }
+
+                    string? ntlmFile = !string.IsNullOrWhiteSpace(winAuth.NtlmUserFilePath)
                         ? winAuth.NtlmUserFilePath
                         : getEnvironmentVariable("NTLM_USER_FILE");
 

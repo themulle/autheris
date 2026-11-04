@@ -171,29 +171,23 @@ public static class SqlServerWindowsAuthConfigurator
             setEnvVar);
 
     private static void ConfigureGssEnvironmentAndSspiProvider(
-        SqlServerWindowsAuthOptions winAuth,
-        IKeyVaultSecretProvider? secrets,
-        IHostEnvironment? environment,
-        out SspiContextProvider? sspiContextProvider,
-        ILogger? logger = null,
-        string? gssStateDirectory = null,
-        Func<string, string?>? getEnvVar = null,
-        Action<string, string>? setEnvVar = null)
+        SqlServerWindowsAuthOptions winAuth, IKeyVaultSecretProvider? secrets, IHostEnvironment? environment,
+        out SspiContextProvider? sspiContextProvider, ILogger? logger = null, string? gssStateDirectory = null,
+        Func<string, string?>? getEnvVar = null, Action<string, string>? setEnvVar = null)
     {
         ArgumentNullException.ThrowIfNull(winAuth);
         sspiContextProvider = null;
-
         var getEnvironmentVariable = getEnvVar ?? Environment.GetEnvironmentVariable;
         var setEnvironmentVariable = setEnvVar ?? NativeEnvironment.Set;
 
         var effectiveMode = ResolveEffectiveMode(winAuth, getEnvironmentVariable);
-        if (effectiveMode == SqlServerWindowsAuthMode.None)
-        {
-            return;
-        }
+        if (effectiveMode == SqlServerWindowsAuthMode.None) return;
 
         if (effectiveMode == SqlServerWindowsAuthMode.Kerberos)
         {
+            var kRegistry = setEnvVar is null ? GssIdentityRegistry.Shared : null;
+            kRegistry?.ClaimKerberos(winAuth.KerberosConfigPath, winAuth.KerberosKeytabPath, winAuth.KerberosCachePath);
+
             if (!string.IsNullOrWhiteSpace(winAuth.KerberosConfigPath))
             {
                 EnsureFileExists(winAuth.KerberosConfigPath, "Kerberos configuration file (KerberosConfigPath)");

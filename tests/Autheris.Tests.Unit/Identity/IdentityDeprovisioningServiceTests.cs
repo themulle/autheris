@@ -131,6 +131,24 @@ public sealed class IdentityDeprovisioningServiceTests
     }
 
     [Fact]
+    public async Task DeprovisionAndLockSubjectAsync_SubscriptionStoreConfigured_RemovesUserSubscriptions()
+    {
+        var subStore = Substitute.For<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore>();
+        var sut = new IdentityDeprovisioningService(_storeRepo, subscriptionStore: subStore);
+        var tenantId = new TenantId("tenant-corp");
+
+        var sub1 = new CloudEventWebhookSubscription("sub-1", "tenant-corp", "https://example.test", "*", [], "sec", CreatedBySid: "user-1");
+        var sub2 = new CloudEventWebhookSubscription("sub-2", "tenant-corp", "https://example.test", "*", [], "sec", CreatedBySid: "user-other");
+        subStore.ListSubscriptionsAsync("tenant-corp", Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<System.Collections.Generic.IReadOnlyList<CloudEventWebhookSubscription>>([sub1, sub2]));
+
+        await sut.DeprovisionAndLockSubjectAsync(tenantId, "realm-1", "user-1", "reason", "admin");
+
+        await subStore.Received(1).RemoveSubscriptionAsync("tenant-corp", "sub-1", Arg.Any<CancellationToken>());
+        await subStore.DidNotReceive().RemoveSubscriptionAsync("tenant-corp", "sub-2", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task DeprovisionAsync_DefaultInterfaceMethod_ForwardsToDeprovisionAndLockSubject()
     {
         var sut = (IIdentityDeprovisioningService)new IdentityDeprovisioningService(_storeRepo);

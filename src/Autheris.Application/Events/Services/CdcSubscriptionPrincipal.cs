@@ -7,13 +7,15 @@ using System.Security.Claims;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 
 /// <summary>Why a creator snapshot could not be captured.</summary>
 public enum CdcSnapshotCaptureError
 {
     None = 0,
     MissingSid,
-    TooLarge
+    TooLarge,
+    RestrictedScope
 }
 
 /// <summary>Why <see cref="CdcSubscriptionPrincipal.Evaluate"/> denied.</summary>
@@ -39,9 +41,18 @@ public static class CdcSubscriptionPrincipal
     public const string AuthenticationType = "cdc-webhook-snapshot";
     public const string TenantClaimType = "tenant_id";
 
-    public static CdcSnapshotCapture Capture(ClaimsPrincipal? admin, CdcWebhooksOptions options)
+    public static CdcSnapshotCapture Capture(ClaimsPrincipal? admin, CdcWebhooksOptions options, IRestrictedScopePolicy? restrictedScopePolicy = null)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        if (admin is not null && restrictedScopePolicy is not null)
+        {
+            var callerScopes = TokenAccessScope.GetScopeSet(admin);
+            if (restrictedScopePolicy.HeldBy(callerScopes).Count > 0)
+            {
+                return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.RestrictedScope);
+            }
+        }
 
         var sid = admin.GetUserSid();
         if (sid is null || string.IsNullOrWhiteSpace(sid.Value.Value) || sid.Value.Value.Length > 256)

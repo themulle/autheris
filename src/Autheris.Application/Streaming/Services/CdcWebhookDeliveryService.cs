@@ -250,6 +250,26 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
             StreamSecurityDecision decision;
             await using (var scope = _scopeFactory.CreateAsyncScope())
             {
+                var identityStore = scope.ServiceProvider.GetService<Autheris.Domain.Interfaces.IIdentityStoreRepository>();
+                if (identityStore != null && !string.IsNullOrWhiteSpace(subscription.CreatedBySid))
+                {
+                    var tId = new Autheris.Domain.Common.TenantId(subscription.TenantId);
+                    if (await identityStore.IsSubjectLockedAsync(tId, "default", subscription.CreatedBySid, ct).ConfigureAwait(false))
+                    {
+                        Drop("subject_locked");
+                        Record(subscription, b => b.DroppedDenied++);
+                        continue;
+                    }
+
+                    var user = await identityStore.GetUserAsync(tId, "default", subscription.CreatedBySid, ct).ConfigureAwait(false);
+                    if (user != null && !user.Active)
+                    {
+                        Drop("subject_inactive");
+                        Record(subscription, b => b.DroppedDenied++);
+                        continue;
+                    }
+                }
+
                 var enforcer = scope.ServiceProvider.GetRequiredService<IStreamRlsPolicyEnforcer>();
                 decision = await enforcer.EvaluateAndMaskAsync(cdcEvent, principal, ct).ConfigureAwait(false);
             }
