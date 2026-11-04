@@ -39,6 +39,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions? _options;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver? _callerAttributes;
@@ -58,8 +59,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _callerAttributes = callerAttributes;
         _time = time ?? TimeProvider.System;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
@@ -158,6 +161,17 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             {
                 _logger.LogDebug("Streaming event '{EventId}' dropped: table '{Table}' not found in catalog or inactive", cdcEvent.EventId, cdcEvent.Table.ToQualifiedName());
                 return StreamSecurityDecision.Denied("Table not found in catalog or inactive");
+            }
+
+            var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata);
+            try
+            {
+                await _transportGate.EnsureCatalogSourceAsync(logicalSource, ct).ConfigureAwait(false);
+            }
+            catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
+            {
+                _logger.LogDebug("Streaming event '{EventId}' dropped: transport not allowed for source '{Source}'", cdcEvent.EventId, logicalSource);
+                return StreamSecurityDecision.Denied("Transport not allowed");
             }
 
             // 5. Consent decision (same chain as GatewayExecutionService)

@@ -193,7 +193,7 @@ scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | sco
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs | copy: copies the ingress transport into the new scope (stamp site)
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs | exempt: CDC webhook delivery; reaches no governed data via choke points
+scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs | copy: stamps Rest ingress for webhook outbox delivery
 scope src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Connectors/SqlConnector.cs | copy: copies ConnectorSessionContext.Items into its scope

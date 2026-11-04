@@ -18,8 +18,10 @@ public static class IcebergRestCatalogEndpoints
 {
     public static IEndpointRouteBuilder MapIcebergRestCatalogEndpoints(this IEndpointRouteBuilder app)
     {
+        var group = app.MapGroup("").WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest);
+
         // GET /v1/{prefix}/namespaces
-        app.MapGet("/v1/{prefix}/namespaces", async (
+        group.MapGet("/v1/{prefix}/namespaces", async (
             string prefix,
             HttpContext context,
             IIcebergRestCatalogFederationService catalogService) =>
@@ -32,7 +34,7 @@ public static class IcebergRestCatalogEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GET /v1/{prefix}/namespaces/{namespace}/tables
-        app.MapGet("/v1/{prefix}/namespaces/{namespace}/tables", async (
+        group.MapGet("/v1/{prefix}/namespaces/{namespace}/tables", async (
             string prefix,
             string @namespace,
             HttpContext context,
@@ -47,7 +49,7 @@ public static class IcebergRestCatalogEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GET /v1/{prefix}/namespaces/{namespace}/tables/{table}
-        app.MapGet("/v1/{prefix}/namespaces/{namespace}/tables/{table}", async (
+        group.MapGet("/v1/{prefix}/namespaces/{namespace}/tables/{table}", async (
             string prefix,
             string @namespace,
             string table,
@@ -66,10 +68,14 @@ public static class IcebergRestCatalogEndpoints
                 // Wunsch 9: unknown, inactive and denied tables all surface as SecurityException (403).
                 return HandleIcebergError(context, ex);
             }
+            catch (Autheris.Domain.Exceptions.TransportNotAllowedException ex)
+            {
+                return HandleIcebergError(context, ex);
+            }
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials
-        app.MapPost("/v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials", async (
+        group.MapPost("/v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials", async (
             string prefix,
             string @namespace,
             string table,
@@ -91,6 +97,10 @@ public static class IcebergRestCatalogEndpoints
             {
                 return HandleIcebergError(context, ex);
             }
+            catch (Autheris.Domain.Exceptions.TransportNotAllowedException ex)
+            {
+                return HandleIcebergError(context, ex);
+            }
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
@@ -102,6 +112,7 @@ public static class IcebergRestCatalogEndpoints
         var (status, code, message) = ex switch
         {
             SecurityException => (StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied."),
+            Autheris.Domain.Exceptions.TransportNotAllowedException => (StatusCodes.Status403Forbidden, ApiErrorCodes.TransportNotAllowed, "Access to the data source is not allowed over this transport."),
             ArgumentException => (StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The request is invalid."),
             NotSupportedException => (StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "Not implemented."),
             _ => (StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An unexpected error occurred.")

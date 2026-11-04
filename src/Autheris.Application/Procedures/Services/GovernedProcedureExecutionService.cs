@@ -42,22 +42,18 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         @"^[A-Za-z0-9_.\-]{1,128}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
     private readonly IConsentCacheService? _consentCache;
-    private readonly IProcedureRegistry _registry;
-    private readonly IProcedureInvoker _invoker;
-    private readonly IOptions<GatewayOptions> _options;
-    private readonly ITableMetadataRepository? _tableRepository;
-    private readonly IConsentRepository? _consentRepository;
-    private readonly IConsentResolutionService? _consentResolution;
-    private readonly IColumnMaskingProvider? _masking;
-    private readonly IPolicyEnforcementService? _policyEnforcement;
+    private readonly IProcedureRegistry _registry; private readonly IProcedureInvoker _invoker;
+    private readonly IOptions<GatewayOptions> _options; private readonly ITableMetadataRepository? _tableRepository;
+    private readonly IConsentRepository? _consentRepository; private readonly IConsentResolutionService? _consentResolution;
+    private readonly IColumnMaskingProvider? _masking; private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
-    private readonly IAuditLogRepository _audit;
-    private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
+    private readonly IAuditLogRepository _audit; private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly ProcedureDenialAuditLimiter _denialAuditLimiter;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
     private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
@@ -87,8 +83,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        ProcedureDenialAuditLimiter? denialAuditLimiter = null)
+        ProcedureDenialAuditLimiter? denialAuditLimiter = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _concurrencyGate = concurrencyGate;
         _denialAuditLimiter = denialAuditLimiter ?? new ProcedureDenialAuditLimiter();
         _typedPolicies = typedPolicies;
@@ -98,19 +96,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(_audit, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
-        _tableRepository = tableRepository;
-        _consentRepository = consentRepository;
-        _consentResolution = consentResolution;
-        _masking = masking;
-        _policyEnforcement = policyEnforcement;
-        _clientIpResolver = clientIpResolver;
-        _logger = logger;
-        _rowScope = rowScope;
-        _rebacEvaluator = rebacEvaluator;
-        _consentCache = consentCache;
+        _tableRepository = tableRepository; _consentRepository = consentRepository;
+        _consentResolution = consentResolution; _masking = masking;
+        _policyEnforcement = policyEnforcement; _clientIpResolver = clientIpResolver;
+        _logger = logger; _rowScope = rowScope;
+        _rebacEvaluator = rebacEvaluator; _consentCache = consentCache;
         _accessProfileRepository = accessProfileRepository;
-        _memoryCache = memoryCache;
-        _accessProfileCache = accessProfileCache;
+        _memoryCache = memoryCache; _accessProfileCache = accessProfileCache;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -178,6 +170,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         {
             // 5. Input validation (unknown and context-bound parameters are rejected, never ignored)
             var values = ValidateInputs(definition, rawInputs, out int? requestedLimit);
+
+            // Transport gate check
+            string sourceName = string.IsNullOrWhiteSpace(definition.DataSource)
+                ? _options.Value.SqlEndpoints.Procedures.ConnectionName
+                : definition.DataSource;
+            await _transportGate.EnsureCatalogSourceAsync(sourceName, ct).ConfigureAwait(false);
 
             // 6. Call (security context goes into the read-only SESSION_CONTEXT)
             var context = new ProcedureSecurityContext(

@@ -125,14 +125,29 @@ public sealed class Subscription
         // GQL-3 / GQL-4: topic admission (catalog + access decision, cdc_all for admins), per-subject limit, audit.
         var governor = services.GetService<CdcSubscriptionGovernor>()
             ?? throw new GraphQLException(ErrorBuilder.New().SetMessage("Subscriptions are not available.").SetCode("UNAVAILABLE").Build());
-        await using var lease = await governor.AdmitAsync(
-            principal,
-            topic,
-            tableId,
-            services.GetService<ITableAccessResolver>(),
-            services.GetRequiredService<IAuditLogRepository>(),
-            ct,
-            guardCts).ConfigureAwait(false);
+        CdcSubscriptionGovernor.Lease lease;
+        try
+        {
+            lease = await governor.AdmitAsync(
+                principal,
+                topic,
+                tableId,
+                services.GetService<ITableAccessResolver>(),
+                services.GetRequiredService<IAuditLogRepository>(),
+                ct,
+                guardCts,
+                services.GetService<Autheris.Application.DataSources.IDataSourceTransportGate>()).ConfigureAwait(false);
+        }
+        catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
+        {
+            throw new GraphQLException(
+                ErrorBuilder.New()
+                    .SetMessage("Access to the data source is not allowed over this transport.")
+                    .SetCode(Autheris.Domain.Exceptions.TransportNotAllowedException.Code)
+                    .Build());
+        }
+
+        await using var leaseDisposer = lease;
 
         var sourceStream = eventChannel.SubscribeAsync(topic, guardCts.Token);
 

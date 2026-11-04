@@ -37,6 +37,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IAuditLogRepository _auditRepository;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
 
@@ -51,8 +52,10 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        IRebacEvaluator? rebacEvaluator = null)
+        IRebacEvaluator? rebacEvaluator = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        _transportGate = transportGate ?? Autheris.Application.DataSources.DenyAllTransportGate.Instance;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
@@ -278,6 +281,9 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             _logger.LogWarning("Iceberg table {Namespace}.{Table} not found or inactive in tenant {Tenant}; answering as denied.", LogSanitizer.Sanitize(@namespace), LogSanitizer.Sanitize(table), LogSanitizer.Sanitize(tenantId));
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
+
+        await _transportGate.EnsureCatalogSourceAsync(
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(tableMeta), ct).ConfigureAwait(false);
 
         if (_consentService == null || _consentRepo == null)
         {
