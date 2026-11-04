@@ -44,14 +44,7 @@ public static class GovernancePlanEndpoints
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         // 2. Get Plan by ID
-        app.MapGet("/api/governance/plans/{planId}", async (
-            string planId,
-            IAccessPlanningService planningService,
-            CancellationToken ct) =>
-        {
-            var plan = await planningService.GetPlanAsync(planId, ct).ConfigureAwait(false);
-            return plan != null ? Results.Ok(plan) : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The plan was not found or has expired.");
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
+        app.MapGet("/api/governance/plans/{planId}", HandleGetAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
 
         // 3. Confirm Plan with TOTP 2FA: issues HMAC-signed confirmation token (ADR-03, ADR-05, R-62)
         app.MapPost("/api/governance/plans/{planId}/confirm", HandleConfirmAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
@@ -60,6 +53,33 @@ public static class GovernancePlanEndpoints
         app.MapPost("/api/governance/plans/{planId}/apply", HandleApplyAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         return app;
+    }
+
+    internal static async Task<IResult> HandleGetAsync(
+        string planId,
+        HttpContext context,
+        IAccessPlanningService planningService,
+        CancellationToken ct)
+    {
+        var plan = await planningService.GetPlanAsync(planId, ct).ConfigureAwait(false);
+        if (plan == null)
+        {
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The plan was not found or has expired.");
+        }
+
+        var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+        if (!isClusterAdmin)
+        {
+            var callerTenant = EndpointSecurity.GetRequestTenant(context).Value;
+            var adminSid = ResolveAdminSid(context);
+            if (!string.Equals(plan.TenantId, callerTenant, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(plan.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase))
+            {
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The plan was not found or has expired.");
+            }
+        }
+
+        return Results.Ok(plan);
     }
 
     private static string? ResolveAdminSid(HttpContext context)

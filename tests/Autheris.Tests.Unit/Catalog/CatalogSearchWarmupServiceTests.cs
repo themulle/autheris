@@ -15,6 +15,7 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Health;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Autheris.Tests.Common;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -56,7 +57,7 @@ public sealed class CatalogSearchWarmupServiceTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await service.StartAsync(cts.Token);
-        await Task.Delay(100);
+        await WaitHelper.WaitUntil(() => _searchEngine.ReceivedCalls().Any(), TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         await _searchEngine.Received(1).RebuildIndexAsync(tables, Arg.Any<CancellationToken>());
@@ -97,12 +98,12 @@ public sealed class CatalogSearchWarmupServiceTests
                 new ValueTask<CatalogVersion>(new CatalogVersion(2, 2)));
 
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(100);
+        await WaitHelper.WaitUntil(() => _searchEngine.ReceivedCalls().Any(), TimeSpan.FromSeconds(5));
 
         // Publish catalog:changed via captured handler
         eventHandler.ShouldNotBeNull();
         await eventHandler(new object());
-        await Task.Delay(150);
+        await WaitHelper.WaitUntil(() => _searchEngine.ReceivedCalls().Count() >= 2, TimeSpan.FromSeconds(5));
 
         await service.StopAsync(CancellationToken.None);
 
@@ -134,7 +135,7 @@ public sealed class CatalogSearchWarmupServiceTests
             versionProvider: _versionProvider);
 
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(1200); // Wait for at least one tick
+        try { await WaitHelper.WaitUntil(() => false, TimeSpan.FromMilliseconds(1200)); } catch (TimeoutException) { }
         await service.StopAsync(CancellationToken.None);
 
         // Only the initial warmup build should have occurred

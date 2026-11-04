@@ -241,4 +241,69 @@ public sealed class AccessPlanningTenantBindingTests
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task GovernancePlanGet_OtherAdminOrTenant_NotFound()
+    {
+        var planningService = Substitute.For<IAccessPlanningService>();
+        var planResult = new AdminPlanAccessResult(
+            PlanId: "plan-123",
+            DatasetId: "sales.public.orders",
+            Diffs: [],
+            Warnings: [],
+            ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(15),
+            TenantId: "tenant-a",
+            AdminSid: "S-1-5-21-CREATOR");
+
+        planningService.GetPlanAsync("plan-123", Arg.Any<CancellationToken>())
+            .Returns(planResult);
+
+        // 1. Caller from different tenant -> 404
+        var otherTenantCtx = new DefaultHttpContext();
+        otherTenantCtx.User = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CREATOR"),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            new Claim("tenant_id", "tenant-b")
+        ], "TestAuth"));
+
+        var otherTenantRes = await GovernancePlanEndpoints.HandleGetAsync("plan-123", otherTenantCtx, planningService, CancellationToken.None);
+        var status = (otherTenantRes as Microsoft.AspNetCore.Http.IStatusCodeHttpResult)?.StatusCode;
+        status.ShouldBe(StatusCodes.Status404NotFound);
+
+        // 2. Caller from same tenant but different admin SID -> 404
+        var otherAdminCtx = new DefaultHttpContext();
+        otherAdminCtx.User = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-OTHER"),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            new Claim("tenant_id", "tenant-a")
+        ], "TestAuth"));
+
+        var otherAdminRes = await GovernancePlanEndpoints.HandleGetAsync("plan-123", otherAdminCtx, planningService, CancellationToken.None);
+        status = (otherAdminRes as Microsoft.AspNetCore.Http.IStatusCodeHttpResult)?.StatusCode;
+        status.ShouldBe(StatusCodes.Status404NotFound);
+
+        // 3. Creator caller (matching tenant and SID) -> 200
+        var matchingCtx = new DefaultHttpContext();
+        matchingCtx.User = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CREATOR"),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            new Claim("tenant_id", "tenant-a")
+        ], "TestAuth"));
+
+        var matchingRes = await GovernancePlanEndpoints.HandleGetAsync("plan-123", matchingCtx, planningService, CancellationToken.None);
+        status = (matchingRes as Microsoft.AspNetCore.Http.IStatusCodeHttpResult)?.StatusCode;
+        status.ShouldBe(StatusCodes.Status200OK);
+
+        // 4. Canonical ClusterAdmin caller -> 200 regardless of tenant/sid
+        var clusterAdminCtx = new DefaultHttpContext();
+        clusterAdminCtx.User = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CLUSTER-ADMIN"),
+            new Claim(ClaimTypes.Role, "ClusterAdmin"),
+            new Claim("tenant_id", "tenant-other")
+        ], "TestAuth"));
+
+        var clusterAdminRes = await GovernancePlanEndpoints.HandleGetAsync("plan-123", clusterAdminCtx, planningService, CancellationToken.None);
+        status = (clusterAdminRes as Microsoft.AspNetCore.Http.IStatusCodeHttpResult)?.StatusCode;
+        status.ShouldBe(StatusCodes.Status200OK);
+    }
 }

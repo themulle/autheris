@@ -38,7 +38,9 @@ public sealed record AdminPlanAccessResult(
     string DatasetId,
     IReadOnlyList<AccessPlanDiffItem> Diffs,
     IReadOnlyList<string> Warnings,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? TenantId = null,
+    string? AdminSid = null);
 
 /// <summary>
 /// Request to confirm a pending access plan using a TOTP 2FA code.

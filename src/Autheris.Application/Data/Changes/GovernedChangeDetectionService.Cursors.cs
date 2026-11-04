@@ -265,15 +265,8 @@ public sealed partial class GovernedChangeDetectionService
 
     private async Task<TableMetadata> RequireTableMetadataAsync(TableIdentifier table, CancellationToken ct)
     {
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false)
+        return await _metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false)
             ?? throw new TableNotFoundException(table);
-
-        if (!metadata.Table.IsActive)
-        {
-            throw new GatewayForbiddenException($"Table '{table}' is not active.");
-        }
-
-        return metadata;
     }
 
     private static void EnsurePrimaryKeyColumnsClear(TableMetadata metadata, TableAccessDecision decision)

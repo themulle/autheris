@@ -93,11 +93,6 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new TableNotFoundException(request.Table);
         }
 
-        if (!metadata.Table.IsActive)
-        {
-            throw new UnauthorizedAccessException($"Table '{request.Table.ToQualifiedName()}' is not active.");
-        }
-
         // 2. Authorization stage (WP-ARC-B-03): unified PDP (ReBAC, ABAC, Consent, Virtual Filters) plus the non-canonical
         // ClusterAdmin fail-closed check. The row policy is not spliced from this decision (WP-X0n / SEC-X1-17): the rewriter's own
         // decision is the only one that restricts rows, so both must be computed from the same inputs.
@@ -110,6 +105,11 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             context.ClientIp,
             request.SelectColumns,
             ct).ConfigureAwait(false);
+
+        if (!metadata.Table.IsActive)
+        {
+            throw new UnauthorizedAccessException($"Table '{request.Table.ToQualifiedName()}' is not active.");
+        }
 
         // 5. AST & SQL Formulation
         // #301/#302: 0 is a valid page size (zero rows, hasMore still reported); it never becomes the default. Callers pass the default explicitly.

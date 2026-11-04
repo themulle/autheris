@@ -483,8 +483,8 @@ public sealed partial class Mutation
         if (req.TenantId != tenantId && !isCrossTenantAdmin)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Cross-tenant access forbidden: The consent request belongs to another tenant.")
+                .SetCode("NOT_FOUND")
+                .SetMessage($"Consent request '{requestId}' was not found.")
                 .Build());
         }
 
@@ -816,8 +816,8 @@ public sealed partial class Mutation
         if (req.TenantId != tenantId && !isCrossTenantAdmin)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Cross-tenant access forbidden: The consent request belongs to another tenant.")
+                .SetCode("NOT_FOUND")
+                .SetMessage($"Consent request '{requestId}' was not found.")
                 .Build());
         }
 
@@ -908,8 +908,8 @@ public sealed partial class Mutation
         if (consent.TenantId != tenantId && !isCrossTenantAdmin)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Cross-tenant access forbidden: The consent belongs to another tenant.")
+                .SetCode("NOT_FOUND")
+                .SetMessage($"Consent '{consentId}' was not found.")
                 .Build());
         }
 

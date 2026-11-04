@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -192,7 +193,7 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
     }
 
     [Fact]
-    public async Task Ingest_KeyRemoved_ClearsValues()
+    public async Task Ingest_KeyRemoved_KeepsValues()
     {
         var stored = CreateStoredMetadata(tableMinGroup: 5, tableNonPersonal: true);
         var (svc, _, _, getPersisted) = CreateHarness(stored);
@@ -205,12 +206,12 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
         result.Success.ShouldBeTrue();
         var persisted = getPersisted();
         persisted.ShouldNotBeNull();
-        persisted.Table.MinGroupSize.ShouldBeNull();
-        persisted.Table.NonPersonal.ShouldBeFalse();
+        persisted.Table.MinGroupSize.ShouldBe(5);
+        persisted.Table.NonPersonal.ShouldBeTrue();
     }
 
     [Fact]
-    public async Task Ingest_InvalidValue_WarnsAndClears()
+    public async Task Ingest_InvalidValue_WarnsAndKeepsStored()
     {
         var stored = CreateStoredMetadata(tableMinGroup: 5, tableNonPersonal: true);
         var (svc, _, _, getPersisted) = CreateHarness(stored);
@@ -228,8 +229,8 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
         result.Success.ShouldBeTrue();
         var persisted = getPersisted();
         persisted.ShouldNotBeNull();
-        persisted.Table.MinGroupSize.ShouldBeNull();
-        persisted.Table.NonPersonal.ShouldBeFalse();
+        persisted.Table.MinGroupSize.ShouldBe(5);
+        persisted.Table.NonPersonal.ShouldBeTrue();
         result.Warnings.ShouldNotBeEmpty();
     }
 
@@ -365,5 +366,117 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
         getPersisted().ShouldBeNull();
         await repo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
         await auditWriter.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Ingest_CannotLowerMinGroupSize_RatchetsWithMax()
+    {
+        var stored = CreateStoredMetadata(tableMinGroup: 5, tableNonPersonal: false);
+        var (svc, _, _, getPersisted) = CreateHarness(stored);
+
+        var json = BuildManifestJson("""
+        {
+          "autheris.min_group_size": "3"
+        }
+        """);
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await svc.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        var persisted = getPersisted();
+        persisted.ShouldNotBeNull();
+        persisted.Table.MinGroupSize.ShouldBe(5); // Ratcheted: max(5, 3) = 5
+    }
+
+    [Fact]
+    public async Task Ingest_StoredSensitiveColumn_ForcesNonPersonalFalse()
+    {
+        var stored = CreateStoredMetadata(tableMinGroup: null, tableNonPersonal: false);
+        stored = stored with
+        {
+            Columns =
+            [
+                new TableColumn { TableId = stored.Table.Id, ColumnName = "id", DataType = "int" },
+                new TableColumn { TableId = stored.Table.Id, ColumnName = "salary", DataType = "numeric", IsSensitive = true }
+            ]
+        };
+        var (svc, _, _, getPersisted) = CreateHarness(stored);
+
+        var json = BuildManifestJson("""
+        {
+          "autheris.non_personal": "true"
+        }
+        """);
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await svc.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        var persisted = getPersisted();
+        persisted.ShouldNotBeNull();
+        persisted.Table.NonPersonal.ShouldBeFalse();
+        result.Warnings.Any(w => w.Contains("sensitive") || w.Contains("non_personal")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Ingest_StoredMaskedColumn_ForcesNonPersonalFalse()
+    {
+        var stored = CreateStoredMetadata(tableMinGroup: null, tableNonPersonal: false);
+        stored = stored with
+        {
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>
+            {
+                ["order_date"] = new MaskingRule { RuleType = "REDACT" }
+            }
+        };
+        var (svc, _, _, getPersisted) = CreateHarness(stored);
+
+        var json = BuildManifestJson("""
+        {
+          "autheris.non_personal": "true"
+        }
+        """);
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await svc.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        var persisted = getPersisted();
+        persisted.ShouldNotBeNull();
+        persisted.Table.NonPersonal.ShouldBeFalse();
+        result.Warnings.Any(w => w.Contains("masking") || w.Contains("non_personal")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Ingest_NoStanding_RejectsMinGroupAndNonPersonal()
+    {
+        var stored = CreateStoredMetadata(tableMinGroup: 5, tableNonPersonal: false);
+        var (svc, _, _, getPersisted) = CreateHarness(stored);
+
+        var json = BuildManifestJson("""
+        {
+          "autheris.min_group_size": "10",
+          "autheris.non_personal": "true"
+        }
+        """);
+
+        // Caller is neither ClusterAdmin nor GovernanceAdmin nor DataOwner
+        var caller = new DbtGovernanceImportCaller(
+            new VirtualFilterActor(new Sid("system:dbt-admin"), IsSync: false, null),
+            new TenantId("postgres"),
+            IsClusterAdmin: false,
+            IsGovernanceAdmin: false,
+            IsDataOwner: false);
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await svc.IngestManifestStreamAsync(stream, caller, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        var persisted = getPersisted();
+        persisted.ShouldNotBeNull();
+        persisted.Table.MinGroupSize.ShouldBe(5); // kept stored value
+        persisted.Table.NonPersonal.ShouldBeFalse(); // kept stored value
+        result.Warnings.Any(w => w.Contains("standing")).ShouldBeTrue();
     }
 }

@@ -616,13 +616,17 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ? new TenantId(owner)
                         : TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value?.Tenancy) ?? TenantId.Platform;
 
+                    bool hasStanding = caller.IsClusterAdmin || caller.IsGovernanceAdmin || caller.IsDataOwner;
+
                     var (newMinGroupSize, newNonPersonal) = await DbtCatalogPrivacyMeta.ApplyAsync(
                         model,
+                        existingMeta,
                         existingMeta.Identifier,
                         existingMeta.Table.MinGroupSize,
                         existingMeta.Table.NonPersonal,
                         _auditWriter,
                         tenant,
+                        hasStanding,
                         warnings,
                         _logger,
                         ct).ConfigureAwait(false);

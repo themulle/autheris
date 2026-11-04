@@ -187,4 +187,75 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         captured!.Description.ShouldBe("Quarterly close");
         await approval.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default);
     }
+
+    [Fact]
+    public async Task ConsentApproveRevoke_ForeignTenantId_SameAsMissing()
+    {
+        var meta = CreateMetadata("NORMAL", requiresFourEyes: false);
+        var missingRequestId = Guid.NewGuid();
+        var foreignRequestId = Guid.NewGuid();
+
+        var foreignReq = new ConsentRequest
+        {
+            Id = foreignRequestId,
+            TableIdentifier = meta.Identifier,
+            RequesterSid = Requester,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = Requester.Value,
+            TenantId = new TenantId("foreign-tenant"),
+            Status = "PENDING"
+        };
+
+        var approval = Substitute.For<IConsentApprovalRepository>();
+        approval.GetConsentRequestAsync(missingRequestId, Arg.Any<CancellationToken>()).Returns((ConsentRequest?)null);
+        approval.GetConsentRequestAsync(foreignRequestId, Arg.Any<CancellationToken>()).Returns(foreignReq);
+
+        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var consents = Substitute.For<IConsentRepository>();
+        var metadata = Substitute.For<ITableMetadataRepository>();
+        metadata.GetTableMetadataAsync(meta.Identifier, Arg.Any<CancellationToken>()).Returns(meta);
+
+        var accessor = CreateAccessor(); // caller is tenant "default"
+        var mutation = new Mutation();
+
+        // 1. Approve missing -> NOT_FOUND
+        var missingEx = await Should.ThrowAsync<GraphQLException>(() =>
+            mutation.ApproveConsentRequestAsync(missingRequestId, null, approval, ownership, consents, metadata, accessor, null!));
+        missingEx.Errors[0].Code.ShouldBe("NOT_FOUND");
+        missingEx.Errors[0].Message.ShouldBe($"Consent request '{missingRequestId}' was not found.");
+
+        // 2. Approve foreign tenant -> same NOT_FOUND error code and format as missing
+        var foreignEx = await Should.ThrowAsync<GraphQLException>(() =>
+            mutation.ApproveConsentRequestAsync(foreignRequestId, null, approval, ownership, consents, metadata, accessor, null!));
+        foreignEx.Errors[0].Code.ShouldBe("NOT_FOUND");
+        foreignEx.Errors[0].Message.ShouldBe($"Consent request '{foreignRequestId}' was not found.");
+
+        // 3. Revoke missing consent -> NOT_FOUND
+        var missingConsentId = Guid.NewGuid();
+        consents.GetConsentByIdAsync(missingConsentId, Arg.Any<CancellationToken>()).Returns((Consent?)null);
+
+        var missingRevokeEx = await Should.ThrowAsync<GraphQLException>(() =>
+            mutation.RevokeConsentAsync(missingConsentId, "Revoke reason", consents, ownership, accessor, CancellationToken.None));
+        missingRevokeEx.Errors[0].Code.ShouldBe("NOT_FOUND");
+        missingRevokeEx.Errors[0].Message.ShouldBe($"Consent '{missingConsentId}' was not found.");
+
+        // 4. Revoke foreign consent -> same NOT_FOUND error code and format as missing
+        var foreignConsentId = Guid.NewGuid();
+        var foreignConsent = new Consent
+        {
+            Id = foreignConsentId,
+            TenantId = new TenantId("foreign-tenant"),
+            TableIdentifier = meta.Identifier,
+            GranteeType = GranteeType.User,
+            GranteeSid = Requester,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        };
+        consents.GetConsentByIdAsync(foreignConsentId, Arg.Any<CancellationToken>()).Returns(foreignConsent);
+
+        var foreignRevokeEx = await Should.ThrowAsync<GraphQLException>(() =>
+            mutation.RevokeConsentAsync(foreignConsentId, "Revoke reason", consents, ownership, accessor, CancellationToken.None));
+        foreignRevokeEx.Errors[0].Code.ShouldBe("NOT_FOUND");
+        foreignRevokeEx.Errors[0].Message.ShouldBe($"Consent '{foreignConsentId}' was not found.");
+    }
 }

@@ -65,18 +65,18 @@ public sealed class Issue443SlowListsMiddlewareTests
     {
         var options = new GraphQLOptions
         {
-            SlowLists = new GraphQLSlowListReportOptions { Enabled = false, ThresholdMs = 50 }
+            SlowLists = new GraphQLSlowListReportOptions { Enabled = false, ThresholdMs = 0 }
         };
 
-        var executor = await CreateExecutorAsync(options, async ctx =>
+        var executor = await CreateExecutorAsync(options, ctx =>
         {
-            await Task.Delay(60);
             if (ctx.ContextData.TryGetValue(SlowListsMiddleware.ContextKey, out var accObj) && accObj is SlowListsAccumulator acc)
             {
                 acc.ForRoot(ctx.ResponseName).OnReport(new TreeExecutionReport(
                     TimeSpan.FromMilliseconds(55), 10,
                     [new TreeListPlan(["readings"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
             }
+            return Task.CompletedTask;
         });
 
         var request = OperationRequestBuilder.New()
@@ -121,18 +121,18 @@ public sealed class Issue443SlowListsMiddlewareTests
     {
         var options = new GraphQLOptions
         {
-            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 50, MaxEntries = 3 }
+            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 0, MaxEntries = 3 }
         };
 
-        var executor = await CreateExecutorAsync(options, async ctx =>
+        var executor = await CreateExecutorAsync(options, ctx =>
         {
-            await Task.Delay(60);
             if (ctx.ContextData.TryGetValue(SlowListsMiddleware.ContextKey, out var accObj) && accObj is SlowListsAccumulator acc)
             {
                 acc.ForRoot(ctx.ResponseName).OnReport(new TreeExecutionReport(
                     TimeSpan.FromMilliseconds(55), 10,
                     [new TreeListPlan(["readings"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
             }
+            return Task.CompletedTask;
         });
 
         var request = OperationRequestBuilder.New()
@@ -155,18 +155,18 @@ public sealed class Issue443SlowListsMiddlewareTests
     {
         var options = new GraphQLOptions
         {
-            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 50 }
+            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 0 }
         };
 
-        var executor = await CreateExecutorAsync(options, async ctx =>
+        var executor = await CreateExecutorAsync(options, ctx =>
         {
-            await Task.Delay(60);
             if (ctx.ContextData.TryGetValue(SlowListsMiddleware.ContextKey, out var accObj) && accObj is SlowListsAccumulator acc)
             {
                 acc.ForRoot(ctx.ResponseName).OnReport(new TreeExecutionReport(
                     TimeSpan.FromMilliseconds(55), 10,
                     [new TreeListPlan(["readings"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
             }
+            return Task.CompletedTask;
         });
 
         // ExposeCostExtensions is false (e.g. Free Tier)
@@ -184,18 +184,18 @@ public sealed class Issue443SlowListsMiddlewareTests
     {
         var options = new GraphQLOptions
         {
-            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 50 }
+            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 0 }
         };
 
-        var executor = await CreateExecutorAsync(options, async ctx =>
+        var executor = await CreateExecutorAsync(options, ctx =>
         {
-            await Task.Delay(60);
             if (ctx.ContextData.TryGetValue(SlowListsMiddleware.ContextKey, out var accObj) && accObj is SlowListsAccumulator acc)
             {
                 acc.ForRoot(ctx.ResponseName).OnReport(new TreeExecutionReport(
                     TimeSpan.FromMilliseconds(55), 10,
                     [new TreeListPlan(["readings"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
             }
+            return Task.CompletedTask;
         }, throwInResolver: true);
 
         var request = OperationRequestBuilder.New()
@@ -215,18 +215,18 @@ public sealed class Issue443SlowListsMiddlewareTests
     {
         var options = new GraphQLOptions
         {
-            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 50 }
+            SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 0 }
         };
 
-        var executor = await CreateExecutorAsync(options, async ctx =>
+        var executor = await CreateExecutorAsync(options, ctx =>
         {
-            await Task.Delay(60);
             if (ctx.ContextData.TryGetValue(SlowListsMiddleware.ContextKey, out var accObj) && accObj is SlowListsAccumulator acc)
             {
                 acc.ForRoot(ctx.ResponseName).OnReport(new TreeExecutionReport(
                     TimeSpan.FromMilliseconds(55), 10,
                     [new TreeListPlan(["readings"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
             }
+            return Task.CompletedTask;
         });
 
         var request = OperationRequestBuilder.New()
@@ -365,12 +365,12 @@ public sealed class Issue443SlowListsMiddlewareTests
     public async Task Gate_AllConjuncts_EachMissingSuppresses()
     {
         // 1. Missing Enabled
-        var optDisabled = new GraphQLOptions { SlowLists = new GraphQLSlowListReportOptions { Enabled = false, ThresholdMs = 50 } };
-        var exec1 = await CreateExecutorAsync(optDisabled, async ctx =>
+        var optDisabled = new GraphQLOptions { SlowLists = new GraphQLSlowListReportOptions { Enabled = false, ThresholdMs = 0 } };
+        var exec1 = await CreateExecutorAsync(optDisabled, ctx =>
         {
-            await Task.Delay(60);
             ((SlowListsAccumulator)ctx.ContextData[SlowListsMiddleware.ContextKey]!).ForRoot(ctx.ResponseName)
                 .OnReport(new TreeExecutionReport(TimeSpan.FromMilliseconds(55), 1, [new TreeListPlan(["r"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
+            return Task.CompletedTask;
         });
         var res1 = (OperationResult)await exec1.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ devices }").AddGlobalState("Autheris.ExposeCostExtensions", true).Build());
         res1.Extensions?.ContainsKey("slowLists").ShouldBeFalse();
@@ -387,12 +387,12 @@ public sealed class Issue443SlowListsMiddlewareTests
         res2.Extensions?.ContainsKey("slowLists").ShouldBeFalse();
 
         // 3. Missing ContextData key Autheris.ExposeCostExtensions
-        var optEnabled = new GraphQLOptions { SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 50 } };
-        var exec3 = await CreateExecutorAsync(optEnabled, async ctx =>
+        var optEnabled = new GraphQLOptions { SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 0 } };
+        var exec3 = await CreateExecutorAsync(optEnabled, ctx =>
         {
-            await Task.Delay(60);
             ((SlowListsAccumulator)ctx.ContextData[SlowListsMiddleware.ContextKey]!).ForRoot(ctx.ResponseName)
                 .OnReport(new TreeExecutionReport(TimeSpan.FromMilliseconds(55), 1, [new TreeListPlan(["r"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
+            return Task.CompletedTask;
         });
         var res3 = (OperationResult)await exec3.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ devices }").Build());
         res3.Extensions?.ContainsKey("slowLists").ShouldBeFalse();
@@ -402,11 +402,11 @@ public sealed class Issue443SlowListsMiddlewareTests
         res4.Extensions?.ContainsKey("slowLists").ShouldBeFalse();
 
         // 5. Result has error
-        var exec5 = await CreateExecutorAsync(optEnabled, async ctx =>
+        var exec5 = await CreateExecutorAsync(optEnabled, ctx =>
         {
-            await Task.Delay(60);
             ((SlowListsAccumulator)ctx.ContextData[SlowListsMiddleware.ContextKey]!).ForRoot(ctx.ResponseName)
                 .OnReport(new TreeExecutionReport(TimeSpan.FromMilliseconds(55), 1, [new TreeListPlan(["r"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
+            return Task.CompletedTask;
         }, throwInResolver: true);
         var res5 = (OperationResult)await exec5.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ devices }").AddGlobalState("Autheris.ExposeCostExtensions", true).Build());
         res5.Extensions?.ContainsKey("slowLists").ShouldBeFalse();
@@ -420,12 +420,12 @@ public sealed class Issue443SlowListsMiddlewareTests
     [Trait("Category", "Security")]
     public async Task FreeTier_NoExtension()
     {
-        var options = new GraphQLOptions { SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 50 } };
-        var executor = await CreateExecutorAsync(options, async ctx =>
+        var options = new GraphQLOptions { SlowLists = new GraphQLSlowListReportOptions { Enabled = true, ThresholdMs = 0 } };
+        var executor = await CreateExecutorAsync(options, ctx =>
         {
-            await Task.Delay(60);
             ((SlowListsAccumulator)ctx.ContextData[SlowListsMiddleware.ContextKey]!).ForRoot(ctx.ResponseName)
                 .OnReport(new TreeExecutionReport(TimeSpan.FromMilliseconds(55), 1, [new TreeListPlan(["r"], TreeListStrategy.CorrelatedUnindexed, null, 1)], []));
+            return Task.CompletedTask;
         });
 
         // Free tier: ExposeCostExtensions is false

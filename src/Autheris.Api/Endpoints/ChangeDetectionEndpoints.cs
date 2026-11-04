@@ -94,8 +94,8 @@ public static class ChangeDetectionEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
-            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, ex.ErrorCode, "Requested dataset was not found.", httpContext);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -155,8 +155,8 @@ public static class ChangeDetectionEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
-            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, ex.ErrorCode, "Requested dataset was not found.", httpContext);
+            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {

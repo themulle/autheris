@@ -213,7 +213,7 @@ public static class DatasetDataEndpoints
         catch (TableNotFoundException ex)
         {
             logger.LogInformation("Table not found: {Table}", ex.Table);
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The requested table was not found.", httpContext.RequestAborted).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage, httpContext.RequestAborted).ConfigureAwait(false);
         }
         catch (UnauthorizedAccessException ex)
         {
