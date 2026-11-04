@@ -23,20 +23,20 @@ internal static class DatasetCatalogStore
     private const string DbtSource = "dbt";
 
     /// <summary>The effective settings of one table after validation; <see cref="Degraded"/> rows carry the secure value.</summary>
-    internal readonly record struct RowOverlay(DatasetVisibility Visibility, IReadOnlyList<DatasetTag> Tags, IReadOnlyList<string> TagNames, bool Degraded)
+    internal readonly record struct RowOverlay(DatasetVisibility Visibility, IReadOnlyList<DatasetTag> Tags, IReadOnlyList<string> TagNames, bool Degraded, int? MinGroupSize = null, bool? NonPersonal = null)
     {
         private static readonly DatasetTag[] NoTags = [];
         private static readonly string[] NoTagNames = [];
 
-        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, NoTags, NoTagNames, true);
-        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, NoTags, NoTagNames, false);
+        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, NoTags, NoTagNames, true, null, null);
+        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, NoTags, NoTagNames, false, null, null);
 
         /// <summary>A healthy row; tables without tags share one empty array, tagged rows are sorted ordinally once.</summary>
-        internal static RowOverlay Create(DatasetVisibility visibility, List<DatasetTag>? tags)
+        internal static RowOverlay Create(DatasetVisibility visibility, List<DatasetTag>? tags, int? minGroupSize = null, bool? nonPersonal = null)
         {
             if (tags is null || tags.Count == 0)
             {
-                return new RowOverlay(visibility, NoTags, NoTagNames, false);
+                return new RowOverlay(visibility, NoTags, NoTagNames, false, minGroupSize, nonPersonal);
             }
 
             var sorted = tags.ToArray();
@@ -47,7 +47,7 @@ internal static class DatasetCatalogStore
                 names[i] = sorted[i].Tag;
             }
 
-            return new RowOverlay(visibility, sorted, names, false);
+            return new RowOverlay(visibility, sorted, names, false, minGroupSize, nonPersonal);
         }
     }
 
@@ -56,12 +56,20 @@ internal static class DatasetCatalogStore
     {
         private readonly Dictionary<Guid, DatasetVisibility> _visibility = [];
         private readonly Dictionary<Guid, List<DatasetTag>> _tags = [];
+        private readonly Dictionary<Guid, int?> _minGroupSize = [];
+        private readonly Dictionary<Guid, bool?> _nonPersonal = [];
         private readonly HashSet<Guid> _poisoned = [];
         private readonly Dictionary<Guid, RowOverlay> _built = [];
 
         internal bool AllDegraded { get; init; }
 
         internal void SetVisibility(Guid id, DatasetVisibility visibility) => _visibility[id] = visibility;
+
+        internal void SetPrivacy(Guid id, int? minGroupSize, bool? nonPersonal)
+        {
+            _minGroupSize[id] = minGroupSize;
+            _nonPersonal[id] = nonPersonal;
+        }
 
         internal void AddTag(Guid id, DatasetTag tag)
         {
@@ -89,15 +97,19 @@ internal static class DatasetCatalogStore
 
             var visibility = _visibility.TryGetValue(tableId, out var v) ? v : DatasetVisibility.Hidden;
             _tags.TryGetValue(tableId, out var list);
-            return _built[tableId] = RowOverlay.Create(visibility, list);
+            _minGroupSize.TryGetValue(tableId, out var minGroupSize);
+            _nonPersonal.TryGetValue(tableId, out var nonPersonal);
+            return _built[tableId] = RowOverlay.Create(visibility, list, minGroupSize, nonPersonal);
         }
     }
 
-    /// <summary>Overlays the fresh tier and tags onto a structural (possibly cached) record without mutating it.</summary>
+    /// <summary>Overlays the fresh tier, tags, and privacy settings onto a structural (possibly cached) record without mutating it.</summary>
     internal static TableMetadata Apply(TableMetadata structural, RowOverlay row) => structural with
     {
         Table = structural.Table with { Visibility = row.Visibility },
-        CatalogTags = row.TagNames
+        CatalogTags = row.TagNames,
+        MinGroupSize = row.MinGroupSize,
+        NonPersonal = row.NonPersonal
     };
 
     internal static TableMetadata Apply(TableMetadata structural, OverlaySet overlay) => Apply(structural, overlay.Get(structural.Table.Id));
@@ -135,7 +147,7 @@ internal static class DatasetCatalogStore
     {
         var set = await LoadAsync(conn, tx, dialect, tableId, strict: true, logger: null, ct).ConfigureAwait(false);
         var row = set.Get(tableId);
-        return new DatasetCatalogSettings(row.Tags, row.Visibility);
+        return new DatasetCatalogSettings(row.Tags, row.Visibility, row.MinGroupSize, row.NonPersonal);
     }
 
     /// <summary>
@@ -157,7 +169,7 @@ internal static class DatasetCatalogStore
         }
 
         var row = (await ReadOverlayAsync(conn, tx, dialect, tableId.Value, logger, ct).ConfigureAwait(false)).Get(tableId.Value);
-        return new DatasetCatalogSettings(row.Tags, row.Visibility);
+        return new DatasetCatalogSettings(row.Tags, row.Visibility, row.MinGroupSize, row.NonPersonal);
     }
 
     /// <summary>Counts per tier: Summary and Full from the settings rows, Hidden as all tables minus those (every other stored value counts as Hidden).</summary>
@@ -213,7 +225,7 @@ internal static class DatasetCatalogStore
         await using (var cmd = conn.CreateCommand())
         {
             Enlist(cmd, tx);
-            cmd.CommandText = $"SELECT table_id, visibility FROM {dialect.Prefix}{SettingsTable}{filter}";
+            cmd.CommandText = $"SELECT table_id, visibility, min_group_size, non_personal FROM {dialect.Prefix}{SettingsTable}{filter}";
             if (tableId is { } id)
             {
                 AddParameter(cmd, "@tid", id.ToString());
@@ -231,6 +243,20 @@ internal static class DatasetCatalogStore
                 if (TryReadVisibility(reader, out var visibility))
                 {
                     set.SetVisibility(rowId, visibility);
+
+                    int? rowMinGroupSize = null;
+                    bool? rowNonPersonal = null;
+                    if (reader.FieldCount > 2 && !reader.IsDBNull(2))
+                    {
+                        rowMinGroupSize = Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture);
+                    }
+                    if (reader.FieldCount > 3 && !reader.IsDBNull(3))
+                    {
+                        var val = reader.GetValue(3);
+                        rowNonPersonal = val is bool b ? b : Convert.ToInt32(val, CultureInfo.InvariantCulture) == 1;
+                    }
+
+                    set.SetPrivacy(rowId, rowMinGroupSize, rowNonPersonal);
                 }
                 else
                 {
@@ -468,6 +494,50 @@ internal static class DatasetCatalogStore
             {
                 await ExecAsync(conn, tx,
                     $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, updated_by, updated_at) VALUES (@tid, @vis, @by, @now)", ct, parameters).ConfigureAwait(false);
+            }
+        }, ct);
+    }
+
+    /// <summary>
+    /// Sets the minimum group size and non-personal table overlay (no write when unchanged).
+    /// </summary>
+    internal static Task<DatasetCatalogChange?> SetPrivacyAsync(
+        DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, TableIdentifier table,
+        int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct)
+    {
+        return MutateAsync(conn, tx, dialect, table, actor, async (tableId, before) =>
+        {
+            if (before.MinGroupSize == minGroupSize && before.NonPersonal == nonPersonal)
+            {
+                return;
+            }
+
+            var npValue = (object?)(nonPersonal.HasValue ? (nonPersonal.Value ? 1 : 0) : null) ?? DBNull.Value;
+            var mgsValue = (object?)minGroupSize ?? DBNull.Value;
+
+            var parameters = new (string, object)[]
+            {
+                ("@tid", tableId.ToString()),
+                ("@mgs", mgsValue),
+                ("@np", npValue),
+                ("@by", actor.Value),
+                ("@now", Now())
+            };
+            var updated = await ExecAsync(conn, tx,
+                $"UPDATE {dialect.Prefix}{SettingsTable} SET min_group_size = @mgs, non_personal = @np, updated_by = @by, updated_at = @now WHERE table_id = @tid", ct, parameters).ConfigureAwait(false);
+            if (updated == 0)
+            {
+                var insertParams = new (string, object)[]
+                {
+                    ("@tid", tableId.ToString()),
+                    ("@vis", (int)before.Visibility),
+                    ("@mgs", mgsValue),
+                    ("@np", npValue),
+                    ("@by", actor.Value),
+                    ("@now", Now())
+                };
+                await ExecAsync(conn, tx,
+                    $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, min_group_size, non_personal, updated_by, updated_at) VALUES (@tid, @vis, @mgs, @np, @by, @now)", ct, insertParams).ConfigureAwait(false);
             }
         }, ct);
     }

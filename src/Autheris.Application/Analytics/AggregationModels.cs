@@ -91,6 +91,30 @@ public sealed record AggregationGroupRow(
 }
 
 /// <summary>
+/// Source that determined the effective minimum group size for a query (#448).
+/// </summary>
+public enum MinGroupSizeSource
+{
+    Default = 0,
+    Operator = 1,
+    Catalog = 2,
+    Request = 3
+}
+
+/// <summary>
+/// Operator-level floor configuration for minimum group size resolution (#448).
+/// </summary>
+public readonly record struct OperatorFloor(int Value, bool IsExplicit = false)
+{
+    public static implicit operator OperatorFloor(int value) => new(value, false);
+}
+
+/// <summary>
+/// Resolved minimum group size value and the source that determined it (#448).
+/// </summary>
+public readonly record struct EffectiveMinGroupSize(int Value, MinGroupSizeSource Source);
+
+/// <summary>
 /// Privacy and execution metadata accompanying an <see cref="AggregationResult"/> (#37).
 /// </summary>
 public sealed record AggregationMetadata(
@@ -103,7 +127,8 @@ public sealed record AggregationMetadata(
     bool Truncated,
     bool NoiseApplied = false,
     double? EpsilonConsumed = null,
-    double? RemainingEpsilon = null);
+    double? RemainingEpsilon = null,
+    MinGroupSizeSource MinimumGroupSizeSource = MinGroupSizeSource.Default);
 
 /// <summary>
 /// Governed aggregation result with groups, differencing-safe totals, and privacy metadata (#28, #37).

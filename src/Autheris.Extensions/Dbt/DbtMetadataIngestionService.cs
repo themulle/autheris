@@ -59,6 +59,16 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         IDbtProposalRepository proposalRepository,
         ITableMetadataRepository metadataRepository,
         ILineageGraphStore lineageGraphStore,
+        IAuditWriter? auditWriter,
+        ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, null, null, auditWriter, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         ILogger<DbtMetadataIngestionService> logger)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, null, null, null, logger)
@@ -602,6 +612,21 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         suppressedRelaxations,
                         _logger);
 
+                    var tenant = existingMeta.OwnerTenantId is { } owner
+                        ? new TenantId(owner)
+                        : TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value?.Tenancy) ?? TenantId.Platform;
+
+                    var (newMinGroupSize, newNonPersonal) = await DbtCatalogPrivacyMeta.ApplyAsync(
+                        model,
+                        existingMeta.Identifier,
+                        existingMeta.Table.MinGroupSize,
+                        existingMeta.Table.NonPersonal,
+                        _auditWriter,
+                        tenant,
+                        warnings,
+                        _logger,
+                        ct).ConfigureAwait(false);
+
                     var updatedTableObj = new Table
                     {
                         Id = existingMeta.Table.Id,
@@ -623,7 +648,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         Tags = existingMeta.Table.Tags,
                         Visibility = existingMeta.Table.Visibility,
                         RlsExpression = existingMeta.Table.RlsExpression,
-                        MinGroupSize = existingMeta.Table.MinGroupSize,
+                        MinGroupSize = newMinGroupSize,
+                        NonPersonal = newNonPersonal,
                         SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
                         RequiredFilterColumns = reqCols,
                         RequiredFilterColumnGroups = reqGroups,
@@ -673,7 +699,12 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
-                        PredefinedSyntheticSamples = mergedSamples
+                        PredefinedSyntheticSamples = mergedSamples,
+                        MinGroupSize = existingMeta.MinGroupSize,
+                        NonPersonal = existingMeta.NonPersonal,
+                        SmallGroupStrategy = existingMeta.SmallGroupStrategy,
+                        OwnerTenantId = existingMeta.OwnerTenantId,
+                        ExpectedRows = existingMeta.ExpectedRows
                     };
 
                     // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
@@ -1328,6 +1359,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     Visibility = existingMeta.Table.Visibility,
                     RlsExpression = existingMeta.Table.RlsExpression,
                     MinGroupSize = existingMeta.Table.MinGroupSize,
+                    NonPersonal = existingMeta.Table.NonPersonal,
                     SmallGroupStrategy = existingMeta.Table.SmallGroupStrategy,
                     RequiredFilterColumns = reqCols,
                     RequiredFilterColumnGroups = reqGroups,

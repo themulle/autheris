@@ -348,6 +348,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
                 ["group_by"] = request.GroupBy ?? Array.Empty<string>(),
                 ["time_granularity"] = request.TimeGranularity,
                 ["minimum_group_size"] = aggResult.Metadata.MinimumGroupSize,
+                ["min_group_size_source"] = aggResult.Metadata.MinimumGroupSizeSource.ToString().ToLowerInvariant(),
                 ["suppressed"] = aggResult.Metadata.Suppressed,
                 ["suppressed_groups_count"] = aggResult.Metadata.SuppressedGroupsCount,
                 ["suppressed_rows_count"] = aggResult.Metadata.SuppressedRowsCount,

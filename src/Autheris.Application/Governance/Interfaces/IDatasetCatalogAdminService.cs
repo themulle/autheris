@@ -12,7 +12,9 @@ public sealed record DatasetCatalogEdit(
     IReadOnlyList<string>? ReplaceTags,
     IReadOnlyList<string>? AddTags,
     IReadOnlyList<string>? RemoveTags,
-    string? Visibility)
+    string? Visibility,
+    string? MinGroupSize = null,
+    bool? NonPersonal = null)
 {
     /// <summary>A request body that could not be bound (missing or wrong shape); answered as <see cref="DatasetCatalogOutcome.InvalidRequest"/> after authorization.</summary>
     public bool Malformed { get; init; }
@@ -40,7 +42,8 @@ public sealed record DatasetCatalogResult(
     DatasetCatalogOutcome Outcome,
     TableIdentifier? Table = null,
     DatasetCatalogSettings? Settings = null,
-    bool TierEffective = true)
+    bool TierEffective = true,
+    string? Warning = null)
 {
     public bool IsSuccess => Outcome is DatasetCatalogOutcome.Applied or DatasetCatalogOutcome.Unchanged;
 }

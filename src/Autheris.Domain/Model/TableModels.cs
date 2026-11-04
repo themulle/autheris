@@ -160,6 +160,7 @@ public sealed record Table
     public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
+    public bool NonPersonal { get; init; } = false;
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
     /// <summary>Issue #163: Table-level required filter columns enforced across every read path.</summary>
     public ImmutableArray<string> RequiredFilterColumns { get; init; } = ImmutableArray<string>.Empty;
@@ -425,10 +426,14 @@ public sealed record TableMetadata
     /// <summary>Per-table minimum group size override for governed aggregations (#37). Falls back to <see cref="Table.MinGroupSize"/>.</summary>
     public int? MinGroupSize { get; init; }
 
+    /// <summary>Per-table non-personal flag override (#448). Falls back to <see cref="Table.NonPersonal"/>.</summary>
+    public bool? NonPersonal { get; init; }
+
     /// <summary>Per-table small group handling strategy override (#37). Falls back to <see cref="Table.SmallGroupStrategy"/>.</summary>
     public SmallGroupStrategy? SmallGroupStrategy { get; init; }
 
     public int? EffectiveMinGroupSize => MinGroupSize ?? Table.MinGroupSize;
+    public bool EffectiveNonPersonal => NonPersonal ?? Table.NonPersonal;
     public SmallGroupStrategy? EffectiveSmallGroupStrategy => SmallGroupStrategy ?? Table.SmallGroupStrategy;
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;

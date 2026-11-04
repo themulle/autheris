@@ -77,6 +77,9 @@ public sealed class AnalyticsPrivacyOptions
 {
     public int DefaultMinGroupSize { get; set; } = AnalyticsOptions.DefaultMinimumGroupSize;
     public bool AllowDisabled { get; set; }
+    public bool AllowCatalogLowering { get; set; }
+    public bool AllowSourceDeclaredLowering { get; set; }
+    public int CatalogMinGroupSizeFloor { get; set; } = 1;
     public SmallGroupStrategy SuppressionMode { get; set; } = SmallGroupStrategy.Suppress;
     /// <summary>
     /// MISC-09: when true and the effective minimum group size is above 1, a WHERE predicate that negates (<c>&lt;&gt;</c>, <c>NOT IN</c>,
