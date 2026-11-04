@@ -14,14 +14,16 @@ public enum DatasetTagSource
 
 public sealed record DatasetTag(string Tag, DatasetTagSource Source);
 
-/// <summary>Persisted catalog settings of one dataset: tags of all sources and the visibility tier (missing row = Hidden).</summary>
-public sealed record DatasetCatalogSettings(IReadOnlyList<DatasetTag> Tags, DatasetVisibility Visibility);
+/// <summary>Persisted catalog settings of one dataset: tags of all sources, visibility tier, and privacy overrides.</summary>
+public sealed record DatasetCatalogSettings(IReadOnlyList<DatasetTag> Tags, DatasetVisibility Visibility, int? MinGroupSize = null, bool? NonPersonal = null);
 
 /// <summary>Result of a catalog settings write: before and after state of one dataset (audit input).</summary>
 public sealed record DatasetCatalogChange(TableIdentifier Table, DatasetCatalogSettings Before, DatasetCatalogSettings After)
 {
     public bool Changed =>
         Before.Visibility != After.Visibility ||
+        Before.MinGroupSize != After.MinGroupSize ||
+        Before.NonPersonal != After.NonPersonal ||
         !Before.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).ThenBy(t => t.Source)
             .SequenceEqual(After.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).ThenBy(t => t.Source));
 }

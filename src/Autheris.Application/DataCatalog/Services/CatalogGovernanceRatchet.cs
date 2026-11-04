@@ -62,6 +62,7 @@ public static class CatalogGovernanceRatchet
             Visibility = exTable.Visibility != DatasetVisibility.Hidden ? exTable.Visibility : inTable.Visibility,
             RlsExpression = !string.IsNullOrWhiteSpace(exTable.RlsExpression) ? exTable.RlsExpression : inTable.RlsExpression,
             MinGroupSize = mergedMinGroupSize,
+            NonPersonal = exTable.NonPersonal,
             SmallGroupStrategy = exTable.SmallGroupStrategy ?? inTable.SmallGroupStrategy,
             RequiredFilterColumns = UnionRequiredFilterColumns(exTable.RequiredFilterColumns, inTable.RequiredFilterColumns),
             RequiredFilterColumnGroups = UnionRequiredFilterColumnGroups(exTable.RequiredFilterColumnGroups, inTable.RequiredFilterColumnGroups),
@@ -152,6 +153,7 @@ public static class CatalogGovernanceRatchet
             EstimatedRowCount = incoming.EstimatedRowCount ?? existing.EstimatedRowCount,
             ExpectedRows = incoming.ExpectedRows ?? existing.ExpectedRows,
             MinGroupSize = existing.MinGroupSize,
+            NonPersonal = existing.NonPersonal,
             SmallGroupStrategy = existing.SmallGroupStrategy,
             DeletedKeyPolicy = existing.DeletedKeyPolicy
         };

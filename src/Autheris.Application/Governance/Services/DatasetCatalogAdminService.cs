@@ -8,11 +8,13 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Services;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
@@ -132,6 +134,20 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             requested = parsed;
         }
 
+        int? requestedMinGroupSize = null;
+        bool minGroupSizeSpecified = false;
+        if (edit.MinGroupSize is not null)
+        {
+            if (!CatalogMinGroupSizeRules.TryParseMinGroupSize(edit.MinGroupSize, out requestedMinGroupSize, out _, allowNone: true))
+            {
+                return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidRequest);
+            }
+            minGroupSizeSpecified = true;
+        }
+
+        bool? requestedNonPersonal = edit.NonPersonal;
+        bool nonPersonalSpecified = edit.NonPersonal.HasValue;
+
         var max = _options.CurrentValue.Catalog.MaxTagsPerDataset;
         if (!TryNormalizeList(edit.ReplaceTags, out var replace) || !TryNormalizeList(edit.AddTags, out var add) || !TryNormalizeList(edit.RemoveTags, out var remove))
         {
@@ -175,11 +191,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         if (dryRun)
         {
-            return Simulate(table, actor.Tenant, before, replace, add, remove, requested);
+            return await SimulateAsync(table, actor.Tenant, before, replace, add, remove, requested, minGroupSizeSpecified, requestedMinGroupSize, nonPersonalSpecified, requestedNonPersonal, ct).ConfigureAwait(false);
         }
 
         DatasetCatalogChange? tagChange = null;
         DatasetCatalogChange? visibilityChange = null;
+        DatasetCatalogChange? privacyChange = null;
         var actorSid = actor.Sid;
         try
         {
@@ -217,6 +234,17 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                     return new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
                 }
             }
+
+            if (minGroupSizeSpecified || nonPersonalSpecified)
+            {
+                var newMinGroup = minGroupSizeSpecified ? requestedMinGroupSize : before.MinGroupSize;
+                var newNonPersonal = nonPersonalSpecified ? requestedNonPersonal : before.NonPersonal;
+                privacyChange = await _tables.SetDatasetPrivacyAsync(table, newMinGroup, newNonPersonal, actorSid, ct).ConfigureAwait(false);
+                if (privacyChange is null)
+                {
+                    return new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
+                }
+            }
         }
         catch (ArgumentException)
         {
@@ -224,28 +252,46 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidTag);
         }
 
-        var after = visibilityChange?.After ?? tagChange?.After ?? before;
-        if (tagChange is not null && visibilityChange is not null)
-        {
-            after = new DatasetCatalogSettings(tagChange.After.Tags, visibilityChange.After.Visibility);
-        }
+        var after = new DatasetCatalogSettings(
+            tagChange?.After.Tags ?? before.Tags,
+            visibilityChange?.After.Visibility ?? before.Visibility,
+            privacyChange?.After.MinGroupSize ?? before.MinGroupSize,
+            privacyChange?.After.NonPersonal ?? before.NonPersonal);
 
         var tagsChanged = tagChange?.Changed == true;
         var visibilityChanged = visibilityChange?.Changed == true;
+        var privacyChanged = privacyChange?.Changed == true;
+
         if (visibilityChanged)
         {
             await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, visibilityChange!.Before, visibilityChange.After).ConfigureAwait(false);
             _metrics?.RequestRefresh();
         }
 
+        if (privacyChanged)
+        {
+            await AuditChangeAsync(AuditEventTypes.CatalogMinGroupSizeChanged, actor, table, source, privacyChange!.Before, privacyChange.After).ConfigureAwait(false);
+        }
+
+        string? warning = null;
+        if (after.NonPersonal == true)
+        {
+            var meta = await _tables.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (meta is not null && meta.Columns.Any(c => TableAccessDecision.IsCatalogSensitive(c.ColumnName, meta)))
+            {
+                warning = "Table has catalog-sensitive columns; small-group suppression lowering will be refused at query time.";
+            }
+        }
+
         return new DatasetCatalogResult(
-            tagsChanged || visibilityChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
-            table, after, IsTierEffective(table, actor.Tenant));
+            tagsChanged || visibilityChanged || privacyChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
+            table, after, IsTierEffective(table, actor.Tenant), warning);
     }
 
-    /// <summary>Dry run (same non-atomic cap semantics as <see cref="ExceedsCap"/>): the state the edit would produce, computed from the strict before-state like the repositories do (admin rows only are touched).</summary>
-    private DatasetCatalogResult Simulate(
-        TableIdentifier table, TenantId tenant, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested)
+    /// <summary>Dry run: the state the edit would produce, computed from the strict before-state like the repositories do.</summary>
+    private async Task<DatasetCatalogResult> SimulateAsync(
+        TableIdentifier table, TenantId tenant, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested,
+        bool minGroupSizeSpecified, int? requestedMinGroupSize, bool nonPersonalSpecified, bool? requestedNonPersonal, CancellationToken ct)
     {
         var admin = new HashSet<string>(before.Tags.Where(t => t.Source == DatasetTagSource.Admin).Select(t => t.Tag), StringComparer.Ordinal);
         if (replace is not null)
@@ -265,9 +311,22 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         var tags = admin.Select(t => new DatasetTag(t, DatasetTagSource.Admin))
             .Concat(before.Tags.Where(t => t.Source == DatasetTagSource.Dbt && !admin.Contains(t.Tag))).ToList();
-        var after = new DatasetCatalogSettings(tags, requested ?? before.Visibility);
+        var afterMinGroup = minGroupSizeSpecified ? requestedMinGroupSize : before.MinGroupSize;
+        var afterNonPersonal = nonPersonalSpecified ? requestedNonPersonal : before.NonPersonal;
+        var after = new DatasetCatalogSettings(tags, requested ?? before.Visibility, afterMinGroup, afterNonPersonal);
         var changed = new DatasetCatalogChange(table, before, after).Changed;
-        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, IsTierEffective(table, tenant));
+
+        string? warning = null;
+        if (after.NonPersonal == true)
+        {
+            var meta = await _tables.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (meta is not null && meta.Columns.Any(c => TableAccessDecision.IsCatalogSensitive(c.ColumnName, meta)))
+            {
+                warning = "Table has catalog-sensitive columns; small-group suppression lowering will be refused at query time.";
+            }
+        }
+
+        return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, IsTierEffective(table, tenant), warning);
     }
 
     private readonly record struct Gate(DatasetCatalogResult? Failure, Caller? Caller, TableIdentifier Table);
@@ -454,7 +513,13 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         return false;
     }
 
-    private static object View(DatasetCatalogSettings s) => new { visibility = s.Visibility.ToString(), tags = s.Tags.Select(t => t.Tag).OrderBy(t => t, StringComparer.Ordinal).ToArray() };
+    private static object View(DatasetCatalogSettings s) => new
+    {
+        visibility = s.Visibility.ToString(),
+        tags = s.Tags.Select(t => t.Tag).OrderBy(t => t, StringComparer.Ordinal).ToArray(),
+        minGroupSize = s.MinGroupSize,
+        nonPersonal = s.NonPersonal
+    };
 
     private Task AuditChangeAsync(string eventType, Caller actor, TableIdentifier table, string source, DatasetCatalogSettings before, DatasetCatalogSettings after)
         => _audit.RecordRequiredAsync(new AuditLogEntry

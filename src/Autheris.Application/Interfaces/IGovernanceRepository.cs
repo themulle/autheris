@@ -47,6 +47,11 @@ public interface ITableMetadataRepository
         TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
 
+    /// <summary>Issue #448: sets the minimum group size and non-personal table overlay in one transaction. Null when the table is unknown or inactive.</summary>
+    Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
+        TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
     /// <summary>
     /// Issue #94 (SD-5): replaces ONLY the declared primary key and indexes of a table. In one transaction the stored columns are read,
     /// the definition is validated against them and replaced, and the epoch is bumped once; masking rules and column metadata other than

@@ -104,6 +104,7 @@ internal static class MetricGraphQlTypes
             d.Field("suppressed").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<MetricResultDto>().Suppressed);
             d.Field("suppressedGroupsCount").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<MetricResultDto>().SuppressedGroupsCount);
             d.Field("minimumGroupSize").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<MetricResultDto>().MinimumGroupSize);
+            d.Field("minimumGroupSizeSource").Type(NonNull("String")).Resolve(ctx => ctx.Parent<MetricResultDto>().MinimumGroupSizeSource);
             d.Field("mergedIntoOther").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<MetricResultDto>().MergedIntoOther);
             d.Field("truncated").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<MetricResultDto>().Truncated);
             d.Field("noiseApplied").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<MetricResultDto>().NoiseApplied);

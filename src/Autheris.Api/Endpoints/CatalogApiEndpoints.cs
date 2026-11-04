@@ -352,6 +352,23 @@ public static class CatalogApiEndpoints
         group.MapPut("/datasets/{id}/visibility", PutDatasetVisibilityHandler)
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogVisibilityChanged);
+
+        group.MapPut("/datasets/{id}/privacy", PutDatasetPrivacyHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogMinGroupSizeChanged);
+    }
+
+    internal static async Task<IResult> PutDatasetPrivacyHandler(
+        string id,
+        SetDatasetPrivacyDto? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var edit = request is null || (request.MinGroupSize is null && !request.NonPersonal.HasValue)
+            ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, request.MinGroupSize, request.NonPersonal);
+        return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
     internal static async Task<IResult> GetDatasetCatalogSettingsHandler(
@@ -412,7 +429,10 @@ public static class CatalogApiEndpoints
                     result.Table!.Value.ToString(),
                     [.. settings.Tags.OrderBy(t => t.Tag, StringComparer.Ordinal).Select(t => new DatasetTagDto(t.Tag, t.Source == DatasetTagSource.Dbt ? "dbt" : "admin"))],
                     settings.Visibility.ToString(),
-                    result.TierEffective));
+                    result.TierEffective,
+                    settings.MinGroupSize,
+                    settings.NonPersonal,
+                    result.Warning));
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Forbidden:
                 return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Access to the dataset is denied.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidTag:
@@ -898,6 +918,9 @@ public sealed record ChangeDatasetTagsDto(System.Collections.Generic.IReadOnlyLi
 /// <summary>Issue #111 (C-4): the requested tier name; parsed by the service, never bound to an enum.</summary>
 public sealed record SetDatasetVisibilityDto(string? Visibility);
 
+/// <summary>Issue #448: the requested privacy settings (minimum group size and non-personal flag).</summary>
+public sealed record SetDatasetPrivacyDto(string? MinGroupSize = null, bool? NonPersonal = null);
+
 public sealed record DatasetTagDto(string Tag, string Source);
 
 public sealed record DatasetCatalogSettingsDto(
@@ -905,6 +928,9 @@ public sealed record DatasetCatalogSettingsDto(
     System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags,
     string Visibility,
     bool TierEffective,
+    int? MinGroupSize = null,
+    bool? NonPersonal = null,
+    string? Warning = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

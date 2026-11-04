@@ -14,7 +14,7 @@ public partial class SqlServerGovernanceRepository
 {
     private static class CatalogSql
     {
-        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json
+        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
 FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
@@ -24,7 +24,8 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
        display_name, sensitivity, requires_four_eyes, is_active,
        data_source_type, http_endpoint_json, plugin_name,
        description, long_description, doc_source,
-       required_filter_columns_json, texts_json
+       required_filter_columns_json, texts_json,
+       min_group_size, non_personal
 FROM TABLES
 WHERE is_active = 1";
 
@@ -67,9 +68,11 @@ WHEN MATCHED THEN UPDATE SET
     long_description = COALESCE(@longDesc, t.long_description),
     doc_source = COALESCE(@docSource, t.doc_source),
     required_filter_columns_json = @requiredFilterColumnsJson,
-    texts_json = @textsJson
-WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json)
-    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson);";
+    texts_json = @textsJson,
+    min_group_size = @minGroupSize,
+    non_personal = @nonPersonal
+WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
+    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal);";
 
         public const string InsertColumnSql = @"MERGE dbo.TABLE_COLUMNS WITH (HOLDLOCK) AS t
 USING (SELECT @id AS id) AS s
@@ -568,6 +571,8 @@ WHERE id = 1;";
                 upsertCmd.AddBound("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
+                upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
+                upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -720,6 +725,11 @@ WHERE id = 1;";
         TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, table, visibility, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
+        TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetPrivacyAsync(conn, tx, CatalogKeyDefinitionStore.SqlServer, table, minGroupSize, nonPersonal, actor, ct), ct);
 
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
