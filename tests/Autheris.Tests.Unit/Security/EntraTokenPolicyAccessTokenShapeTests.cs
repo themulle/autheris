@@ -128,4 +128,50 @@ public sealed class EntraTokenPolicyAccessTokenShapeTests
         error.ShouldBeNull();
         appOnlyToken.IsReadOnly().ShouldBeTrue();
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void EntraTokenPolicy_DelegatedToken_UnlistedClientId_Rejected()
+    {
+        var delegatedToken = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("oid", "11111111-2222-3333-4444-555555555555"),
+                new Claim("azp", "unauthorized-third-party-app"),
+                new Claim("scp", "user_impersonation"),
+                new Claim("preferred_username", "alice@corp.example")
+            ],
+            "Bearer"));
+
+        var options = new EntraIdAuthOptions
+        {
+            AllowedClientIds = ["authorized-portal-app", "authorized-cli-app"]
+        };
+
+        var error = EntraTokenPolicy.Apply(delegatedToken, options, Resolver);
+        error.ShouldNotBeNull();
+        error.ShouldContain("unauthorized-third-party-app");
+        error.ShouldContain("not in the list of allowed clients");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void EntraTokenPolicy_DelegatedToken_ListedClientId_Accepted()
+    {
+        var delegatedToken = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("oid", "11111111-2222-3333-4444-555555555555"),
+                new Claim("azp", "authorized-portal-app"),
+                new Claim("scp", "user_impersonation"),
+                new Claim("preferred_username", "alice@corp.example")
+            ],
+            "Bearer"));
+
+        var options = new EntraIdAuthOptions
+        {
+            AllowedClientIds = ["authorized-portal-app", "authorized-cli-app"]
+        };
+
+        var error = EntraTokenPolicy.Apply(delegatedToken, options, Resolver);
+        error.ShouldBeNull();
+    }
 }

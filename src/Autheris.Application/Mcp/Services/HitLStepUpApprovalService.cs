@@ -420,56 +420,87 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
         try
         {
-            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62)
-            if (_totpService != null)
+            // VULN-05: Replay & Race condition prevention - fast-fail before consuming 2FA code
+            if (entry.Ticket.Status != HitLApprovalStatus.Pending)
             {
-                var isTotpEnforced = _options.Value.HitLStepUp.RequireTotp2Fa;
+                return new HitLApprovalResult(
+                    false,
+                    entry.Ticket,
+                    $"Ticket is already in status '{entry.Ticket.Status}'. Cannot approve."
+                );
+            }
+
+            // VULN-04 / SEC C-05: Self-Approval Bypass prevention (Four-Eyes invariant)
+            if (_options.Value.HitLStepUp.RequireDifferentApprover && IsSameIdentity(entry.Ticket.RequesterSid, approver))
+            {
+                var safeRequesterSidForLog = (entry.Ticket.RequesterSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+                var safeApprovalIdForWarn = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning("Four-Eyes security violation: Requester '{RequesterSid}' attempted self-approval on ticket '{ApprovalId}'.",
+                    safeRequesterSidForLog, safeApprovalIdForWarn);
+
+                return new HitLApprovalResult(
+                    false,
+                    entry.Ticket,
+                    "Four-Eyes security violation: Self-approval is strictly prohibited. Approver cannot be the requester."
+                );
+            }
+
+            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62)
+            var isTotpEnforced = _options.Value.HitLStepUp.RequireTotp2Fa;
+            if (isTotpEnforced || !string.IsNullOrWhiteSpace(totpCode))
+            {
+                if (_totpService == null)
+                {
+                    return new HitLApprovalResult(
+                        false,
+                        entry.Ticket,
+                        "TOTP 2FA service is not configured.");
+                }
+
+                if (string.IsNullOrWhiteSpace(totpCode))
+                {
+                    return new HitLApprovalResult(
+                        false,
+                        entry.Ticket,
+                        "TOTP 2FA code is required for Step-Up approval.");
+                }
+
                 var enrolledSecret = _totpSecretStore != null
                     ? await _totpSecretStore.GetSecretAsync(approver.ApproverSid, ct).ConfigureAwait(false)
                     : null;
 
-                if (isTotpEnforced || !string.IsNullOrWhiteSpace(enrolledSecret) || !string.IsNullOrWhiteSpace(totpCode))
+                if (string.IsNullOrWhiteSpace(enrolledSecret))
                 {
-                    if (string.IsNullOrWhiteSpace(totpCode))
-                    {
-                        return new HitLApprovalResult(
-                            false,
-                            entry.Ticket,
-                            "TOTP 2FA code is required for Step-Up approval.");
-                    }
+                    return new HitLApprovalResult(
+                        false,
+                        entry.Ticket,
+                        "Approver has not enrolled in TOTP 2FA or secret is missing.");
+                }
 
-                    if (string.IsNullOrWhiteSpace(enrolledSecret))
-                    {
-                        return new HitLApprovalResult(
-                            false,
-                            entry.Ticket,
-                            "Approver has not enrolled in TOTP 2FA or secret is missing.");
-                    }
+                var isTotpValid = await _totpService.VerifyAndConsumeTotpAsync(
+                    approver.ApproverSid,
+                    enrolledSecret,
+                    totpCode,
+                    ct).ConfigureAwait(false);
 
-                    var isTotpValid = await _totpService.VerifyAndConsumeTotpAsync(
-                        approver.ApproverSid,
-                        enrolledSecret,
-                        totpCode,
-                        ct).ConfigureAwait(false);
+                if (!isTotpValid)
+                {
+                    var safeTotpApproverSid = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+                    var safeTotpApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                    _logger.LogWarning("TOTP verification failed for approver '{ApproverSid}' on ticket '{ApprovalId}'.",
+                        safeTotpApproverSid, safeTotpApprovalId);
 
-                    if (!isTotpValid)
-                    {
-                        var safeTotpApproverSid = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
-                        var safeTotpApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
-                        _logger.LogWarning("TOTP verification failed for approver '{ApproverSid}' on ticket '{ApprovalId}'.",
-                            safeTotpApproverSid, safeTotpApprovalId);
-
-                        return new HitLApprovalResult(
-                            false,
-                            entry.Ticket,
-                            "TOTP 2FA verification failed or one-time code was already used.");
-                    }
+                    return new HitLApprovalResult(
+                        false,
+                        entry.Ticket,
+                        "TOTP 2FA verification failed or one-time code was already used.");
                 }
             }
+
             HitLApprovalResult approvedResult;
             lock (entry.Lock)
             {
-                // VULN-05: Replay & Race condition prevention
+                // VULN-05: Replay & Race condition prevention under lock
                 if (entry.Ticket.Status != HitLApprovalStatus.Pending)
                 {
                     return new HitLApprovalResult(
@@ -479,8 +510,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                     );
                 }
 
-                // VULN-04 / SEC C-05: Self-Approval Bypass prevention (Four-Eyes invariant).
-                // Every identifier of the approver is compared, so oid/sub/upn/PrimarySid variants of the same user are caught.
+                // VULN-04 / SEC C-05: Self-Approval Bypass prevention under lock
                 if (_options.Value.HitLStepUp.RequireDifferentApprover && IsSameIdentity(entry.Ticket.RequesterSid, approver))
                 {
                     var safeRequesterSidForLog = (entry.Ticket.RequesterSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);

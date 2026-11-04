@@ -59,27 +59,30 @@ public static class EntraTokenPolicy
             return "Token without scopes ('scp') or roles ('roles') is not accepted as an API access token.";
         }
 
+        var isAppOnly = scopes.Count == 0 && subjectResolver.ResolveSubject(principal).Type == SubjectType.ServicePrincipal;
+
+        // Client ID allowlist check (if configured) applies to both delegated and app-only tokens (GHSA-hw85-rqjh-cwxx)
+        if (options.AllowedClientIds.Count > 0)
+        {
+            var clientId = azp
+                ?? appid
+                ?? principal.FindFirst("client_id")?.Value;
+
+            if (string.IsNullOrWhiteSpace(clientId) ||
+                !options.AllowedClientIds.Contains(clientId, StringComparer.OrdinalIgnoreCase))
+            {
+                var target = isAppOnly ? "allowed app-only clients" : "allowed clients";
+                return $"Client application '{clientId}' is not in the list of {target}.";
+            }
+        }
+
         // Delegated Entra tokens always carry scp; only tokens without it can be app-only.
-        if (scopes.Count == 0 && subjectResolver.ResolveSubject(principal).Type == SubjectType.ServicePrincipal)
+        if (isAppOnly)
         {
             // App-only tokens must have at least one application role assigned
             if (roles.Count == 0)
             {
                 return "App-only tokens require an assigned application role ('roles').";
-            }
-
-            // Client ID allowlist check (if configured)
-            if (options.AllowedClientIds.Count > 0)
-            {
-                var clientId = azp
-                    ?? appid
-                    ?? principal.FindFirst("client_id")?.Value;
-
-                if (string.IsNullOrWhiteSpace(clientId) ||
-                    !options.AllowedClientIds.Contains(clientId, StringComparer.OrdinalIgnoreCase))
-                {
-                    return $"Client application '{clientId}' is not in the list of allowed app-only clients.";
-                }
             }
 
             switch (options.AppOnlyTokens)
