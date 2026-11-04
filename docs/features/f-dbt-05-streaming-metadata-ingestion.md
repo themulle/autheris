@@ -38,7 +38,7 @@ The sync imports relations from `relationships` tests, from `relationships_combi
 - A reference that matches no node is skipped with `UNKNOWN_MODEL`; one that matches more than one is skipped with `AMBIGUOUS_REFERENCE`. Nothing is picked by order.
 - Without `attached_node`, the child is the single `depends_on` node other than the parent. A self relation is inferred only when `depends_on` holds exactly the parent; any other shape is `AMBIGUOUS_REFERENCE`. With `attached_node`, the node must be in the manifest and in `depends_on`.
 - The importer resolves tables by unique id (database, schema, name); sources are registered under their `name`. A relation without unique ids resolves by name only when exactly one model has that name, otherwise `AMBIGUOUS_MODEL`.
-- `unique` and `unique_combination_of_columns` tests on a source declare a key. Without `attached_node` the test attaches only to its single `model.`, `seed.`, `snapshot.` or `source.` dependency; otherwise the key is skipped with `AMBIGUOUS_ATTACHMENT`.
+- `unique` and `unique_combination_of_columns` (and alias `unique_combination`) tests on a source declare a key. Without `attached_node` the test attaches only to its single `model.`, `seed.`, `snapshot.` or `source.` dependency; otherwise the key is skipped with `AMBIGUOUS_ATTACHMENT`.
 
 A multi-column relation is declared with the table-level generic test `relationships_combination` (no namespace, or the project's own package):
 

@@ -56,7 +56,27 @@ public static class CatalogKeyDefinitionImport
                 return;
             }
 
-            _indexes.Add(new TableIndexDefinition(UniqueIndexName(_indexes.Count + 1), columns!.ToArray(), true, KeyDirections.Canonical(directions?.ToArray())));
+            var canonicalDirections = KeyDirections.Canonical(directions?.ToArray());
+            if (_indexes.Any(i => i.Columns.SequenceEqual(columns!, StringComparer.OrdinalIgnoreCase) &&
+                                  KeyDirectionsEqual(i.Directions, canonicalDirections)))
+            {
+                return;
+            }
+
+            if (_primaryKey is not null && _primaryKey.SequenceEqual(columns!, StringComparer.OrdinalIgnoreCase) &&
+                KeyDirectionsEqual(_primaryKeyDirections, canonicalDirections))
+            {
+                return;
+            }
+
+            _indexes.Add(new TableIndexDefinition(UniqueIndexName(_indexes.Count + 1), columns!.ToArray(), true, canonicalDirections));
+        }
+
+        private static bool KeyDirectionsEqual(IReadOnlyList<KeyColumnDirection>? left, IReadOnlyList<KeyColumnDirection>? right)
+        {
+            if (left is null && right is null) return true;
+            if (left is null || right is null) return false;
+            return left.SequenceEqual(right);
         }
 
         private static bool DirectionsMatch(IReadOnlyList<string> columns, IReadOnlyList<KeyColumnDirection>? directions) =>

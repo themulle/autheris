@@ -372,6 +372,93 @@ public sealed class DbtSourceRelationTests
     }
 
     [Fact]
+    public async Task Parse_UniqueCombinationAliasOnSource_DeclaresKeyIdenticalToUniqueCombinationOfColumns()
+    {
+        // Issue #463: unique_combination as alias of unique_combination_of_columns
+        using var streamOfCols = Manifest(
+            new()
+            {
+                ["test.shop.uc_cols"] = Test("unique_combination_of_columns", new() { ["combination_of_columns"] = Cols("customer_id", "tenant_id") }, [Crm], attached: Crm)
+            },
+            TwoSources());
+        using var streamAlias = Manifest(
+            new()
+            {
+                ["test.shop.uc_alias"] = Test("unique_combination", new() { ["combination_of_columns"] = Cols("customer_id", "tenant_id") }, [Crm], attached: Crm)
+            },
+            TwoSources());
+
+        var resultOfCols = await Parse(streamOfCols);
+        var resultAlias = await Parse(streamAlias);
+
+        var keysOfCols = resultOfCols.Models.Single(m => m.UniqueId == Crm).DeclaredKeys!;
+        var keysAlias = resultAlias.Models.Single(m => m.UniqueId == Crm).DeclaredKeys!;
+
+        keysAlias.ShouldNotBeNull();
+        keysAlias.UniqueConstraints.ShouldHaveSingleItem().ShouldBe(["customer_id", "tenant_id"]);
+        keysAlias.UniqueConstraints[0].ShouldBe(keysOfCols.UniqueConstraints[0]);
+    }
+
+    [Fact]
+    public async Task Parse_SourceWithBothTests_YieldsOneDeclaredKey()
+    {
+        // Issue #463: A node with both unique_combination_of_columns and unique_combination yields one key, not two.
+        using var stream = Manifest(
+            new()
+            {
+                ["test.shop.uc_cols"] = Test("unique_combination_of_columns", new() { ["combination_of_columns"] = Cols("customer_id", "tenant_id") }, [Crm], attached: Crm),
+                ["test.shop.uc_alias"] = Test("unique_combination", new() { ["combination_of_columns"] = Cols("customer_id", "tenant_id") }, [Crm], attached: Crm)
+            },
+            TwoSources());
+
+        var result = await Parse(stream);
+        var keys = result.Models.Single(m => m.UniqueId == Crm).DeclaredKeys;
+        keys.ShouldNotBeNull();
+        keys!.UniqueConstraints.Count.ShouldBe(1);
+        keys.UniqueConstraints[0].ShouldBe(["customer_id", "tenant_id"]);
+    }
+
+    [Fact]
+    public async Task Parse_UniqueCombination_WithArgumentsObjectAndDirections_ParsesCorrectly()
+    {
+        // Issue #463: arguments: { combination_of_columns: [...] } form and column directions
+        using var stream = Manifest(
+            new()
+            {
+                ["test.shop.uc_args"] = Test("unique_combination", new()
+                {
+                    ["arguments"] = new Dictionary<string, object>
+                    {
+                        ["combination_of_columns"] = Cols("customer_id", "tenant_id DESC")
+                    }
+                }, [Crm], attached: Crm)
+            },
+            TwoSources());
+
+        var result = await Parse(stream);
+        var keys = result.Models.Single(m => m.UniqueId == Crm).DeclaredKeys;
+        keys.ShouldNotBeNull();
+        keys!.UniqueConstraints.ShouldHaveSingleItem().ShouldBe(["customer_id", "tenant_id"]);
+        keys.UniqueDirections.ShouldNotBeNull();
+        keys.UniqueDirections![0]!.ShouldBe([KeyColumnDirection.Ascending, KeyColumnDirection.Descending]);
+    }
+
+    [Fact]
+    public async Task Parse_UniqueCombination_EmptyOrMissing_DropsDeclaration()
+    {
+        // Issue #463: Missing or empty combination_of_columns drops the declaration
+        using var streamEmpty = Manifest(
+            new()
+            {
+                ["test.shop.uc_empty"] = Test("unique_combination", new() { ["combination_of_columns"] = Array.Empty<object>() }, [Crm], attached: Crm)
+            },
+            TwoSources());
+
+        var resultEmpty = await Parse(streamEmpty);
+        resultEmpty.Models.Single(m => m.UniqueId == Crm).DeclaredKeys!.Invalid.ShouldBeTrue();
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public async Task Parse_KeyTestWithTwoDependencies_SkipsAmbiguousAttachment()
     {
