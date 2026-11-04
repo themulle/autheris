@@ -344,7 +344,9 @@ public sealed class GovernanceMigrationEngineTests
         var trace = new List<string>();
         var runner = NewRunner(repository, cs, [ProbeStep()], lockTimeoutSeconds: 1, trace: trace, acquireLock: async (_, _, token) =>
         {
-            await Task.Delay(Timeout.Infinite, token).ContinueWith(_ => { }, TaskScheduler.Default);
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var registration = token.Register(() => cancelled.TrySetResult());
+            await cancelled.Task;
             throw new InvalidOperationException("Operation cancelled by user.");
         });
 

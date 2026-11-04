@@ -13,6 +13,8 @@ namespace Autheris.Infrastructure.Persistence.Migrations;
 /// </summary>
 public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
 {
+    private static readonly TimeSpan ClientLockGrace = TimeSpan.FromSeconds(2);
+
     private readonly GovernanceMigrationOptions _options;
     private readonly ILogger? _logger;
 
@@ -252,8 +254,6 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
             }
         }
     }
-
-    private static readonly TimeSpan ClientLockGrace = TimeSpan.FromSeconds(2);
 
     private GovernanceSchemaDriftException LockTimeout() => LockTimeoutError(EngineDisplayName, _options.LockTimeoutSeconds);
 
