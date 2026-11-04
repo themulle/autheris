@@ -31,6 +31,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IConsumerUsageRecorder? _usageRecorder;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
@@ -60,8 +61,11 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         TypedPolicySources? typedPolicies = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        IConsumerUsageRecorder? usageRecorder = null)
+        IConsumerUsageRecorder? usageRecorder = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _usageRecorder = usageRecorder;
         _typedPolicies = typedPolicies;
         _accessProfileRepository = accessProfileRepository;
@@ -185,6 +189,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
 
+        // Issue #447 C3 (SEC-ATR-07/08): after the principal and access decision, before any executor, connector, cache or ALLOW audit record.
+        await _transportGate.EnsureCatalogSourceAsync(
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
+
         // Generate/Fetch query result via IDataSourceExecutor (SQL, Declarative HTTP, or Plugin)
         var maxRows = _options?.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         var rowLimit = Math.Clamp(first ?? 50, 1, maxRows);
@@ -297,6 +305,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Offset: after ?? 0,
                 RequestHeaders: requestHeaders,
                 Items: pageItems);
+            // SEC-ATR-05: a connector that opens its own scope copies the caller's ingress from here.
+            session.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
 
             rawRows = await Autheris.Application.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 

@@ -27,6 +27,22 @@ public static class SqlTransports
     /// <summary>The in-memory DuckDB OLAP endpoint (<c>POST /api/v1/olap/query</c>). Never part of the default allowed list.</summary>
     public const string Olap = "Olap";
 
+    /// <summary>
+    /// Issue #447 (SEC-ATR-03): the federation transport name of a server-stamped ingress; <c>null</c> for an unset ingress.
+    /// GraphQL and OData read through the planner like REST, so they are judged as <see cref="Rest"/>.
+    /// </summary>
+    public static string? ForIngress(Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress) => ingress switch
+    {
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql => WebSql,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino => Trino,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp => Mcp,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight => FlightSql,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest
+            or Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL
+            or Autheris.Domain.Options.DataSources.DataSourceTransportFlags.OData => Rest,
+        _ => null
+    };
+
     /// <summary>Every registered transport name; <c>WebSql:CrossSource:AllowedTransports</c> entries are validated against it at start-up.</summary>
     public static IReadOnlyList<string> All { get; } =
         [WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob, Olap];

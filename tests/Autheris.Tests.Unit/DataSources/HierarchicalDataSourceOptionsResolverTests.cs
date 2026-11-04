@@ -212,7 +212,7 @@ public sealed class HierarchicalDataSourceOptionsResolverTests
     }
 
     [Fact]
-    public void IsTransportAllowed_EvaluatesTransportFlagsBitmask()
+    public void EffectiveProfile_IsTransportAllowed_EvaluatesTransportFlagsBitmask()
     {
         var configMonitor = new TestMonitor<DataSourceConfigurationOptions>(new DataSourceConfigurationOptions
         {
@@ -227,10 +227,11 @@ public sealed class HierarchicalDataSourceOptionsResolverTests
 
         using var resolver = new HierarchicalDataSourceOptionsResolver(configMonitor);
 
-        resolver.IsTransportAllowed("locked_source", DataSourceTransportFlags.GraphQL).ShouldBeTrue();
-        resolver.IsTransportAllowed("locked_source", DataSourceTransportFlags.Rest).ShouldBeTrue();
-        resolver.IsTransportAllowed("locked_source", DataSourceTransportFlags.WebSql).ShouldBeFalse();
-        resolver.IsTransportAllowed("locked_source", DataSourceTransportFlags.Trino).ShouldBeFalse();
+        var profile = resolver.Resolve("locked_source");
+        profile.IsTransportAllowed(DataSourceTransportFlags.GraphQL).ShouldBeTrue();
+        profile.IsTransportAllowed(DataSourceTransportFlags.Rest).ShouldBeTrue();
+        profile.IsTransportAllowed(DataSourceTransportFlags.WebSql).ShouldBeFalse();
+        profile.IsTransportAllowed(DataSourceTransportFlags.Trino).ShouldBeFalse();
     }
 
     [Fact]
@@ -281,6 +282,79 @@ public sealed class HierarchicalDataSourceOptionsResolverTests
         var policy = provider.GetPolicy("telemetry_source");
         policy.MinimumLogLevel.ShouldBe(Microsoft.Extensions.Logging.LogLevel.Debug);
         policy.StatementText.ShouldBe(Autheris.Domain.Diagnostics.StatementTextMode.Parameterized);
+    }
+
+    [Fact]
+    public void Rebuild_AddsWebSqlDefaultAllowedAndMappedSources()
+    {
+        var configMonitor = new TestMonitor<DataSourceConfigurationOptions>(new DataSourceConfigurationOptions
+        {
+            Defaults = new DataSourceProfileOptions { AllowedTransports = DataSourceTransportFlags.GraphQL },
+            Profiles = new Dictionary<string, DataSourceProfileOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["explicit_src"] = new DataSourceProfileOptions { AllowedTransports = DataSourceTransportFlags.Rest }
+            }
+        });
+        var webSql = new WebSqlOptions
+        {
+            DefaultDataSourceName = "main_db",
+            AllowedDataSources = ["allowed_db", "explicit_src"],
+            DataSourceMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["alias"] = "mapped_db" },
+            TenantDataSourceAllowlist = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase) { ["t1"] = ["tenant_db"] }
+        };
+        var gatewayMonitor = new TestMonitor<GatewayOptions>(new GatewayOptions { WebSql = webSql });
+
+        using var resolver = new HierarchicalDataSourceOptionsResolver(configMonitor, gatewayMonitor);
+
+        foreach (var name in new[] { "main_db", "allowed_db", "mapped_db", "tenant_db" })
+        {
+            resolver.TryResolve(name, out var p).ShouldBeTrue(name);
+            p.AllowedTransports.ShouldBe(DataSourceTransportFlags.GraphQL, name);
+        }
+
+        // the closure never overwrites an explicit profile (SEC-ATR-10)
+        resolver.TryResolve("explicit_src", out var explicitProfile).ShouldBeTrue();
+        explicitProfile.AllowedTransports.ShouldBe(DataSourceTransportFlags.Rest);
+        resolver.TryResolve("alias", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Gate_RebuildFailure_KeepsLastGood_SEC_ATR_10()
+    {
+        var monitor = new FlakyMonitor(new DataSourceConfigurationOptions
+        {
+            Profiles = new Dictionary<string, DataSourceProfileOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["src"] = new DataSourceProfileOptions { AllowedTransports = DataSourceTransportFlags.GraphQL }
+            }
+        });
+        using var resolver = new HierarchicalDataSourceOptionsResolver(monitor);
+
+        // a rebuild that fails keeps the previous snapshot (never an empty map, never the default for a known source)
+        monitor.FailNext = true;
+        monitor.RaiseChange();
+
+        resolver.TryResolve("src", out var profile).ShouldBeTrue();
+        profile.AllowedTransports.ShouldBe(DataSourceTransportFlags.GraphQL);
+    }
+
+    private sealed class FlakyMonitor(DataSourceConfigurationOptions value) : IOptionsMonitor<DataSourceConfigurationOptions>
+    {
+        private Action<DataSourceConfigurationOptions, string?>? _listener;
+        public bool FailNext { get; set; }
+
+        public DataSourceConfigurationOptions CurrentValue => FailNext ? throw new InvalidOperationException("boom") : value;
+
+        public DataSourceConfigurationOptions Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<DataSourceConfigurationOptions, string?> listener)
+        {
+            _listener = listener;
+            return null;
+        }
+
+        public void RaiseChange() => _listener?.Invoke(value, null);
     }
 
     private sealed class TestMonitor<T>(T initialValue) : IOptionsMonitor<T>

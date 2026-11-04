@@ -33,7 +33,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 [Collection("CatalogRelation")]
 public sealed class GraphQlPagingEngineTests
 {
-    private const string PageRangeBody = "{\"errors\":[{\"message\":\"The page size or offset is out of range.\",\"extensions\":{\"code\":\"INVALID_QUERY\"}}]}";
+    private const string PageRangeBody = "{\"errors\":[{\"message\":\"The page size or offset is out of range.\",\"extensions\":{\"code\":\"INVALID_QUERY_OPTION\"}}]}";
 
     private static readonly TableIdentifier Customers = new("sales", "dbo", "customers");
     private static readonly TableIdentifier Secrets = new("sales", "dbo", "secrets");

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -52,16 +53,18 @@ public static class TableStreamEndpoints
 
     public static IEndpointRouteBuilder MapTableStreamEndpoints(this IEndpointRouteBuilder app)
     {
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ArgumentNullException.ThrowIfNull(app);
 
         // Canonical: POST /api/v1/data/{domain}/{schema}/{table}/stream
-        app.MapPost("/api/v1/data/{domain}/{schema}/{table}/stream", HandleBulkStreamAsync)
+        ingress.MapPost("/api/v1/data/{domain}/{schema}/{table}/stream", HandleBulkStreamAsync)
             .WithName("StreamDatasetBulkKeyset")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // Alias: POST /api/v1/data/{domain}/{schema}/{table}/bulk
-        app.MapPost("/api/v1/data/{domain}/{schema}/{table}/bulk", HandleBulkStreamAsync)
+        ingress.MapPost("/api/v1/data/{domain}/{schema}/{table}/bulk", HandleBulkStreamAsync)
             .WithName("StreamDatasetBulkKeysetAlias")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);

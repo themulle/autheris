@@ -44,10 +44,10 @@ public sealed class GraphQlEnumerationShieldMiddleware
 
     /// <summary>
     /// #330 (SEC-RG-08/09): the one resolver error that is not shielded outside Development, because it carries no schema information:
-    /// code <c>INVALID_QUERY</c> with exactly the fixed page-range message (ordinal compare) of <see cref="GatewayPageRangeException"/>.
+    /// code <c>INVALID_QUERY_OPTION</c> (or legacy <c>INVALID_QUERY</c>) with exactly the fixed page-range message (ordinal compare) of <see cref="GatewayPageRangeException"/>.
     /// </summary>
     internal static bool IsPageRangeError(IError error) =>
-        string.Equals(error.Code, Code, StringComparison.Ordinal)
+        (string.Equals(error.Code, "INVALID_QUERY_OPTION", StringComparison.Ordinal) || string.Equals(error.Code, Code, StringComparison.Ordinal))
         && string.Equals(error.Message, GatewayPageRangeException.FixedMessage, StringComparison.Ordinal);
 
     private readonly RequestDelegate _next;
@@ -104,7 +104,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
         {
             await result.DisposeAsync().ConfigureAwait(false);
             context.Result = new OperationResult(ImmutableList.Create(
-                ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode(Code).Build()))
+                ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode("INVALID_QUERY_OPTION").Build()))
             {
                 ContextData = ImmutableDictionary<string, object?>.Empty.Add(ExecutionContextData.ValidationErrors, true)
             };

@@ -26,19 +26,33 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
     private readonly OpenApiDocumentOptions _options;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
 
     public DynamicOpenApiGenerator(
         ITableMetadataRepository metadataRepo,
         ILogger<DynamicOpenApiGenerator> logger,
         OpenApiDocumentOptions? options = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null)
+        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
     {
+        _transportResolver = transportResolver;
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? new OpenApiDocumentOptions();
         _memoryCache = memoryCache;
         _versionProvider = versionProvider;
+    }
+
+    /// <summary>
+    /// Issue #447 REQ-ATR-08, SEC-ATR-07: the OpenAPI documents describe the OData surface, so a table whose source does not allow OData is
+    /// left out before any document or cache key is built (the index hash and the documents are derived from the filtered list).
+    /// </summary>
+    private async Task<IReadOnlyList<TableMetadata>> GetOpenApiTablesAsync(CancellationToken ct)
+    {
+        var all = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        return Autheris.Application.DataSources.TransportDiscoveryFilter.Apply(
+            _transportResolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.OData, all);
     }
 
     public async Task<string> GenerateOpenApiJsonAsync(string? domainScope = null, bool modular = false, CancellationToken ct = default)
@@ -57,7 +71,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
 
     public async Task<string?> GenerateEntitySchemaJsonAsync(TableIdentifier tableId, CancellationToken ct = default)
     {
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await GetOpenApiTablesAsync(ct).ConfigureAwait(false);
         var table = allTables.FirstOrDefault(t =>
             string.Equals(t.Identifier.Domain, tableId.Domain, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(t.Identifier.Schema, tableId.Schema, StringComparison.OrdinalIgnoreCase) &&
@@ -76,7 +90,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
 
     public async Task<OpenApiIndexDocument> GetIndexDocumentAsync(string? baseUrl = null, CancellationToken ct = default)
     {
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await GetOpenApiTablesAsync(ct).ConfigureAwait(false);
         var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
         var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(allTables.Select(t => t.Identifier));
         var cacheScope = "catalog";
@@ -159,7 +173,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
 
     private async Task<JsonObject> BuildOpenApiNodeAsync(string? domainScope, bool modular, CancellationToken ct)
     {
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await GetOpenApiTablesAsync(ct).ConfigureAwait(false);
 
         IEnumerable<TableMetadata> tables = allTables;
         if (!string.IsNullOrWhiteSpace(domainScope))

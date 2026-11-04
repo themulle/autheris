@@ -176,3 +176,20 @@ All defaults confirmed by the owner:
 3. The gate runs after the principal/tenant checks (SEC-ATR-08).
 4. Async jobs are checked against the `WebSql` flag; Flight denials return HTTP 403 + `TRANSPORT_NOT_ALLOWED` (section 5, items 1-2).
 5. Added: decision 13 (`AllowedTransports` inherits from `Defaults`), in scope of WP-1. It only narrows access (removes a fail-open) and falls under SEC-ATR-01; its tests are mandatory security tests.
+
+## Delivery status (2026-11-04)
+
+Phases 4 and 5 complete on branch `feat/issue-447-enforce-allowed-transports` (stacked on `docs/plans-issues-443-450`); Phase 5 APPROVED in round 2. WP-1..WP-6 delivered; WP-7 (REQ-ATR-12) stays a separate follow-up (default taken).
+
+Plan changes made during implementation (accepted by the Phase 5 reviewer):
+- Decision 4 API is async: `EnsureAsync`, `EnsureAllAsync`, `EnsureCatalogSourceAsync`/`EnsureCatalogSourcesAsync`, sync `IsAllowed`. `IDataSourceOptionsResolver` gained `CanonicalName` and `Generation` (bumped on every snapshot swap; discovery caches key on it).
+- No schema change: async jobs are in-memory channel items, so the submitting ingress rides on the queued item (an item without it denies). Flight tickets carry a signed ingress; `StatementSession` stores and re-checks it (SEC-ATR-05).
+- Gate constructor parameters are optional and default to a deny-all `TransportGateFallback`; only the unit test assembly installs an allow-all seam, guarded by `SEC_ATR_01_TransportGateFallback_IsNeverSetOutsideUnitTests`.
+- Catalog-named sources without a profile inherit `Defaults` at runtime (owner decision 1); the strict `EnsureAsync` keeps unknown = deny.
+- SEC-ATR-03 partially met: the server-set fine-grained federation transport constants (ArrowExport, SqlEndpoints, AsyncJob, Olap) are unchanged and never client-bound; `SqlTableReadExecutor` derives its transport from the ingress.
+- `SecurityContextResolutionMiddleware` writes caller and tenant into the audit context so denial audits are attributed. MCP stdio stamps once per runner scope (single-transport process). OData `$batch` does not exist, so it has no tests.
+- Additional choke point: `GovernedChangeDetectionService` (`/changes`, `/change-token`, stamped Rest). `sample-rows` is stamped Rest; a source without Rest is hidden by catalog visibility and answers 403 `ACCESS_DENIED`.
+- The admin listing `/api/v1/catalog/datasources` runs through the Rest-ingress visibility filter, so a source that denies Rest is not listed there. `/api/governance/datasources/{id}/refresh-physical-keys` stays exempt (admin only, physical key metadata).
+- Exemption baseline `tests/Autheris.Tests.Architecture/Baselines/ingress-exemptions.txt` (route, scope and executor lines with reasons) received reviewer sign-off in Phase 5 (SEC-ATR-13).
+
+Open Low findings: `OpenApiCacheManager` can store an entry computed just before a reload after the clear (stale until the next reload); per-call gate allocations remain on the array-based overloads only.

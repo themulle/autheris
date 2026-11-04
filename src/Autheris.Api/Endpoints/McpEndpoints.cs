@@ -53,7 +53,9 @@ public static class McpEndpoints
         var mcpBasePath = Autheris.Api.Security.McpPathResolver.Resolve(gatewayOptions);
 
         // Streamable HTTP on the official MCP SDK (GatewayMcpServer); stateless, so there are no session endpoints.
-        var endpoint = app.MapMcp(mcpBasePath).WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+        var endpoint = app.MapMcp(mcpBasePath)
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp) // Issue #447 (SEC-ATR-02)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // SEC M-09: hard body limit for JSON-RPC messages and MCP >= 2025-06-18 batch rejection.
         endpoint.Add(builder =>

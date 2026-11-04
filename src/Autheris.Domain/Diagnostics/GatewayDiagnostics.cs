@@ -58,6 +58,10 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> RoleResolutionDegradedCounter =
         Meter.CreateCounter<long>("autheris_role_resolution_degraded_total", description: "Requests whose group and role resolution was unavailable (data access is denied)");
 
+    /// <summary>Issue #447: a data source refused the ingress transport. Tags <c>transport</c> and <c>datasource</c> (a configured profile name or <c>unknown</c>, bounded cardinality).</summary>
+    public static readonly Counter<long> TransportDenied =
+        Meter.CreateCounter<long>("autheris_transport_denied_total", description: "Requests refused because the data source does not allow the ingress transport");
+
     public static readonly Counter<long> AuditWriteFailedCounter =
         Meter.CreateCounter<long>("autheris_audit_write_failed_total", description: "Audit writes that failed, by tier (required or best_effort)");
 

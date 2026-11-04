@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System.Collections.Generic;
 using System.Text.Json;
 using Autheris.Api.Extensions;
@@ -27,9 +28,13 @@ public static partial class WebSqlEndpoints
 
     public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {
+        // Issue #447 (SEC-ATR-02): the ingress transport comes from endpoint metadata only. /v1/statement* is Trino, everything else WebSql.
+        var webSql = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.WebSql);
+        var trino = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Trino);
+
         // OpenAPI description of the endpoint (documentation only, no data). Like the other specs it is anonymous only
         // in OpenSchema mode.
-        var openApi = app.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
+        var openApi = webSql.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
             .WithName("GetWebSqlOpenApiSpec")
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         if (gatewayOptions?.IsOpenSchemaAllowed == true)
@@ -41,57 +46,57 @@ public static partial class WebSqlEndpoints
             openApi.RequireAuthorization();
         }
 
-        app.MapPost("/api/v1/sql", HandleWebSqlRequest)
+        webSql.MapPost("/api/v1/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSqlV1")
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .WithRequestBodyLimit(2 * 1024 * 1024)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapPost("/api/sql", HandleWebSqlRequest)
+        webSql.MapPost("/api/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSql")
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .WithRequestBodyLimit(2 * 1024 * 1024)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapPost("/v1/statement", HandleWebSqlRequest)
+        trino.MapPost("/v1/statement", HandleWebSqlRequest)
            .WithName("ExecuteTrinoStatementV1")
            .WithRequestBodyLimit(2 * 1024 * 1024)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapGet("/v1/statement/queued/{statementId}", HandleTrinoQueuedStatementRequest)
+        trino.MapGet("/v1/statement/queued/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetTrinoQueuedStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapGet("/v1/statement/executing/{statementId}", HandleTrinoQueuedStatementRequest)
+        trino.MapGet("/v1/statement/executing/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetTrinoExecutingStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapDelete("/v1/statement/{statementId}", HandleTrinoCancelStatementRequest)
+        trino.MapDelete("/v1/statement/{statementId}", HandleTrinoCancelStatementRequest)
            .WithName("CancelTrinoStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapGet("/api/v1/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
+        webSql.MapGet("/api/v1/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetWebSqlStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapGet("/api/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
+        webSql.MapGet("/api/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetWebSqlStatement")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapDelete("/api/v1/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
+        webSql.MapDelete("/api/v1/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
            .WithName("CancelWebSqlStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        app.MapDelete("/api/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
+        webSql.MapDelete("/api/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
            .WithName("CancelWebSqlStatement")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);

@@ -96,11 +96,33 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         string.Equals(toolName, McpDatasetTools.CallProcedure, StringComparison.OrdinalIgnoreCase) ||
         McpSemanticTools.IsSemanticTool(toolName);
 
+    /// <summary>
+    /// Issue #447 (REQ-ATR-04): the central tool error mapping. A transport denial from any gate call below becomes a tool error
+    /// (<c>isError</c>) with the code <c>TRANSPORT_NOT_ALLOWED</c> and fixed text: no source name, no sub-reason.
+    /// </summary>
     public async Task<string> ExecuteToolAsync(
         McpToolDefinition tool,
         string argumentsJson,
         McpSessionContext sessionContext,
         CancellationToken ct = default)
+    {
+        try
+        {
+            return await ExecuteToolCoreAsync(tool, argumentsJson, sessionContext, ct).ConfigureAwait(false);
+        }
+        catch (TransportNotAllowedException)
+        {
+            return CreateMcpError(
+                sessionContext.TenantId, tool.Name, TransportNotAllowedException.Code,
+                "Access to the data source is not allowed over this transport.");
+        }
+    }
+
+    private async Task<string> ExecuteToolCoreAsync(
+        McpToolDefinition tool,
+        string argumentsJson,
+        McpSessionContext sessionContext,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tool);
         ArgumentNullException.ThrowIfNull(sessionContext);
