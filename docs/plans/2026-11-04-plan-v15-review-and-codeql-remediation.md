@@ -117,16 +117,20 @@ flowchart LR
   1. In `CatalogGraphQlMap.CollectRoot`, when a root field resolves via the `<rootField>Connection` suffix:
      - Instead of calling `CollectTable(field.SelectionSet, table, walk, depth + 1)` directly on the connection selection set, call a helper `CollectConnectionNodeSelections(field.SelectionSet, table, walk, fragments, visitedFragments, depth + 1)` that traverses `edges` → `node` (unwrapping inline fragments and fragment spreads on `*Connection` and `*Edge`) and invokes `CollectTable` on each `node` selection set.
 
-#### Step 2.3 — Keyset Ordering Consistency & HMAC Cursor Order Binding on `*Connection` (`HIGH-02`, `MED-10`)
+#### Step 2.3 — Keyset Ordering Consistency & HMAC Cursor Order Binding on `*Connection` (`HIGH-02` Owner Decision 2026-11-04, `MED-10`)
 * **Files:**
   - `src/Autheris.GraphQL/Catalog/ConnectionGraphQlTypes.cs`
   - `src/Autheris.GraphQL/Catalog/GraphQlTreeBuilder.cs`
   - `src/Autheris.Application/Data/Services/KeysetCursorContextFactory.cs`
 * **Changes:**
   1. Use `BulkStreamKey.TryResolve(table.Metadata)` (`MED-10`) in `ConnectionGraphQlTypes` to resolve the canonical keyset columns and default directions (checking `idx.IsUnique && idx.Columns.Count > 0`).
-  2. When `orderBy` is supplied on a `*Connection` field (`HIGH-02`):
-     - Require that the user-supplied `orderBy` columns match the resolved keyset columns in order (rejecting any non-keyset `orderBy` on `*Connection` with governed code `INVALID_QUERY` after authorization, matching keyset invariants).
-     - Use the effective per-column `OrderDirection` list (`effectiveDirections`) for **both** `GraphQlTreeBuilder.BuildConnectionTree` (`ORDER BY`), `BuildTreeSeekFilter` (seek comparisons `>` vs `<`), and `KeysetCursorContextFactory.ForGraphQl` (binding the per-column directions into `KeysetCursorContext.Direction` and `ComputeRequestHash`).
+  2. **Owner Decision (2026-11-04) on `HIGH-02` (`orderBy` on `*Connection`):**
+     - Keep the `orderBy` argument on `*Connection` fields (`REQ-GQL-420-01`), but restrict `orderBy` strictly to the resolved keyset columns (matching the keyset column sequence or a leading prefix thereof, with any omitted trailing keyset columns retaining their default physical index directions).
+     - If a caller supplies any non-keyset column or out-of-order keyset columns in `orderBy` on a `*Connection` field, reject the query *after* table authorization (`SEC-RG-08`) with governed code `INVALID_QUERY` and a fixed error message.
+     - Propagate the effective per-column `OrderDirection` list (`effectiveDirections`) identically into:
+       - `GraphQlTreeBuilder.BuildConnectionTree` (SQL `ORDER BY`),
+       - `ConnectionGraphQlTypes.BuildTreeSeekFilter` (lexicographic seek comparisons `>` for `Asc`, `<` for `Desc`), and
+       - `KeysetCursorContextFactory.ForGraphQl` (binding the canonical per-column directions into `KeysetCursorContext.Direction` and `ComputeRequestHash` so cursors cannot be replayed across different `orderBy` directions).
   3. In `ConnectionGraphQlTypes.ReadElementValue` (`MED-10`), decode numeric values via `elem.TryGetInt64(out var l) ? l : elem.TryGetDecimal(out var d) ? d : elem.GetDouble()`.
   4. In `KeysetCursorContextFactory.WriteTreeFilter` (`MED-10`), include `c.BindNullOperand` (`writer.WriteBoolean("nullOp", c.BindNullOperand)`).
   5. Update `GraphQlTreeBuilder.BuildConnectionTree` and `ConnectionGraphQlTypes.CollectSelectedNodeColumns` to collect across all `edges` / `node` selections and inline/named fragments (`MED-10`).
