@@ -84,7 +84,8 @@ public sealed class CdcSubscriptionGovernor
         ITableAccessResolver? accessResolver,
         IAuditLogRepository audit,
         CancellationToken ct,
-        CancellationTokenSource? streamCts = null)
+        CancellationTokenSource? streamCts = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
         var tenant = principal.GetTenantId();
@@ -113,6 +114,11 @@ public sealed class CdcSubscriptionGovernor
                 if (!access.Decision.IsAllowed)
                 {
                     denial = "no access to table";
+                }
+                else if (transportGate != null)
+                {
+                    var source = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(access.Metadata);
+                    await transportGate.EnsureCatalogSourceAsync(source, ct).ConfigureAwait(false);
                 }
             }
             catch (TableNotFoundException)

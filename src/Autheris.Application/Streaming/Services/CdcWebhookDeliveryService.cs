@@ -250,6 +250,9 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
             StreamSecurityDecision decision;
             await using (var scope = _scopeFactory.CreateAsyncScope())
             {
+                scope.ServiceProvider.GetService<Autheris.Application.DataSources.IIngressTransportContext>()
+                    ?.Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest);
+
                 var identityStore = scope.ServiceProvider.GetService<Autheris.Domain.Interfaces.IIdentityStoreRepository>();
                 if (identityStore != null && !string.IsNullOrWhiteSpace(subscription.CreatedBySid))
                 {

@@ -190,6 +190,24 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         {
             groupByColumns = ValidateAndResolveGroupBy(query, metadata, decision);
             resolvedAggregates = ValidateAndResolveAggregates(query, metadata, decision);
+
+            if (effectiveMinGroupSize > 1)
+            {
+                var groupSet = new HashSet<string>(groupByColumns, StringComparer.OrdinalIgnoreCase);
+                foreach (var agg in resolvedAggregates)
+                {
+                    if (agg.Function is AggregateFunction.Min or AggregateFunction.Max or AggregateFunction.CountDistinct)
+                    {
+                        if (agg.Column != null && !groupSet.Contains(agg.Column))
+                        {
+                            throw new ArgumentException(
+                                $"Aggregate function '{agg.Function}' on non-group column '{agg.Column}' is not permitted when minimum group size is greater than 1.",
+                                nameof(query));
+                        }
+                    }
+                }
+            }
+
             ValidateWhereClause(query.Where, metadata, decision);
             AggregationNegationGuard.Enforce(query.Where, groupByColumns, metadata, effectiveMinGroupSize, _analyticsOptions.Privacy.RestrictNegatedFilters);
             ValidateOrderByClause(query.OrderBy, groupByColumns, resolvedAggregates, metadata, decision);
@@ -257,6 +275,24 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                 else if (bucket.Count > 0 || groupByColumns.Count > 0)
                 {
                     smallBuckets.Add(bucket);
+                }
+            }
+
+            // Complementary suppression when noise is disabled:
+            // If primary suppression occurred (smallBuckets.Count > 0), suppress at least one additional surviving bucket
+            // so that subtracting surviving groups from marginal totals cannot isolate the suppressed bucket(s).
+            if (!_analyticsOptions.Privacy.Noise.Enabled && smallBuckets.Count > 0 && groupByColumns.Count > 0)
+            {
+                if (survivingBuckets.Count > 1)
+                {
+                    var complementary = survivingBuckets.OrderBy(b => b.Count).First();
+                    survivingBuckets.Remove(complementary);
+                    smallBuckets.Add(complementary);
+                }
+                else if (survivingBuckets.Count <= 1)
+                {
+                    smallBuckets.AddRange(survivingBuckets);
+                    survivingBuckets.Clear();
                 }
             }
         }

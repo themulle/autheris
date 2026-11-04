@@ -47,7 +47,12 @@ internal static partial class AggregationNegationGuard
             var negates = type == SqlBaseLexer.NEQ
                 || (type == SqlBaseLexer.NOT && !IsIsNotNull(tokens, i));
             var equals = type == SqlBaseLexer.EQ;
-            if (!negates && !equals)
+            var isRange = type == SqlBaseLexer.LT
+                || type == SqlBaseLexer.LTE
+                || type == SqlBaseLexer.GT
+                || type == SqlBaseLexer.GTE
+                || type == SqlBaseLexer.BETWEEN;
+            if (!negates && !equals && !isRange)
             {
                 continue;
             }
@@ -67,7 +72,7 @@ internal static partial class AggregationNegationGuard
                     continue;
                 }
 
-                if (negates || isolating.Contains(column))
+                if (negates || ((equals || isRange) && isolating.Contains(column)))
                 {
                     throw new AggregationFilterRejectedException();
                 }

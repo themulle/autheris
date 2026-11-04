@@ -16,6 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -36,7 +37,7 @@ public static class ProcedureEndpointRoutes
             return app;
         }
 
-        var group = app.MapGroup("/api/v1/procedures");
+        var group = app.MapGroup("/api/v1/procedures").WithIngressTransport(DataSourceTransportFlags.Rest);
 
         group.MapGet("/", HandleList).WithName("ListProcedureEndpoints").RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -382,6 +383,10 @@ public static class ProcedureEndpointRoutes
         catch (ProcedureUnavailableException)
         {
             await ApiProblems.Indistinguishable(StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "Procedure endpoint is currently unavailable.").ExecuteAsync(http).ConfigureAwait(false);
+        }
+        catch (TransportNotAllowedException)
+        {
+            await ApiProblems.WriteAsync(http, StatusCodes.Status403Forbidden, ApiErrorCodes.TransportNotAllowed, "Access to the data source is not allowed over this transport.", ct).ConfigureAwait(false);
         }
         catch (GatewayThrottledException ex)
         {

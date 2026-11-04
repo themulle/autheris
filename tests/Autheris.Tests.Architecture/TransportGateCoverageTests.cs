@@ -25,7 +25,10 @@ public sealed partial class TransportGateCoverageTests
         "src/Autheris.Application/Olap/OlapStagingService.cs",
         "src/Autheris.Application/Olap/FederatedStagingService.cs",
         "src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs",
-        "src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.cs"
+        "src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.cs",
+        "src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs",
+        "src/Autheris.Extensions/Lakehouse/Services/IcebergRestCatalogFederationService.cs",
+        "src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs"
     ];
 
     [GeneratedRegex(@"\b(CreateScope|CreateAsyncScope)\s*\(|\bTask\s*\.\s*Run\s*[(<]")]
