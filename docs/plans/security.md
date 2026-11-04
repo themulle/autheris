@@ -38,6 +38,7 @@ Details, file/line evidence and design in [`implementation/impl-security-wave-c-
 | Follow-up | Webhooks, events | Remove the deprecated legacy `X-Autheris-Signature` header (`EmitLegacySignature`) and `DocumentDepositedEvent.SourceFilePath` (no production deployment yet). |
 | **COMPLETED ✅** | SQL compiler gate | All 18 entries (57 unique statements) in `tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences.json` audited, documented with concrete security justifications, and signed off (`approved`, see `PLAN-SQLGATE-CUTOVER-03` (history in git)). |
 | Follow-up | Error hygiene | ~25 endpoint `ex.Message` sites remain on the allow-list of the raw-exception guard test; retired by `WP-ARC-C-05` (ProblemDetails). |
+| **`PLAN-SEC-REV-V15`** | Post-v1.5.0 Review & CodeQL | PRD [`2026-11-04-req-v15-review-and-codeql-remediation.md`](2026-11-04-req-v15-review-and-codeql-remediation.md) & Plan [`2026-11-04-plan-v15-review-and-codeql-remediation.md`](2026-11-04-plan-v15-review-and-codeql-remediation.md): 33 findings from `v1.5.0..HEAD` review (`CRIT-01..03`, `HIGH-01..05`, `MED-01..13`, `LOW-01..08`, `NIT-01..04`) and 61 open GitHub CodeQL alerts (`#2..#210`). |
 
 ---
 
