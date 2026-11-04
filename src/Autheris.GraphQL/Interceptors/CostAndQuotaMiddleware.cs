@@ -220,6 +220,7 @@ public sealed class CostAndQuotaMiddleware
         // 1. Resolve client tier & quota policy
         var tierResolver = services!.GetRequiredService<IClientTierResolver>();
         var clientContext = await tierResolver.ResolveAsync(principal, apiKey, clientIp, context.RequestAborted).ConfigureAwait(false);
+        context.ContextData["Autheris.ExposeCostExtensions"] = clientContext.Policy.ExposeCostExtensions;
 
         // 2. Calculate cost via QueryCostAnalyzerRule (incorporating actual runtime variable values and QueryCostOptions)
         var runtimeVariables = BuildRuntimeVariables(context);

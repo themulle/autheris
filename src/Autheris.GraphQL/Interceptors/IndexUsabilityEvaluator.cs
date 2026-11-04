@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Data.Services;
+using Autheris.Application.Sql.Indexing;
 using Autheris.Domain.Model;
 using HotChocolate.Language;
 
@@ -28,9 +29,6 @@ public static class IndexUsabilityEvaluator
         "contains", "endsWith", "neq", "nin"
     };
 
-    internal readonly record struct CandidateIndex(
-        IReadOnlyList<string> Columns,
-        IReadOnlyList<KeyColumnDirection>? Directions);
 
     /// <summary>
     /// Evaluates whether the given root-list query plan can use an index for its ordering and/or filtering.
@@ -199,38 +197,7 @@ public static class IndexUsabilityEvaluator
     /// Gathers all candidate indexes from table metadata: primary key, secondary/unique indexes, and physical indexes.
     /// </summary>
     internal static List<CandidateIndex> GetCandidateIndexes(TableMetadata metadata)
-    {
-        var candidates = new List<CandidateIndex>(2 + metadata.Indexes.Count + metadata.PhysicalIndexes.Count);
-
-        if (metadata.PrimaryKeyColumns.Count > 0)
-        {
-            candidates.Add(new CandidateIndex(
-                metadata.PrimaryKeyColumns,
-                KeyDirections.Canonical(metadata.PrimaryKeyDirections) ?? Array.Empty<KeyColumnDirection>()));
-        }
-
-        foreach (var idx in metadata.Indexes)
-        {
-            if (idx.Columns.Count > 0)
-            {
-                candidates.Add(new CandidateIndex(
-                    idx.Columns,
-                    KeyDirections.Canonical(idx.Directions) ?? Array.Empty<KeyColumnDirection>()));
-            }
-        }
-
-        foreach (var phys in metadata.PhysicalIndexes)
-        {
-            if (phys.Columns.Count > 0)
-            {
-                candidates.Add(new CandidateIndex(
-                    phys.Columns,
-                    KeyDirections.Canonical(phys.Directions) ?? Array.Empty<KeyColumnDirection>()));
-            }
-        }
-
-        return candidates;
-    }
+        => IndexCandidates.GetCandidateIndexes(metadata);
 
     /// <summary>
     /// Extracts ordered (FieldName, Direction) tuples from an AST "orderBy" argument node.

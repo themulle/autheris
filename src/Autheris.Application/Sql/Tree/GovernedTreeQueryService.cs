@@ -36,6 +36,17 @@ public interface IGovernedTreeQueryService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Runs a GraphQL selection tree and notifies an optional observer about statement/relation execution metrics.
+    /// </summary>
+    Task<JsonDocument> ExecuteAsync(
+        ClaimsPrincipal? principal,
+        TreeQueryNode root,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string operationId,
+        ITreeExecutionObserver? observer,
+        CancellationToken ct = default) => ExecuteAsync(principal, root, requestHeaders, operationId, ct);
+
+    /// <summary>
     /// Lists the columns of <paramref name="root"/> that are masked for the caller, using the access decisions memoized
     /// by a preceding <see cref="ExecuteAsync"/> of the same operation. Empty when nothing is masked or no decision exists.
     /// </summary>
@@ -222,11 +233,19 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         }
     }
 
+    public Task<JsonDocument> ExecuteAsync(
+        ClaimsPrincipal? principal,
+        TreeQueryNode root,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string operationId,
+        CancellationToken ct = default) => ExecuteAsync(principal, root, requestHeaders, operationId, observer: null, ct);
+
     public async Task<JsonDocument> ExecuteAsync(
         ClaimsPrincipal? principal,
         TreeQueryNode root,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         string operationId,
+        ITreeExecutionObserver? observer,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -484,7 +503,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
         // 4. Bounded concurrency per user and root table, then one round trip.
         using var lease = AcquireLease(rootAccess);
+        var stmtSw = System.Diagnostics.Stopwatch.StartNew();
         var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
+        stmtSw.Stop();
 
         long measuredRows = 0;
         try
@@ -498,9 +519,12 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         }
         _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.Allow, rowsReturned: measuredRows, rowsMeasured: true);
 
+        var crossListExecs = new List<CrossSourceListExecution>();
+
         // Fast path: no cross-source relations and no HMAC columns
         if (crossSourceRelations.Count == 0 && compiled.HmacColumns.Count == 0)
         {
+            observer?.OnReport(new TreeExecutionReport(stmtSw.Elapsed, (int)Math.Min(measuredRows, int.MaxValue), compiled.Lists, crossListExecs));
             return JsonDocument.Parse(json);
         }
 
@@ -588,7 +612,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                         PerParentLimit: cr.Child.Limit,
                         ParentDecision: rootAccess.Decision);
 
+                    var crossSw = System.Diagnostics.Stopwatch.StartNew();
                     var crossResult = await _crossSourceResolver.ResolveRelationAsync(crossRequest, ct).ConfigureAwait(false);
+                    crossSw.Stop();
+                    if (cr.IsList)
+                    {
+                        crossListExecs.Add(new CrossSourceListExecution(new[] { cr.ResponseKey }, crossSw.Elapsed, cr.Child.ExecutionLimit ?? cr.Child.Limit));
+                    }
 
                     for (int i = 0; i < rootArray.Count; i++)
                     {
@@ -659,6 +689,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             node.WriteTo(writer);
         }
         stream.Position = 0;
+        observer?.OnReport(new TreeExecutionReport(stmtSw.Elapsed, (int)Math.Min(measuredRows, int.MaxValue), compiled.Lists, crossListExecs));
         return JsonDocument.Parse(stream);
     }
 

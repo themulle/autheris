@@ -48,6 +48,14 @@ public static partial class TreeSqlCompiler
         IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
         DatabaseDialect dialect,
         bool maskingDisabled = false)
+        => Compile(root, access, dialect, maskingDisabled, TreeCompileOptions.Default);
+
+    internal static CompiledTreeQuery Compile(
+        TreeQueryNode root,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        DatabaseDialect dialect,
+        bool maskingDisabled,
+        TreeCompileOptions? options)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(access);
@@ -62,10 +70,11 @@ public static partial class TreeSqlCompiler
             throw new GatewayInvalidQueryException($"The query nests relations deeper than {MaxDepth} levels.");
         }
 
-        var context = new CompileContext(dialect, access, maskingDisabled);
+        var context = new CompileContext(dialect, access, maskingDisabled, options);
         var plan = Prepare(root, context, path: []);
+        PlanListStrategies(plan, context, isRoot: true, path: []);
         var sql = BuildRoot(plan, context);
-        return new CompiledTreeQuery(sql, context.Parameters, context.HmacColumns);
+        return new CompiledTreeQuery(sql, context.Parameters, context.HmacColumns, context.Lists);
     }
 
     /// <summary>
@@ -150,15 +159,50 @@ public static partial class TreeSqlCompiler
 
     // ---------------------------------------------------------------- planning
 
-    private sealed class CompileContext(DatabaseDialect dialect, IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access, bool maskingDisabled)
+    private sealed class CompileContext(
+        DatabaseDialect dialect,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        bool maskingDisabled,
+        TreeCompileOptions? options = null)
     {
         public DatabaseDialect Dialect { get; } = dialect;
         public IReadOnlyDictionary<TableIdentifier, TreeTableAccess> Access { get; } = access;
         public bool MaskingDisabled { get; } = maskingDisabled;
+        public TreeCompileOptions Options { get; } = options ?? TreeCompileOptions.Default;
         public Dictionary<string, object?> Parameters { get; } = new(StringComparer.Ordinal);
         public List<TreeHmacColumn> HmacColumns { get; } = [];
+        public List<TreeListPlan> Lists { get; } = [];
         private int _aliasCounter;
         private int _parameterCounter;
+
+        public sealed record ContextSnapshot(
+            int AliasCounter,
+            int ParameterCounter,
+            Dictionary<string, object?> Parameters,
+            int HmacCount,
+            int ListCount);
+
+        public ContextSnapshot TakeSnapshot() =>
+            new(_aliasCounter, _parameterCounter, new Dictionary<string, object?>(Parameters, StringComparer.Ordinal), HmacColumns.Count, Lists.Count);
+
+        public void Restore(ContextSnapshot s)
+        {
+            _aliasCounter = s.AliasCounter;
+            _parameterCounter = s.ParameterCounter;
+            Parameters.Clear();
+            foreach (var kvp in s.Parameters)
+            {
+                Parameters[kvp.Key] = kvp.Value;
+            }
+            if (HmacColumns.Count > s.HmacCount)
+            {
+                HmacColumns.RemoveRange(s.HmacCount, HmacColumns.Count - s.HmacCount);
+            }
+            if (Lists.Count > s.ListCount)
+            {
+                Lists.RemoveRange(s.ListCount, Lists.Count - s.ListCount);
+            }
+        }
 
         public string NextAlias() => "t" + (_aliasCounter++).ToString(CultureInfo.InvariantCulture);
 
@@ -218,82 +262,6 @@ public static partial class TreeSqlCompiler
         }
     }
 
-    /// <summary>
-    /// SQLA-06 follow-up: binds the parameters of a secured source. Each engine marker gets a fresh <c>@gqN</c> name from the shared counter and
-    /// the shared parameter budget; the remap is a tokenising one (C4) on the post-compile text only.
-    /// </summary>
-    private static string BindSecuredSource(CompileContext context, TreeSecuredSource source)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var parameter in source.Parameters)
-        {
-            if (map.ContainsKey(parameter.Marker))
-            {
-                throw TreeSecuredSourceMarkers.Denied();
-            }
-
-            map[parameter.Marker] = context.AddParameter(parameter.Value);
-        }
-
-        return TreeSecuredSourceMarkers.Remap(source.Sql, source.Dialect, map);
-    }
-
-    /// <summary>SQL2-11: replaces @name parameter tokens outside string literals and quoted identifiers.</summary>
-    internal static string RenameParameters(string sql, IReadOnlyDictionary<string, string> renames)
-    {
-        var sb = new System.Text.StringBuilder(sql.Length + 16);
-        int i = 0;
-        while (i < sql.Length)
-        {
-            char c = sql[i];
-            if (c is '\'' or '"' or '[')
-            {
-                char close = c == '[' ? ']' : c;
-                int end = i + 1;
-                while (end < sql.Length)
-                {
-                    if (sql[end] == close)
-                    {
-                        if (close != ']' && end + 1 < sql.Length && sql[end + 1] == close)
-                        {
-                            end += 2;
-                            continue;
-                        }
-                        break;
-                    }
-                    end++;
-                }
-                end = Math.Min(end + 1, sql.Length);
-                sb.Append(sql, i, end - i);
-                i = end;
-                continue;
-            }
-
-            if (c == '@')
-            {
-                int start = i + 1;
-                int end = start;
-                while (end < sql.Length && (char.IsLetterOrDigit(sql[end]) || sql[end] == '_'))
-                {
-                    end++;
-                }
-
-                var name = sql[start..end];
-                if (name.Length > 0 && renames.TryGetValue(name, out var replacement))
-                {
-                    sb.Append(replacement);
-                    i = end;
-                    continue;
-                }
-            }
-
-            sb.Append(c);
-            i++;
-        }
-
-        return sb.ToString();
-    }
-
     private sealed record OutputColumn(string Key, string? SourceColumn, string? LiteralExpression);
 
     private sealed class NodePlan
@@ -305,6 +273,7 @@ public static partial class TreeSqlCompiler
         public required List<string> InnerColumns { get; init; }
         public required List<(string Column, bool Descending)> Order { get; init; }
         public required List<(TreeRelationNode Relation, NodePlan Child)> Children { get; init; }
+        public Dictionary<TreeRelationNode, (TreeListStrategy Strategy, string? Reason)> ListStrategies { get; } = [];
     }
 
     private static NodePlan Prepare(TreeQueryNode node, CompileContext context, IReadOnlyList<string> path, IReadOnlyList<string>? joinedChildColumns = null)
@@ -692,6 +661,56 @@ public static partial class TreeSqlCompiler
             || Autheris.Application.Sql.Policy.PolicyPredicateSubqueryDetector.ContainsSubquery(typed.Predicate.Expression);
     }
 
+    private static List<string> BuildInnerPredicates(
+        NodePlan plan,
+        CompileContext context,
+        NodePlan? parent,
+        TreeRelationNode? relation,
+        bool correlate = true)
+    {
+        var target = Q(context, TargetAlias);
+        var metadata = plan.Access.Metadata;
+        var securedSource = plan.Access.SecuredSource;
+        var where = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(plan.Access.TenantColumn))
+        {
+            var tenantColumn = metadata.GetColumn(plan.Access.TenantColumn)?.ColumnName
+                ?? throw new GatewayForbiddenException("Access denied.");
+            where.Add($"{target}.{Q(context, tenantColumn)} = {context.AddParameter(plan.Access.TenantValue)}");
+        }
+
+        var rowFilter = plan.Access.Decision.CombinedRowFilterSql;
+        if (!string.IsNullOrWhiteSpace(rowFilter) && securedSource == null)
+        {
+            // SQLA-06: the spliced text carries no tenant wrapper for policy subqueries (the engine pipeline adds it); deny instead of emitting it.
+            if (RowPolicyRequiresEnginePipeline(plan.Access.Decision))
+            {
+                throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
+            }
+
+            SqlSecurityValidator.ValidateRowFilter(plan.Access.Decision);
+            where.Add($"({context.BindRowFilter(rowFilter, plan.Access.Decision.RowFilterParameters)})");
+        }
+
+        if (correlate && parent != null && relation != null)
+        {
+            for (var i = 0; i < relation.ChildColumns.Count; i++)
+            {
+                var childColumn = metadata.GetColumn(relation.ChildColumns[i])!.ColumnName;
+                var parentColumn = parent.Access.Metadata.GetColumn(relation.ParentColumns[i])!.ColumnName;
+                where.Add($"{target}.{Q(context, childColumn)} = {Q(context, parent.Alias)}.{Q(context, parentColumn)}");
+            }
+        }
+
+        if (plan.Node.Where != null)
+        {
+            where.Add(BuildFilter(plan.Node.Where, metadata, context, target));
+        }
+
+        return where;
+    }
+
     private static string BuildInner(NodePlan plan, CompileContext context, NodePlan? parent, TreeRelationNode? relation)
     {
         var dialect = context.Dialect;
@@ -720,41 +739,7 @@ public static partial class TreeSqlCompiler
 
         sb.Append(" AS ").Append(target);
 
-        var where = new List<string>();
-        if (!string.IsNullOrWhiteSpace(plan.Access.TenantColumn))
-        {
-            var tenantColumn = metadata.GetColumn(plan.Access.TenantColumn)?.ColumnName
-                ?? throw new GatewayForbiddenException("Access denied.");
-            where.Add($"{target}.{Q(context, tenantColumn)} = {context.AddParameter(plan.Access.TenantValue)}");
-        }
-
-        var rowFilter = plan.Access.Decision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(rowFilter) && securedSource == null)
-        {
-            // SQLA-06: the spliced text carries no tenant wrapper for policy subqueries (the engine pipeline adds it); deny instead of emitting it.
-            if (RowPolicyRequiresEnginePipeline(plan.Access.Decision))
-            {
-                throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
-            }
-
-            SqlSecurityValidator.ValidateRowFilter(plan.Access.Decision);
-            where.Add($"({context.BindRowFilter(rowFilter, plan.Access.Decision.RowFilterParameters)})");
-        }
-
-        if (parent != null && relation != null)
-        {
-            for (var i = 0; i < relation.ChildColumns.Count; i++)
-            {
-                var childColumn = metadata.GetColumn(relation.ChildColumns[i])!.ColumnName;
-                var parentColumn = parent.Access.Metadata.GetColumn(relation.ParentColumns[i])!.ColumnName;
-                where.Add($"{target}.{Q(context, childColumn)} = {Q(context, parent.Alias)}.{Q(context, parentColumn)}");
-            }
-        }
-
-        if (node.Where != null)
-        {
-            where.Add(BuildFilter(node.Where, metadata, context, target));
-        }
+        var where = BuildInnerPredicates(plan, context, parent, relation, correlate: true);
 
         // SEC-PG-07: SQL Server rejects FETCH NEXT 0 ROWS (provider error). A zero page there fetches one row behind a constant-false predicate.
         if (limit == 0 && isRoot && dialect == DatabaseDialect.SqlServer)
@@ -848,6 +833,19 @@ public static partial class TreeSqlCompiler
     }
 
     private static string BuildRoot(NodePlan plan, CompileContext context)
+    {
+        bool hasSetBasedChild = plan.Children.Any(c => c.Relation.IsList &&
+            plan.ListStrategies.TryGetValue(c.Relation, out var s) && s.Strategy == TreeListStrategy.SetBased);
+
+        if (hasSetBasedChild)
+        {
+            return BuildSetBasedRoot(plan, context);
+        }
+
+        return BuildCorrelatedRoot(plan, context);
+    }
+
+    private static string BuildCorrelatedRoot(NodePlan plan, CompileContext context)
     {
         var inner = BuildInner(plan, context, parent: null, relation: null);
         var alias = Q(context, plan.Alias);

@@ -113,6 +113,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> CallerAttributeCircuitOpen =
         Meter.CreateCounter<long>("autheris.callerattr.circuit.open", description: "Caller attribute provider calls refused by an open circuit");
 
+    public static readonly Counter<long> TreeNestedListStrategy =
+        Meter.CreateCounter<long>("autheris.tree.nested_list.strategy", description: "Tree query nested list compilation strategy decisions, by dialect, strategy and reason");
+
     // Versioned PII allow-list per span type (Frozen for zero-allocation thread-safe lookups)
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>
     {

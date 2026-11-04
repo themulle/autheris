@@ -86,11 +86,39 @@ public sealed record TreeTableAccess(
 /// <summary>An HMAC-masked column that the gateway pseudonymizes after reading (SEC H-13: no key in SQL).</summary>
 public sealed record TreeHmacColumn(IReadOnlyList<string> Path, string Column, MaskingRule Rule);
 
+/// <summary>Compilation strategy chosen for a nested list relation in a tree query.</summary>
+public enum TreeListStrategy
+{
+    CorrelatedIndexed,
+    CorrelatedUnindexed,
+    SetBased
+}
+
+/// <summary>Metadata on the chosen compilation strategy of a nested list relation.</summary>
+public sealed record TreeListPlan(
+    IReadOnlyList<string> Path,
+    TreeListStrategy Strategy,
+    string? Reason,
+    int Limit);
+
+/// <summary>Internal compilation options and test hooks for the tree query compiler.</summary>
+internal sealed class TreeCompileOptions
+{
+    public static readonly TreeCompileOptions Default = new();
+    public int MaxSetBasedRows { get; init; } = 100_000;
+    /// <summary>Test-only fault injection: response key for which set-based compile throws.</summary>
+    public string? FailSetBasedFor { get; init; }
+}
+
 /// <summary>One statement that returns the whole result as a JSON array in a single text value.</summary>
 public sealed record CompiledTreeQuery(
     string Sql,
     IReadOnlyDictionary<string, object?> Parameters,
-    IReadOnlyList<TreeHmacColumn> HmacColumns);
+    IReadOnlyList<TreeHmacColumn> HmacColumns,
+    IReadOnlyList<TreeListPlan>? Lists = null)
+{
+    public IReadOnlyList<TreeListPlan> Lists { get; init; } = Lists ?? [];
+}
 
 /// <summary>
 /// A selected column that is masked for the caller. <see cref="Path"/> is the chain of relation response keys from the

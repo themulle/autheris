@@ -720,7 +720,10 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         try
         {
             var queryNode = GraphQlTreeBuilder.BuildTree(ctx, table, schema, maxResponseRows, out var pageRangeViolated);
-            using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted)
+            var observer = ctx.ContextData.TryGetValue(Autheris.GraphQL.Interceptors.SlowListsMiddleware.ContextKey, out var obsObj) && obsObj is Autheris.GraphQL.Interceptors.SlowListsAccumulator acc
+                ? acc.ForRoot(ctx.ResponseName)
+                : null;
+            using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, observer, ctx.RequestAborted)
                 .ConfigureAwait(false);
 
             if (pageRangeViolated)

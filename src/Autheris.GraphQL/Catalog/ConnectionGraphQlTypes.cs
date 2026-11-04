@@ -389,7 +389,10 @@ internal static class ConnectionGraphQlTypes
         JsonDocument doc;
         try
         {
-            doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted).ConfigureAwait(false);
+            var observer = ctx.ContextData.TryGetValue(Autheris.GraphQL.Interceptors.SlowListsMiddleware.ContextKey, out var obsObj) && obsObj is Autheris.GraphQL.Interceptors.SlowListsAccumulator acc
+                ? acc.ForRoot(ctx.ResponseName)
+                : null;
+            doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, observer, ctx.RequestAborted).ConfigureAwait(false);
         }
         catch (GatewayForbiddenException)
         {
