@@ -539,7 +539,7 @@ public static class DbtArtifactStreamingParser
         return names;
     }
 
-    /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> tests declare a unique constraint on the attached model.</summary>
+    /// <summary>dbt <c>unique</c> and <c>unique_combination_of_columns</c> (or alias <c>unique_combination</c>) tests declare a unique constraint on the attached model.</summary>
     private static void CollectUniqueTest(string testId, JsonElement node, Dictionary<string, CatalogKeyDefinitionImport.Collector> builders, RelationCollector warnings)
     {
         if (!node.TryGetProperty("test_metadata", out var testMetadata) ||
@@ -551,7 +551,8 @@ public static class DbtArtifactStreamingParser
 
         var testName = nameProp.GetString();
         var isUnique = string.Equals(testName, "unique", StringComparison.OrdinalIgnoreCase);
-        var isCombination = string.Equals(testName, "unique_combination_of_columns", StringComparison.OrdinalIgnoreCase);
+        var isCombination = string.Equals(testName, "unique_combination_of_columns", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(testName, "unique_combination", StringComparison.OrdinalIgnoreCase);
         if (!isUnique && !isCombination)
         {
             return;
@@ -581,7 +582,17 @@ public static class DbtArtifactStreamingParser
         var builder = GetBuilder(builders, attached!);
         if (isCombination)
         {
-            builder.AddUnique(ReadColumnArray(kwargs, "combination_of_columns"));
+            var target = kwargs;
+            if (!target.TryGetProperty("combination_of_columns", out _) &&
+                kwargs.TryGetProperty("arguments", out var argsProp) &&
+                argsProp.ValueKind == JsonValueKind.Object &&
+                argsProp.TryGetProperty("combination_of_columns", out _))
+            {
+                target = argsProp;
+            }
+
+            var columns = ReadKeyColumnArray(target, "combination_of_columns", out var directions);
+            builder.AddUnique(columns, directions);
         }
         else if (kwargs.TryGetProperty("column_name", out var columnProp) && columnProp.ValueKind == JsonValueKind.String &&
                  !string.IsNullOrWhiteSpace(columnProp.GetString()))
