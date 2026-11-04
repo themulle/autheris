@@ -74,17 +74,14 @@ route /api/schema-registry/{service}/history | catalog integration, lineage, sch
 route /api/schema-registry/{service}/latest | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/schema-registry/services | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/catalog/datahub/events | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/v1/catalog/datasets/{dataset}/sample-rows | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/v1/cdc/events | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
+route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/streams/{id}/reset-watermark | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
-route /api/v1/cdc/streams/{id}/resync | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
+route /api/v1/cdc/streams/{id}/resync | CDC stream restart (consumer restart and key discard); no source read and no row data in the response (CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams/{id}/rotate-image-key | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/subscriptions | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/subscriptions/{id} | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/data/{domain}/{schema}/{table}/changes | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
-route /api/v1/data/{domain}/{schema}/{table}/change-token | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/documents/{category}/{docId} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
@@ -192,8 +189,8 @@ scope src/Autheris.Application/Jobs/Services/AsyncQueryJobBackgroundWorker.cs | 
 scope src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs | exempt: approval bookkeeping; reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
 scope src/Autheris.Application/Serialization/ArrowFlightSqlServer.cs | copy: stamps ArrowFlight ingress into its scopes
-scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | exempt: Task.Run flows ExecutionContext, so the ingress AsyncLocal is preserved; gate still runs in the choke point
-scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | exempt: Task.Run flows ExecutionContext, so the ingress AsyncLocal is preserved; gate still runs in the choke point
+scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
+scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs | copy: copies the ingress transport into the new scope (stamp site)
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs | exempt: CDC webhook delivery; reaches no governed data via choke points

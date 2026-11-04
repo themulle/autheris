@@ -71,7 +71,9 @@ public static class QueryAnalysisAndProfilingEndpoints
 
         if (mapSampleRows)
         {
-            app.MapGet("/api/v1/catalog/datasets/{dataset}/sample-rows", HandleSampleRowsAsync)
+            // Issue #447 (SEC-ATR-04): a non-synthetic sample reads rows through the C3 choke point, so the route carries the REST ingress.
+            var ingress = app.MapGroup("").WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest);
+            ingress.MapGet("/api/v1/catalog/datasets/{dataset}/sample-rows", HandleSampleRowsAsync)
                 .WithName("GetDatasetSampleRowsWithSyntheticSupport")
                 .RequireAuthorization()
                 .WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataSyntheticSample);

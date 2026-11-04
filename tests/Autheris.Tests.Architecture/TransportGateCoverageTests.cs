@@ -24,7 +24,8 @@ public sealed partial class TransportGateCoverageTests
         "src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs",
         "src/Autheris.Application/Olap/OlapStagingService.cs",
         "src/Autheris.Application/Olap/FederatedStagingService.cs",
-        "src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs"
+        "src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs",
+        "src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.cs"
     ];
 
     [GeneratedRegex(@"\b(CreateScope|CreateAsyncScope)\s*\(|\bTask\s*\.\s*Run\s*[(<]")]
@@ -90,7 +91,7 @@ public sealed partial class TransportGateCoverageTests
     }
 
     [Fact]
-    public void SEC_ATR_12_ChokePoints_InvokeTransportGate()
+    public void SEC_ATR_04_SEC_ATR_12_ChokePoints_InvokeTransportGate()
     {
         var withGate = Measure(RepositoryScan.ProductionFiles, GateEnsureCall());
 

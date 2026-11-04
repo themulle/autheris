@@ -25,4 +25,10 @@ public interface IDataSourceOptionsResolver
     /// An unmapped name is returned unchanged; a blank name yields an empty string (Issue #447, SEC-ATR-08).
     /// </summary>
     string CanonicalName(string? dataSourceName);
+
+    /// <summary>
+    /// Increases after every reload that swapped the profile snapshot. A cache of anything derived from the allowed transports keys on it,
+    /// so a reload that newly denies a source never serves a stale entry (Issue #447, REQ-ATR-10). Resolvers without reload report 0.
+    /// </summary>
+    long Generation => 0;
 }

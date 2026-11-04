@@ -138,6 +138,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
             {
                 Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "Sqlite", SourceName = source },
                 Identifier = new TableIdentifier(source, "main", table),
+                CatalogView = CatalogView.Full, // sample rows are only read for a Full catalog shape
                 Columns =
                 [
                     new TableColumn { ColumnName = "id", DataType = "integer" },
@@ -274,6 +275,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         await WebSql_JoinSAndT_Denied();
     }
 
+    // SEC-ATR-11: one denied routed source denies the whole federated query, no staging.
     [Fact]
     public async Task Federation_OneSourceDenied_NoStagingCreated()
     {
@@ -288,6 +290,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         _connections.ToT.ShouldBe(tBefore, "the allowed source was not read either (all-or-nothing, no staged data)");
     }
 
+    // SEC-ATR-03: the transport field of a request body (and header/query) never sets the ingress; only the route does.
     [Fact]
     public async Task Rest_ClientTransportBodyField_Ignored()
     {
@@ -488,6 +491,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         await AssertDeniedOnceAsync(before);
     }
 
+    // SEC-ATR-07: the gate runs before any cache; a warm cache never serves a denied transport.
     [Fact]
     public async Task GraphQL_CacheHit_DoesNotBypassGate()
     {
@@ -633,6 +637,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         controlText.ShouldContain("row-one");
     }
 
+    // SEC-ATR-11: inner MCP delegation reuses the outer MCP scope ingress.
     [Fact]
     public async Task Mcp_QuerySqlDelegation_ChecksMcpNotWebSql()
     {
@@ -727,6 +732,82 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         Expect(gql.Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "GraphQL");
         var ticket = await FlightTicketAsync(client, "SELECT id FROM src_s.main.s_items");
         Expect((await BodyAsync(await FlightStreamAsync(client, ticket))).Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "ArrowFlight");
+    }
+
+    // ---------------------------------------------------------------------------------------- review round: sample rows, change detection
+
+    // SEC-ATR-04: the non-synthetic sample rows route reads rows through C3; it carries the REST ingress. A source without REST is hidden
+    // from the catalog for that ingress (REQ-ATR-08: discovery hides, one denial for "not visible"), and no row is read from it.
+    [Fact]
+    public async Task Rest_SampleRows_Denied()
+    {
+        await EnsureSeededAsync();
+        using var client = Client();
+        // the administrator view samples rows (a Full catalog shape)
+        client.DefaultRequestHeaders.Remove("X-Test-Roles");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin,Reader");
+        const string url = "/api/v1/catalog/datasets/src_s.main.s_items/sample-rows?count=2";
+
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        var connectionsBefore = _connections.ToS;
+        var denied = await client.GetAsync(url);
+        var body = await BodyAsync(denied);
+        denied.StatusCode.ShouldBe(HttpStatusCode.Forbidden, body);
+        body.ShouldNotContain("row-one");
+        _connections.ToS.ShouldBe(connectionsBefore, "no connection to the denied source");
+
+        SourceSAllows("Rest");
+        var control = await client.GetAsync(url);
+        control.StatusCode.ShouldBe(HttpStatusCode.OK, await BodyAsync(control));
+        (await BodyAsync(control)).ShouldContain("row-");
+    }
+
+    // SEC-ATR-04: change detection reads the version, the change log and the current rows of the table's source.
+    [Fact]
+    public async Task Rest_ChangeToken_Denied()
+    {
+        await EnsureSeededAsync();
+        using var client = Client();
+        const string url = "/api/v1/data/src_s/main/s_items/change-token";
+
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        var before = await TakeAsync();
+        await AssertForbiddenCodeAsync(await client.GetAsync(url));
+        await AssertDeniedOnceAsync(before);
+
+        SourceSAllows("Rest");
+        var control = await client.GetAsync(url);
+        control.StatusCode.ShouldNotBe(HttpStatusCode.Forbidden, await BodyAsync(control));
+    }
+
+    [Fact]
+    public async Task Rest_ChangesSince_Denied()
+    {
+        await EnsureSeededAsync();
+        using var client = Client();
+        const string url = "/api/v1/data/src_s/main/s_items/changes";
+
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        var before = await TakeAsync();
+        await AssertForbiddenCodeAsync(await client.PostAsJsonAsync(url, new { }));
+        await AssertDeniedOnceAsync(before);
+    }
+
+    // SEC-ATR-07 / REQ-ATR-10: after a reload that denies OData, the cached OpenAPI document and OData discovery no longer list the source.
+    [Fact]
+    public async Task OData_DiscoveryCaches_ReloadThatDeniesTheSource_HidesItFromDiscovery()
+    {
+        await EnsureSeededAsync();
+        using var client = Client();
+
+        SourceSAllows("OData");
+        (await BodyAsync(await client.GetAsync("/odata/v4/$openapi"))).ShouldContain("s_items");
+        (await BodyAsync(await client.GetAsync("/odata/v4/$openapi"))).ShouldContain("s_items");
+        (await BodyAsync(await client.GetAsync("/odata/v4/$metadata"))).ShouldContain("s_items");
+
+        SourceSAllows("Rest");
+        (await BodyAsync(await client.GetAsync("/odata/v4/$openapi"))).ShouldNotContain("s_items");
+        (await BodyAsync(await client.GetAsync("/odata/v4/$metadata"))).ShouldNotContain("s_items");
     }
 
     // ---------------------------------------------------------------------------------------------------------------- doubles

@@ -226,6 +226,13 @@ public sealed partial class ODataHandler(
         return $"odata:tables:{principal.GetTenantId().Value}:{hash}";
     }
 
+    /// <summary>
+    /// The authorized-tables entry also depends on the transports the sources allow (they hide tables, REQ-ATR-08), so the key carries the
+    /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447, REQ-ATR-10).
+    /// </summary>
+    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal) =>
+        BuildAuthorizedTablesCacheKey(principal) is { } key ? $"{key}:g{_transportResolver?.Generation ?? 0}" : null;
+
     private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
         if (principal?.Identity?.IsAuthenticated != true)
@@ -235,7 +242,7 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null)
         {
-            var cacheKey = BuildAuthorizedTablesCacheKey(principal);
+            var cacheKey = AuthorizedTablesCacheKey(principal);
             if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
             {
                 return (cachedTables, true);
@@ -291,7 +298,7 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null && complete)
         {
-            var cacheKey = BuildAuthorizedTablesCacheKey(principal);
+            var cacheKey = AuthorizedTablesCacheKey(principal);
             if (cacheKey != null)
             {
                 SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));

@@ -39,6 +39,7 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly ChangeDetectionOptions _options;
     private readonly byte[] _signingKeyBytes;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     public GovernedChangeDetectionService(
         ITableMetadataRepository metadataRepository,
@@ -46,8 +47,10 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
         IChangeVersionProvider versionProvider,
         IColumnMaskingProvider maskingProvider,
         IAuditLogRepository auditLogRepository,
-        IOptions<ChangeDetectionOptions>? options = null)
+        IOptions<ChangeDetectionOptions>? options = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
         _versionProvider = versionProvider ?? throw new ArgumentNullException(nameof(versionProvider));
@@ -80,6 +83,10 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             clientIp,
             requestedColumns: null,
             ct).ConfigureAwait(false);
+
+        // Issue #447 (SEC-ATR-04): the version provider reads the table's source, so the ingress transport must be allowed on it first.
+        await _transportGate.EnsureCatalogSourceAsync(
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 
         var currentVersion = await _versionProvider.GetCurrentVersionAsync(table, ct).ConfigureAwait(false);
         if (!currentVersion.HasValue)
@@ -121,6 +128,10 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             request.ClientIp,
             request.SelectColumns,
             ct).ConfigureAwait(false);
+
+        // Issue #447 (SEC-ATR-04): the change log and the current rows come from the table's source; deny before any of them is read.
+        await _transportGate.EnsureCatalogSourceAsync(
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 
         EnsurePrimaryKeyColumnsClear(metadata, decision);
 

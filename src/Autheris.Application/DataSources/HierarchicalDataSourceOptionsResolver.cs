@@ -4,6 +4,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Data;
+using System.Threading;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
@@ -28,6 +29,10 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     private sealed record Snapshot(FrozenDictionary<string, EffectiveDataSourceProfile> Profiles, EffectiveDataSourceProfile DefaultProfile);
 
     private volatile Snapshot _snapshot = null!;
+    private long _generation;
+
+    /// <inheritdoc />
+    public long Generation => Interlocked.Read(ref _generation);
 
     public HierarchicalDataSourceOptionsResolver(
         IOptionsMonitor<DataSourceConfigurationOptions> dataSourceOptions,
@@ -187,6 +192,9 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             }
 
             _snapshot = new Snapshot(dict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase), defaultProfile);
+
+            // after the swap: a cache that sees the new generation also sees the new snapshot
+            Interlocked.Increment(ref _generation);
         }
     }
 

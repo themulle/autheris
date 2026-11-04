@@ -15,6 +15,27 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
 {
     private const int MaxCacheEntries = 200;
     private readonly ConcurrentDictionary<string, byte[]> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
+    private long _seenGeneration;
+
+    /// <summary>
+    /// <paramref name="transportResolver"/>: the documents list only tables whose source allows OData, so the cache is dropped whenever a
+    /// data-source options reload swapped the profiles (Issue #447, REQ-ATR-08/10); a newly denied source never stays in a cached document.
+    /// </summary>
+    public OpenApiCacheManager(Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
+    {
+        _transportResolver = transportResolver;
+        _seenGeneration = transportResolver?.Generation ?? 0;
+    }
+
+    private void DropWhenTransportsReloaded()
+    {
+        var generation = _transportResolver?.Generation ?? 0;
+        if (Interlocked.Exchange(ref _seenGeneration, generation) != generation)
+        {
+            _cache.Clear();
+        }
+    }
 
     public Task<byte[]> GetOrAddAsync(
         string? domainScope,
@@ -32,6 +53,7 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
         Func<CancellationToken, Task<string>> factory,
         CancellationToken ct = default)
     {
+        DropWhenTransportsReloaded();
         var key = BuildKey(domainScope, isYaml, isModular);
         if (key is null)
         {

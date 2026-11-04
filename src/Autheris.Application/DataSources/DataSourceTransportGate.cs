@@ -118,7 +118,7 @@ public sealed class DataSourceTransportGate : IDataSourceTransportGate
 
     /// <inheritdoc />
     public Task EnsureAsync(string? dataSourceName, CancellationToken ct = default) =>
-        EnsureAllAsync([dataSourceName], ct);
+        EnsureOneAsync(dataSourceName, catalogKnown: false, ct);
 
     /// <inheritdoc />
     public Task EnsureAllAsync(IEnumerable<string?> dataSourceNames, CancellationToken ct = default) =>
@@ -130,27 +130,32 @@ public sealed class DataSourceTransportGate : IDataSourceTransportGate
 
     /// <inheritdoc />
     public Task EnsureCatalogSourceAsync(string? catalogSourceName, CancellationToken ct = default) =>
-        EnsureCoreAsync([catalogSourceName], catalogKnown: true, ct);
+        EnsureOneAsync(catalogSourceName, catalogKnown: true, ct);
 
     private async Task EnsureCoreAsync(IEnumerable<string?> dataSourceNames, bool catalogKnown, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataSourceNames);
-        var transport = _ingress.Current;
-
         foreach (var logicalName in dataSourceNames)
         {
-            var canonical = Canonicalise(logicalName);
-            var decision = Decide(_resolver, canonical, transport, catalogKnown);
-            if (decision.IsAllowed)
-            {
-                RememberChecked(logicalName!);
-                continue;
-            }
-
-            // One audit event for the first denial; nothing was read, and allowed sources are never audited (no partial audit).
-            await _recorder.RecordDenialAsync(new TransportDenial(logicalName, canonical, transport, decision.Reason), ct).ConfigureAwait(false);
-            throw new TransportNotAllowedException(logicalName, transport);
+            await EnsureOneAsync(logicalName, catalogKnown, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Single-name core (no per-call array); the all-or-nothing forms loop over it and stop at the first denial.</summary>
+    private async Task EnsureOneAsync(string? logicalName, bool catalogKnown, CancellationToken ct)
+    {
+        var transport = _ingress.Current;
+        var canonical = Canonicalise(logicalName);
+        var decision = Decide(_resolver, canonical, transport, catalogKnown);
+        if (decision.IsAllowed)
+        {
+            RememberChecked(logicalName!);
+            return;
+        }
+
+        // One audit event for the first denial; nothing was read, and allowed sources are never audited (no partial audit).
+        await _recorder.RecordDenialAsync(new TransportDenial(logicalName, canonical, transport, decision.Reason), ct).ConfigureAwait(false);
+        throw new TransportNotAllowedException(logicalName, transport);
     }
 
     /// <inheritdoc />
