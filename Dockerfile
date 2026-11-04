@@ -33,6 +33,7 @@ ENV APP_UID=10001
 RUN mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data
 RUN mkdir -p /app/shared-docs /app/scratch && chown -R $APP_UID:$APP_UID /app/shared-docs /app/scratch
 RUN apt-get update \
+    && apt-get --only-upgrade install -y libpcre2-8-0 \
     && apt-get install -y --no-install-recommends \
         libgssapi-krb5-2 \
         gss-ntlmssp \
