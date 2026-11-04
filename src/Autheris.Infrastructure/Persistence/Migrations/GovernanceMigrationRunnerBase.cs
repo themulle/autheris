@@ -32,6 +32,9 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     /// <summary>Test seam: ignores shipped catalogue steps (not <see cref="AdditionalSteps"/>) above this version (builds a database that holds an older release schema). Never set in production code (an architecture test pins that).</summary>
     internal int? StepVersionCapOverride { get; init; }
 
+    /// <summary>Test seam: replaces the dialect lock acquisition (simulates a provider that aborts the command when the client-side timeout fires). Never set in production code (an architecture test pins that).</summary>
+    internal Func<DbConnection, TimeSpan, CancellationToken, Task>? AcquireLockOverride { get; init; }
+
     /// <summary>Test seam: receives <c>ddl:*</c> and <c>apply:N</c> markers right before the run mutates the database.</summary>
     internal Action<string>? Trace { get; init; }
 
@@ -193,7 +196,8 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
             {
                 if (!verifyOnly)
                 {
-                    acquire.CancelAfter(timeout);
+                    // A small grace beyond the server-side lock timeout lets the server's answer (e.g. sp_getapplock -1) win normally.
+                    acquire.CancelAfter(timeout + ClientLockGrace);
                 }
 
                 try
@@ -201,12 +205,19 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
                     connection = await OpenConnectionAsync(verifyOnly, acquire.Token).ConfigureAwait(false);
                     if (!verifyOnly)
                     {
-                        await AcquireLockAsync(connection, timeout, acquire.Token).ConfigureAwait(false);
+                        await (AcquireLockOverride?.Invoke(connection, timeout, acquire.Token) ?? AcquireLockAsync(connection, timeout, acquire.Token)).ConfigureAwait(false);
                         locked = true;
                     }
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested && !verifyOnly)
                 {
+                    throw LockTimeout();
+                }
+                catch (Exception ex) when (ex is not GovernanceSchemaDriftException
+                    && acquire.IsCancellationRequested && !ct.IsCancellationRequested && !verifyOnly)
+                {
+                    // Providers such as SqlClient abort the command with a provider exception (not an OperationCanceledException)
+                    // when the client-side token fires; that is the lock timeout, fail closed either way.
                     throw LockTimeout();
                 }
             }
@@ -241,6 +252,8 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
             }
         }
     }
+
+    private static readonly TimeSpan ClientLockGrace = TimeSpan.FromSeconds(2);
 
     private GovernanceSchemaDriftException LockTimeout() => LockTimeoutError(EngineDisplayName, _options.LockTimeoutSeconds);
 

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
@@ -42,7 +43,8 @@ public sealed class GovernanceMigrationEngineTests
         bool? runtimeDdl = null,
         Func<string?>? excessPrivilege = null,
         Func<int, Task>? audit = null,
-        bool requireLeastPrivilege = false) =>
+        bool requireLeastPrivilege = false,
+        Func<DbConnection, TimeSpan, CancellationToken, Task>? acquireLock = null) =>
         new(
             repository,
             Options.Create(new GatewayOptions
@@ -68,7 +70,8 @@ public sealed class GovernanceMigrationEngineTests
             IsProduction = production,
             RuntimeLoginRunsDdlOverride = runtimeDdl,
             ExcessPrivilegeOverride = excessPrivilege,
-            RuntimeDdlAuditOverride = audit
+            RuntimeDdlAuditOverride = audit,
+            AcquireLockOverride = acquireLock
         };
 
     private static GovernanceSchemaShapeDelta ProbeDelta { get; } = new(
@@ -330,6 +333,53 @@ public sealed class GovernanceMigrationEngineTests
         {
             repository.ReleaseLock();
         }
+    }
+
+    [Fact]
+    public async Task LockTimeout_ClientTokenFiresFirst_ProviderExceptionIsMappedToLockTimeout()
+    {
+        // SqlClient aborts the command with a SqlException (not an OperationCanceledException) when the client-side token fires before sp_getapplock answers -1.
+        var cs = NewConnectionString();
+        using var repository = NewRepository(cs);
+        var trace = new List<string>();
+        var runner = NewRunner(repository, cs, [ProbeStep()], lockTimeoutSeconds: 1, trace: trace, acquireLock: async (_, _, token) =>
+        {
+            await Task.Delay(Timeout.Infinite, token).ContinueWith(_ => { }, TaskScheduler.Default);
+            throw new InvalidOperationException("Operation cancelled by user.");
+        });
+
+        var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => runner.RunAsync());
+
+        ex.Code.ShouldBe(GovernanceMigrationCodes.LockTimeout);
+        trace.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task LockAcquisition_DriftExceptionFromProvider_PassesThroughUnchanged()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRepository(cs);
+        var runner = NewRunner(repository, cs, [ProbeStep()], acquireLock: (_, _, _) =>
+            throw new GovernanceSchemaDriftException(GovernanceMigrationCodes.LockFailed, "lock failed"));
+
+        var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => runner.RunAsync());
+
+        ex.Code.ShouldBe(GovernanceMigrationCodes.LockFailed);
+    }
+
+    [Fact]
+    public async Task LockAcquisition_CallerCancellation_SurfacesAsOperationCanceled()
+    {
+        var cs = NewConnectionString();
+        using var repository = NewRepository(cs);
+        using var cts = new CancellationTokenSource();
+        var runner = NewRunner(repository, cs, [ProbeStep()], acquireLock: async (_, _, token) =>
+        {
+            await cts.CancelAsync();
+            token.ThrowIfCancellationRequested();
+        });
+
+        await Should.ThrowAsync<OperationCanceledException>(() => runner.RunAsync(cts.Token));
     }
 
     [Fact]
