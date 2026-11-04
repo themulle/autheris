@@ -787,11 +787,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         }
         catch (GatewayPageRangeException)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode("INVALID_QUERY").Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(GatewayPageRangeException.FixedMessage).SetCode("INVALID_QUERY_OPTION").Build());
         }
         catch (GatewayInvalidQueryException ex)
         {
-            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode("INVALID_QUERY").Build());
+            throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
         }
         catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException)
         {

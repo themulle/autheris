@@ -157,15 +157,27 @@ public sealed class TreeSqlCompilerTests : IDisposable
     }
 
     [Theory]
-    [InlineData("email")]  // masked
-    [InlineData("tenant_id")] // denied
-    public void FilterOrSortOnNonClearColumn_IsRejected(string column)
+    [InlineData("email", true)]  // masked
+    [InlineData("tenant_id", false)] // denied
+    public void FilterOrSortOnNonClearColumn_IsRejected(string column, bool isMasked)
     {
         var filtered = new TreeQueryNode(Authors, ["id"]) { Where = new TreeComparison(column, TreeFilterOperator.Eq, "x") };
         var sorted = new TreeQueryNode(Authors, ["id"]) { OrderBy = [new TreeOrder(column)] };
 
-        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.Sqlite));
-        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.Sqlite));
+        if (isMasked)
+        {
+            var exFilter = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.Sqlite));
+            exFilter.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
+            var exSort = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.Sqlite));
+            exSort.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
+        }
+        else
+        {
+            var exFilter = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.Sqlite));
+            exFilter.ErrorCode.ShouldBe("INVALID_QUERY");
+            var exSort = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.Sqlite));
+            exSort.ErrorCode.ShouldBe("INVALID_QUERY");
+        }
     }
 
     [Fact]
@@ -320,7 +332,61 @@ public sealed class TreeSqlCompilerTests : IDisposable
         };
         var root = new TreeQueryNode(Authors, ["id"]) { Relations = [ArticlesOf(new TreeQueryNode(Articles, ["id"]))] };
 
-        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+        Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+    }
+
+    [Fact]
+    public void FilterOrSortOnMaskedColumn_ThrowsFilterOnMaskedColumnException()
+    {
+        var access = Access();
+        var authors = access[Authors];
+        access[Authors] = authors with
+        {
+            Decision = TableAccessDecision.Allowed(Authors,
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["email"] = ColumnAccessLevel.Mask },
+                hasUnconstrainedColumnAllow: true)
+        };
+
+        var filtered = new TreeQueryNode(Authors, ["id"])
+        {
+            Where = new TreeComparison("email", TreeFilterOperator.Eq, "test@example.com")
+        };
+        var exFilter = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(filtered, access, DatabaseDialect.Sqlite));
+        exFilter.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
+        exFilter.ColumnName.ShouldBe("email");
+
+        var sorted = new TreeQueryNode(Authors, ["id"])
+        {
+            OrderBy = [new TreeOrder("email", Descending: false)]
+        };
+        var exSort = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(sorted, access, DatabaseDialect.Sqlite));
+        exSort.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
+    }
+
+    [Fact]
+    public void FilterOnUnknownOrDeniedColumn_ThrowsGatewayInvalidQuery_WithInvalidQueryCode()
+    {
+        var access = Access();
+        var unknown = new TreeQueryNode(Authors, ["id"])
+        {
+            Where = new TreeComparison("nonexistent", TreeFilterOperator.Eq, "val")
+        };
+        var exUnknown = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(unknown, access, DatabaseDialect.Sqlite));
+        exUnknown.ErrorCode.ShouldBe("INVALID_QUERY");
+
+        var authors = access[Authors];
+        access[Authors] = authors with
+        {
+            Decision = TableAccessDecision.Allowed(Authors,
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["email"] = ColumnAccessLevel.Deny },
+                hasUnconstrainedColumnAllow: true)
+        };
+        var denied = new TreeQueryNode(Authors, ["id"])
+        {
+            Where = new TreeComparison("email", TreeFilterOperator.Eq, "val")
+        };
+        var exDenied = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(denied, access, DatabaseDialect.Sqlite));
+        exDenied.ErrorCode.ShouldBe("INVALID_QUERY");
     }
 
     [Fact]
