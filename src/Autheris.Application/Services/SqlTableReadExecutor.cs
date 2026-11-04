@@ -41,6 +41,11 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     private readonly IGovernedTableReadPlanner _planner;
     private readonly Func<IGovernedSqlExecutionService> _executionService;
     private readonly IOptions<GatewayOptions>? _options;
+    private readonly Autheris.Application.DataSources.IIngressTransportContext? _ingress;
+
+    /// <summary>SEC-ATR-03: the federation transport of a planned read comes from the server-stamped ingress, never a hard-coded name.</summary>
+    private string FederationTransport(string fallback) =>
+        (_ingress is null ? null : SqlTransports.ForIngress(_ingress.Current)) ?? fallback;
 
     /// <param name="planner">The shared table-read planner.</param>
     /// <param name="executionService">
@@ -52,8 +57,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     public SqlTableReadExecutor(
         IGovernedTableReadPlanner planner,
         Func<IGovernedSqlExecutionService> executionService,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        Autheris.Application.DataSources.IIngressTransportContext? ingress = null)
     {
+        _ingress = ingress;
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
         _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
         _options = options;
@@ -89,7 +96,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
                 new GovernedSqlQueryRequest(
                     subtreePlan.Sql,
                     subtreePlan.Parameters,
-                    Transport: SqlTransports.WebSql,
+                    Transport: FederationTransport(SqlTransports.WebSql),
                     PlannedTableRead: true),
                 context.Principal,
                 tenant,
@@ -114,7 +121,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             context.Items.TryGetValue(TableQueryItems.OrderBy, out var order) && order is IReadOnlyList<TableOrderBy> orderBy ? orderBy : null,
             limit,
             Math.Max(0, context.Offset),
-            SqlTransports.Rest);
+            FederationTransport(SqlTransports.Rest));
 
         var planned = PlanOrThrow(intent, metadata, decision);
         context.Items[TableQueryItems.Ordering] = planned.Ordering.ToString();
@@ -192,7 +199,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             context.Items.TryGetValue(TableQueryItems.OrderBy, out var order) && order is IReadOnlyList<TableOrderBy> orderBy ? orderBy : null,
             limit,
             Math.Max(0, context.Offset),
-            SqlTransports.Rest);
+            FederationTransport(SqlTransports.Rest));
 
         var planned = PlanOrThrow(intent, metadata, decision);
         context.Items[TableQueryItems.Ordering] = planned.Ordering.ToString();

@@ -299,6 +299,13 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             context.Items[SecurityPrincipalContext.TenantIdItemKey] = resolvedTenant;
         }
 
+        // Issue #447 (REQ-ATR-05): a transport denial is audited while the request runs, before the access audit finalizer attributes the
+        // request; the caller and tenant are therefore recorded on the audit context as soon as they are resolved.
+        if (context.RequestServices?.GetService<Autheris.Domain.Audit.AuditContext>() is { } requestAuditContext)
+        {
+            AccessAuditMiddleware.ResolveSecurityContext(context, requestAuditContext);
+        }
+
         using (securityContext.ResolvedTenant is { } telemetryTenant ? TelemetryTenantContext.Enter(telemetryTenant) : NoopScope.Instance)
         {
             if (securityContext.ResolvedTenant is { } tagTenant &&

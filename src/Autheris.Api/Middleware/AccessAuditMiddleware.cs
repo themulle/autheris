@@ -244,7 +244,7 @@ public sealed class AccessAuditMiddleware
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength];
 
-    private static void ResolveSecurityContext(HttpContext context, AuditContext auditContext)
+    internal static void ResolveSecurityContext(HttpContext context, AuditContext auditContext)
     {
         if (context.User?.Identity?.IsAuthenticated == true)
         {

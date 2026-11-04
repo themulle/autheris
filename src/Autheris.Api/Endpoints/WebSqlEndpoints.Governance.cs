@@ -374,14 +374,28 @@ public static partial class WebSqlEndpoints
                                    msg.Equals(GenericServerErrorMessage, StringComparison.OrdinalIgnoreCase) ||
                                    msg.Equals("Statement execution failed.", StringComparison.OrdinalIgnoreCase);
 
-            trinoError = new
+            if (string.Equals(status.ErrorCode, Autheris.Domain.Exceptions.TransportNotAllowedException.Code, StringComparison.Ordinal))
             {
-                // NL-SC-33: fixed message per denial class; the status text (SQL, table names, exception text) never reaches the protocol entry.
-                message = isInternalError ? GenericServerErrorMessage : "The SQL statement could not be executed.",
-                errorCode = isInternalError ? 2 : 1,
-                errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
-                errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
-            };
+                // Issue #447 (REQ-ATR-04): fixed text and code; no source name, no sub-reason.
+                trinoError = new
+                {
+                    message = "Access to the data source is not allowed over this transport.",
+                    errorCode = 3,
+                    errorName = Autheris.Domain.Exceptions.TransportNotAllowedException.Code,
+                    errorType = "USER_ERROR"
+                };
+            }
+            else
+            {
+                trinoError = new
+                {
+                    // NL-SC-33: fixed message per denial class; the status text (SQL, table names, exception text) never reaches the protocol entry.
+                    message = isInternalError ? GenericServerErrorMessage : "The SQL statement could not be executed.",
+                    errorCode = isInternalError ? 2 : 1,
+                    errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
+                    errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
+                };
+            }
         }
 
         var responseObj = new Dictionary<string, object?>

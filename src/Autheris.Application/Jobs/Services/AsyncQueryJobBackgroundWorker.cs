@@ -234,6 +234,19 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         try
         {
             using var scope = _scopeFactory.CreateScope();
+            // Issue #447 (SEC-ATR-05): the worker scope carries the ingress persisted with the job at submit. An item without one
+            // (None), or a host without the context registration, leaves the ingress unset, which the transport gate denies (fail-closed).
+            if (scope.ServiceProvider.GetService<Autheris.Domain.Audit.AuditContext>() is { } auditContext)
+            {
+                // a transport denial of this job is audited for the submitting caller and tenant
+                auditContext.TenantId = new TenantId(item.Job.TenantId);
+                auditContext.ActorSid = new Sid(item.Job.SubmittedByUserId);
+            }
+
+            if (item.Ingress != Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None)
+            {
+                scope.ServiceProvider.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Set(item.Ingress);
+            }
             var sqlExec = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
             // SR-H-05 defence in depth: re-derive the bounds server-side; the queued request is never trusted.

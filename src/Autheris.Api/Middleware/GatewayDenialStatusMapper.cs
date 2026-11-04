@@ -30,6 +30,7 @@ internal static class GatewayDenialStatusMapper
     {
         TenantUnresolvedException => Autheris.Api.Errors.ApiErrorCodes.TenantUnresolved,
         TenantClaimInvalidException => Autheris.Api.Errors.ApiErrorCodes.TenantClaimInvalid,
+        TransportNotAllowedException => Autheris.Api.Errors.ApiErrorCodes.TransportNotAllowed,
         _ => null
     };
 

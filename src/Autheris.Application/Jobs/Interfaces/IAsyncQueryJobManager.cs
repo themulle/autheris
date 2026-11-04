@@ -14,6 +14,7 @@ public interface IAsyncQueryJobManager
         AsyncQueryJobRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
         CancellationToken ct = default);
 
     Task<AsyncJobDescriptor?> GetJobAsync(

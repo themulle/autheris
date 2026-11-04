@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.DataSources;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
@@ -128,6 +130,7 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
         ], "Test"));
 
         using var executionScope = host.Services.CreateScope();
+        executionScope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql); // #447: a direct service call is a WebSql ingress
         var service = executionScope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
         var result = await service.ExecuteQueryBufferedAsync(
             new GovernedSqlQueryRequest("SELECT id, amount, active_tenant FROM public.active_invoices WHERE id = 1"), claims, Tenant, CancellationToken.None);

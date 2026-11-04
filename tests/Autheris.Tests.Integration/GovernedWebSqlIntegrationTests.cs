@@ -112,6 +112,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     private async Task<GovernedSqlResult> RunAsync(string sql, ClaimsPrincipal user, string tenant)
     {
         using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>().Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql);  // #447: a direct service call is a WebSql ingress
         return await scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>().ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql), user, new TenantId(tenant));
     }
 
@@ -449,6 +450,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     public async Task WebSql_JoinOnStaticallyRedactedColumn_IsRejectedWithSecurityException()
     {
         using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>().Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql);  // #447: a direct service call is a WebSql ingress
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
@@ -479,6 +481,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     public async Task WebSql_Ansi89CommaJoin_OnStaticallyRedactedColumn_IsRejectedWithSecurityException()
     {
         using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>().Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql);  // #447: a direct service call is a WebSql ingress
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
@@ -510,6 +513,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     public async Task WebSql_JoinOnHmacPseudonymizedColumn_IsRejectedByTheCompiler()
     {
         using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>().Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql);  // #447: a direct service call is a WebSql ingress
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
         await RegisterTableAsync(
@@ -531,6 +535,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     public async Task WebSql_JoinOnCasbinMaskedColumn_WithoutHmac_IsRejectedWithSecurityException()
     {
         using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>().Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql);  // #447: a direct service call is a WebSql ingress
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 

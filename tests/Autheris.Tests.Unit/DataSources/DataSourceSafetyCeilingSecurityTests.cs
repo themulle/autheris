@@ -108,7 +108,7 @@ public sealed class DataSourceSafetyCeilingSecurityTests
     }
 
     [Fact]
-    public void SecDs05_03_FailClosedTransportEnforcement_RejectsUnauthorizedTransports()
+    public void SecDs05_03_EffectiveProfile_ReflectsConfiguredTransports()
     {
         var configMonitor = new TestMonitor<DataSourceConfigurationOptions>(new DataSourceConfigurationOptions
         {
@@ -123,15 +123,9 @@ public sealed class DataSourceSafetyCeilingSecurityTests
 
         using var resolver = new HierarchicalDataSourceOptionsResolver(configMonitor);
 
-        // Allowed transport succeeds
-        Should.NotThrow(() =>
-            DataSourceAllowlistGuard.EnsureTransportAllowed(resolver, "graphql_only", DataSourceTransportFlags.GraphQL));
-
-        // Unauthorized transport fails closed
-        var ex = Should.Throw<WebSqlPolicyException>(() =>
-            DataSourceAllowlistGuard.EnsureTransportAllowed(resolver, "graphql_only", DataSourceTransportFlags.WebSql));
-
-        ex.Message.ShouldContain("not allowed over transport");
+        var profile = resolver.Resolve("graphql_only");
+        profile.IsTransportAllowed(DataSourceTransportFlags.GraphQL).ShouldBeTrue();
+        profile.IsTransportAllowed(DataSourceTransportFlags.WebSql).ShouldBeFalse();
     }
 
     [Fact]

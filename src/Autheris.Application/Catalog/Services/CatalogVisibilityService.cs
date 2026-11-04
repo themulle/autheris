@@ -8,6 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.DataSources;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
@@ -17,6 +18,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -40,6 +42,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly GatewayOptions? _options;
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly ILogger<CatalogVisibilityService> _logger;
+    private readonly IIngressTransportContext? _ingress;
+    private readonly IDataSourceOptionsResolver? _transportResolver;
     private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
@@ -49,8 +53,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         IConsentRepository? consentRepository,
         IOptions<GatewayOptions>? gatewayOptions,
         IRebacEvaluator? rebacEvaluator = null,
-        ILogger<CatalogVisibilityService>? logger = null)
+        ILogger<CatalogVisibilityService>? logger = null,
+        IIngressTransportContext? ingress = null,
+        IDataSourceOptionsResolver? transportResolver = null)
     {
+        _ingress = ingress;
+        _transportResolver = transportResolver;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
         _options = gatewayOptions?.Value;
@@ -272,6 +280,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
 
+        // SEC-ATR-07: the memo is per scope, but the key still carries the ingress so a listing never crosses transports.
+        baseKey = baseKey with { Claims = $"{baseKey.Claims}|i:{(_ingress?.Current ?? DataSourceTransportFlags.None)}" };
         return new Context(principal, sid.Value, scope, caller.Tenant, catalogOwner, _options.Catalog.SharedTables ?? [], baseKey);
     }
 
@@ -298,6 +308,14 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             var shaped = engineOutput
                 .Where(t => CatalogViewShaping.Resolve(isAdminView, t.CatalogView) != CatalogOutputShape.NotFound)
                 .ToList();
+
+            // Issue #447 REQ-ATR-08: a table whose source does not allow the ingress transport is hidden, never an error. No ingress
+            // (an admin context) leaves the list unfiltered.
+            var transport = _ingress?.Current ?? DataSourceTransportFlags.None;
+            if (transport != DataSourceTransportFlags.None && _transportResolver is not null)
+            {
+                shaped = [.. TransportDiscoveryFilter.Apply(_transportResolver, transport, shaped)];
+            }
 
             return await ApplyRebacAsync(context, shaped, ct).ConfigureAwait(false);
         }

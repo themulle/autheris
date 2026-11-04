@@ -153,6 +153,46 @@ public sealed class GatewayUnsupportedColumnTypeException : Exception
     }
 }
 
+/// <summary>
+/// Issue #447 (SEC-ATR-08): the data source does not allow the ingress transport of the request. An unknown source and a denied transport
+/// produce the same exception, so a caller cannot tell them apart. The echoed logical name is length-capped and stripped of control characters.
+/// </summary>
+public sealed class TransportNotAllowedException : GatewaySecurityException
+{
+    public const string Code = "TRANSPORT_NOT_ALLOWED";
+    public const int MaxNameLength = 128;
+
+    public TransportNotAllowedException(string? logicalDataSourceName, Options.DataSources.DataSourceTransportFlags transport)
+        : base($"Access to data source '{SanitizeName(logicalDataSourceName)}' is not allowed over transport '{transport}'.", Code)
+    {
+    }
+
+    /// <summary>Strips control characters and caps the length of a caller-supplied name before it is echoed, audited or logged (SEC-ATR-08/09).</summary>
+    public static string SanitizeName(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return string.Empty;
+        }
+
+        var buffer = new System.Text.StringBuilder(Math.Min(name.Length, MaxNameLength));
+        foreach (char c in name)
+        {
+            if (buffer.Length >= MaxNameLength)
+            {
+                break;
+            }
+
+            if (!char.IsControl(c))
+            {
+                buffer.Append(c);
+            }
+        }
+
+        return buffer.ToString();
+    }
+}
+
 public sealed class ResourceGroupExhaustedException : GatewaySecurityException
 {
     public Model.ResourceGroupTier Tier { get; }
