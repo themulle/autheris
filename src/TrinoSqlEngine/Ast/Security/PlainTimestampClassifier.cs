@@ -22,6 +22,18 @@ internal static class PlainTimestampClassifier
         };
     }
 
+    public static bool IsZoned(TargetSqlDialect dialect, string? catalogType)
+    {
+        if (!TryNormalize(catalogType, out string type)) return false;
+        return dialect switch
+        {
+            TargetSqlDialect.SqlServer => type is "datetimeoffset",
+            TargetSqlDialect.PostgreSql => type is "timestamptz" or "timestamp with time zone",
+            TargetSqlDialect.DuckDb => type is "timestamptz" or "timestamp with time zone",
+            _ => false
+        };
+    }
+
     /// <summary>A CAST target (<c>timestamp</c>, <c>timestamp(3)</c>, <c>timestamp without time zone</c>) that yields a plain timestamp in every supported dialect.</summary>
     public static bool IsPlainCastTarget(string? targetType) =>
         TryNormalize(targetType, out string type) && type is "timestamp" or "timestamp without time zone";

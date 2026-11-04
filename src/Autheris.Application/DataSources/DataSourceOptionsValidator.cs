@@ -74,6 +74,10 @@ public sealed class DataSourceOptionsValidator : IValidateOptions<DataSourceConf
     {
         if (profile == null) return;
 
+        // SEC-ATR-01 / decision 13: a numeric value with undefined bits is a misconfiguration, never silently widened or narrowed.
+        if (profile.AllowedTransports.HasValue && (profile.AllowedTransports.Value & ~DataSourceTransportFlags.All) != 0)
+            failures.Add($"{prefix}.AllowedTransports contains undefined transport flags.");
+
         if (profile.QueryCostMultiplier.HasValue && (profile.QueryCostMultiplier.Value < 0.01 || profile.QueryCostMultiplier.Value > 1000.0))
             failures.Add($"{prefix}.QueryCostMultiplier must be between 0.01 and 1000.0.");
 

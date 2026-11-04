@@ -126,31 +126,72 @@ public sealed class TimeBucketingPlannedSqlCompileTests
         planned.Sql.ShouldContain("date_trunc('month', CAST(\"d\" AS timestamp)) AS \"d\"");
     }
 
+    [Fact]
+    public void PlannedBucket_DateColumn_IgnoresZone()
+    {
+        var planned = Plan("PostgreSQL", "timestamp", "d", TimeBucketInterval.Month, "Europe/Berlin");
+        planned.Sql.ShouldContain("date_trunc('month', CAST(\"d\" AS timestamp)) AS \"d\"");
+        planned.Sql.ShouldNotContain("convert_timezone");
+    }
+
+    [Fact]
+    public void PlannedBucket_Hour_WholeHourZone_GroupsByUtcInstant_NoConvertCall()
+    {
+        var planned = Plan("PostgreSQL", "timestamp", "ts", TimeBucketInterval.Hour, "Europe/Berlin");
+        planned.Sql.ShouldContain("date_trunc('hour', \"ts\") AS \"ts\"");
+        planned.Sql.ShouldNotContain("convert_timezone");
+    }
+
+    [Fact]
+    public void PlannedBucket_Hour_Kolkata_ShiftsByThirtyMinutes()
+    {
+        var planned = Plan("PostgreSQL", "timestamp", "ts", TimeBucketInterval.Hour, "Asia/Kolkata");
+        planned.Sql.ShouldContain("date_add('minute', -30, date_trunc('hour', date_add('minute', 30, \"ts\"))) AS \"ts\"");
+    }
+
+    [Fact]
+    public void PlannedBucket_Hour_LordHowe_FallsBackToWallHour()
+    {
+        var planned = Plan("PostgreSQL", "timestamp", "ts", TimeBucketInterval.Hour, "Australia/Lord_Howe");
+        planned.Sql.ShouldContain("date_trunc('hour', convert_timezone('UTC', 'Australia/Lord_Howe', \"ts\")) AS \"ts\"");
+    }
+
     [Theory]
     [InlineData("PostgreSQL", "timestamptz")]
     [InlineData("PostgreSQL", "timestamp with time zone")]
     [InlineData("SqlServer", "datetimeoffset")]
+    public void PlannedBucket_ZonedColumn_CompilesWithTwoArgConvert(string provider, string type)
+    {
+        var (_, target, _) = provider == "SqlServer" ? Mssql() : Pg();
+        var planned = Plan(provider, type, "ts", TimeBucketInterval.Day, "Europe/Berlin");
+
+        planned.Sql.ShouldContain("convert_timezone('Europe/Berlin', \"ts\")");
+
+        var compiled = Compile(planned.Sql, target, type);
+        compiled.Sql.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Theory]
     [InlineData("SqlServer", "varchar")]
     [InlineData("PostgreSQL", "text")]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-PGP-02")]
-    public void PlannedBucket_ZonedColumn_Throws400_NoTypeLeak(string provider, string type)
+    [Trait("SecurityCondition", "SEC-TBZ-07")]
+    public void PlannedBucket_NonTemporalColumn_TimeBucketUnsupported_NoTypeLeak(string provider, string type)
     {
-        var ex = Should.Throw<ArgumentException>(() => Plan(provider, type, "ts", TimeBucketInterval.Day, "UTC"));
+        var ex = Should.Throw<AggregationTimeBucketUnsupportedException>(() => Plan(provider, type, "ts", TimeBucketInterval.Day, "UTC"));
 
-        ex.Message.ShouldNotContain(type, Case.Insensitive);
-        ex.Message.ShouldNotContain("ts", Case.Sensitive);
-        AggregateFailureMapper.ForAggregate(ex)!.Errors[0].Code.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+        ex.Message.ShouldBe(AggregationTimeBucketUnsupportedException.FixedMessage);
+        AggregateFailureMapper.ForAggregate(ex)!.Errors[0].Code.ShouldBe("AGGREGATION_TIME_BUCKET_UNSUPPORTED");
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-PGP-02")]
-    public void PlannedBucket_SqlServerTimestampIsRowversion_Throws400()
+    [Trait("SecurityCondition", "SEC-TBZ-07")]
+    public void PlannedBucket_SqlServerRowversion_TimeBucketUnsupported()
     {
-        var ex = Should.Throw<ArgumentException>(() => Plan("SqlServer", "timestamp", "ts", TimeBucketInterval.Day, "UTC"));
+        var ex = Should.Throw<AggregationTimeBucketUnsupportedException>(() => Plan("SqlServer", "timestamp", "ts", TimeBucketInterval.Day, "UTC"));
 
-        AggregateFailureMapper.ForAggregate(ex)!.Errors[0].Code.ShouldBe("AGGREGATION_ARGUMENT_INVALID");
+        AggregateFailureMapper.ForAggregate(ex)!.Errors[0].Code.ShouldBe("AGGREGATION_TIME_BUCKET_UNSUPPORTED");
     }
 
     [Theory]
@@ -160,21 +201,25 @@ public sealed class TimeBucketingPlannedSqlCompileTests
     [InlineData("geometry")]
     [InlineData("timestamp(x)")]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-PGP-02")]
-    public void PlannedBucket_UnknownOrNullColumnMetadata_Throws400_FixedMessage(string? dataType)
+    [Trait("SecurityCondition", "SEC-TBZ-07")]
+    public void PlannedBucket_UnknownOrNullColumnMetadata_TimeBucketUnsupported(string? dataType)
     {
         foreach (var dialect in new[] { DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer })
         {
-            var ex = Should.Throw<ArgumentException>(() => GovernedTableReadPlanner.BuildTimeBucketExpression(
+            var ex = Should.Throw<AggregationTimeBucketUnsupportedException>(() => GovernedTableReadPlanner.BuildTimeBucketExpression(
                 "secret_col", new TimeBucketSpecification("secret_col", TimeBucketInterval.Day, "Europe/Berlin"), dialect, dataType));
 
-            ex.Message.ShouldNotContain("secret_col");
-            ex.Message.ShouldNotContain("Berlin");
-            if (dataType is { Length: > 2 })
-            {
-                ex.Message.ShouldNotContain(dataType);
-            }
+            ex.Message.ShouldBe(AggregationTimeBucketUnsupportedException.FixedMessage);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PlannedBucket_Databricks_NonUtcZone_TimeBucketUnsupported()
+    {
+        var ex = Should.Throw<AggregationTimeBucketUnsupportedException>(() => GovernedTableReadPlanner.BuildTimeBucketExpression(
+            "ts", new TimeBucketSpecification("ts", TimeBucketInterval.Day, "Europe/Berlin"), DatabaseDialect.Databricks));
+        ex.Message.ShouldBe(AggregationTimeBucketUnsupportedException.FixedMessage);
     }
 
     [Fact]
@@ -231,17 +276,46 @@ public sealed class TimeBucketingPlannedSqlCompileTests
     }
 
     [Fact]
+    public void PlannedKey_ZoneWallDayBerlin_Issue449_CarriesOffset()
+    {
+        var spec = new TimeBucketSpecification("ts", TimeBucketInterval.Day, "Europe/Berlin");
+        GovernedAggregationService.NormalizePlannedBucketKey(new DateTime(2026, 10, 6, 0, 0, 0), spec, TimeBucketKeyShape.ZoneWall)
+            .ShouldBe("2026-10-06T00:00:00+02:00");
+    }
+
+    [Fact]
+    public void PlannedKey_UtcInstantHour_ConvertsToZoneOffset()
+    {
+        var spec = new TimeBucketSpecification("ts", TimeBucketInterval.Hour, "Europe/Berlin");
+        GovernedAggregationService.NormalizePlannedBucketKey(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.Zero), spec, TimeBucketKeyShape.UtcInstant)
+            .ShouldBe("2026-10-25T02:00:00+02:00");
+        GovernedAggregationService.NormalizePlannedBucketKey(new DateTimeOffset(2026, 10, 25, 1, 0, 0, TimeSpan.Zero), spec, TimeBucketKeyShape.UtcInstant)
+            .ShouldBe("2026-10-25T02:00:00+01:00");
+    }
+
+    [Fact]
+    public void PlannedKey_DateColumn_IsYyyyMmDd()
+    {
+        var spec = new TimeBucketSpecification("d", TimeBucketInterval.Month, "Europe/Berlin");
+        GovernedAggregationService.NormalizePlannedBucketKey(new DateOnly(2026, 10, 5), spec, TimeBucketKeyShape.Date)
+            .ShouldBe("2026-10-05");
+    }
+
+    [Fact]
     public void PlannedTimeBucketKey_IsInvariantIsoText()
     {
         var previous = CultureInfo.CurrentCulture;
         try
         {
             CultureInfo.CurrentCulture = new CultureInfo("de-DE");
-            GovernedAggregationService.NormalizePlannedBucketKey(new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Unspecified)).ShouldBe("2023-01-01T00:00:00");
-            GovernedAggregationService.NormalizePlannedBucketKey(new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero)).ShouldBe("2023-01-01T00:00:00");
-            GovernedAggregationService.NormalizePlannedBucketKey(new DateOnly(2023, 1, 1)).ShouldBe("2023-01-01T00:00:00");
-            GovernedAggregationService.NormalizePlannedBucketKey(null).ShouldBeNull();
-            GovernedAggregationService.NormalizePlannedBucketKey("2023-01-01 00:00:00").ShouldBe("2023-01-01 00:00:00");
+            var dayUtc = new TimeBucketSpecification("ts", TimeBucketInterval.Day, "UTC");
+            var dateBerlin = new TimeBucketSpecification("d", TimeBucketInterval.Month, "Europe/Berlin");
+
+            GovernedAggregationService.NormalizePlannedBucketKey(new DateTime(2023, 1, 1, 0, 0, 0, DateTimeKind.Unspecified), dayUtc, TimeBucketKeyShape.ZoneWall).ShouldBe("2023-01-01T00:00:00+00:00");
+            GovernedAggregationService.NormalizePlannedBucketKey(new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero), dayUtc, TimeBucketKeyShape.ZoneWall).ShouldBe("2023-01-01T00:00:00+00:00");
+            GovernedAggregationService.NormalizePlannedBucketKey(new DateOnly(2023, 1, 1), dateBerlin, TimeBucketKeyShape.Date).ShouldBe("2023-01-01");
+            GovernedAggregationService.NormalizePlannedBucketKey(null, dayUtc, TimeBucketKeyShape.ZoneWall).ShouldBeNull();
+            GovernedAggregationService.NormalizePlannedBucketKey("2023-01-01 00:00:00", dayUtc, TimeBucketKeyShape.ZoneWall).ShouldBe("2023-01-01T00:00:00+00:00");
         }
         finally
         {
@@ -261,14 +335,13 @@ public sealed class TimeBucketingPlannedSqlCompileTests
         try
         {
             CultureInfo.CurrentCulture = new CultureInfo(culture);
+            var dayUtc = new TimeBucketSpecification("ts", TimeBucketInterval.Day, "UTC");
             foreach (var kind in new[] { DateTimeKind.Unspecified, DateTimeKind.Utc, DateTimeKind.Local })
             {
-                GovernedAggregationService.NormalizePlannedBucketKey(new DateTime(2023, 12, 31, 23, 0, 0, kind)).ShouldBe("2023-12-31T23:00:00");
+                GovernedAggregationService.NormalizePlannedBucketKey(new DateTime(2023, 12, 31, 23, 0, 0, kind), dayUtc, TimeBucketKeyShape.ZoneWall).ShouldBe("2023-12-31T23:00:00+00:00");
             }
 
-            GovernedAggregationService.NormalizePlannedBucketKey(new DateTimeOffset(2023, 6, 1, 0, 0, 0, TimeSpan.FromHours(2))).ShouldBe("2023-06-01T00:00:00");
-            GovernedAggregationService.NormalizePlannedBucketKey(DateTime.MaxValue).ShouldBe("9999-12-31T23:59:59");
-            GovernedAggregationService.NormalizePlannedBucketKey(DateTime.MinValue).ShouldBe("0001-01-01T00:00:00");
+            GovernedAggregationService.NormalizePlannedBucketKey(new DateTimeOffset(2023, 6, 1, 0, 0, 0, TimeSpan.FromHours(2)), dayUtc, TimeBucketKeyShape.ZoneWall).ShouldBe("2023-06-01T00:00:00+00:00");
         }
         finally
         {
@@ -351,6 +424,17 @@ public sealed class TimeBucketingPlannedSqlCompileTests
 
             mapped!.Errors[0].Code.ShouldBe("UNAVAILABLE");
             mapped.Errors[0].Message.ShouldBe("The database is currently unavailable.");
+        }
+
+        [Fact]
+        [Trait("Category", "Security")]
+        public void AggregateFailureMapper_TimeBucketUnsupported_OwnCode_FixedMessage_NoColumnName()
+        {
+            var mapped = AggregateFailureMapper.ForAggregate(new AggregationTimeBucketUnsupportedException());
+            mapped.ShouldNotBeNull();
+            mapped.Errors[0].Code.ShouldBe("AGGREGATION_TIME_BUCKET_UNSUPPORTED");
+            mapped.Errors[0].Message.ShouldBe("Time bucketing is not supported for this column.");
+            mapped.Errors[0].Extensions!.Keys.ShouldBe(["code"]);
         }
     }
 }

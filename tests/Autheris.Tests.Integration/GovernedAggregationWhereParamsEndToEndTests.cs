@@ -8,6 +8,8 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
+using Autheris.Application.DataSources;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
@@ -183,6 +185,7 @@ public abstract class GovernedAggregationWhereParamsBase : IDisposable
     private async Task<List<(string Region, long Count, long Max)>> RunAsync(TreeFilter filter, string tenant)
     {
         using var scope = _host!.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql); // #447: a direct service call is a WebSql ingress
         var service = scope.ServiceProvider.GetRequiredService<IGovernedAggregationService>();
         var result = await service.ExecuteAggregationAsync(User(tenant), Query(filter));
         return result.Groups
@@ -237,6 +240,7 @@ public abstract class GovernedAggregationWhereParamsBase : IDisposable
         if (!await EnsureHostAsync()) return;
 
         using var scope = _host!.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql); // #447: a direct service call is a WebSql ingress
         var service = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
         var request = new GovernedSqlQueryRequest(
             $"SELECT id FROM {Target!.Schema}.{TableName} WHERE id = @__gql_tf_0",

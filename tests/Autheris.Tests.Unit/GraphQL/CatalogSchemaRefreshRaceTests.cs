@@ -111,6 +111,21 @@ public sealed class CatalogSchemaRefreshRaceTests
         return (module, provider);
     }
 
+    private static IDisposable SubscribeToEvictions(ServiceProvider provider, SemaphoreSlim evicted) =>
+        provider.GetRequiredService<IRequestExecutorEvents>().Subscribe(new EvictedObserver(evicted));
+
+    /// <summary>
+    /// A check that returns true makes HotChocolate evict the executor on a background consumer, which disposes the old
+    /// executor's type module change monitor. Disposing the provider before that finished races the same monitor's Dispose
+    /// (Collection was modified). The Evicted event is raised after the old monitor is disposed and the new executor is stored.
+    /// </summary>
+    private static async Task AwaitConvergenceAsync(ServiceProvider provider, SemaphoreSlim evicted)
+    {
+        (await evicted.WaitAsync(TimeSpan.FromSeconds(30))).ShouldBeTrue("the executor was never evicted after the catalog change");
+        var executor = await provider.GetRequiredService<IRequestExecutorProvider>().GetExecutorAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        executor.Schema.Types.ContainsName("sales_public_invoices").ShouldBeTrue();
+    }
+
     [Fact]
     public async Task CheckForCatalogChanges_WhileAnotherCheckRuns_ObservesTheLaterWrite()
     {
@@ -118,6 +133,8 @@ public sealed class CatalogSchemaRefreshRaceTests
         var (module, provider) = await StartAsync(catalog);
         using var _ = module;
         await using var __ = provider;
+        var evicted = new SemaphoreSlim(0);
+        using var subscription = SubscribeToEvictions(provider, evicted);
 
         catalog.HoldNextRead();
         var first = module.CheckForCatalogChangesAsync();
@@ -130,6 +147,7 @@ public sealed class CatalogSchemaRefreshRaceTests
         catalog.Gate.SetResult();
         (await first.WaitAsync(TimeSpan.FromSeconds(30))).ShouldBeFalse();
         (await second.WaitAsync(TimeSpan.FromSeconds(30))).ShouldBeTrue();
+        await AwaitConvergenceAsync(provider, evicted);
     }
 
     [Fact]
@@ -141,6 +159,8 @@ public sealed class CatalogSchemaRefreshRaceTests
         await using var __ = provider;
         var fingerprint = module.BuiltFingerprint;
         fingerprint.ShouldNotBeNull();
+        var evicted = new SemaphoreSlim(0);
+        using var subscription = SubscribeToEvictions(provider, evicted);
 
         catalog.Write("orders", "invoices");
         catalog.Throw = true;
@@ -150,6 +170,7 @@ public sealed class CatalogSchemaRefreshRaceTests
         // The semaphore was released: the next check runs and sees the change.
         catalog.Throw = false;
         (await module.CheckForCatalogChangesAsync().WaitAsync(TimeSpan.FromSeconds(30))).ShouldBeTrue();
+        await AwaitConvergenceAsync(provider, evicted);
     }
 
     [Fact]
@@ -206,6 +227,21 @@ public sealed class CatalogSchemaRefreshRaceTests
             (remaining > TimeSpan.Zero && await created.WaitAsync(remaining))
                 .ShouldBeTrue("the served schema never converged to the new catalog");
         }
+    }
+
+    private sealed class EvictedObserver(SemaphoreSlim evicted) : IObserver<RequestExecutorEvent>
+    {
+        public void OnNext(RequestExecutorEvent value)
+        {
+            if (value.Type == RequestExecutorEventType.Evicted)
+            {
+                evicted.Release();
+            }
+        }
+
+        public void OnError(Exception error) { }
+
+        public void OnCompleted() { }
     }
 
     private sealed class CreatedObserver(SemaphoreSlim created) : IObserver<RequestExecutorEvent>

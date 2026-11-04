@@ -19,7 +19,7 @@ public partial class SqliteGovernanceRepository
 {
     private static class CatalogSql
     {
-        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json
+        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
 FROM TABLES
 WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
 
@@ -27,10 +27,8 @@ WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOC
 WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE";
 
         public const string SelectActiveTableEntitiesSql = @"SELECT t.id, t.source_type, t.source_name, t.schema_name, t.table_name,
-       t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active,
-       t.data_source_type, t.http_endpoint_json, t.plugin_name,
-       t.description, t.long_description, t.doc_source,
-       t.required_filter_columns_json, t.texts_json
+       t.display_name, t.sensitivity, t.requires_four_eyes, t.is_active, t.data_source_type, t.http_endpoint_json, t.plugin_name,
+       t.description, t.long_description, t.doc_source, t.required_filter_columns_json, t.texts_json, t.min_group_size, t.non_personal
 FROM TABLES t
 WHERE t.is_active = 1";
 
@@ -51,8 +49,8 @@ FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 ORDER BY c.rowid";
 
-        public const string UpsertTableSql = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json)
-VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson)
+        public const string UpsertTableSql = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
+VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal)
 ON CONFLICT (id) DO UPDATE SET
     source_type = excluded.source_type,
     source_name = excluded.source_name,
@@ -69,7 +67,9 @@ ON CONFLICT (id) DO UPDATE SET
     long_description = excluded.long_description,
     doc_source = excluded.doc_source,
     required_filter_columns_json = excluded.required_filter_columns_json,
-    texts_json = excluded.texts_json";
+    texts_json = excluded.texts_json,
+    min_group_size = excluded.min_group_size,
+    non_personal = excluded.non_personal";
 
         public const string InsertColumnSql = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json)
 VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson)
@@ -489,6 +489,8 @@ RETURNING structure_version, content_version;";
                 upsertCmd.AddBound("@docSource", (object?)targetDocSource ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
+                upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
+                upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal ? 1 : 0);
                 await upsertCmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -668,10 +670,11 @@ RETURNING structure_version, content_version;";
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, add, remove, actor, ct), ct);
 
-    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
-        TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
-        WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, visibility, actor, ct), ct);
+    public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) => DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, visibility, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) => DatasetCatalogStore.SetPrivacyAsync(conn, tx, CatalogKeyDefinitionStore.Sqlite, table, minGroupSize, nonPersonal, actor, ct), ct);
 
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch; the local metadata entry is dropped after the commit.</summary>
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(

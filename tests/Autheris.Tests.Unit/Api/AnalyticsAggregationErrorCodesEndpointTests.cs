@@ -88,6 +88,7 @@ public sealed class AnalyticsAggregationErrorCodesEndpointTests
     public static TheoryData<Exception, int, string, string> Causes() => new()
     {
         { new AggregationPrivacyRestrictedException(), 400, "AGGREGATION_PRIVACY_RESTRICTED", PrivacyMessage },
+        { new AggregationTimeBucketUnsupportedException(), 400, "AGGREGATION_TIME_BUCKET_UNSUPPORTED", AggregationTimeBucketUnsupportedException.FixedMessage },
         { new AggregationFilterRejectedException(), 400, "AGG_NEGATED_FILTER_REJECTED", AggregationFilterRejectedException.FixedMessage },
         { new AstBuildException(Sentinel, new InvalidOperationException(Sentinel)), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Dialect, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },

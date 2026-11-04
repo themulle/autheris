@@ -209,6 +209,8 @@ public static class McpAdminTools
                 "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table or table id)." },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces the admin tags (empty list removes them). Omit to leave unchanged." },
                 "visibility": { "type": "string", "enum": ["Hidden", "Summary", "Full"], "description": "Catalog tier. Omit to leave unchanged." },
+                "minGroupSize": { "type": "string", "description": "Minimum group size (1..1000000 or 'none'). Omit to leave unchanged." },
+                "nonPersonal": { "type": "boolean", "description": "Flag indicating whether dataset contains non-personal data. Omit to leave unchanged." },
                 "planId": { "type": "string", "description": "Plan identifier returned by the first (planning) call." },
                 "confirmationToken": { "type": "string", "description": "HMAC-signed confirmation token of the TOTP-confirmed plan." }
               }
@@ -428,7 +430,14 @@ public static class McpAdminTools
     private static string ArgumentsDigest(string operation, string canonicalArguments) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(operation + "\n" + canonicalArguments)));
 
-    private sealed record SetDatasetCatalogArguments(string? Dataset, IReadOnlyList<string>? Tags, string? Visibility, string? PlanId = null, string? ConfirmationToken = null);
+    private sealed record SetDatasetCatalogArguments(
+        string? Dataset,
+        IReadOnlyList<string>? Tags,
+        string? Visibility,
+        string? MinGroupSize = null,
+        bool? NonPersonal = null,
+        string? PlanId = null,
+        string? ConfirmationToken = null);
 
     /// <summary>
     /// Issue #111 (A-8): the same service as REST and the manifest, called with the principal rebuilt from the session, so the tool cannot widen
@@ -448,9 +457,9 @@ public static class McpAdminTools
 
         var req = JsonSerializer.Deserialize<SetDatasetCatalogArguments>(argumentsJson, StrictJsonOptions)
             ?? throw new ArgumentException("Invalid arguments for admin_set_dataset_catalog.");
-        if (string.IsNullOrWhiteSpace(req.Dataset) || (req.Tags is null && req.Visibility is null))
+        if (string.IsNullOrWhiteSpace(req.Dataset) || (req.Tags is null && req.Visibility is null && req.MinGroupSize is null && req.NonPersonal is null))
         {
-            throw new ArgumentException("admin_set_dataset_catalog requires 'dataset' and at least one of 'tags' or 'visibility'.");
+            throw new ArgumentException("admin_set_dataset_catalog requires 'dataset' and at least one of 'tags', 'visibility', 'minGroupSize', or 'nonPersonal'.");
         }
 
         // Two-phase confirmation (ADR-03): the confirmed arguments are the edit itself, without the confirmation properties.
@@ -469,7 +478,7 @@ public static class McpAdminTools
         }
 
         var principal = Autheris.Application.Mcp.Services.McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-        var edit = new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(req.Tags, null, null, req.Visibility);
+        var edit = new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(req.Tags, null, null, req.Visibility, req.MinGroupSize, req.NonPersonal);
         var result = await datasetCatalog.ApplyAsync(principal, req.Dataset, edit, "mcp", ct).ConfigureAwait(false);
         if (!result.IsSuccess)
         {

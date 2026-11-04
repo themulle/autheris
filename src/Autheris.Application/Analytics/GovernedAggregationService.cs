@@ -23,6 +23,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 using Autheris.Domain.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -52,6 +53,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     private readonly IConsentResolutionService? _resolutionService;
     private readonly IGovernedSqlExecutionService? _sqlExecutionService;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly IAuditWriter? _auditWriter;
     private readonly IGovernedTableReadPlanner _planner;
     private readonly AnalyticsOptions _analyticsOptions;
@@ -61,6 +63,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     private readonly Queue<string> _noisyInsertionOrder = new();
     private readonly object _noisyCacheLock = new();
     private readonly ICallerAttributeRegistry? _callerAttributeRegistry;
+    private readonly ILogger<GovernedAggregationService>? _logger;
 
     [ActivatorUtilitiesConstructor]
     public GovernedAggregationService(
@@ -77,8 +80,12 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IOptions<AnalyticsOptions>? analyticsOptions = null,
         IGovernedTableReadPlanner? planner = null,
         IDifferentialPrivacyEngine? dpEngine = null,
-        ICallerAttributeRegistry? callerAttributeRegistry = null)
+        ICallerAttributeRegistry? callerAttributeRegistry = null,
+        ILogger<GovernedAggregationService>? logger = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
@@ -94,6 +101,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
         _dpEngine = dpEngine ?? new DifferentialPrivacyEngine(auditLogRepository, analyticsOptions: analyticsOptions);
         _callerAttributeRegistry = callerAttributeRegistry;
+        _logger = logger;
     }
 
     public GovernedAggregationService(
@@ -109,8 +117,12 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IOptions<AnalyticsOptions>? analyticsOptions = null,
         IGovernedTableReadPlanner? planner = null,
         IDifferentialPrivacyEngine? dpEngine = null,
-        ICallerAttributeRegistry? callerAttributeRegistry = null)
+        ICallerAttributeRegistry? callerAttributeRegistry = null,
+        ILogger<GovernedAggregationService>? logger = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
         _accessResolver = accessResolver ?? (gatewayExecutionService as ITableAccessResolver);
@@ -125,6 +137,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
         _dpEngine = dpEngine ?? (metadataRepository is IAuditLogRepository dpAudit ? new DifferentialPrivacyEngine(dpAudit, analyticsOptions: analyticsOptions) : null);
         _callerAttributeRegistry = callerAttributeRegistry;
+        _logger = logger;
     }
 
     public async Task<AggregationResult> ExecuteAggregationAsync(
@@ -167,7 +180,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             throw new GatewayForbiddenException(DeniedMessage);
         }
 
-        int effectiveMinGroupSize = ResolveEffectiveMinGroupSize(query, metadata);
+        var effectiveMinGroup = ResolveEffectiveMinGroupSize(query, metadata);
+        int effectiveMinGroupSize = effectiveMinGroup.Value;
         SmallGroupStrategy effectiveStrategy = ResolveEffectiveSmallGroupStrategy(query, metadata);
 
         IReadOnlyList<string> groupByColumns;
@@ -210,7 +224,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             var generation = await TryGetAttributeGenerationAsync(ct).ConfigureAwait(false);
             if (generation.HasValue)
             {
-                noiseCacheKey = NoisyCacheKey.Build(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay, NoisyCacheKey.Fingerprint(decision, metadata, generation.Value), query.TimeBuckets);
+                noiseCacheKey = NoisyCacheKey.Build(tenantId, userSid, metadata.Identifier, groupByColumns, resolvedAggregates, query.Where, query.OrderBy, requestedLimit, effectiveMinGroupSize, effectiveStrategy, utcDay, NoisyCacheKey.Fingerprint(decision, metadata, generation.Value), query.TimeBuckets, effectiveMinGroup.Source);
                 if (_noisyResultCache.TryGetValue(noiseCacheKey, out var cached) && string.Equals(cached.UtcDay, utcDay, StringComparison.Ordinal))
                 {
                     return cached.Result;
@@ -352,7 +366,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             Truncated: truncated,
             NoiseApplied: noiseApplied,
             EpsilonConsumed: epsilonConsumed,
-            RemainingEpsilon: remainingEpsilon);
+            RemainingEpsilon: remainingEpsilon,
+            MinimumGroupSizeSource: effectiveMinGroup.Source);
 
         await RecordAuditAsync(tenantId, userSid, query.Table, allowed: true, new Dictionary<string, object?>
         {
@@ -361,6 +376,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ["aggregates"] = resolvedAggregates.Select(a => a.EffectiveAlias).ToArray(),
             ["filter"] = query.Where?.SqlPredicate,
             ["minimum_group_size"] = effectiveMinGroupSize,
+            ["min_group_size_source"] = effectiveMinGroup.Source.ToString().ToLowerInvariant(),
             ["strategy"] = effectiveStrategy.ToString(),
             ["suppressed"] = suppressed,
             ["suppressed_groups_count"] = suppressedGroupsCount,

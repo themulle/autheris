@@ -1,0 +1,8 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "TABLES", "column": { "name": "min_group_size", "type": "INTEGER", "family": "integer", "nullable": true } },
+    { "op": "addColumn", "table": "TABLES", "column": { "name": "non_personal", "type": "INTEGER", "family": "integer", "nullable": false } },
+    { "op": "addColumn", "table": "TABLE_CATALOG_SETTINGS", "column": { "name": "min_group_size", "type": "INTEGER", "family": "integer", "nullable": true } },
+    { "op": "addColumn", "table": "TABLE_CATALOG_SETTINGS", "column": { "name": "non_personal", "type": "INTEGER", "family": "integer", "nullable": true } }
+  ]
+}

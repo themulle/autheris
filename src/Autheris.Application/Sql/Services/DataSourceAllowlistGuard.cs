@@ -72,6 +72,16 @@ public static class DataSourceAllowlistGuard
         return MapDataSource(webSqlOptions, source);
     }
 
+    /// <summary>
+    /// The catalog source name before <c>DataSourceMappings</c> (issue #447: the transport gate canonicalises it itself and echoes only the
+    /// logical name, never the physical key).
+    /// </summary>
+    public static string LogicalDataSource(TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return !string.IsNullOrWhiteSpace(metadata.Table?.SourceName) ? metadata.Table!.SourceName! : metadata.Identifier.Domain;
+    }
+
     /// <summary>Maps a data source name through <c>DataSourceMappings</c> (an unmapped or empty mapping keeps the name).</summary>
     public static string MapDataSource(WebSqlOptions webSqlOptions, string? name)
     {
@@ -82,20 +92,4 @@ public static class DataSourceAllowlistGuard
             ? mapped
             : name;
     }
-
-    /// <summary>
-    /// SEC-DS05-03: Enforces transport isolation for a data source based on granular per-data-source configuration.
-    /// Fails closed if the data source profile excludes the requested transport protocol.
-    /// </summary>
-    public static void EnsureTransportAllowed(
-        Autheris.Application.DataSources.IDataSourceOptionsResolver? resolver,
-        string? dataSourceName,
-        Autheris.Domain.Options.DataSources.DataSourceTransportFlags transport)
-    {
-        if (resolver != null && !resolver.IsTransportAllowed(dataSourceName, transport))
-        {
-            throw new WebSqlPolicyException($"Access to data source '{dataSourceName}' is not allowed over transport '{transport}'.");
-        }
-    }
 }
-

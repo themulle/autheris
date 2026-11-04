@@ -73,8 +73,12 @@ public sealed class DataSourceProfileOptions
     /// <summary>Default transaction isolation level for sessions opened against this data source.</summary>
     public IsolationLevel? DefaultIsolationLevel { get; init; }
 
-    /// <summary>Permitted ingress transports authorized to query this data source (SEC-DS05-03).</summary>
-    public DataSourceTransportFlags AllowedTransports { get; init; } = DataSourceTransportFlags.All;
+    /// <summary>
+    /// Permitted ingress transports authorized to query this data source (SEC-DS05-03). <c>null</c> inherits
+    /// <c>Defaults.AllowedTransports</c> and, when that is unset too, <see cref="DataSourceTransportFlags.All"/> (SEC-ATR-01, decision 13).
+    /// An explicit <see cref="DataSourceTransportFlags.None"/> denies every transport and is never replaced by the default.
+    /// </summary>
+    public DataSourceTransportFlags? AllowedTransports { get; init; }
 
     // ==========================================
     // 4. Caching & Staging Guardrails

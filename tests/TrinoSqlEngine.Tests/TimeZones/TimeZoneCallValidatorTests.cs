@@ -1,8 +1,10 @@
 namespace TrinoSqlEngine.Tests.TimeZones;
 
+using System.Collections.Frozen;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Governance;
 using TrinoSqlEngine.Tests.Security;
 using TrinoSqlEngine.Tests.Compiler;
 using Xunit;
@@ -361,5 +363,57 @@ public sealed class TimeZoneCallValidatorTests
         Assert.DoesNotContain("CONVERT_TIMEZONE(", ex!.Message, StringComparison.OrdinalIgnoreCase);
         Assert.IsType<SqlTimeZoneException>(ex);
         Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, ((SqlTimeZoneException)ex).Code);
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    public void TwoArg_ZonedColumn_Accepted(TargetSqlDialect dialect)
+    {
+        var compiled = Compile(dialect, "SELECT convert_timezone('Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e");
+        Assert.NotNull(compiled);
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    public void TwoArg_PlainColumn_Rejected(TargetSqlDialect dialect)
+    {
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, "SELECT convert_timezone('Europe/Berlin', e.OccurredAt) FROM dbo.Events e"));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    public void ThreeArg_ZonedColumn_StillRejected(TargetSqlDialect dialect)
+    {
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, "SELECT convert_timezone('UTC', 'Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e"));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    public void TwoArg_MaskedColumn_Rejected(TargetSqlDialect dialect)
+    {
+        var masks = new DictMaskProvider();
+        masks.Masks[(Events, "occurredattz")] = new MaskSpec(MaskKind.Redact, new MaskArguments(), System.Collections.Frozen.FrozenDictionary<string, PolicyValue>.Empty);
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, "SELECT convert_timezone('Europe/Berlin', e.OccurredAtTz) FROM dbo.Events e", masks: masks, tablesWithMaskedColumns: new HashSet<string> { "Events" }));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    public void TwoArg_ExpressionArgument_Rejected(TargetSqlDialect dialect)
+    {
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, "SELECT convert_timezone('Europe/Berlin', CAST(e.OccurredAtTz AS datetimeoffset)) FROM dbo.Events e"));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    public void TwoArg_CountsTowardCallCap(TargetSqlDialect dialect)
+    {
+        var cols = string.Join(", ", Enumerable.Range(1, 9).Select(_ => "convert_timezone('Europe/Berlin', e.OccurredAtTz)"));
+        Assert.Equal(GovernedSqlErrorCodes.TimeZoneArgument, Rejected(dialect, $"SELECT {cols} FROM dbo.Events e"));
     }
 }

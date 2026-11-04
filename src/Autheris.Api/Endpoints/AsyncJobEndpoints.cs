@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -20,7 +21,7 @@ public static class AsyncJobEndpoints
 {
     public static IEndpointRouteBuilder MapAsyncJobEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/jobs");
+        var group = app.MapGroup("/api/v1/jobs").WithIngressTransport(DataSourceTransportFlags.WebSql);
 
         group.MapPost("/query", async (
             AsyncQueryJobRequest request,
@@ -32,7 +33,11 @@ public static class AsyncJobEndpoints
             AsyncJobDescriptor job;
             try
             {
-                job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+                job = await jobManager.SubmitJobAsync(
+                    request, httpContext.User, tenantId,
+                    httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
+                        ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
+                    ct).ConfigureAwait(false);
             }
             catch (ClusterStateUnavailableException)
             {

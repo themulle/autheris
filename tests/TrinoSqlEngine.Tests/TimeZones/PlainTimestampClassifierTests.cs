@@ -77,4 +77,32 @@ public sealed class PlainTimestampClassifierTests
     [InlineData("timestamptz", false)]
     public void T13_CastTargetsMustBePlainTimestamps(string target, bool expected) =>
         Assert.Equal(expected, PlainTimestampClassifier.IsPlainCastTarget(target));
+
+    [Fact]
+    public void IsZoned_SqlServerDatetimeoffset_True()
+    {
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, "datetimeoffset"));
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, "datetimeoffset(7)"));
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, "DATETIMEOFFSET"));
+    }
+
+    [Fact]
+    public void IsZoned_PostgresTimestamptzSpellings_True()
+    {
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.PostgreSql, "timestamptz"));
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.PostgreSql, "timestamp with time zone"));
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.PostgreSql, "TIMESTAMP WITH TIME ZONE"));
+        Assert.True(PlainTimestampClassifier.IsZoned(TargetSqlDialect.PostgreSql, "timestamptz(6)"));
+    }
+
+    [Fact]
+    public void IsZoned_PlainAndRowversion_False()
+    {
+        Assert.False(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, "datetime2"));
+        Assert.False(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, "timestamp"));
+        Assert.False(PlainTimestampClassifier.IsZoned(TargetSqlDialect.PostgreSql, "timestamp"));
+        Assert.False(PlainTimestampClassifier.IsZoned(TargetSqlDialect.PostgreSql, "timestamp without time zone"));
+        Assert.False(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, "varchar"));
+        Assert.False(PlainTimestampClassifier.IsZoned(TargetSqlDialect.SqlServer, null));
+    }
 }

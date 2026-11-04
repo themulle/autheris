@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -37,9 +38,11 @@ public static class ArrowExportEndpoints
 
     public static IEndpointRouteBuilder MapArrowExportEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = endpoints.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapPost("/api/v1/export/arrow", HandleArrowExportAsync)
+        ingress.MapPost("/api/v1/export/arrow", HandleArrowExportAsync)
             .WithName("ExportTableToArrow")
             .WithSummary("Exports governed tabular rows directly into Apache Arrow IPC streaming format")
             .RequireRebac("viewer", "table", paramName: "table", source: RebacParameterSource.QueryOrJsonBody)

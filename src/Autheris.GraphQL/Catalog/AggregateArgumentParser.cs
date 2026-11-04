@@ -176,6 +176,11 @@ internal static partial class AggregateArgumentParser
             throw AggregateErrors.ArgumentInvalid();
         }
 
+        if (colField.FieldType != CatalogFieldType.DateTime)
+        {
+            throw AggregateErrors.TimeBucketUnsupported(colField.FieldName, bucketStr);
+        }
+
         var timeZone = "UTC";
         if (fields.TryGetValue("timeZone", out var tzNode) && !IsAbsent(tzNode))
         {
@@ -192,7 +197,7 @@ internal static partial class AggregateArgumentParser
 
         if (!TrinoSqlEngine.TimeZoneRegistry.Contains(timeZone))
         {
-            throw AggregateErrors.Create("INVALID_QUERY", $"Time zone '{timeZone}' is not recognized.");
+            throw AggregateErrors.Create("INVALID_QUERY", "The time zone is not a recognized IANA zone id.");
         }
 
         return new TimeBucketSpecification(colField.ColumnName, interval, timeZone);

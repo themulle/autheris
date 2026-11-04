@@ -70,6 +70,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
     private readonly CompiledSqlAuditDigester _auditDigester;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     public FederatedDuckDbExecutionService(
         IOptions<GatewayOptions> options,
@@ -92,8 +93,11 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         ILogger<FederatedDuckDbExecutionService>? logger = null,
         IVirtualFilterFederationPlanner? vfPlanner = null,
         Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
-        CompiledSqlAuditDigester? auditDigester = null)
+        CompiledSqlAuditDigester? auditDigester = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _auditDigester = auditDigester ?? new CompiledSqlAuditDigester(options);
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -225,6 +229,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
+        // Issue #447 C2 (SEC-ATR-11): every routed source must allow the ingress transport; nothing is planned or staged otherwise.
+        await _transportGate.EnsureCatalogSourcesAsync(routing.Tables.Select(t => t.EffectiveDataSource), ct).ConfigureAwait(false);
+
         _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId);
     }
 
@@ -313,6 +320,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
             // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
             var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, timeoutCts.Token).ConfigureAwait(false);
+
+            // Issue #447 C2 (SEC-ATR-11): all-or-nothing before key loading, planning, the start audit record and any staging.
+            await _transportGate.EnsureCatalogSourcesAsync(routing.Tables.Select(t => t.EffectiveDataSource), timeoutCts.Token).ConfigureAwait(false);
 
             // SEC-DATA131-01: parameter validation strictly follows table authorization (anti-oracle defense).
             var parameterLimits = ListParameterLimits.From(_options.Value.WebSql ?? new WebSqlOptions());

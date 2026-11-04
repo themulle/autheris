@@ -129,4 +129,63 @@ public sealed class TimeBucketingAggregateParserTests
         parsed.TimeBuckets[0].Interval.ShouldBe(TimeBucketInterval.Month);
         parsed.TimeBuckets[0].TimeZone.ShouldBe("UTC"); // Defaults to UTC!
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void TimeBucket_NonDateTimeField_TimeBucketUnsupported()
+    {
+        var table = CreateCatalogTable();
+
+        var groupByNode = new ListValueNode(
+            new ObjectValueNode(
+                new ObjectFieldNode("column", new EnumValueNode("category")),
+                new ObjectFieldNode("bucket", new EnumValueNode("DAY"))));
+
+        var aggregatesNode = new ListValueNode(
+            new ObjectValueNode(
+                new ObjectFieldNode("fn", new EnumValueNode("COUNT")),
+                new ObjectFieldNode("alias", new StringValueNode("cnt"))));
+
+        var ex = Should.Throw<HotChocolate.GraphQLException>(() => AggregateArgumentParser.Parse(
+            table,
+            groupByNode,
+            aggregatesNode,
+            null,
+            null,
+            new AggregationOptions(),
+            _ => null));
+
+        ex.Errors.Single().Code.ShouldBe("AGGREGATION_TIME_BUCKET_UNSUPPORTED");
+        ex.Errors.Single().Message.ShouldBe("Time bucketing is not supported for this column.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void TimeBucketParser_UnknownZone_FixedMessage_NoZoneEcho()
+    {
+        var table = CreateCatalogTable();
+
+        var groupByNode = new ListValueNode(
+            new ObjectValueNode(
+                new ObjectFieldNode("column", new EnumValueNode("created_at")),
+                new ObjectFieldNode("bucket", new EnumValueNode("DAY")),
+                new ObjectFieldNode("timeZone", new StringValueNode("Mars/Base"))));
+
+        var aggregatesNode = new ListValueNode(
+            new ObjectValueNode(
+                new ObjectFieldNode("fn", new EnumValueNode("COUNT")),
+                new ObjectFieldNode("alias", new StringValueNode("cnt"))));
+
+        var ex = Should.Throw<HotChocolate.GraphQLException>(() => AggregateArgumentParser.Parse(
+            table,
+            groupByNode,
+            aggregatesNode,
+            null,
+            null,
+            new AggregationOptions(),
+            _ => null));
+
+        ex.Errors.Single().Code.ShouldBe("INVALID_QUERY");
+        ex.Errors.Single().Message.ShouldBe("The time zone is not a recognized IANA zone id.");
+    }
 }

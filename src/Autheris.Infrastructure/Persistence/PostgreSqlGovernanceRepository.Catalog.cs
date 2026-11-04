@@ -13,7 +13,7 @@ public partial class PostgreSqlGovernanceRepository
 {
     private static class CatalogSql
     {
-        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json
+        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
 FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
@@ -23,7 +23,8 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
        display_name, sensitivity, requires_four_eyes, is_active,
        data_source_type, http_endpoint_json, plugin_name,
        description, long_description, doc_source,
-       required_filter_columns_json, texts_json
+       required_filter_columns_json, texts_json,
+       min_group_size, non_personal
 FROM TABLES
 WHERE is_active = 1";
 
@@ -48,8 +49,8 @@ WHERE t.is_active = 1";
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
 FOR UPDATE";
 
-        public const string UpsertTableSql = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json)
-VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson)
+        public const string UpsertTableSql = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
+VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal)
 ON CONFLICT (id) DO UPDATE SET
     source_type = EXCLUDED.source_type,
     source_name = EXCLUDED.source_name,
@@ -66,7 +67,9 @@ ON CONFLICT (id) DO UPDATE SET
     long_description = COALESCE(EXCLUDED.long_description, TABLES.long_description),
     doc_source = COALESCE(EXCLUDED.doc_source, TABLES.doc_source),
     required_filter_columns_json = EXCLUDED.required_filter_columns_json,
-    texts_json = EXCLUDED.texts_json";
+    texts_json = EXCLUDED.texts_json,
+    min_group_size = EXCLUDED.min_group_size,
+    non_personal = EXCLUDED.non_personal";
 
         public const string InsertColumnSql = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json)
 VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson)
@@ -556,6 +559,8 @@ RETURNING structure_version, content_version;";
                 upsertCmd.AddBound("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
+                upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
+                upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
                 await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -708,6 +713,11 @@ RETURNING structure_version, content_version;";
         TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, visibility, actor, ct), ct);
+
+    public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
+        TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetPrivacyAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, minGroupSize, nonPersonal, actor, ct), ct);
 
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(

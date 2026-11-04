@@ -71,6 +71,7 @@ public static class AuditEventTypes
     // Catalog visibility and tag changes (Tier A, issue #111): before/after, actor and source.
     public const string CatalogVisibilityChanged = "CATALOG_VISIBILITY_CHANGED";
     public const string CatalogTagsChanged = "CATALOG_TAGS_CHANGED";
+    public const string CatalogMinGroupSizeChanged = "CATALOG_MIN_GROUP_SIZE_CHANGED";
 
     // Issue #111 (A-9): aggregated count of probe attempts on datasets the caller cannot manage (one entry per principal and window).
     public const string CatalogProbeSuppressed = "CATALOG_PROBE_SUPPRESSED";
@@ -149,5 +150,8 @@ public static class AuditEventTypes
     // Issue #281: app-scoped trusted GraphQL documents
     public const string TrustedDocumentsReplaced = "TRUSTED_DOCUMENTS_REPLACED";
     public const string TrustedDocumentsRetired = "TRUSTED_DOCUMENTS_RETIRED";
+
+    // Issue #447: a data source refused the ingress transport of the request (fail-closed gate)
+    public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
 }
 

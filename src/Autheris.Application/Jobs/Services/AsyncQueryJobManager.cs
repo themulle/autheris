@@ -275,6 +275,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         AsyncQueryJobRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -349,7 +350,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
                 ct).ConfigureAwait(false);
 
             // Bounded queue: a full channel rejects instead of blocking the request (the cleanup below removes the job).
-            if (!_channel.Writer.TryWrite(new AsyncJobExecutionItem(descriptor, request, user, cts)))
+            if (!_channel.Writer.TryWrite(new AsyncJobExecutionItem(descriptor, request, user, cts, ingress)))
             {
                 if (_channel.Reader.Completion.IsCompleted)
                 {

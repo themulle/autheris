@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
@@ -20,6 +21,8 @@ public static partial class ODataEndpoints
 {
     public static IEndpointRouteBuilder MapODataEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.OData);
         // OData v4 / Power BI & Excel Direct Adapter Endpoints
         async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context, IWebHostEnvironment env)
         {
@@ -47,19 +50,19 @@ public static partial class ODataEndpoints
             return Results.Content(xml, "application/xml;charset=utf-8");
         }
 
-        app.MapGet("/odata", HandleServiceDocumentAsync)
+        ingress.MapGet("/odata", HandleServiceDocumentAsync)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapGet("/odata/v4", HandleServiceDocumentAsync)
+        ingress.MapGet("/odata/v4", HandleServiceDocumentAsync)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapGet("/odata/$metadata", HandleMetadataAsync)
+        ingress.MapGet("/odata/$metadata", HandleMetadataAsync)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapGet("/odata/v4/$metadata", HandleMetadataAsync)
+        ingress.MapGet("/odata/v4/$metadata", HandleMetadataAsync)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -104,7 +107,7 @@ public static partial class ODataEndpoints
         }
 
         // Dynamic OpenAPI 3.1 & Swagger UI Explorer (F-API-03)
-        ConfigureOpenApiAuth(app.MapGet("/odata/v4/$openapi", async (
+        ConfigureOpenApiAuth(ingress.MapGet("/odata/v4/$openapi", async (
             IDynamicOpenApiGenerator generator,
             IOpenApiCacheManager cacheManager,
             HttpContext context) =>
@@ -134,7 +137,7 @@ public static partial class ODataEndpoints
         })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // OpenAPI Catalog Index Endpoint (Lists all available domain slices & API specs)
-        ConfigureOpenApiAuth(app.MapGet("/odata/v4/$openapi/index", async (
+        ConfigureOpenApiAuth(ingress.MapGet("/odata/v4/$openapi/index", async (
             IDynamicOpenApiGenerator generator,
             HttpContext context) =>
         {
@@ -147,7 +150,7 @@ public static partial class ODataEndpoints
             return Results.Json(indexDoc, contentType: "application/json;charset=utf-8");
         })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        ConfigureOpenApiAuth(app.MapGet("/api/v1/openapi/index", async (
+        ConfigureOpenApiAuth(ingress.MapGet("/api/v1/openapi/index", async (
             IDynamicOpenApiGenerator generator,
             HttpContext context) =>
         {
@@ -161,7 +164,7 @@ public static partial class ODataEndpoints
         })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // Isolated Entity Schema Endpoint ($ref target for modular OpenAPI specifications)
-        ConfigureOpenApiAuth(app.MapGet("/odata/v4/$openapi/schemas/{domain}/{schema}/{tableName}", async (
+        ConfigureOpenApiAuth(ingress.MapGet("/odata/v4/$openapi/schemas/{domain}/{schema}/{tableName}", async (
             string domain,
             string schema,
             string tableName,
@@ -184,7 +187,7 @@ public static partial class ODataEndpoints
             return Results.Content(json, "application/json;charset=utf-8");
         })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        ConfigureOpenApiAuth(app.MapGet("/odata/v4/{domain}/openapi.json", async (
+        ConfigureOpenApiAuth(ingress.MapGet("/odata/v4/{domain}/openapi.json", async (
             string domain,
             IDynamicOpenApiGenerator generator,
             IOpenApiCacheManager cacheManager,
@@ -206,7 +209,7 @@ public static partial class ODataEndpoints
             return Results.Bytes(bytes, contentType: "application/json;charset=utf-8");
         })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        ConfigureOpenApiAuth(app.MapGet("/odata/v4/{domain}/openapi.yaml", async (
+        ConfigureOpenApiAuth(ingress.MapGet("/odata/v4/{domain}/openapi.yaml", async (
             string domain,
             IDynamicOpenApiGenerator generator,
             IOpenApiCacheManager cacheManager,
@@ -263,30 +266,30 @@ public static partial class ODataEndpoints
             return Results.Stream(stream, contentType, enableRangeProcessing: false);
         }).AllowAnonymous().WithAuditExemption("Swagger UI static asset");
 
-        app.MapGet("/odata/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
+        ingress.MapGet("/odata/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
-        app.MapGet("/odata/v4/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
+        ingress.MapGet("/odata/v4/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
-        app.MapGet("/odata/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
+        ingress.MapGet("/odata/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
-        app.MapGet("/odata/v4/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
+        ingress.MapGet("/odata/v4/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
-        app.MapGet("/odata/{entitySetName}", HandleFlatEntitySetRequestAsync)
+        ingress.MapGet("/odata/{entitySetName}", HandleFlatEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
-        app.MapGet("/odata/v4/{entitySetName}", HandleFlatEntitySetRequestAsync)
+        ingress.MapGet("/odata/v4/{entitySetName}", HandleFlatEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);

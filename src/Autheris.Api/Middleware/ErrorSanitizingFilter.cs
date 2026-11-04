@@ -43,6 +43,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "UNAVAILABLE",
         "COLUMN_NOT_RELEASED",
         "FILTER_ON_MASKED_COLUMN",
+        "INVALID_QUERY_OPTION",
         "COST_LIMIT",
         "ROW_LIMIT",
         // Issue #107: fixed message without table or rule names (SEC-RF107-08).
@@ -77,6 +78,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "AGGREGATION_DISABLED",
         "AGG_NEGATED_FILTER_REJECTED",
         "AGGREGATION_PRIVACY_RESTRICTED",
+        "AGGREGATION_TIME_BUCKET_UNSUPPORTED",
         "AGGREGATION_NOT_SUPPORTED",
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
@@ -99,7 +101,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "SYNC_FAILED",
         "GDPR_SUBJECT_SCOPE_UNRESOLVED",
         // Relay keyset pagination
-        "KEYSET_PAGINATION_UNAVAILABLE"
+        "KEYSET_PAGINATION_UNAVAILABLE",
+        // Issue #447 (SEC-ATR-08): fixed text without the data source name.
+        "TRANSPORT_NOT_ALLOWED"
     };
 
     /// <summary>
@@ -109,6 +113,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     private static readonly Dictionary<string, string> FixedClientMessages = new(StringComparer.OrdinalIgnoreCase)
     {
         ["KEYSET_PAGINATION_UNAVAILABLE"] = "Keyset pagination is unavailable for this table or caller.",
+        ["TRANSPORT_NOT_ALLOWED"] = "Access to the data source is not allowed over this transport.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,
@@ -128,6 +133,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGGREGATION_ON_MASKED_COLUMN"] = "A requested column is masked for the current caller and cannot be used in an aggregation.",
         ["AGG_NEGATED_FILTER_REJECTED"] = "The aggregation filter is rejected by the privacy policy.",
         ["AGGREGATION_PRIVACY_RESTRICTED"] = "The requested aggregate is not available under the privacy policy.",
+        ["AGGREGATION_TIME_BUCKET_UNSUPPORTED"] = "Time bucketing is not supported for this column.",
         ["AGGREGATION_NOT_SUPPORTED"] = "The requested aggregation is not supported for this dataset.",
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
@@ -166,7 +172,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     {
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",
-        "READ_ONLY_TOKEN"
+        "READ_ONLY_TOKEN",
+        "AGGREGATION_TIME_BUCKET_UNSUPPORTED"
     };
 
     private static readonly string[] SensitivePatterns =
@@ -224,7 +231,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayPageRangeException)
         {
             gatewayOutcome = true;
-            error = MapGatewayOutcome(error, Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage, "INVALID_QUERY");
+            error = MapGatewayOutcome(error, Autheris.Domain.Exceptions.GatewayPageRangeException.FixedMessage, "INVALID_QUERY_OPTION");
         }
         else if (error.Exception is Autheris.Domain.Exceptions.GatewayInvalidQueryException)
         {

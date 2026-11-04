@@ -54,6 +54,19 @@ WHERE rm.member_sid = @sid";
         var textsJson = reader.IsDBNull(o + 16) ? null : reader.GetString(o + 16);
         var texts = CatalogLocalizationPersistence.ParseLocalizedTexts(textsJson, tableId, logger);
 
+        int? minGroupSize = null;
+        if (reader.FieldCount > o + 17 && !reader.IsDBNull(o + 17))
+        {
+            minGroupSize = Convert.ToInt32(reader.GetValue(o + 17), CultureInfo.InvariantCulture);
+        }
+
+        bool nonPersonal = false;
+        if (reader.FieldCount > o + 18 && !reader.IsDBNull(o + 18))
+        {
+            var val = reader.GetValue(o + 18);
+            nonPersonal = val is bool b ? b : Convert.ToInt32(val, CultureInfo.InvariantCulture) == 1;
+        }
+
         return new Table
         {
             Id = tableId,
@@ -72,7 +85,9 @@ WHERE rm.member_sid = @sid";
             LongDescription = reader.IsDBNull(o + 13) ? null : reader.GetString(o + 13),
             Texts = texts,
             DocumentationSource = reader.IsDBNull(o + 14) ? null : reader.GetString(o + 14),
-            RequiredFilterColumns = reqFilters
+            RequiredFilterColumns = reqFilters,
+            MinGroupSize = minGroupSize,
+            NonPersonal = nonPersonal
         };
     }
 

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using Autheris.Api.Errors;
 using System;
 using System.Collections.Generic;
@@ -31,7 +32,7 @@ public static class SqlEndpointRoutes
 
     public static IEndpointRouteBuilder MapSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {
-        var group = app.MapGroup("/api/v1/queries");
+        var group = app.MapGroup("/api/v1/queries").WithIngressTransport(DataSourceTransportFlags.Rest);
 
         group.MapGet("/", HandleListEndpoints)
              .WithName("ListSqlEndpoints")

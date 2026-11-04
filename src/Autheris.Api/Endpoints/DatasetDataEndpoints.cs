@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Domain.Options.DataSources;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,20 +32,22 @@ public static class DatasetDataEndpoints
 
     public static IEndpointRouteBuilder MapDatasetDataEndpoints(this IEndpointRouteBuilder app)
     {
+        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         // 1. GET /api/v1/data/{domain}/{schema}/{table}
-        app.MapGet("/api/v1/data/{domain}/{schema}/{table}", HandleQueryThreePartAsync)
+        ingress.MapGet("/api/v1/data/{domain}/{schema}/{table}", HandleQueryThreePartAsync)
             .WithName("QueryDatasetThreePart")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         // 2. GET /api/v1/data/{domain}/{schema}/{table}/{id}
-        app.MapGet("/api/v1/data/{domain}/{schema}/{table}/{id}", HandleGetByIdAsync)
+        ingress.MapGet("/api/v1/data/{domain}/{schema}/{table}/{id}", HandleGetByIdAsync)
             .WithName("GetDatasetRecordById")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         // 3. GET /api/v1/data/{datasetId} (e.g. /api/v1/data/sales.dbo.customers)
-        app.MapGet("/api/v1/data/{datasetId}", HandleQueryDatasetIdAsync)
+        ingress.MapGet("/api/v1/data/{datasetId}", HandleQueryDatasetIdAsync)
             .WithName("QueryDatasetByIdentifier")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);

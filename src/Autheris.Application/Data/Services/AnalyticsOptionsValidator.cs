@@ -43,6 +43,12 @@ public sealed class AnalyticsOptionsValidator : IValidateOptions<AnalyticsOption
             return ValidateOptionsResult.Fail("Analytics:Privacy must not be null.");
         }
 
+        if (options.Privacy.CatalogMinGroupSizeFloor is < 1 or > Autheris.Application.Dbt.Services.SemanticManifestValidator.MaxMinGroupSize)
+        {
+            return ValidateOptionsResult.Fail(
+                $"Analytics:Privacy:CatalogMinGroupSizeFloor must be between 1 and {Autheris.Application.Dbt.Services.SemanticManifestValidator.MaxMinGroupSize}.");
+        }
+
         var minAllowed = options.Privacy.AllowDisabled ? 1 : 2;
         // MISC-10: a floor of 1 switches small-group suppression off, so it needs the explicit AllowDisabled opt-in. The per-table and
         // per-dataset overrides REPLACE the default and are held to the same minimum.

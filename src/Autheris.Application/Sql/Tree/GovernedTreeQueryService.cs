@@ -247,17 +247,17 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         var maxRows = _options.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         if (root.Limit > maxRows)
         {
-            throw new GatewayInvalidQueryException($"The page size must not exceed {maxRows}.");
+            throw new GatewayInvalidQueryException($"The page size must not exceed {maxRows}.", "INVALID_QUERY_OPTION");
         }
 
         var maxOffset = _options.GraphQL?.MaxAllowedOffset >= 0 ? _options.GraphQL.MaxAllowedOffset : 10000;
         if (root.Offset < 0)
         {
-            throw new GatewayInvalidQueryException("The offset cannot be negative.");
+            throw new GatewayInvalidQueryException("The offset cannot be negative.", "INVALID_QUERY_OPTION");
         }
         if (root.Offset > maxOffset)
         {
-            throw new GatewayInvalidQueryException($"The offset cannot exceed {maxOffset}.");
+            throw new GatewayInvalidQueryException($"The offset cannot exceed {maxOffset}.", "INVALID_QUERY_OPTION");
         }
 
         var maxBudget = _options.GraphQL?.MaxAggregateRowBudget > 0 ? _options.GraphQL.MaxAggregateRowBudget : 50000;

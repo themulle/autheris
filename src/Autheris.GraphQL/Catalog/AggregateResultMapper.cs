@@ -39,7 +39,8 @@ internal record AutherisTypedAggregationResult(
     int MinimumGroupSize,
     bool MergedIntoOther,
     bool Truncated,
-    bool NoiseApplied);
+    bool NoiseApplied,
+    string MinimumGroupSizeSource = "default");
 
 internal sealed record AggregateResultDto(
     IReadOnlyList<AggregateGroupDto> Groups,
@@ -49,7 +50,8 @@ internal sealed record AggregateResultDto(
     int MinimumGroupSize,
     bool MergedIntoOther,
     bool Truncated,
-    bool NoiseApplied) : AutherisTypedAggregationResult(Groups, Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MergedIntoOther, Truncated, NoiseApplied);
+    bool NoiseApplied,
+    string MinimumGroupSizeSource = "default") : AutherisTypedAggregationResult(Groups, Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MergedIntoOther, Truncated, NoiseApplied, MinimumGroupSizeSource);
 
 /// <summary>
 /// #112 A-4: pure mapping of an engine result to the typed GraphQL shape. Kinds are static (function and column type), conversion is
@@ -105,10 +107,20 @@ internal static class AggregateResultMapper
         AggregationResult result,
         CatalogTableType table,
         IReadOnlyList<CatalogColumnField> groupColumns,
-        IReadOnlyList<ResolvedAggregate> aggregates)
+        IReadOnlyList<ResolvedAggregate> aggregates,
+        IReadOnlySet<string>? bucketColumns = null)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return Map(result, groupColumns, aggregates, bucketColumns);
+    }
+
+    public static AggregateResultDto Map(
+        AggregationResult result,
+        IReadOnlyList<CatalogColumnField> groupColumns,
+        IReadOnlyList<ResolvedAggregate> aggregates,
+        IReadOnlySet<string>? bucketColumns = null)
     {
         ArgumentNullException.ThrowIfNull(result);
-        ArgumentNullException.ThrowIfNull(table);
 
         var groups = new List<AggregateGroupDto>(result.Groups.Count);
         foreach (var row in result.Groups)
@@ -117,7 +129,12 @@ internal static class AggregateResultMapper
             foreach (var column in groupColumns)
             {
                 // The merged OTHER row stands for many groups: its key is never filled (SEC-112-07).
-                key[column.FieldName] = row.IsMergedOther ? null : ConvertKey(Lookup(row.GroupKey, column.ColumnName), column.FieldType);
+                bool isBucket = bucketColumns != null && (bucketColumns.Contains(column.ColumnName) || bucketColumns.Contains(column.FieldName));
+                key[column.FieldName] = row.IsMergedOther
+                    ? null
+                    : (isBucket
+                        ? ConvertBucketKey(Lookup(row.GroupKey, column.ColumnName))
+                        : ConvertKey(Lookup(row.GroupKey, column.ColumnName), column.FieldType));
             }
 
             var values = new List<AggregateValueDto>(aggregates.Count);
@@ -143,7 +160,8 @@ internal static class AggregateResultMapper
             result.MinimumGroupSize,
             result.MergedIntoOther,
             result.Truncated,
-            result.NoiseApplied);
+            result.NoiseApplied,
+            result.Metadata.MinimumGroupSizeSource.ToString().ToLowerInvariant());
     }
 
     private static object? Lookup(IReadOnlyDictionary<string, object?> values, string name)
@@ -162,6 +180,21 @@ internal static class AggregateResultMapper
         }
 
         return null;
+    }
+
+    private static object? ConvertBucketKey(object? raw)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if (raw is string s)
+        {
+            return s;
+        }
+
+        throw AggregateErrors.ResultTypeMismatch();
     }
 
     private static object? ConvertKey(object? raw, CatalogFieldType type)

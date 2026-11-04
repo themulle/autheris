@@ -23,7 +23,8 @@ internal sealed record MetricResultDto(
     bool MergedIntoOther,
     bool Truncated,
     bool NoiseApplied,
-    IReadOnlyList<MetricDefinitionDto> MetricDefinitions);
+    IReadOnlyList<MetricDefinitionDto> MetricDefinitions,
+    string MinimumGroupSizeSource = "default");
 
 /// <summary>#112 A-8: pure mapping of a metric query result to the typed GraphQL shape (kinds come from the service).</summary>
 internal static class MetricResultMapper
@@ -73,7 +74,8 @@ internal static class MetricResultMapper
             result.MergedIntoOther,
             result.Truncated(),
             result.Metadata.NoiseApplied,
-            definitions);
+            definitions,
+            result.Metadata.MinimumGroupSizeSource.ToString().ToLowerInvariant());
     }
 
     private static bool Truncated(this MetricQueryResult result) => result.Metadata.Truncated;

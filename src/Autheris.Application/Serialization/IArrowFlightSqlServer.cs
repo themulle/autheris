@@ -29,5 +29,6 @@ public interface IArrowFlightSqlServer
         FlightSqlTicket ticket,
         ClaimsPrincipal principal,
         TenantId? callerTenant = null,
+        Autheris.Domain.Options.DataSources.DataSourceTransportFlags callerIngress = Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight,
         CancellationToken ct = default);
 }

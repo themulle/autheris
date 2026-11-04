@@ -165,6 +165,7 @@ internal static class AggregateGraphQlTypes
             d.Field("suppressed").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Suppressed);
             d.Field("suppressedGroupsCount").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<AggregateResultDto>().SuppressedGroupsCount);
             d.Field("minimumGroupSize").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MinimumGroupSize);
+            d.Field("minimumGroupSizeSource").Type(NonNull("String")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MinimumGroupSizeSource);
             d.Field("mergedIntoOther").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MergedIntoOther);
             d.Field("truncated").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Truncated);
             d.Field("noiseApplied").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().NoiseApplied);
@@ -235,7 +236,8 @@ internal static class AggregateGraphQlTypes
 
             var result = await ctx.Service<IGovernedAggregationService>()
                 .ExecuteAggregationAsync(principal, query, ctx.RequestAborted).ConfigureAwait(false);
-            return AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates);
+            var bucketColumns = parsed.TimeBuckets?.Select(b => b.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates, bucketColumns);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && AggregateFailureMapper.ForAggregate(ex) is { } mapped)
         {
