@@ -9,7 +9,7 @@ namespace Autheris.Tests.Architecture;
 /// </summary>
 internal static class RepositoryScan
 {
-    private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules", ".git"];
+    private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules", ".git", ".claude", "worktrees"];
     private static readonly Lazy<string> Root = new(LocateRoot);
     private static readonly Lazy<IReadOnlyList<SourceFile>> SrcFiles = new(() => LoadCsFiles("src"));
 

@@ -220,6 +220,8 @@ public sealed class DocsIntegrityTests
         return Directory.EnumerateFiles(root, "*.md", SearchOption.AllDirectories)
             .Select(f => RepositoryScan.Normalize(Path.GetRelativePath(root, f)))
             .Where(p => !p.StartsWith(".git/", StringComparison.OrdinalIgnoreCase) &&
+                        !p.StartsWith(".claude/", StringComparison.OrdinalIgnoreCase) &&
+                        !p.StartsWith("worktrees/", StringComparison.OrdinalIgnoreCase) &&
                         !p.Contains("/.git/") &&
                         !p.Contains("/bin/") &&
                         !p.Contains("/obj/") &&
