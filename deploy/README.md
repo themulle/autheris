@@ -217,3 +217,12 @@ Nach jedem Durchlauf werden strukturierte Reports im Ordner `results/` abgelegt:
 2. `results/benchmark-summary.json`: Alle k6-Metriken im JSON-Format.
 3. `results/benchmark-summary.csv`: Tabellarische Metriken für automatisierte CI/CD-Auswertungen.
 4. `results/chaos-test-result.json`: Validierungsergebnis des Redis-Chaos-Tests.
+
+---
+
+## 10. Releasing
+
+Releases are published automatically from git tags matching `vX.Y.Z`. Before tagging:
+1. Update `CHANGELOG.md` with release notes under `## [X.Y.Z] - YYYY-MM-DD` and move unreleased items to the version section.
+2. Verify that the scheduled nightly workflow runs on `main` (`parity-nightly.yml` and `sql-compiler-gate-nightly.yml`) are green.
+3. Release cadence: maximum of one planned release per week, plus out-of-band security patches as needed.
