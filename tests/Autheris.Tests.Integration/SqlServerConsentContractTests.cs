@@ -45,7 +45,6 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
             {
                 Provider = "SqlServer",
                 ConnectionString = _db!.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         });

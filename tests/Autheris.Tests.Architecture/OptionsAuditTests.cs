@@ -34,10 +34,17 @@ public sealed class OptionsAuditTests
             typeof(Program).Assembly
         };
 
-        var typesByName = assemblies
-            .SelectMany(a => a.GetTypes())
-            .Where(t => t.FullName is not null)
-            .ToDictionary(t => t.FullName!, t => t, StringComparer.Ordinal);
+        var typesByName = new Dictionary<string, Type>(StringComparer.Ordinal);
+        foreach (var a in assemblies)
+        {
+            foreach (var t in a.GetTypes())
+            {
+                if (t.FullName is not null)
+                {
+                    typesByName.TryAdd(t.FullName, t);
+                }
+            }
+        }
 
         var productionFiles = RepositoryScan.ProductionFiles;
 

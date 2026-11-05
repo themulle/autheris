@@ -45,7 +45,6 @@ public sealed class SqlServerGovernanceUpgradeTests : GovernanceUpgradeTestsBase
             {
                 Provider = "SqlServer",
                 ConnectionString = cs,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false,
                 Migrations = new GovernanceMigrationOptions
                 {

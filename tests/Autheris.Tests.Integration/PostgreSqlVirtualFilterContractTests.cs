@@ -61,7 +61,6 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
             {
                 Provider = "PostgreSql",
                 ConnectionString = _db!.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         }), env);

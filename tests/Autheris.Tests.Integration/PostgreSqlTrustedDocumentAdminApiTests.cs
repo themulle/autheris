@@ -54,7 +54,7 @@ public sealed class PostgreSqlTrustedDocumentAdminApiTests : IAsyncLifetime
         env.EnvironmentName.Returns("Development");
         return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, SeedDemoData = false }
         }), env);
     }
 

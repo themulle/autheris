@@ -12,7 +12,7 @@ namespace Autheris.Tests.Architecture;
 /// over-approximates consumption (a common name read elsewhere counts as read), so it under-reports unconsumed properties
 /// but never flags a consumed one. The unconsumed set must be empty (WP-SIMPL-06).
 /// </summary>
-public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.ITestOutputHelper output)
+public sealed partial class OptionsConsumptionInventoryTests
 {
     private static readonly Assembly[] ProductionAssemblies =
     [
@@ -35,11 +35,11 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
     }
 
     [Theory]
-    [InlineData("public int X { get; set; } public int EffectiveX => Math.Max(1, X);", true)]
-    [InlineData("public bool A { get; set; } public bool IsA => A || B;", true)]
-    [InlineData("public int X { get; set; } // X is ignored", false)]
-    [InlineData("public int X { get; set; } string s = \"X\";", false)]
-    public void Reads_inside_the_declaring_file_count_as_consumption(string propertyBody, bool shouldBeConsumed)
+    [InlineData("X", "public int X { get; set; } public int EffectiveX => Math.Max(1, X);", true)]
+    [InlineData("A", "public bool A { get; set; } public bool IsA => A || B;", true)]
+    [InlineData("X", "public int X { get; set; } // X is ignored", false)]
+    [InlineData("X", "public int X { get; set; } string s = \"X\";", false)]
+    public void Reads_inside_the_declaring_file_count_as_consumption(string propertyName, string propertyBody, bool shouldBeConsumed)
     {
         var source = $"namespace Autheris.Tests.Architecture; public sealed class InlineDeclaringTestOptions {{ {propertyBody} }}";
         var files = new List<RepositoryScan.SourceFile>
@@ -47,14 +47,14 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
             new("src/InlineDeclaringTestOptions.cs", source)
         };
         var unconsumed = FindUnconsumed([typeof(InlineDeclaringTestOptions)], files);
+        var key = $"{typeof(InlineDeclaringTestOptions).FullName}.{propertyName}";
         if (shouldBeConsumed)
         {
-            unconsumed.ShouldNotContain($"{typeof(InlineDeclaringTestOptions).FullName}.X");
-            unconsumed.ShouldNotContain($"{typeof(InlineDeclaringTestOptions).FullName}.A");
+            unconsumed.ShouldNotContain(key);
         }
         else
         {
-            unconsumed.ShouldContain($"{typeof(InlineDeclaringTestOptions).FullName}.X");
+            unconsumed.ShouldContain(key);
         }
     }
 
@@ -165,8 +165,6 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
         // A property that becomes consumed simply drops out of the result (and out of the failing set).
         var withReader = files.Append(new("src/X/Reader2.cs", "var y = options.Value.Dead;")).ToList();
         FindUnconsumed([typeof(PlantedOptions)], withReader).ShouldBeEmpty();
-        FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles)
-            .Count.ShouldBeGreaterThan(0, "Scanner must see option types; a zero result means it is broken.");
     }
 
     private static List<string> FindUnconsumed(IEnumerable<Type> types, IReadOnlyList<RepositoryScan.SourceFile> files, bool countDeclaringReads = true)

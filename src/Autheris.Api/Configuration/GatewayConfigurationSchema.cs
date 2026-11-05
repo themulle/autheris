@@ -9,7 +9,6 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Options.Observability;
 using Autheris.Domain.Options.Plugins;
-using Autheris.Domain.Options.Protocols;
 using Autheris.Domain.Options.Security;
 using Autheris.Domain.Options.TableCache;
 using Microsoft.Extensions.Configuration;

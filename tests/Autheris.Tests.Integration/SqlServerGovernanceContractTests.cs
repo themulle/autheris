@@ -52,7 +52,6 @@ public sealed class SqlServerGovernanceContractTests : IAsyncLifetime
             {
                 Provider = "SqlServer",
                 ConnectionString = _connectionString!,
-                EnableOutboxProcessor = false,
                 SeedDemoData = seed
             }
         });

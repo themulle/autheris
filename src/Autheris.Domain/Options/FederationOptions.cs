@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Configuration for Federated Subgraphs & Hot Chocolate Fusion execution (P7).
+/// Configuration for Federated Subgraphs &amp; Hot Chocolate Fusion execution (P7).
 /// </summary>
 public sealed class FederationOptions
 {

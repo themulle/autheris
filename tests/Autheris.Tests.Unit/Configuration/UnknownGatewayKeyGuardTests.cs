@@ -251,7 +251,7 @@ public sealed class UnknownGatewayKeyGuardTests
     [InlineData("Gateway:Rebac:OpenFgaApiUrl")]
     [InlineData("Gateway:Rebac:OpenFgaStoreId")]
     [InlineData("Gateway:Authentication:GroupCacheTtlMinutes")]
-    [InlineData("Gateway:Databricks:Obo:AllowLongRunning")]
+    [InlineData("Gateway:DataSources:Connections:testSource:Databricks:Auth:Obo:AllowLongRunning")]
     [InlineData("Gateway:CatalogSearch:FieldWeights")]
     [InlineData("Gateway:DataMasking:MaskingCacheTtlHours")]
     [InlineData("Gateway:Federation:GatewayPackagePath")]

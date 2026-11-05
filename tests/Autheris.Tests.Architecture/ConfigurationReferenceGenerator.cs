@@ -178,7 +178,7 @@ internal static class ConfigurationReferenceGenerator
                 var propPath = currentPath + ":" + prop.Name;
                 var propVal = instance != null ? TryGetValue(prop, instance) : null;
 
-                if (IsSecretLike(prop.Name))
+                if (IsSecretLike(prop))
                 {
                     if (propVal != null)
                     {
@@ -281,7 +281,21 @@ internal static class ConfigurationReferenceGenerator
         }
     }
 
-    internal static bool IsSecretLike(string name) => SecretRegex.IsMatch(name);
+    internal static bool IsSecretLike(PropertyInfo prop)
+    {
+        if (prop.PropertyType == typeof(bool)) return false;
+        return IsSecretLike(prop.Name);
+    }
+
+    internal static bool IsSecretLike(string name)
+    {
+        if (name.EndsWith("SensitivityKey", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("ProjectKey", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        return SecretRegex.IsMatch(name);
+    }
 
     private static object? TryGetValue(PropertyInfo prop, object instance)
     {

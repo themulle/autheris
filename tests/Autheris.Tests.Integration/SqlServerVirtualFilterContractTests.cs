@@ -48,7 +48,6 @@ public sealed class SqlServerVirtualFilterContractTests : IAsyncLifetime
             {
                 Provider = "SqlServer",
                 ConnectionString = _db!.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         }), env);

@@ -44,7 +44,6 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
             {
                 Provider = "PostgreSql",
                 ConnectionString = cs,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false,
                 Migrations = new GovernanceMigrationOptions
                 {

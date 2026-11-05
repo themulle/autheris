@@ -23,7 +23,6 @@ internal static class GovernanceSchemaTestSupport
         {
             Provider = "PostgreSql",
             ConnectionString = connectionString,
-            EnableOutboxProcessor = false,
             SeedDemoData = false,
             Migrations = new GovernanceMigrationOptions { Mode = mode }
         }
@@ -35,7 +34,6 @@ internal static class GovernanceSchemaTestSupport
         {
             Provider = "SqlServer",
             ConnectionString = connectionString,
-            EnableOutboxProcessor = false,
             SeedDemoData = false,
             Migrations = new GovernanceMigrationOptions { Mode = mode }
         }
