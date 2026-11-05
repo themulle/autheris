@@ -37,6 +37,9 @@ A critical whole-project review (10 findings) concluded that Autheris is an AI-g
 
 - **OD-1 (binding, owner, 2026-11-05):** SQLite is dropped as the governance/metadata catalog store. Only SQL Server and PostgreSQL remain as governance databases. Scope is the governance/metadata store only; SQLite as a governed data source is a separate open decision (D14). Requirements: REQ-SIMPL-12 and REQ-SIMPL-05.
 - **OD-2 (owner request, 2026-11-05; recommendation, default taken):** evaluate and, by default, execute full SQLite removal (data source, parity, quickstart, tests), staged: governance store first, then tests/parity, then the data-source dialect. Evidence favours removal for the product (parity and CI are SQLite-centred but PostgreSQL fixtures exist) but the trade-offs are real (no zero-dependency quickstart, slower DB tests, transition parity gap); the owner can stop after step 1 or 2. See REQ-SIMPL-13.
+- **OD-3 (binding, owner, 2026-11-05):** WebSQL DML (`RestApi:AllowDml`, opt-in, off by default) stays in the core. The DML advisories and #505 are fixed in the core security lane; the write-grant fix must not rely on Casbin, which is deleted (WP-SIMPL-14).
+- **OD-4 (binding, owner, 2026-11-05):** catalog search, including semantic search and embeddings, is core. #501 and the embeddings part of #488 are FIX-IN-CORE.
+- **OD-5 (binding, owner, 2026-11-05):** the ITSM integration and the header-based break-glass/justification flow (`JustificationAndBreakGlassInterceptor` and its options and headers) are deleted. Access-profile break-glass assignments are a separate feature and stay. The ITSM-related parts of #507 and #485 are OBSOLETE-BY-REMOVAL.
 
 ### 2.1 Positioning (one sentence)
 
