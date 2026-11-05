@@ -2,8 +2,8 @@ apiVersion: v2
 name: autheris
 description: Enterprise GraphQL Gateway with Data-Owner Consent, Zero-Trust Governance and High Availability
 type: application
-version: 1.0.0
-appVersion: "1.0.0"
+version: 0.0.0-dev
+appVersion: "0.0.0-dev"
 keywords:
   - graphql
   - gateway

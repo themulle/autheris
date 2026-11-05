@@ -51,7 +51,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     [InlineData("id < 7")]
     [InlineData("id > 7")]
     [InlineData("id BETWEEN 6 AND 7")]
-    public void GHSA_6523_m29q_c397_RangePredicatesOnPrimaryKey_AreRejectedAsIsolating(string sql)
+    public void RangePredicatesOnPrimaryKey_AreRejectedAsIsolating(string sql)
     {
         var meta = Wp0.Table("sales", "orders", columns: ["id", "dept", "amount"]) with
         {
@@ -64,7 +64,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     }
 
     [Fact]
-    public async Task GHSA_6523_m29q_c397_MinMaxCountDistinct_OnNonGroupColumn_WhenKGreaterThan1_Rejected()
+    public async Task MinMaxCountDistinct_OnNonGroupColumn_WhenKGreaterThan1_Rejected()
     {
         var meta = Wp0.Table("sales", "orders", columns: ["id", "dept", "amount"]) with
         {
@@ -123,7 +123,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     // =========================================================================
 
     [Fact]
-    public async Task GHSA_3953_r994_fg4m_GovernedProcedureExecution_EnforcesTransportGate()
+    public async Task GovernedProcedureExecution_EnforcesTransportGate()
     {
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -175,7 +175,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     }
 
     [Fact]
-    public async Task GHSA_3953_r994_fg4m_IcebergRestCatalog_EnforcesTransportGate()
+    public async Task IcebergRestCatalog_EnforcesTransportGate()
     {
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -208,7 +208,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     }
 
     [Fact]
-    public async Task GHSA_3953_r994_fg4m_CdcSubscriptionGovernor_EnforcesTransportGate()
+    public async Task CdcSubscriptionGovernor_EnforcesTransportGate()
     {
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -231,7 +231,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     }
 
     [Fact]
-    public async Task GHSA_3953_r994_fg4m_StreamRlsPolicyEnforcer_EnforcesTransportGate()
+    public async Task StreamRlsPolicyEnforcer_EnforcesTransportGate()
     {
         var gate = Substitute.For<IDataSourceTransportGate>();
         gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
