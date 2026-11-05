@@ -1,7 +1,6 @@
 # P5: Subscriptions, Realtime Events & In-Stream RLS
 
-**Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`Subscription.cs`](file:///root/autheris/src/Autheris.GraphQL/Subscriptions/Subscription.cs), [`StreamRlsPolicyEnforcer.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs), [`WebSocketAuthInterceptor.cs`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/WebSocketAuthInterceptor.cs)
+**Components:** [`Subscription.cs`](../../src/Autheris.GraphQL/Subscriptions/Subscription.cs), [`StreamRlsPolicyEnforcer.cs`](../../src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs), [`WebSocketAuthInterceptor.cs`](../../src/Autheris.GraphQL/Subscriptions/WebSocketAuthInterceptor.cs)
 
 ---
 

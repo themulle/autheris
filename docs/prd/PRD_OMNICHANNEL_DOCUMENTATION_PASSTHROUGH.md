@@ -1,7 +1,6 @@
 # PRD: Omnichannel Semantic Documentation Passthrough (dbt & OpenMetadata)
 
 **Feature-ID:** F-DOC-01  
-**Status:** In Realisierung / Top Quick-Win (Wave 1)  
 **Author:** Principal Enterprise Product Manager & Platform Strategist  
 **Target Release:** Autheris v2.3 / v2.4  
 **Impact Level:** Highest RICE-C Score (39.9) – Strategischer Differenzierungs-Moat vs. Apollo / Hasura  

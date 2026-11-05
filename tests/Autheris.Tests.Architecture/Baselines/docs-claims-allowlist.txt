@@ -1,0 +1,61 @@
+# Allowlist for legitimate configuration timeouts, SLA metrics, alert thresholds and historical records.
+# Format: path:exact-line-text
+#
+# docs/configuration-guide.md config/SLA value
+docs/configuration-guide.md:- `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
+# docs/operations-runbook.md config/SLA value
+docs/operations-runbook.md:Required audit writes (administrative changes, security events, denials and allow records written through `IAuditWriter.RecordRequiredAsync`) are coalesced by `AuditGroupCommitSink` into batches of up to 64 entries (5 ms coalescing window, 4,096 pending entries before back-pressure), each written in one transaction with one chain-tail read and one anchor ([F-AUDIT-01, section 10](features/f-audit-01-hardened-cryptographic-audit.md)).
+# docs/operations-runbook.md config/SLA value
+docs/operations-runbook.md:* **L1 Cache Hit (In-Memory Policy):** P50 < 0.2 ms, P99 < 1.0 ms
+# docs/operations-runbook.md config/SLA value
+docs/operations-runbook.md:* **L2 Cache Hit (Redis Roundtrip):** P50 < 1.5 ms, P99 < 4.0 ms
+# docs/operations-runbook.md config/SLA value
+docs/operations-runbook.md:* **End-to-End GraphQL Request (with RLS Pushdown):** P50 < 4.0 ms, P95 < 9.0 ms, P99 < 15.0 ms
+# docs/operations-runbook.md config/SLA value
+docs/operations-runbook.md:| Redis | Standalone or Redis Cluster (epoch reads are single-key and Cluster-safe). About 2,000 ops/s at peak; the 150 ms staleness budget saves one round trip per request for non-sensitive tables. Enable AOF persistence (F-OPS-02). |
+# docs/adr/ADR-002-epoch-cache-validation.md config/SLA value
+docs/adr/ADR-002-epoch-cache-validation.md:Um Latenzen < 1 ms bei der Consent-Auflösung (Q-01) zu erreichen, ist Caching unerlässlich. Ein Widerruf eines Zugriffsrechts muss jedoch innerhalb von <= 1 s clusterweit wirksam werden (Q-07). Ein reiner TTL-basierter Cache wäre zu träge; reines Pub/Sub ist unzuverlässig bei Netzwerk-Partitionen ("Fire and Forget").
+# docs/adr/ADR-015-apache-iceberg-lakehouse-connector-and-zero-trust-pushdown.md config/SLA value
+docs/adr/ADR-015-apache-iceberg-lakehouse-connector-and-zero-trust-pushdown.md:- **Problem**: Konkurrenzprodukte (Apollo GraphQL, Hasura DDN) verlangen den Betrieb externer Cloud Data Warehouses (Snowflake, Databricks SQL, Trino). Dies verursacht hohe Cluster-Kosten, addiert 1.500 bis 3.000 ms Latenz und entkoppelt die Autorisierungslogik vom Gateway.
+# docs/adr/ADR-015-apache-iceberg-lakehouse-connector-and-zero-trust-pushdown.md config/SLA value
+docs/adr/ADR-015-apache-iceberg-lakehouse-connector-and-zero-trust-pushdown.md:- Direkte Abfrage riesiger analytischer Datenmengen in 15–50 ms statt Sekunden.
+# docs/adr/ADR-020-unified-authorization-model.md config/SLA value
+docs/adr/ADR-020-unified-authorization-model.md:- PDP p95 latency above 5 ms per object on the parity benchmark after caching.
+# docs/architecture/arc42.md config/SLA value
+docs/architecture/arc42.md:2. **Performance & Low Latency**: P99 consent resolution latency < 15ms via two-tier caching (L1 MemoryCache + L2 Redis) with policy epoch invalidation.
+# docs/extensions/data-catalog-guide.md config/SLA value
+docs/extensions/data-catalog-guide.md:- **Vorteil**: Extrem niedrige Latenz im Query-Pfad (< 0.2 ms), da keine externen I/O-Aufrufe während der GraphQL-Ausführung stattfinden. Hohe Ausfallsicherheit bei Ausfällen des Katalogs.
+# docs/features/f-audit-02-retention-purge-and-checkpoints.md config/SLA value
+docs/features/f-audit-02-retention-purge-and-checkpoints.md:- Inter-batch delay: Waits `InterBatchDelayMs` (default: 200ms) between batches to allow concurrent incoming audit writes to proceed without contention.
+# docs/features/f-cdc-02-mssql-change-tracking.md config/SLA value
+docs/features/f-cdc-02-mssql-change-tracking.md:| `PollingIntervalMilliseconds` | `1000` | Polling interval (minimum 250 ms). |
+# docs/features/f-dialect-02-ast-sql-compiler.md config/SLA value
+docs/features/f-dialect-02-ast-sql-compiler.md:| Cache miss (parse, build, simplify, inject, verify, emit) | 0.73 ms per compile | 10 ms |
+# docs/features/f-gov-14-federated-virtual-filters.md config/SLA value
+docs/features/f-gov-14-federated-virtual-filters.md:| `TargetPattern` | `string?` | profile scope | `source.schema.object` pattern, or a regex (prefix `^` or `regex:`). A regex is matched as a full match against `domain.schema.table` only, case-insensitively, with the non-backtracking engine and a 50 ms timeout. A pattern longer than 256 characters, or with backreferences or lookarounds, is rejected at write time. A pattern that cannot be evaluated at query time denies the query (`VF_PATTERN_EVALUATION_FAILED`); it is never treated as "no match". |
+# docs/features/f-gov-14-federated-virtual-filters.md config/SLA value
+docs/features/f-gov-14-federated-virtual-filters.md:| Single integer column | 2.12 ms | 390.8 KB |
+# docs/features/f-gov-14-federated-virtual-filters.md config/SLA value
+docs/features/f-gov-14-federated-virtual-filters.md:| Single text column | 2.55 ms | 390.8 KB |
+# docs/features/f-gov-14-federated-virtual-filters.md config/SLA value
+docs/features/f-gov-14-federated-virtual-filters.md:| Composite (2 text columns) | 6.06 ms | 2.29 MB |
+# docs/features/f-ops-02-high-availability-kubernetes-helm.md config/SLA value
+docs/features/f-ops-02-high-availability-kubernetes-helm.md:- **Automated SRE Observability**: Pre-configured PrometheusRule alerts detect 5xx error rate spikes ($> 0.5\%$), P99 latency regressions ($> 250\text{ms}$), and audit log dead-letter queue backlogs.
+# docs/features/f-ops-02-high-availability-kubernetes-helm.md config/SLA value
+docs/features/f-ops-02-high-availability-kubernetes-helm.md:| `MssqlChangeTrackingHostedService` (job `MssqlChangeTrackingPollJob`) | `cdc:mssql:poll` | `MssqlChangeTracking:PollingIntervalMilliseconds` (minimum 250 ms) | `max(15 s, 3 x interval)` | CDC watermark ([F-CDC-02](f-cdc-02-mssql-change-tracking.md#31-durable-fenced-watermark)) |
+# docs/features/f-ops-02-high-availability-kubernetes-helm.md config/SLA value
+docs/features/f-ops-02-high-availability-kubernetes-helm.md:| **`AutherisHighP99Latency`** | `warning` | P99 latency $> 250\text{ms}$ for 3m | Warns when query execution times exceed SLA threshold. |
+# docs/prd/PRD_MCP_AGENT_METADATA_ENRICHMENT.md config/SLA value
+docs/prd/PRD_MCP_AGENT_METADATA_ENRICHMENT.md:- `tools/list` muss aus dem In-Memory-Cache innerhalb von **< 1.0 ms** antworten.
+# docs/prd/PRD_OMNICHANNEL_DOCUMENTATION_PASSTHROUGH.md config/SLA value
+docs/prd/PRD_OMNICHANNEL_DOCUMENTATION_PASSTHROUGH.md:| **AC-8** | Performance: Schema-Assemblierung bleibt P99 < 50ms, Null-Overhead zur Query-Laufzeit. | BenchmarkDotNet Test |
+# docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md config/SLA value
+docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md:Das Konzept stützt sich auf einen Linux-Inotify-gestützten `FileSystemWatcher`, der Änderungen in `< 100 ms` erfassen soll.
+# docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md config/SLA value
+docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md:> Der Linux-Kernel-Mechanismus `inotify` arbeitet rein **knotenlokal**. Wenn Pod 1 auf Node A eine Datei auf einen NFSv4- oder AWS EFS-Mount schreibt, erhält der Linux-Kernel auf Node B (Pod 2 und Pod 3) **kein Inotify-Ereignis**. Pod 2 und 3 bemerken die Änderung erst nach Minuten über NFS-Directory-Attribute-Caches (`actimeo`) oder durch aktives Polling! Die im Konzept versprochene Reaktionszeit von `< 100 ms` bricht im K8s-Cluster technisch zusammen, es sei denn, man führt einen separaten Redis-PubSub-Eventbus ein – was das NFS-Konzept vollends ad absurdum führt.
+# docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md config/SLA value
+docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md:* **Speicher- und GC-Druck:** Das Vorhalten von Zehntausenden Markdown-Chunks, Vektor-Tensoren (`System.Numerics.Tensors`) und Okapi-BM25-Invertierten-Indizes im Kestrel-Prozessheap gefährdet die P99-Latenzgarantien der API-Pipeline (`< 15 ms`).
+# docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md config/SLA value
+docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md:Das Konzept sieht vor, dass ein LLM anhand von Spaltennamen, Datentyp und Kommentaren mit einem 200ms-Timeout Vorklassifizierungen generiert.
+# docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md config/SLA value
+docs/prd/PRODUCT_MANAGEMENT_ANALYSIS_GOV_DOCS_MCP.md:| **PII & Data Profiling** | LLM + Heuristik (200ms) | 200+ Regex/ML Patterns | Eigener ML-Klassifizierer | **Deep Cell-Level Profiling (State-of-the-Art)** | Basale Regex Tags | ❌ Keine |

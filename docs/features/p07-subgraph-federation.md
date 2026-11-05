@@ -1,7 +1,6 @@
 # P7: Subgraph Federation Router (Hot Chocolate Fusion)
 
-**Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`FusionGatewayExtensions.cs`](file:///root/autheris/src/Autheris.GraphQL/Federation/FusionGatewayExtensions.cs), [`SubgraphSecurityDelegatingHandler.cs`](file:///root/autheris/src/Autheris.GraphQL/Federation/SubgraphSecurityDelegatingHandler.cs), [`SubgraphFieldMaskingTypeInterceptor.cs`](file:///root/autheris/src/Autheris.GraphQL/Federation/SubgraphFieldMaskingTypeInterceptor.cs)
+**Components:** [`FusionGatewayExtensions.cs`](../../src/Autheris.GraphQL/Federation/FusionGatewayExtensions.cs), [`SubgraphSecurityDelegatingHandler.cs`](../../src/Autheris.GraphQL/Federation/SubgraphSecurityDelegatingHandler.cs), [`SubgraphFieldMaskingTypeInterceptor.cs`](../../src/Autheris.GraphQL/Federation/SubgraphFieldMaskingTypeInterceptor.cs)
 
 ---
 

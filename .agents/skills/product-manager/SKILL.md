@@ -38,7 +38,7 @@ flowchart TD
 - Analyze competitor releases (Apollo Federation v2, Hasura DDN, Immuta, Kong, Cosmo).
 
 ### Stage 2: Deduplication Check (`docs/features/`)
-- Search [`docs/features/README.md`](file:///root/autheris/docs/features/README.md) and individual feature documents.
+- Search [`docs/features/README.md`](../../../docs/features/README.md) and individual feature documents.
 - Questions to answer:
   - *Does Autheris already have this capability?*
   - *Can an existing connector, policy engine, or endpoint satisfy this need with configuration?*
@@ -54,7 +54,7 @@ flowchart TD
 ### Stage 4: Web & Industry Best-Practice Benchmarking
 - Cross-reference the proposal with authoritative industry standards:
   - **Security:** OWASP API Security Top 10, OWASP LLM01..10 Guardrails, NIST SP 800-207 Zero Trust, GDPR Art. 9/15, SEC Rule 17a-4 WORM audit.
-  - **Specifications:** GraphQL Foundation specs, OData v4, OpenAPI 3.1, Apache Iceberg v2, Apache Arrow Flight, OpenFGA ReBAC.
+  - **Specifications:** GraphQL Foundation specs, OData v4, OpenAPI 3.1, Apache Iceberg v2, Apache Arrow IPC.
   - **Reliability:** Circuit breaking, jittered backoff retries, rate limiting, distributed caching (Redis L2).
 
 ### Stage 5: Gatekeeper Verdict (Reject vs. Enrich)
@@ -68,8 +68,8 @@ If a request violates best practices or architectural boundaries:
 #### 🟢 When to Approve & Enrich:
 If the request is sound and strategically valuable:
 1. **Expand with Enterprise Best Practices:** Include telemetry spans, rate-limiting, error handling, audit line-aging, and fail-closed behaviors.
-2. **Draft the Requirement Document:** Place it in [`docs/plans/`](file:///root/autheris/docs/plans/) as `YYYY-MM-DD-req-<name>.md`.
-3. **Register in Origin Master Plan:** Link the new initiative in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
+2. **Draft the Requirement Document:** Place it in [`docs/plans/`](../../../docs/plans/) as `YYYY-MM-DD-req-<name>.md`.
+3. **Register in Origin Master Plan:** Link the new initiative in [`docs/plans/00-master-plan-overview.md`](../../../docs/plans/00-master-plan-overview.md).
 
 ---
 
@@ -81,7 +81,7 @@ If the request is sound and strategically valuable:
 | **Hasura Enterprise**<br/>*(DDN)* | Instant GraphQL over SQL; declarative permissions | Strong vendor lock-in; high license cost; difficult cross-domain governance; no integrated 4-eyes approval workflow | **Open Governance & Lower TCO**: Decoupled Data-Owner governance, no proprietary lock-in, automated ITSM approvals (ServiceNow/Jira). |
 | **WunderGraph / Cosmo** | Open-source Apollo alternative; Rust router | Frontend/BFF focus; **lacks enterprise compliance** (no SHA-256 hash-chain audit trail, no Kerberos/AD legacy support, no data catalog sync) | **Enterprise Grade & Compliance**: Cryptographic tamper-evident audit logs, hybrid IdP federation, GDPR Art. 15 disclosure APIs. |
 | **Data Security Suites**<br/>*(Immuta, Privacera)* | Strong policy engines for Snowflake/Databricks | **Not an API gateway**: Operate deep inside databases; high latency and complexity for application developers | **Unified Access Layer**: Brings Immuta-like governance directly to GraphQL, REST, and OData endpoints. |
-| **Tyk / Kong / Envoy**<br/>*(Traditional API Gateways)* | Mature API management & dev portals | **Double-hop latency penalty**: Out-of-process gRPC coprocesses incur IPC serialization costs; cannot perform deep GraphQL AST pushdown | **Dual-Mode Extensibility**: In-process native C# middlewares (<0.1ms overhead) + optional gRPC interceptors for polyglot microservices. |
+| **Tyk / Kong / Envoy**<br/>*(Traditional API Gateways)* | Mature API management & dev portals | **Double-hop latency penalty**: Out-of-process sidecars incur IPC serialization costs; cannot perform deep GraphQL AST pushdown | **High Performance Extensibility**: In-process native C# middlewares (<0.1ms overhead). |
 
 ---
 

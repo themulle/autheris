@@ -2,7 +2,6 @@
 
 **Dokument-ID:** `PRD-STRAT-GOV-DOCS-2026`  
 **Autor:** Principal Enterprise Product Manager & Platform Strategist  
-**Status:** In Review / Executive Board Submission  
 **Datum:** 10. Oktober 2026  
 **Zielgruppe:** CPO, CTO, Head of Architecture, Lead Data Stewards, Enterprise Sales  
 

@@ -1,7 +1,6 @@
 # P8: WORM Audit Logging & Consent Sealing
 
-**Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`IAuditWormExportService.cs`](file:///root/autheris/src/Autheris.Application/Interfaces/IAuditWormExportService.cs), [`AuditWormExportService.cs`](file:///root/autheris/src/Autheris.Infrastructure/Audit/AuditWormExportService.cs), [`SqliteGovernanceRepository.Consent.cs`](file:///root/autheris/src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs)
+**Components:** [`IAuditWormExportService.cs`](../../src/Autheris.Application/Interfaces/IAuditWormExportService.cs), [`AuditWormExportService.cs`](../../src/Autheris.Infrastructure/Persistence/AuditWormExportService.cs), [`SqliteGovernanceRepository.Consent.cs`](../../src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs)
 
 ---
 

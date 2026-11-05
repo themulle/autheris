@@ -3,9 +3,9 @@
 **Feature-ID:** F-DBT-07  
 **Category:** dbt Integration & Semantic Analytics  
 **Components:**
-- Domain: [`DbtSemanticModels.cs`](file:///root/autheris/src/Autheris.Domain/Model/DbtSemanticModels.cs)
-- Application: [`ISemanticMetricQueryService.cs`](file:///root/autheris/src/Autheris.Application/Analytics/ISemanticMetricQueryService.cs), [`SemanticMetricQueryService.cs`](file:///root/autheris/src/Autheris.Application/Analytics/SemanticMetricQueryService.cs), [`DbtSemanticManifestIngestionService.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Services/DbtSemanticManifestIngestionService.cs), [`McpSemanticTools.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/McpSemanticTools.cs), [`McpToolRegistry.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/McpToolRegistry.cs), [`AiDataGuardrailService.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs), [`McpToolExecutionHandler.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/McpToolExecutionHandler.cs)
-- GraphQL & API: [`QueryTypes.cs`](file:///root/autheris/src/Autheris.GraphQL/Types/QueryTypes.cs), [`AnalyticsEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/AnalyticsEndpoints.cs), [`DbtWebhookEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DbtWebhookEndpoints.cs)
+- Domain: [`DbtSemanticModels.cs`](../../src/Autheris.Domain/Model/DbtSemanticModels.cs)
+- Application: [`ISemanticMetricQueryService.cs`](../../src/Autheris.Application/Analytics/ISemanticMetricQueryService.cs), [`SemanticMetricQueryService.cs`](../../src/Autheris.Application/Analytics/SemanticMetricQueryService.cs), [`DbtSemanticManifestIngestionService.cs`](../../src/Autheris.Application/Dbt/Services/DbtSemanticManifestIngestionService.cs), [`McpSemanticTools.cs`](../../src/Autheris.Application/Mcp/Services/McpSemanticTools.cs), [`McpToolRegistry.cs`](../../src/Autheris.Application/Mcp/Services/McpToolRegistry.cs), [`AiDataGuardrailService.cs`](../../src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs), [`McpToolExecutionHandler.cs`](../../src/Autheris.Application/Mcp/Services/McpToolExecutionHandler.cs)
+- GraphQL & API: `QueryTypes.cs`, [`AnalyticsEndpoints.cs`](../../src/Autheris.Api/Endpoints/AnalyticsEndpoints.cs), `DbtWebhookEndpoints.cs`
 
 ---
 

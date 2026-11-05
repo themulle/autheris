@@ -1,6 +1,6 @@
 # F-DATA-03: Embedded In-Memory OLAP via DuckDB.NET
 
-**Components:** [`DuckDbOlapEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs), [`IOlapStagingService.cs`](file:///root/autheris/src/Autheris.Application/Olap/IOlapStagingService.cs), [`OlapStagingService.cs`](file:///root/autheris/src/Autheris.Application/Olap/OlapStagingService.cs), [`IDuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Application/Olap/IDuckDbOlapEngine.cs), [`DuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Infrastructure/Olap/DuckDbOlapEngine.cs)
+**Components:** [`DuckDbOlapEndpoints.cs`](../../src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs), [`IOlapStagingService.cs`](../../src/Autheris.Application/Olap/IOlapStagingService.cs), [`OlapStagingService.cs`](../../src/Autheris.Application/Olap/OlapStagingService.cs), [`IDuckDbOlapEngine.cs`](../../src/Autheris.Application/Olap/IDuckDbOlapEngine.cs), [`DuckDbOlapEngine.cs`](../../src/Autheris.Application/Olap/DuckDbOlapEngine.cs)
 
 ---
 

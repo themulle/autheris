@@ -1,7 +1,6 @@
 # F-SQL-01: Declarative SQL-to-API Engine & Auto-OpenAPI
 
-**Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`SqlEndpointLoader.cs`](file:///root/autheris/src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs), [`InMemorySqlEndpointRegistry.cs`](file:///root/autheris/src/Autheris.Application/SqlEndpoints/Services/InMemorySqlEndpointRegistry.cs), [`SqlEndpointRoutes.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs)
+**Components:** [`SqlEndpointLoader.cs`](../../src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs), [`InMemorySqlEndpointRegistry.cs`](../../src/Autheris.Application/SqlEndpoints/Services/InMemorySqlEndpointRegistry.cs), [`SqlEndpointRoutes.cs`](../../src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs)
 
 ---
 
@@ -13,7 +12,7 @@ Data engineering teams have established vast repositories of optimized, battle-t
 
 ## 2. Business Value
 
-- **Zero-Boilerplate API Creation**: Turn any approved `.sql` file into a secure, production-ready REST API in seconds without writing code.
+- **Zero-Boilerplate API Creation**: Turn any approved `.sql` file into a secure, REST API in seconds without writing code.
 - **GitOps Workflow for Data APIs**: Manage data APIs through pull requests and version-controlled SQL files with automated CI testing.
 - **Interactive Documentation**: Auto-generates complete OpenAPI 3.0 specs ready for testing in Swagger UI.
 

@@ -1,7 +1,6 @@
 # F-ARCH-10: Standardized Connector SPI (Trino Pattern)
 
-**Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IDataSourceExecutor.cs`](file:///root/autheris/src/Autheris.Application/DataSources/IDataSourceExecutor.cs), [`IConnectorPlugin.cs`](file:///root/autheris/src/Autheris.Application/Connectors/IConnectorPlugin.cs), [`ConnectorPluginManager.cs`](file:///root/autheris/src/Autheris.Application/Connectors/ConnectorPluginManager.cs)
+**Components:** [`IDataSourceExecutor.cs`](../../src/Autheris.Application/Interfaces/IDataSourceExecutor.cs), `IConnectorPlugin.cs`, `ConnectorPluginManager.cs`
 
 ---
 

@@ -40,7 +40,7 @@ The visible set is computed by the shared catalog visibility rule: a dataset is 
 ## 3. Implementation Details
 
 - **Service:** `CatalogDiscoveryService` in `src/Autheris.Application/Catalog/Services/CatalogDiscoveryService.cs`.
-- **Secrets Provider:** `IKeyVaultSecretProvider` in `src/Autheris.Core/Security/IKeyVaultSecretProvider.cs`.
+- **Secrets Provider:** `IKeyVaultSecretProvider` in `src/Autheris.Application/Interfaces/IKeyVaultSecretProvider.cs`.
 - **Endpoints:** Mapped in `src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs`.
 
 ## 4. Remote Spec Download Limits

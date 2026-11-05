@@ -1,7 +1,6 @@
 # F-PERF-13: GraphQL Cost & Client-Tier Quota Rate Limiting
 
-**Status:** [Done] (100% GA – Production-Ready)  
-**Components:** [`CostAndQuotaMiddleware.cs`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs), [`ClientTierResolver.cs`](file:///root/autheris/src/Autheris.Application/Caching/Services/ClientTierResolver.cs), [`QueryCostAnalyzerRule.cs`](file:///root/autheris/src/Autheris.GraphQL/Validation/QueryCostAnalyzerRule.cs), [`RedisRateLimiterService.cs`](file:///root/autheris/src/Autheris.Infrastructure/RateLimiting/RedisRateLimiterService.cs), [`ClientTierModels.cs`](file:///root/autheris/src/Autheris.Domain/Model/ClientTierModels.cs)
+**Components:** [`CostAndQuotaMiddleware.cs`](../../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs), [`ClientTierResolver.cs`](../../src/Autheris.Application/Caching/Services/ClientTierResolver.cs), [`QueryCostAnalyzerRule.cs`](../../src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs), [`RedisRateLimiterService.cs`](../../src/Autheris.Infrastructure/RateLimiting/RedisRateLimiterService.cs), [`ClientTierModels.cs`](../../src/Autheris.Domain/Model/ClientTierModels.cs)
 
 ---
 
@@ -9,7 +8,7 @@
 
 GraphQL APIs give clients flexible data querying capabilities, but this flexibility exposes backend databases to Denial-of-Service (DoS) and Denial-of-Wallet attacks. Malicious or poorly optimized queries with deep nesting, cartesian product joins, or missing pagination limits can easily monopolize database CPU, exhaust connection pools, and degrade latency for all tenants.
 
-**F-PERF-13** provides an intelligent, pre-execution defense layer implemented by the [`CostAndQuotaMiddleware`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs). Before any query reaches the execution pipeline or contacts a data source:
+**F-PERF-13** provides an intelligent, pre-execution defense layer implemented by the [`CostAndQuotaMiddleware`](../../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs). Before any query reaches the execution pipeline or contacts a data source:
 1. The query AST complexity is statically calculated and weighted against runtime pagination variables.
 2. The caller is mapped to a governed **Client Tier** (`Free`, `Standard`, `Enterprise`, or `Internal`).
 3. If the query exceeds the tier's maximum allowable complexity per query, it is rejected immediately (**Fail-Fast**).

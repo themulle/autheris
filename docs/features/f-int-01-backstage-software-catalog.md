@@ -1,7 +1,6 @@
 # F-INT-01: Spotify Backstage Software Catalog Integration
 
-**Status:** [Done] (100% GA – Production-Ready)  
-**Components:** [`BackstageEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/BackstageEndpoints.cs), [`IBackstageCatalogExportService.cs`](file:///root/autheris/src/Autheris.Application/Integrations/Backstage/IBackstageCatalogExportService.cs), [`BackstageCatalogExportService.cs`](file:///root/autheris/src/Autheris.Application/Integrations/Backstage/BackstageCatalogExportService.cs), [`BackstageYamlSerializer.cs`](file:///root/autheris/src/Autheris.Application/Integrations/Backstage/BackstageYamlSerializer.cs)
+**Components:** [`BackstageEndpoints.cs`](../../src/Autheris.Api/Endpoints/BackstageEndpoints.cs), [`IBackstageCatalogExportService.cs`](../../src/Autheris.Application/Integrations/Backstage/IBackstageCatalogExportService.cs), [`BackstageCatalogExportService.cs`](../../src/Autheris.Extensions/Backstage/BackstageCatalogExportService.cs), [`BackstageYamlSerializer.cs`](../../src/Autheris.Extensions/Backstage/BackstageYamlSerializer.cs)
 
 ---
 

@@ -1,13 +1,12 @@
-# P9: Native C# Ingress/Egress Pipeline & Dual-Mode Extensibility
+# P9: Native C# Ingress/Egress Pipeline
 
-**Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`IGatewayMiddleware.cs`](file:///root/autheris/src/Autheris.Application/Interfaces/IGatewayMiddleware.cs), [`GatewayExecutionService.cs`](file:///root/autheris/src/Autheris.Application/Services/GatewayExecutionService.cs)
+**Components:** `IGatewayMiddleware.cs`, [`GatewayExecutionService.cs`](../../src/Autheris.Application/Services/GatewayExecutionService.cs)
 
 ---
 
 ## 1. Overview & Problem Statement
 
-API gateways that rely on external out-of-process gRPC co-processes or Lua scripting (such as Kong or Tyk) introduce significant latency overhead (often 2–5 ms per call). P9 provides a dual-mode extensibility framework: native in-process C# DLL/NuGet middlewares for high-performance sub-millisecond execution (<0.1 ms overhead, zero IPC), alongside an optional decoupled gRPC coprocess interface for polyglot microservice teams.
+API gateways that rely on external out-of-process coprocesses or Lua scripting (such as Kong or Tyk) introduce significant latency overhead. P9 provides native in-process C# DLL/NuGet middlewares for high-performance execution (zero IPC).
 
 ---
 
@@ -15,7 +14,6 @@ API gateways that rely on external out-of-process gRPC co-processes or Lua scrip
 
 - **Peak High-Throughput Performance**: Sub-millisecond pipeline latency for critical enterprise hot paths.
 - **Familiar .NET Developer Ecosystem**: Write enterprise plugins, custom authenticators, and transformation interceptors using standard C#, DI, and NuGet packages.
-- **Polyglot Flexibility**: Non-.NET teams can still implement gRPC interceptors in Go, Python, or Rust when desired.
 
 ---
 

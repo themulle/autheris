@@ -378,7 +378,7 @@ dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj
 
 ## 11. Testing In-Memory OLAP & Arrow Export (`F-DATA-03` / `F-DATA-04`)
 
-Test fast vector analytical queries and Arrow Flight/IPC endpoints:
+Test fast vector analytical queries and Arrow IPC endpoints:
 
 ```bash
 # 1. In-Memory DuckDB OLAP Query

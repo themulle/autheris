@@ -1,7 +1,6 @@
 # F-DATA-05: Apache Iceberg REST Catalog (IRC) & Dynamic STS Credential Vending
 
-**Status:** [Done] (100% GA – Production-Ready)  
-**Components:** [`IcebergRestCatalogEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs), [`IIcebergRestCatalogFederationService.cs`](file:///root/autheris/src/Autheris.Extensions/Lakehouse/Interfaces/IIcebergRestCatalogFederationService.cs), [`LakehouseServiceCollectionExtensions.cs`](file:///root/autheris/src/Autheris.Extensions/Lakehouse/LakehouseServiceCollectionExtensions.cs)
+**Components:** [`IcebergRestCatalogEndpoints.cs`](../../src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs), [`IIcebergRestCatalogFederationService.cs`](../../src/Autheris.Extensions/Lakehouse/Interfaces/IIcebergRestCatalogFederationService.cs), [`LakehouseServiceCollectionExtensions.cs`](../../src/Autheris.Extensions/Lakehouse/LakehouseServiceCollectionExtensions.cs)
 
 ---
 

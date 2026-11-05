@@ -1,13 +1,13 @@
-# F-DATA-04: Apache Arrow Flight SQL Egress & Zero-Copy Analytics Pipeline
+# F-DATA-04: HTTP endpoints returning Arrow IPC
 
 **Feature-ID:** F-DATA-04  
-**Components:** [`ArrowFlightSqlEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/ArrowFlightSqlEndpoints.cs), [`IArrowFlightSqlServer.cs`](file:///root/autheris/src/Autheris.Application/Serialization/IArrowFlightSqlServer.cs), [`ArrowFlightSqlServer.cs`](file:///root/autheris/src/Autheris.Infrastructure/Serialization/ArrowFlightSqlServer.cs)
+**Components:** [`ArrowFlightSqlEndpoints.cs`](../../src/Autheris.Api/Endpoints/ArrowFlightSqlEndpoints.cs), [`IArrowFlightSqlServer.cs`](../../src/Autheris.Application/Serialization/IArrowFlightSqlServer.cs), [`ArrowFlightSqlServer.cs`](../../src/Autheris.Application/Serialization/ArrowFlightSqlServer.cs)
 
 ---
 
 ## 1. Overview & Problem Statement
 
-Transferring multi-million-row datasets over standard JSON REST endpoints creates CPU and allocation overhead due to row-by-row JSON serialization and repeated memory copies. `F-DATA-04` implements a governed Apache Arrow Flight SQL egress pipeline over HTTP/2 and Apache Arrow IPC streaming (`application/vnd.apache.arrow.stream`). Governed database results are converted into binary columnar Arrow `RecordBatch` payloads and streamed directly to analytical clients (DuckDB, Pandas, Polars, PyArrow, PySpark) with full row-level security (RLS) pushdown and format-preserving column masking.
+Transferring multi-million-row datasets over standard JSON REST endpoints creates CPU and allocation overhead due to row-by-row JSON serialization and repeated memory copies. `F-DATA-04` implements HTTP endpoints returning Arrow IPC over HTTP/2 and Apache Arrow IPC streaming (`application/vnd.apache.arrow.stream`). Governed database results are converted into binary columnar Arrow `RecordBatch` payloads and streamed directly to analytical clients (DuckDB, Pandas, Polars, PyArrow, PySpark) with full row-level security (RLS) pushdown and format-preserving column masking.
 
 ---
 
@@ -15,13 +15,13 @@ Transferring multi-million-row datasets over standard JSON REST endpoints create
 
 - **High-Throughput Columnar Ingestion**: Streams binary Apache Arrow `RecordBatch` payloads (`application/vnd.apache.arrow.stream`) without row-by-row JSON serialization overhead.
 - **Zero-Copy Memory Layout**: Direct columnar memory layout compatibility between the gateway and client analytics engines (`pyarrow.ipc`, Polars, DuckDB).
-- **Tamper-Proof Two-Phase Flight Protocol**: Query planning (`POST /api/v1/flight/sql/info`) issues an HMAC-SHA256 signed `FlightSqlTicket` bound to the authenticated subject SID, tenant, and expiration timestamp before streaming (`POST /api/v1/flight/sql/stream`).
+- **Tamper-Proof Two-Phase Ticket Protocol**: Query planning (`POST /api/v1/flight/sql/info`) issues an HMAC-SHA256 signed `FlightSqlTicket` bound to the authenticated subject SID, tenant, and expiration timestamp before streaming (`POST /api/v1/flight/sql/stream`).
 
 ---
 
 ## 3. Architecture & Component Wiring
 
-1. **Flight Info & Ticket Issuance (`POST /api/v1/flight/sql/info`)**:
+1. **Query Info & Ticket Issuance (`POST /api/v1/flight/sql/info`)**:
    - Validates the caller's SQL query and returns a `FlightSqlInfoResponse` containing the target `FlightEndpointUri` (`/api/v1/flight/sql/stream`) and an HMAC-SHA256 signed `FlightSqlTicket`.
    - Each ticket binds the SQL command, caller `SubjectSid`, `TenantId`, and expiration timestamp (`ExpiresAtUnixMs`) using a 256-bit cryptographic signing key.
 2. **Governed Catalog Discovery (`GET /api/v1/flight/sql/tables`)**:
@@ -33,7 +33,7 @@ Transferring multi-million-row datasets over standard JSON REST endpoints create
 
 ### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
 
-Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is `true`, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. Flight SQL queries use the transport name `FlightSql`; the Arrow IPC export endpoint uses `ArrowExport`. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is `true`, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. Queries using the `/api/v1/flight/sql/*` endpoints use the transport name `FlightSql`; the Arrow IPC export endpoint uses `ArrowExport`. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
 
 ```json
 {
@@ -59,7 +59,7 @@ import pyarrow.ipc as ipc
 
 headers = {"Authorization": "Bearer <token>"}
 
-# 1. Request Flight SQL info and signed ticket
+# 1. Request query info and signed ticket
 info_resp = httpx.post(
     "https://gateway.internal/api/v1/flight/sql/info",
     json={"sqlQuery": "SELECT * FROM finance.dbo.general_ledger"},

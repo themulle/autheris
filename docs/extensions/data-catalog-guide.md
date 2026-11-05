@@ -35,7 +35,7 @@ flowchart LR
 ```
 
 1. **Mirror Mode (`SyncMode: Mirror`)**:
-   - Die Metadaten werden periodisch über Hintergrunddienste ([`DataCatalogSyncBackgroundService`](file:///root/gql_extensions/src/Autheris.Extensions/DataCatalog/DataCatalogSyncBackgroundService.cs)) in den lokalen Governance-Store (SQLite) synchronisiert.
+   - Die Metadaten werden periodisch über Hintergrunddienste ([`DataCatalogSyncBackgroundService`](../../src/Autheris.Extensions/DataCatalog/DataCatalogSyncBackgroundService.cs)) in den lokalen Governance-Store (SQLite) synchronisiert.
    - **Vorteil**: Extrem niedrige Latenz im Query-Pfad (< 0.2 ms), da keine externen I/O-Aufrufe während der GraphQL-Ausführung stattfinden. Hohe Ausfallsicherheit bei Ausfällen des Katalogs.
 2. **Reference Mode (`SyncMode: Reference`)**:
    - Das Gateway cached Metadaten im L1/L2-Cache und fragt bei Cache-Misses die Daten live über den jeweiligen Catalog-Client ab.

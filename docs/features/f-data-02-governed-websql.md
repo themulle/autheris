@@ -1,7 +1,6 @@
 # F-DATA-02: Governed WebSQL Engine & Trino REST Protocol
 
-**Status:** [Done] (100% GA – Wave 1 & 100% Trino Compatibility)  
-**Components:** [`WebSqlEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/WebSqlEndpoints.cs), [`WebSqlStatementManager.cs`](file:///root/autheris/src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs), [`GovernedSqlExecutionService.cs`](file:///root/autheris/src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs), [`TrinoSqlEngine`](file:///root/autheris/src/TrinoSqlEngine)
+**Components:** [`WebSqlEndpoints.cs`](../../src/Autheris.Api/Endpoints/WebSqlEndpoints.cs), [`WebSqlStatementManager.cs`](../../src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs), [`GovernedSqlExecutionService.cs`](../../src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs), [`TrinoSqlEngine`](../../src/TrinoSqlEngine)
 
 ---
 

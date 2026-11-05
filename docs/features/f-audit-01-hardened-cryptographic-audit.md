@@ -24,7 +24,7 @@ The audit subsystem decouples in-memory high-throughput hash chaining from asymm
 - If the transaction is rolled back (`OnTransactionRolledBack`), the in-memory sequence numbers and chain hashes automatically revert to the committed state. This completely eliminates phantom audit records.
 
 ### 4. GDPR Art. 17 Compliant PII Scrubbing (AU-06 & AU-07)
-- Raw SQL queries sent through WebSQL or Declarative SQL endpoints are canonicalized via [`AuditCanonicalizer`](../../src/Autheris.Infrastructure/Persistence/AuditCanonicalizer.cs).
+- Raw SQL queries sent through WebSQL or Declarative SQL endpoints are canonicalized via [`AuditCanonicalizer`](../../src/Autheris.Domain/Audit/AuditCanonicalizer.cs).
 - Literal values (strings, numbers, timestamps) are scrubbed and parameterized (`@p_redacted`), preventing personal data from being immutably sealed into WORM storage while maintaining verifiable query structure integrity.
 
 ### 5. Resilient Dead-Letter Channel & Backpressure (AU-05)

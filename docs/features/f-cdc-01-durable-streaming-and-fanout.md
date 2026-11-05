@@ -1,6 +1,6 @@
 # F-CDC-01: Durable CDC Event Streaming & Multi-Protocol Fanout
 
-**Components:** [`ICdcStreamStore.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Interfaces/ICdcStreamStore.cs), [`SqliteCdcStreamStore.cs`](file:///root/autheris/src/Autheris.Infrastructure/Streaming/SqliteCdcStreamStore.cs), [`PostgreSqlCdcStreamStore.cs`](file:///root/autheris/src/Autheris.Infrastructure/Streaming/PostgreSqlCdcStreamStore.cs), [`SqlServerCdcStreamStore.cs`](file:///root/autheris/src/Autheris.Infrastructure/Streaming/SqlServerCdcStreamStore.cs), [`CdcChangeEventBuilder.cs`](file:///root/autheris/src/Autheris.Extensions/Cdc/CdcChangeEventBuilder.cs), [`CdcWebhookDispatcher.cs`](file:///root/autheris/src/Autheris.Extensions/Cdc/CdcWebhookDispatcher.cs), [`ICdcPluginHandler.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Interfaces/ICdcPluginHandler.cs)
+**Components:** [`ICdcStreamStore.cs`](../../src/Autheris.Application/Streaming/Interfaces/ICdcStreamStore.cs), `SqliteCdcStreamStore.cs`, `PostgreSqlCdcStreamStore.cs`, `SqlServerCdcStreamStore.cs`, [`CdcChangeEventBuilder.cs`](../../src/Autheris.Extensions/Cdc/CdcChangeEventBuilder.cs), `CdcWebhookDispatcher.cs`, `ICdcPluginHandler.cs`
 
 ---
 

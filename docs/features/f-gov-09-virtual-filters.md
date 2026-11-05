@@ -1,6 +1,6 @@
 # F-GOV-09: Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering)
 
-**Components:** [`VirtualFilterEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs), [`EffectiveFilterInspector.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs), [`MandatoryRowFilterResolver.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs), [`StructuredFilterSqlBuilder.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/StructuredFilterSqlBuilder.cs), [`SqlFilterCompiler.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/SqlFilterCompiler.cs), [`VirtualFilterAdministrationService.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.cs), [`VirtualFilterSnapshotProvider.cs`](file:///root/autheris/src/Autheris.Application/VirtualFilters/VirtualFilterSnapshotProvider.cs), [`TableAccessPolicy.cs`](file:///root/autheris/src/Autheris.Application/Policy/TableAccessPolicy.cs)
+**Components:** [`VirtualFilterEndpoints.cs`](../../src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs), [`EffectiveFilterInspector.cs`](../../src/Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs), [`MandatoryRowFilterResolver.cs`](../../src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs), [`StructuredFilterSqlBuilder.cs`](../../src/Autheris.Application/VirtualFilters/StructuredFilterSqlBuilder.cs), [`SqlFilterCompiler.cs`](../../src/Autheris.Application/VirtualFilters/SqlFilterCompiler.cs), [`VirtualFilterAdministrationService.cs`](../../src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.cs), [`VirtualFilterSnapshotProvider.cs`](../../src/Autheris.Application/VirtualFilters/VirtualFilterSnapshotProvider.cs), [`TableAccessPolicy.cs`](../../src/Autheris.Application/Policy/TableAccessPolicy.cs)
 
 ---
 
@@ -12,7 +12,7 @@ In enterprise data access, traditional Row-Level Security (RLS) policies are fre
 - Ad-hoc WebSQL (`/api/v1/sql`, `/v1/statement`)
 - GraphQL table and selection tree queries (`/graphql`)
 - OData v4 endpoints (`/odata/v4/*`)
-- Apache Arrow Flight SQL & binary export (`/api/v1/flight/sql/*`, `/api/v1/export/arrow`)
+- Arrow IPC over HTTP & binary export (`/api/v1/flight/sql/*`, `/api/v1/export/arrow`)
 - Governed Stored Procedures (`/api/v1/procedures/*`)
 - Embedded DuckDB OLAP queries (`/api/v1/olap/query`)
 
@@ -22,11 +22,11 @@ Virtual filters define reusable filter predicates independently of target tables
 
 ## 2. Business Value
 
-- **Universal Cross-Channel Parity**: Exactly identical row filtering semantics are enforced regardless of whether an analyst accesses data through Power BI (OData), Python (Arrow Flight), WebSQL, or web applications (GraphQL).
+- **Universal Cross-Channel Parity**: Exactly identical row filtering semantics are enforced regardless of whether an analyst accesses data through Power BI (OData), Python (Arrow IPC), WebSQL, or web applications (GraphQL).
 - **Zero-Drift Access Profiles**: Grantees (Users, Groups, Roles, Service Principals) are assigned `AccessProfile`s governing broad object patterns (`sales.*.*`). Any new table matching the pattern inherits the mandatory filter immediately.
 - **Fail-Closed Uncovered Object Governance**: If a table within a profile's scope is not covered by any binding, the profile explicitly dictates whether access is denied (`UncoveredPolicy.Deny` - fail closed) or left to explicit consents alone (`UncoveredPolicy.Skip`).
 - **Auditability & Explainability**: The `/api/v1/governance/effective-filters` endpoint allows compliance officers and auditors to simulate and explain exactly which virtual filters apply to a given user and table, showing generated target dialect SQL.
-- **Microsecond In-Memory Resolution**: Snapshots are cached in-memory and synchronized atomically across cluster nodes via monotonic generation counters, adding under **0.05 ms** (p99) to query latency.
+- **Low-Latency In-Memory Resolution**: Snapshots are cached in-memory and synchronized atomically across cluster nodes via monotonic generation counters.
 
 ---
 
@@ -234,7 +234,7 @@ Authorization: Bearer <token>
 The Virtual Filter subsystem is validated by comprehensive unit, integration, and cross-channel parity tests:
 - `CrossChannelVirtualFilterParityTests.cs`: Proves that WebSQL, GraphQL, OData, and stored procedures return identical rows under virtual filters.
 - `VirtualFilterAdministrationTests.cs`: Validates CRUD, GitOps atomic sync, `MaxRemovals` safeguards, and input validation.
-- `VirtualFilterResolutionPerformanceTests.cs`: Benchmarks resolution overhead, ensuring p99 latency remains under 0.05 ms.
+- `VirtualFilterResolutionPerformanceTests.cs`: Benchmarks resolution overhead.
 - `VirtualFilterProcedureParityTests.cs`: Verifies row-scope and virtual filter enforcement on stored procedure outputs.
 
 ## Tenant binding of source tables
