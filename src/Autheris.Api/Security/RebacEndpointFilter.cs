@@ -121,12 +121,14 @@ public sealed class RebacEndpointFilter : IEndpointFilter
                 detail: "Target object identifier missing for ReBAC check.");
         }
 
+        string targetObject;
         if (string.Equals(_objectType, "table", StringComparison.OrdinalIgnoreCase))
         {
             try
             {
                 var norm = TableIdentifierNormalizer.Normalize(objectId);
-                objectId = norm.ToQualifiedName();
+                targetObject = Autheris.Application.Policy.RebacTableGate.ObjectId(norm);
+                objectId = targetObject;
             }
             catch
             {
@@ -136,8 +138,10 @@ public sealed class RebacEndpointFilter : IEndpointFilter
                     detail: $"Invalid table identifier '{objectId}'.");
             }
         }
-
-        var targetObject = $"{_objectType}:{objectId}";
+        else
+        {
+            targetObject = $"{_objectType}:{objectId}";
+        }
 
         // 4. Batch DataLoader / Evaluator Check
         var loader = httpContext.RequestServices.GetRequiredService<IRebacBatchDataLoader>();

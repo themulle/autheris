@@ -515,6 +515,16 @@ internal static class AuditSqlCore
         bool anchorEntryMatched = false;
         bool readAnyRows = false;
 
+        if (anchor != null && anchor.Sequence == position)
+        {
+            anchorEntryMatched = FixedTimeEqualsString(expectedPrevHash, anchor.EntryHash);
+            if (!anchorEntryMatched)
+            {
+                flagViolation($"Anchor mismatch at sequence {position}. DB entry hash does not match signed anchor.");
+                return new AuditChainVerificationResult(false, position, expectedPrevHash);
+            }
+        }
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             readAnyRows = true;

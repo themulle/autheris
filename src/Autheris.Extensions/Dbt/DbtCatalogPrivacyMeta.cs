@@ -20,18 +20,6 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 internal static class DbtCatalogPrivacyMeta
 {
-    public static Task<(int? MinGroupSize, bool NonPersonal)> ApplyAsync(
-        DbtModelDefinition model,
-        TableIdentifier tableId,
-        int? storedMinGroupSize,
-        bool storedNonPersonal,
-        IAuditWriter? auditWriter,
-        TenantId tenantId,
-        List<string> warnings,
-        ILogger logger,
-        CancellationToken ct)
-        => ApplyAsync(model, null, tableId, storedMinGroupSize, storedNonPersonal, auditWriter, tenantId, hasStanding: true, warnings, logger, ct);
-
     public static async Task<(int? MinGroupSize, bool NonPersonal)> ApplyAsync(
         DbtModelDefinition model,
         TableMetadata? existingMetadata,
@@ -43,7 +31,8 @@ internal static class DbtCatalogPrivacyMeta
         bool hasStanding,
         List<string> warnings,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool dryRun = false)
     {
         // 1. Extract raw keys (flat or nested)
         var (rawMinGroup, rawNonPersonal, hasMinGroupKey, hasNonPersonalKey) = ExtractRaw(model.Meta);
@@ -148,6 +137,11 @@ internal static class DbtCatalogPrivacyMeta
         if (!changed)
         {
             return (storedMinGroupSize, storedNonPersonal);
+        }
+
+        if (dryRun)
+        {
+            return (targetMinGroupSize, targetNonPersonal);
         }
 
         // 6. Fail-closed audit check

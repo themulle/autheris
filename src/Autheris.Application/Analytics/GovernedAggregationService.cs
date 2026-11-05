@@ -191,7 +191,13 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             groupByColumns = ValidateAndResolveGroupBy(query, metadata, decision);
             resolvedAggregates = ValidateAndResolveAggregates(query, metadata, decision);
 
-            if (effectiveMinGroupSize > 1)
+            if (_analyticsOptions.Privacy.Noise.Enabled)
+            {
+                ValidateAggregatesForNoise(resolvedAggregates);
+                ValidateMeasureBoundsForNoise(resolvedAggregates, metadata);
+            }
+
+            if (effectiveMinGroupSize > 1 && !_analyticsOptions.Privacy.Noise.Enabled && effectiveStrategy != SmallGroupStrategy.MergeIntoOther)
             {
                 var groupSet = new HashSet<string>(groupByColumns, StringComparer.OrdinalIgnoreCase);
                 foreach (var agg in resolvedAggregates)
@@ -211,11 +217,6 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ValidateWhereClause(query.Where, metadata, decision);
             AggregationNegationGuard.Enforce(query.Where, groupByColumns, metadata, effectiveMinGroupSize, _analyticsOptions.Privacy.RestrictNegatedFilters);
             ValidateOrderByClause(query.OrderBy, groupByColumns, resolvedAggregates, metadata, decision);
-            if (_analyticsOptions.Privacy.Noise.Enabled)
-            {
-                ValidateAggregatesForNoise(resolvedAggregates);
-                ValidateMeasureBoundsForNoise(resolvedAggregates, metadata);
-            }
 
             // I405-SC-01: the group-key type is refused last, so every access, mask, aggregate, WHERE and noise error wins over it.
             EnsureGroupKeysGroupable(groupByColumns, metadata);
@@ -281,7 +282,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             // Complementary suppression when noise is disabled:
             // If primary suppression occurred (smallBuckets.Count > 0), suppress at least one additional surviving bucket
             // so that subtracting surviving groups from marginal totals cannot isolate the suppressed bucket(s).
-            if (!_analyticsOptions.Privacy.Noise.Enabled && smallBuckets.Count > 0 && groupByColumns.Count > 0)
+            if (!_analyticsOptions.Privacy.Noise.Enabled && smallBuckets.Count > 0 && groupByColumns.Count > 0 && effectiveStrategy != SmallGroupStrategy.MergeIntoOther)
             {
                 if (survivingBuckets.Count > 1)
                 {

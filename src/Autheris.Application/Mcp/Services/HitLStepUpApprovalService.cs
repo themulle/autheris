@@ -445,9 +445,15 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 );
             }
 
-            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62)
+            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62, GHSA-wg8p-wfw5-qvgj)
             var isTotpEnforced = _options.Value.HitLStepUp.RequireTotp2Fa;
-            if (isTotpEnforced || !string.IsNullOrWhiteSpace(totpCode))
+            var enrolledSecret = _totpSecretStore != null
+                ? await _totpSecretStore.GetSecretAsync(approver.ApproverSid, ct).ConfigureAwait(false)
+                : null;
+            var hasEnrolledSecret = !string.IsNullOrWhiteSpace(enrolledSecret);
+            var codeSupplied = !string.IsNullOrWhiteSpace(totpCode);
+
+            if (isTotpEnforced || hasEnrolledSecret || codeSupplied)
             {
                 if (_totpService == null)
                 {
@@ -457,7 +463,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                         "TOTP 2FA service is not configured.");
                 }
 
-                if (string.IsNullOrWhiteSpace(totpCode))
+                if (!codeSupplied)
                 {
                     return new HitLApprovalResult(
                         false,
@@ -465,11 +471,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                         "TOTP 2FA code is required for Step-Up approval.");
                 }
 
-                var enrolledSecret = _totpSecretStore != null
-                    ? await _totpSecretStore.GetSecretAsync(approver.ApproverSid, ct).ConfigureAwait(false)
-                    : null;
-
-                if (string.IsNullOrWhiteSpace(enrolledSecret))
+                if (!hasEnrolledSecret)
                 {
                     return new HitLApprovalResult(
                         false,
@@ -479,8 +481,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
                 var isTotpValid = await _totpService.VerifyAndConsumeTotpAsync(
                     approver.ApproverSid,
-                    enrolledSecret,
-                    totpCode,
+                    enrolledSecret!,
+                    totpCode!,
                     ct).ConfigureAwait(false);
 
                 if (!isTotpValid)

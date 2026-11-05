@@ -15,6 +15,11 @@ namespace Autheris.Tests.Unit;
 /// </summary>
 public static class GovernanceStoreFactory
 {
+    private static readonly Lazy<IAuditAnchorSigner> DefaultTestSigner = new(() =>
+    {
+        using var ec = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        return new AsymmetricAuditAnchorSigner(System.Text.Encoding.UTF8.GetBytes(ec.ExportPkcs8PrivateKeyPem()));
+    });
     public static SqliteGovernanceRepository CreateSqlite(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions>? options = null,
@@ -70,7 +75,8 @@ public static class GovernanceStoreFactory
             throw new InvalidOperationException("Pass an explicit auditAnchorStore when the test environment is not Development/Test.");
         }
 
-        var anchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, auditAnchorSigner, logger, paths);
+        var effectiveSigner = auditAnchorSigner ?? (!string.IsNullOrWhiteSpace(gateway.Value.Audit.ChainAnchorWormDirectory) ? DefaultTestSigner.Value : null);
+        var anchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(gateway.Value, env, secrets, effectiveSigner, logger, paths);
         return new SqliteGovernanceRepository(
             epochValidationService,
             gateway,

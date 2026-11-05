@@ -257,17 +257,34 @@ public sealed class CdcWebhookDeliveryService : BackgroundService
                 if (identityStore != null && !string.IsNullOrWhiteSpace(subscription.CreatedBySid))
                 {
                     var tId = new Autheris.Domain.Common.TenantId(subscription.TenantId);
-                    if (await identityStore.IsSubjectLockedAsync(tId, "default", subscription.CreatedBySid, ct).ConfigureAwait(false))
+                    var realmRegistry = scope.ServiceProvider.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>();
+                    var candidateRealms = new List<string> { "default" };
+                    if (realmRegistry != null)
                     {
-                        Drop("subject_locked");
-                        Record(subscription, b => b.DroppedDenied++);
-                        continue;
+                        candidateRealms.AddRange(realmRegistry.GetAllRealms().Select(r => r.RealmId));
                     }
 
-                    var user = await identityStore.GetUserAsync(tId, "default", subscription.CreatedBySid, ct).ConfigureAwait(false);
-                    if (user != null && !user.Active)
+                    var isLockedOrInactive = false;
+                    foreach (var realm in candidateRealms.Distinct(StringComparer.OrdinalIgnoreCase))
                     {
-                        Drop("subject_inactive");
+                        if (await identityStore.IsSubjectLockedAsync(tId, realm, subscription.CreatedBySid, ct).ConfigureAwait(false))
+                        {
+                            isLockedOrInactive = true;
+                            Drop("subject_locked");
+                            break;
+                        }
+
+                        var user = await identityStore.GetUserAsync(tId, realm, subscription.CreatedBySid, ct).ConfigureAwait(false);
+                        if (user != null && !user.Active)
+                        {
+                            isLockedOrInactive = true;
+                            Drop("subject_inactive");
+                            break;
+                        }
+                    }
+
+                    if (isLockedOrInactive)
+                    {
                         Record(subscription, b => b.DroppedDenied++);
                         continue;
                     }

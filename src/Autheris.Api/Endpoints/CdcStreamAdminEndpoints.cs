@@ -53,13 +53,7 @@ public static class CdcStreamAdminEndpoints
 
     private static bool IsAuthorizedAdmin(HttpContext context)
     {
-        var secContext = context.GetSecurityContext();
-        if (secContext is { IsAuthenticated: true })
-        {
-            return secContext.IsClusterAdmin || secContext.ClusterRoles.Contains("GovernanceAdmin");
-        }
-
-        return EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+        return EndpointSecurity.IsCanonicalClusterAdmin(context.User) || EndpointSecurity.IsGlobalGovernanceAdmin(context.User);
     }
 
     internal static async Task<IResult> ListAsync(HttpContext context, CdcStreamAdminService service, CancellationToken ct)

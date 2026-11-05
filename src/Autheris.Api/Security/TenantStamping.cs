@@ -31,13 +31,13 @@ internal static class TenantStamping
             originalSource = TenantSourceClaim.Default;
         }
 
-        while (identity.FindFirst(SourceClaimType) is { } inbound)
+        foreach (var inbound in identity.FindAll(SourceClaimType).ToList())
         {
-            identity.RemoveClaim(inbound);
+            identity.TryRemoveClaim(inbound);
         }
-        while (identity.FindFirst(StatusClaimType) is { } inboundStatus)
+        foreach (var inboundStatus in identity.FindAll(StatusClaimType).ToList())
         {
-            identity.RemoveClaim(inboundStatus);
+            identity.TryRemoveClaim(inboundStatus);
         }
 
         if (restamp && originalSource == TenantSourceClaim.Default)
@@ -45,9 +45,9 @@ internal static class TenantStamping
             var names = TenantClaimReader.ClaimNames;
             for (var i = 0; i < names.Count; i++)
             {
-                while (identity.FindFirst(names[i]) is { } claim)
+                foreach (var claim in identity.FindAll(names[i]).ToList())
                 {
-                    identity.RemoveClaim(claim);
+                    identity.TryRemoveClaim(claim);
                 }
             }
         }
@@ -58,9 +58,9 @@ internal static class TenantStamping
             var names = TenantClaimReader.ClaimNames;
             for (var i = 0; i < names.Count; i++)
             {
-                while (identity.FindFirst(names[i]) is { } claim)
+                foreach (var claim in identity.FindAll(names[i]).ToList())
                 {
-                    identity.RemoveClaim(claim);
+                    identity.TryRemoveClaim(claim);
                 }
             }
         }

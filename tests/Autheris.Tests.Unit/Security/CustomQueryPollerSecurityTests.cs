@@ -101,6 +101,23 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         return context;
     }
 
+    private static DefaultHttpContext CtxGlobal(params string[] roles)
+    {
+        var claims = new List<Claim> { new("sub", "S-1-5-21-ADMIN1") };
+        claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
+        context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
+        {
+            UserSid = new Sid("S-1-5-21-ADMIN1"),
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(roles.Where(r => r is "GovernanceAdmin" or "ClusterAdmin")),
+            AuthenticationScheme = "Bearer"
+        };
+        return context;
+    }
+
     private static int Status(IResult r) => ((IStatusCodeHttpResult)r).StatusCode!.Value;
 
     private static CustomQueryPollerStreamOptions BaseOptions(string query) => new()
@@ -352,7 +369,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         var service = CreateAdminService();
         var audit = CreateAuditWriter();
 
-        var result = await CdcStreamAdminEndpoints.ResetWatermarkAsync(desc.Id.Value, request, Ctx("GovernanceAdmin"), service, audit, default);
+        var result = await CdcStreamAdminEndpoints.ResetWatermarkAsync(desc.Id.Value, request, CtxGlobal("GovernanceAdmin"), service, audit, default);
         Status(result).ShouldBe(200);
 
         // Verify Tier A audit event recorded

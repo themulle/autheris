@@ -186,8 +186,9 @@ public static class AnalyticsEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, "NOT_FOUND");
-            return SafeErrorResults.Problem(StatusCodes.Status404NotFound, "NOT_FOUND", "The requested dataset was not found.", httpContext);
+            // GHSA-jcpx-6m27-2m97: unify table existence oracle (missing/inactive vs denied) to 403 ACCESS_DENIED
+            SafeErrorResults.LogFailure(httpContext, ex, ApiErrorCodes.AccessDenied);
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access to the requested aggregation was denied by governance policy.", httpContext);
         }
         catch (GatewaySecurityException ex)
         {

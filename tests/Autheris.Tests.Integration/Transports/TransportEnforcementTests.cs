@@ -66,6 +66,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
 
         _factory = factory.WithWebHostBuilder(b =>
         {
+            b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default");
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");

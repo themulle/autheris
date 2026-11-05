@@ -348,6 +348,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var permittedById = permitted.ToDictionary(t => t.Identifier);
             var allById = all.ToDictionary(t => t.Identifier);
             var terms = QueryTerms(q);
+            var singleIdentifier = IsSingleIdentifierQuery(q, terms);
             var hits = await _searchEngine.SearchAsync(
                 new CatalogSearchQuery(q, domain, Limit: 25, Mode: CatalogSearchMode.Hybrid),
                 tableId => permittedById.ContainsKey(tableId),
@@ -355,7 +356,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
             // Result hygiene: rebuilt from the caller's filtered metadata; hits that exist only because of a hidden column are dropped.
             var tableHits = hits
-                .Select(h => ShapeHit(h, permittedById, allById, terms))
+                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier))
                 .Where(h => h != null)
                 .Select(h => ToSummary(permittedById[h!.TableIdentifier], "Catalog", context.Language))
                 .ToList();
@@ -417,9 +418,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         {
             var allById = all.ToDictionary(t => t.Identifier);
             var terms = QueryTerms(query.QueryText);
+            var singleIdentifier = IsSingleIdentifierQuery(query.QueryText, terms);
             var rawHits = await _searchEngine.SearchAsync(query, tableId => permittedById.ContainsKey(tableId), ct).ConfigureAwait(false);
             var tableHits = rawHits
-                .Select(h => ShapeHit(h, permittedById, allById, terms))
+                .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier))
                 .Where(h => h != null)
                 .Select(h => h!)
                 .ToList();
@@ -582,6 +584,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+    private static bool IsSingleIdentifierQuery(string? query, IReadOnlyList<string> terms) =>
+        terms.Count > 1 &&
+        !string.IsNullOrWhiteSpace(query) &&
+        !query.Trim().Any(char.IsWhiteSpace);
+
     private static readonly char[] QuerySeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-', '_', ':'];
 
     /// <summary>
@@ -596,7 +603,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         CatalogSearchHit hit,
         IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
         IReadOnlyDictionary<TableIdentifier, TableMetadata> all,
-        IReadOnlyList<string> queryTerms)
+        IReadOnlyList<string> queryTerms,
+        bool isSingleIdentifierQuery = false)
     {
         if (!permitted.TryGetValue(hit.TableIdentifier, out var visible))
         {
@@ -608,17 +616,35 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                          full.Columns.Any(c => !visibleColumnNames.Contains(c.ColumnName));
 
         IReadOnlyList<string> matchedTerms = hit.MatchedTerms;
+        double combinedScore = hit.CombinedScore;
+        double? bm25Score = hit.Bm25Score;
+        double? vectorScore = hit.VectorScore;
+
         if (restricted)
         {
             var text = VisibleTokens(visible);
             matchedTerms = hit.MatchedTerms
                 .Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t))
                 .ToList();
-            var lexical = matchedTerms.Count > 0 || queryTerms.Any(text.Contains);
-            if (!lexical)
+            if (matchedTerms.Count == 0)
             {
                 return null;
             }
+
+            // When all query terms came from a single underscore-joined identifier (e.g. a column name like tier_secret_col),
+            // every query term must be present in the visible text so a shared prefix (like "tier" in table description)
+            // cannot make a hidden column name match a restricted/Summary row.
+            if (isSingleIdentifierQuery && queryTerms.Any(t => !text.Contains(t)))
+            {
+                return null;
+            }
+
+            // GHSA-95f9-ffc7-vw2c: For column-restricted tables, scrub continuous scores and zero out BM25/vector scores
+            // to prevent text-oracle inference attacks on hidden columns.
+            bm25Score = null;
+            vectorScore = null;
+            var visibleRatio = queryTerms.Count > 0 ? (double)matchedTerms.Count / queryTerms.Count : 1.0;
+            combinedScore = Math.Round(visibleRatio, 1);
         }
 
         var relevantColumns = visible.Columns
@@ -635,6 +661,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
         return hit with
         {
+            CombinedScore = combinedScore,
+            Bm25Score = bm25Score,
+            VectorScore = vectorScore,
             Description = visible.Table.Description,
             SuggestedGraphQlField = visible.CatalogView == CatalogView.Summary ? null : hit.SuggestedGraphQlField,
             Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",

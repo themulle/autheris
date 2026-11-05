@@ -31,7 +31,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true }
+            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true, RequireTotp2Fa = false }
         });
 
         var service = new HitLStepUpApprovalService(options, NullLogger<HitLStepUpApprovalService>.Instance);
@@ -91,7 +91,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true }
+            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true, RequireTotp2Fa = false }
         });
 
         var service = new HitLStepUpApprovalService(options, NullLogger<HitLStepUpApprovalService>.Instance);
@@ -119,7 +119,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true }
+            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true, RequireTotp2Fa = false }
         });
 
         var service = new HitLStepUpApprovalService(options, NullLogger<HitLStepUpApprovalService>.Instance);
@@ -166,7 +166,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true }
+            HitLStepUp = new HitLStepUpOptions { Enabled = true, ApprovalTimeoutSeconds = 5, RequireDifferentApprover = true, RequireTotp2Fa = false }
         });
 
         var hitlService = new HitLStepUpApprovalService(options, NullLogger<HitLStepUpApprovalService>.Instance);

@@ -700,7 +700,9 @@ public sealed class CatalogVisibilityServiceTests
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") &&
                         !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") &&
                         !f.Contains(testRoot, StringComparison.Ordinal) &&
-                        !f.Contains($"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}"))
+                        !f.Contains($"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}") &&
+                        !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}") &&
+                        !f.Contains($"{Path.DirectorySeparatorChar}worktrees{Path.DirectorySeparatorChar}"))
             .Where(f => assignment.IsMatch(File.ReadAllText(f)))
             .Select(Path.GetFileName)
             .ToList();

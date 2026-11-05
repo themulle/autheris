@@ -62,6 +62,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.CatalogPhysicalIndexesChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogVisibilityChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogTagsChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.CatalogMinGroupSizeChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogProbeSuppressed] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ServiceStarted] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ServiceStopped] = AuditFailurePolicy.BestEffort,

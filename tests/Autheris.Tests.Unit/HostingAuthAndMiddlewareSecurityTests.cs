@@ -366,7 +366,13 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
             DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" },
             Authentication = new Autheris.Domain.Options.AuthenticationOptions
             {
-                EntraId = new EntraIdAuthOptions { Enabled = true, TenantId = "contoso-tenant", ClientId = "11111111-2222-3333-4444-555555555555" }
+                EntraId = new EntraIdAuthOptions
+                {
+                    Enabled = true,
+                    TenantId = "contoso-tenant",
+                    ClientId = "11111111-2222-3333-4444-555555555555",
+                    AllowedClientIds = ["11111111-2222-3333-4444-555555555555"]
+                }
             }
         };
 

@@ -316,23 +316,31 @@ public static class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.TableRowFilterStrategyChanged);
 
-        group.MapPut("/relations/{relationId:guid}/cross-data-source", async (
-            Guid relationId,
-            SetRelationCrossDataSourceDto request,
-            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
-            CancellationToken ct) =>
-        {
-            var updated = await relationRepo.SetRelationCrossDataSourceOptInAsync(relationId, request.AllowCrossDataSource, ct);
-            if (!updated)
-            {
-                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The relation was not found.");
-            }
-            return Results.Ok(new { relationId, allowCrossDataSource = request.AllowCrossDataSource });
-        })
+        group.MapPut("/relations/{relationId:guid}/cross-data-source", SetRelationCrossDataSourceAsync)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.CrossSourceOptInChanged);
 
         return app;
+    }
+
+    internal static async Task<IResult> SetRelationCrossDataSourceAsync(
+        Guid relationId,
+        SetRelationCrossDataSourceDto request,
+        HttpContext context,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
+        CancellationToken ct)
+    {
+        if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User) && !EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var updated = await relationRepo.SetRelationCrossDataSourceOptInAsync(relationId, request.AllowCrossDataSource, ct);
+        if (!updated)
+        {
+            return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The relation was not found.");
+        }
+        return Results.Ok(new { relationId, allowCrossDataSource = request.AllowCrossDataSource });
     }
 
     private static void MapDatasetCatalogRoutes(IEndpointRouteBuilder group)

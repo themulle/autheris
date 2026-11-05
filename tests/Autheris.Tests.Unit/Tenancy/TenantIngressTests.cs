@@ -61,6 +61,7 @@ public sealed class TenantIngressTests
         {
             registry.GetRealm(realm.Id).Returns(realm);
             registry.GetDefaultRealm().Returns(realm);
+            registry.ResolveRealmForScheme(Arg.Any<string?>(), Arg.Any<string?>()).Returns(realm);
         }
 
         var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: Resolver(defaultTenant, registry));

@@ -60,6 +60,7 @@ public sealed class CdcSubscriptionEndpointTests
         services.AddSingleton<IOptions<CdcWebhooksOptions>>(Options.Create(options ?? new CdcWebhooksOptions { Enabled = true }));
         services.AddSingleton(store);
         services.AddSingleton(env);
+        services.AddSingleton<IRestrictedScopePolicy>(RestrictedScopePolicy.Default);
         if (protectorRegistered)
         {
             services.AddSingleton(protector);

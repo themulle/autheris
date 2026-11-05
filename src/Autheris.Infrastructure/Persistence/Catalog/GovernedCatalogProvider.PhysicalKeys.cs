@@ -88,11 +88,6 @@ public sealed partial class GovernedCatalogProvider
                     ? new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Known, indexes)
                     : new PhysicalNonUniqueSnapshot(PhysicalKeySnapshotState.Unavailable);
 
-            if (keyRows.Count == 0 && nonUniqueRows.Count > 0 && nonUnique.State == PhysicalKeySnapshotState.Known)
-            {
-                return new PhysicalKeySnapshot(PhysicalKeySnapshotState.Known, [], target, nonUnique);
-            }
-
             if (!keysBuilt)
             {
                 return PhysicalKeySnapshot.Unavailable;

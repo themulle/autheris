@@ -17,6 +17,7 @@ jobs:
   build-and-test:
     name: Build & Test All Suites
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -41,7 +42,8 @@ jobs:
 
       # WP-TS-02: Autheris.Tests.Integration runs in the parallel integration-tests shards below.
       - name: Test Autheris Solution (excluding Spark and integration)
-        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
+        timeout-minutes: 15
+        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
       - name: Lint and render Helm chart
@@ -59,12 +61,24 @@ jobs:
           path: ${{ runner.temp }}/test-results
           if-no-files-found: ignore
 
+      - name: Upload crash/hang diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-main
+          path: |
+            **/Sequence_*.xml
+            **/*.dmp
+          retention-days: 7
+          if-no-files-found: ignore
+
   # WP-TS-02: Autheris.Tests.Integration runs serially in-process (shared containers, global state), so it is split across
   # parallel jobs instead. .github/scripts/integration-shard-filter.py balances the test classes by measured wall time; the last
   # shard is the exact complement of the others, so every test runs in exactly one shard.
   integration-tests:
     name: Integration Tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest # Docker is available for Testcontainers
+    timeout-minutes: 90
     permissions:
       contents: read
     strategy:
@@ -86,11 +100,12 @@ jobs:
         run: dotnet restore Autheris.sln --locked-mode
 
       - name: Test integration shard
+        timeout-minutes: 85
         env:
           SHARD: ${{ matrix.shard }}
         run: |
           FILTER="$(python3 .github/scripts/integration-shard-filter.py "$((SHARD - 1))" 4)"
-          dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
+          dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       - name: Upload integration test results (TRX)
         if: always()
@@ -100,10 +115,22 @@ jobs:
           path: ${{ runner.temp }}/test-results
           if-no-files-found: ignore
 
+      - name: Upload integration crash/hang diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-integration-${{ matrix.shard }}
+          path: |
+            **/Sequence_*.xml
+            **/*.dmp
+          retention-days: 7
+          if-no-files-found: ignore
+
   # WP-TS-03: run Databricks/Spark proxy execution tests in a dedicated parallel job so the main test job does not wait on the Spark container.
   spark-integration-tests:
     name: Spark Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -125,7 +152,8 @@ jobs:
         run: docker pull apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314
 
       - name: Test Spark Integration Suite
-        run: dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=Spark" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal
+        timeout-minutes: 12
+        run: dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=Spark" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       - name: Upload Spark test results (TRX)
         if: always()
@@ -133,6 +161,17 @@ jobs:
         with:
           name: test-results-spark
           path: ${{ runner.temp }}/test-results
+          if-no-files-found: ignore
+
+      - name: Upload Spark crash/hang diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-spark
+          path: |
+            **/Sequence_*.xml
+            **/*.dmp
+          retention-days: 7
           if-no-files-found: ignore
 
   # SEC2-09: production Helm render guards and container hardening posture (deploy/scripts/verify-hardening.sh).

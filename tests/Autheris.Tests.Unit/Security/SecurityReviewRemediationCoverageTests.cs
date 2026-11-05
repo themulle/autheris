@@ -581,6 +581,7 @@ public sealed class SecurityReviewRemediationCoverageTests
             var files = Directory.EnumerateFiles(dirPath, "*.*", SearchOption.AllDirectories)
                 .Where(f => !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar) &&
                             !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) &&
+                            !f.Contains(Path.DirectorySeparatorChar + "node_modules" + Path.DirectorySeparatorChar) &&
                             !f.Contains(".bench-secrets.env") &&
                             !f.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) &&
                             !f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));

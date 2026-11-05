@@ -136,11 +136,16 @@ public sealed class StepSqlLintTests
     }
 
     [Fact]
-    public void ShippedCatalogues_HoldExactlySteps0002To0004()
+    public void ShippedCatalogues_HoldExactlySteps0002To0005()
     {
         foreach (var engine in new[] { "sqlite", "postgresql", "sqlserver" })
         {
-            SqlMigrationStep.LoadEmbedded(engine).Select(s => (s.Version, s.Name)).ShouldBe([(2, "key_and_index_column_direction"), (3, "tenant_default_removal_and_request_tenant"), (4, "physical_nonunique_indexes")]);
+            SqlMigrationStep.LoadEmbedded(engine).Select(s => (s.Version, s.Name)).ShouldBe([
+                (2, "key_and_index_column_direction"),
+                (3, "tenant_default_removal_and_request_tenant"),
+                (4, "physical_nonunique_indexes"),
+                (5, "catalog_min_group_size")
+            ]);
         }
     }
 }

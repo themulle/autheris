@@ -55,7 +55,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        _transportGate = transportGate ?? Autheris.Application.DataSources.DenyAllTransportGate.Instance;
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));

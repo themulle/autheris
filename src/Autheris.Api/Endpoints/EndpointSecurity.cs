@@ -65,10 +65,36 @@ internal static class EndpointSecurity
         => Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
     /// <summary>
-    /// SEC M-11: Global (tenant-independent) governance administrators: GovernanceAdmin or ClusterAdmin.
+    /// SEC M-11 / GHSA-mgv5-4r69-mwww: Global (tenant-independent) governance administrators: Canonical ClusterAdmin,
+    /// or GovernanceAdmin that is not bound to a tenant scope.
     /// </summary>
     public static bool IsGlobalGovernanceAdmin(ClaimsPrincipal? principal)
-        => GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin);
+    {
+        if (principal == null)
+        {
+            return false;
+        }
+
+        if (IsCanonicalClusterAdmin(principal))
+        {
+            return true;
+        }
+
+        if (!GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin))
+        {
+            return false;
+        }
+
+        var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Absent)
+        {
+            return true;
+        }
+
+        // If the tenant claim was default-assigned by the ingress/gateway rather than explicitly bound by caller or realm,
+        // it is not a tenant-scoped restricted token.
+        return principal.FindFirst("autheris:tenant_status")?.Value == "default";
+    }
 
     /// <summary>SEC C-05: Approver roles (DataSteward, DataOwner, GovernanceAdmin) or ClusterAdmin.</summary>
     public static bool IsApprover(ClaimsPrincipal? principal)
