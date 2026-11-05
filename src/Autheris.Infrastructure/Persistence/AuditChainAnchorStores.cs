@@ -373,6 +373,12 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
                 // Two different valid anchors for one sequence: history was rewritten or the chain forked.
                 return Invalid;
             }
+            else if (best.Sequence - anchor.Sequence > 1)
+            {
+                // GHSA-4qx8-fv2p-q8r2: Sequence gap detected between consecutive anchors in the WORM directory
+                _logger?.LogCritical("CRITICAL: WORM audit anchor sequence gap detected between {Newer} and {Older}. Possible deleted span.", best.Sequence, anchor.Sequence);
+                return Invalid;
+            }
         }
 
         if (best == null && skipped > 0)
@@ -796,6 +802,12 @@ public static class AuditChainAnchorStoreFactory
 
             if (!string.IsNullOrWhiteSpace(options.ChainAnchorWormDirectory))
             {
+                if (signer == null)
+                {
+                    throw new System.ComponentModel.DataAnnotations.ValidationException(
+                        "Security violation: ChainAnchorWormDirectory is configured, but no external audit anchor signer is registered. " +
+                        "WORM directory anchors require external cryptographic signatures to prevent unsigned file injection.");
+                }
                 stores.Add(new WormDirectoryAuditChainAnchorStore(options.ChainAnchorWormDirectory, verify, logger, verifyPurge));
             }
         }

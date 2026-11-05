@@ -331,7 +331,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
                         userActive++;
                     }
                 }
-                else if (existing.BytesProduced is { } bytes)
+
+                if (existing.BytesProduced is { } bytes && string.Equals(existing.TenantId, tenantId.Value, StringComparison.Ordinal))
                 {
                     scratchBytes += bytes;
                 }
@@ -349,7 +350,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
 
             if (maxScratchBytes > 0 && scratchBytes >= maxScratchBytes)
             {
-                throw new AsyncJobQueueLimitExceededException("The scratch disk quota for async job results has been exceeded. Retry later.", maxQueued);
+                throw new AsyncJobQueueLimitExceededException("The scratch disk quota for async job results has been exceeded. Retry later.", (int)Math.Min(int.MaxValue, maxScratchBytes));
             }
 
             _jobs[jobId] = descriptor;
@@ -644,6 +645,9 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         {
             try { File.Delete(job.ResultFilePath); } catch { }
         }
+
+        updated = updated with { BytesProduced = null, ResultFilePath = null };
+        _jobs[jobId] = updated;
 
         await RecordAuditAsync(
             updated,

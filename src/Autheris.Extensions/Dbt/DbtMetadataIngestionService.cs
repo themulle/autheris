@@ -43,6 +43,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
     private readonly IPhysicalKeyCatalog? _physicalKeys;
     private readonly IAuditWriter? _auditWriter;
+    private readonly IDataOwnershipRepository? _ownershipRepo;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -616,7 +617,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ? new TenantId(owner)
                         : TenantResolver.EffectiveDefaultOf(_gatewayOptions?.Value?.Tenancy) ?? TenantId.Platform;
 
-                    bool hasStanding = caller.IsClusterAdmin || caller.IsGovernanceAdmin || caller.IsDataOwner;
+                    bool isTableApprover = caller.Actor.Sid is { } actorSid && !string.IsNullOrWhiteSpace(actorSid.Value) &&
+                        _ownershipRepo != null && await _ownershipRepo.IsAuthorizedApproverForTableAsync(existingMeta.Identifier, actorSid, ct).ConfigureAwait(false);
+                    bool hasStanding = caller.IsClusterAdmin || caller.IsGovernanceAdmin || isTableApprover;
 
                     var (newMinGroupSize, newNonPersonal) = await DbtCatalogPrivacyMeta.ApplyAsync(
                         model,

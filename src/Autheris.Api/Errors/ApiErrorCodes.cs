@@ -126,6 +126,7 @@ public static class ApiErrorCodes
     public const string TotpCurrentCodeRequired = "TOTP_CURRENT_CODE_REQUIRED";
     public const string TotpCodeInvalid = "TOTP_CODE_INVALID";
     public const string TokenRevoked = "TOKEN_REVOKED";
+    public const string CdcRestrictedScopeForbidden = "CDC_RESTRICTED_SCOPE_FORBIDDEN";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 

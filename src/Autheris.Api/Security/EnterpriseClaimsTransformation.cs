@@ -84,6 +84,21 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
 
+        // GHSA-hw85-rqjh-cwxx: Enforce realm-level client ID allowlist if configured
+        if (realm?.AllowedClientIds is { Count: > 0 } allowedClients)
+        {
+            var clientId = identity.FindFirst("azp")?.Value
+                ?? identity.FindFirst("appid")?.Value
+                ?? identity.FindFirst("client_id")?.Value;
+
+            if (string.IsNullOrWhiteSpace(clientId) ||
+                !allowedClients.Contains(clientId, StringComparer.OrdinalIgnoreCase))
+            {
+                MarkDegraded(identity, realmId, $"client '{clientId}' not in realm allowed clients");
+                return normalizedPrincipal;
+            }
+        }
+
         // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
         // Inbound tenant_source claims are removed, the resolved tenant is stamped.
         // realmBound is only true when the realm has an explicit binding (Fixed or ClaimMapped), not Unbound.

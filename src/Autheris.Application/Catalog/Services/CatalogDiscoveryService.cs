@@ -608,6 +608,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                          full.Columns.Any(c => !visibleColumnNames.Contains(c.ColumnName));
 
         IReadOnlyList<string> matchedTerms = hit.MatchedTerms;
+        double combinedScore = hit.CombinedScore;
+        double? bm25Score = hit.Bm25Score;
+        double? vectorScore = hit.VectorScore;
+
         if (restricted)
         {
             var text = VisibleTokens(visible);
@@ -619,6 +623,13 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             {
                 return null;
             }
+
+            // GHSA-95f9-ffc7-vw2c: For column-restricted tables, scrub continuous scores and zero out BM25/vector scores
+            // to prevent text-oracle inference attacks on hidden columns.
+            bm25Score = null;
+            vectorScore = null;
+            var visibleRatio = queryTerms.Count > 0 ? (double)matchedTerms.Count / queryTerms.Count : 1.0;
+            combinedScore = Math.Round(visibleRatio, 1);
         }
 
         var relevantColumns = visible.Columns
@@ -635,6 +646,9 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
         return hit with
         {
+            CombinedScore = combinedScore,
+            Bm25Score = bm25Score,
+            VectorScore = vectorScore,
             Description = visible.Table.Description,
             SuggestedGraphQlField = visible.CatalogView == CatalogView.Summary ? null : hit.SuggestedGraphQlField,
             Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",

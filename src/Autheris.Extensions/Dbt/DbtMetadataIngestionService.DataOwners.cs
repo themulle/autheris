@@ -49,13 +49,15 @@ public sealed partial class DbtMetadataIngestionService
         IDataOwnerAssignmentRepository? ownerAssignments = null,
         IDataOwnerIdentityVerifier? ownerIdentityVerifier = null,
         IPhysicalKeyCatalog? physicalKeys = null,
-        IAuditWriter? auditWriter = null)
+        IAuditWriter? auditWriter = null,
+        IDataOwnershipRepository? ownershipRepo = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
             virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, physicalKeys, auditWriter, logger)
     {
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _ownerAssignments = ownerAssignments;
         _ownerIdentityVerifier = ownerIdentityVerifier;
+        _ownershipRepo = ownershipRepo;
     }
 
     private const int MaxOwnerAssignmentsPerImport = 5000;

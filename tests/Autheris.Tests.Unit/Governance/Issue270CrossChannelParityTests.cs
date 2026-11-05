@@ -107,6 +107,7 @@ public sealed class Issue270CrossChannelParityTests
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
                 Arg.Any<string>(),
+                Arg.Any<ITreeExecutionObserver?>(),
                 Arg.Any<CancellationToken>())
             .Returns(_ => JsonDocument.Parse($$"""
             [
@@ -188,6 +189,7 @@ public sealed class Issue270CrossChannelParityTests
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
                 Arg.Any<string>(),
+                Arg.Any<ITreeExecutionObserver?>(),
                 Arg.Any<CancellationToken>())
             .Returns(_ => JsonDocument.Parse($$"""
             [

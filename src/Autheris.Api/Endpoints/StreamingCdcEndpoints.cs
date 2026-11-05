@@ -316,7 +316,7 @@ public static class StreamingCdcEndpoints
         }
 
         // Creator snapshot: authorisation of every delivered event is evaluated as this principal. Never taken from the request body.
-        var restrictedScopes = services.GetService<Autheris.Domain.Security.IRestrictedScopePolicy>();
+        var restrictedScopes = services.GetRequiredService<Autheris.Domain.Security.IRestrictedScopePolicy>();
         var capture = CdcSubscriptionPrincipal.Capture(context.User, options, restrictedScopes);
         if (capture.Error == CdcSnapshotCaptureError.MissingSid)
         {

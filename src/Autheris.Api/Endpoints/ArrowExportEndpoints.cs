@@ -136,10 +136,13 @@ public static class ArrowExportEndpoints
         }
 
         // WebSQL finding 4.3 & SR15-21: Ensure target table matches ReBAC-authorized table if checked by route filter
-        if (httpContext.Items.TryGetValue("RebacValidated:table", out var rebacTableObj) && rebacTableObj is string rebacTable && !string.IsNullOrWhiteSpace(table))
+        if (httpContext.Items.TryGetValue("RebacValidated:table", out var rebacTableObj) && rebacTableObj is string rebacTable && tableId.HasValue)
         {
-            var normRebac = TableIdentifierNormalizer.Normalize(rebacTable).ToQualifiedName();
-            if (!string.Equals(table, normRebac, StringComparison.OrdinalIgnoreCase))
+            var expectedObj = Autheris.Application.Policy.RebacTableGate.ObjectId(tableId.Value);
+            var actualObj = rebacTable.StartsWith("table:", StringComparison.OrdinalIgnoreCase)
+                ? rebacTable
+                : Autheris.Application.Policy.RebacTableGate.ObjectId(TableIdentifierNormalizer.Normalize(rebacTable));
+            if (!string.Equals(expectedObj, actualObj, StringComparison.OrdinalIgnoreCase))
             {
                 return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by ReBAC policy.", httpContext, "Forbidden");
             }
@@ -270,7 +273,7 @@ public static class ArrowExportEndpoints
         foreach (var target in referencedTables)
         {
             if (!TableIdentifierNormalizer.TryNormalize(target.FullName, out var normalized) ||
-                !await loader.CheckAsync(tenant.Value, caller, "viewer", "table:" + normalized.ToQualifiedName(), ct).ConfigureAwait(false))
+                !await loader.CheckAsync(tenant.Value, caller, "viewer", Autheris.Application.Policy.RebacTableGate.ObjectId(normalized), ct).ConfigureAwait(false))
             {
                 return false;
             }

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
+using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Data.Changes;
 using Autheris.Domain.Audit;
@@ -94,13 +95,13 @@ public static class ChangeDetectionEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
-            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
+            SafeErrorResults.LogFailure(httpContext, ex, ApiErrorCodes.AccessDenied);
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by data governance policy.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
-            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
+            SafeErrorResults.LogFailure(httpContext, ex, ApiErrorCodes.AccessDenied);
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by data governance policy.", httpContext);
         }
         catch (GatewaySecurityException ex)
         {
@@ -155,13 +156,13 @@ public static class ChangeDetectionEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
-            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
+            SafeErrorResults.LogFailure(httpContext, ex, ApiErrorCodes.AccessDenied);
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by data governance policy.", httpContext);
         }
         catch (UnauthorizedAccessException ex)
         {
-            SafeErrorResults.LogFailure(httpContext, ex, "FORBIDDEN");
-            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied by data governance policy.", httpContext);
+            SafeErrorResults.LogFailure(httpContext, ex, ApiErrorCodes.AccessDenied);
+            return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by data governance policy.", httpContext);
         }
         catch (GatewayInvalidQueryException ex)
         {

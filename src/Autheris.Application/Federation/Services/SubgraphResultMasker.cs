@@ -75,12 +75,15 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         foreach (var (key, ruleType) in configured)
         {
             if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(ruleType)) continue;
+            var normalizedKey = FederatedFieldName.Normalize(key);
             var lastDot = key.LastIndexOf('.');
             var field = FederatedFieldName.Normalize(lastDot >= 0 ? key[(lastDot + 1)..] : key);
             if (field.Length == 0) continue;
 
             var type = ruleType.Trim().ToUpperInvariant();
-            map[field] = type == "NONE" ? null : new MaskingRule { RuleType = type, Replacement = "[REDACTED]" };
+            var rule = type == "NONE" ? null : new MaskingRule { RuleType = type, Replacement = "[REDACTED]" };
+            map[normalizedKey] = rule;
+            map[field] = rule;
         }
 
         return map;
@@ -179,17 +182,22 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         MaskingRule rule;
         var shouldMask = false;
 
-        // 1. Check schema field name
-        if (!string.IsNullOrEmpty(fieldName) && ClassifyName(fieldName, ctx, out rule))
+        // 1. Check parentType.fieldName first if parentType is present
+        if (!string.IsNullOrEmpty(parentType) && !string.IsNullOrEmpty(fieldName) && ClassifyName($"{parentType}.{fieldName}", ctx, out rule))
         {
             shouldMask = true;
         }
-        // 2. Check response name (alias or field name)
+        // 2. Check schema field name
+        else if (!string.IsNullOrEmpty(fieldName) && ClassifyName(fieldName, ctx, out rule))
+        {
+            shouldMask = true;
+        }
+        // 3. Check response name (alias or field name)
         else if (!string.IsNullOrEmpty(responseName) && ClassifyName(responseName, ctx, out rule))
         {
             shouldMask = true;
         }
-        // 3. Fail-closed: mask every non-identifier scalar leaf
+        // 4. Fail-closed: mask every non-identifier scalar leaf
         else if (ctx.MaskUnknownScalars && IsScalarLeaf(value) && !IsIdentifierName(fieldName) && !IsIdentifierName(responseName))
         {
             rule = RedactMaskRule;
@@ -203,6 +211,31 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
 
         if (!shouldMask)
         {
+            // GHSA-xpw9-4m63-69pf: Recurse into dictionary/JSON scalars even if top-level field is not sensitive
+            if (value is IDictionary or IReadOnlyDictionary<string, object?>)
+            {
+                var maskedDict = MaskRecursive(value, null, null, ctx);
+                masked = !ReferenceEquals(maskedDict, value);
+                return maskedDict;
+            }
+
+            if (value is System.Text.Json.JsonElement jsonElem)
+            {
+                if (jsonElem.ValueKind == System.Text.Json.JsonValueKind.Object || jsonElem.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    var converted = ToMaskableObject(jsonElem);
+                    var maskedObj = MaskRecursive(converted, null, null, ctx);
+                    var reEncoded = System.Text.Json.JsonSerializer.Serialize(maskedObj);
+                    var raw = jsonElem.GetRawText();
+                    if (!string.Equals(raw, reEncoded, StringComparison.Ordinal))
+                    {
+                        masked = true;
+                        using var doc = System.Text.Json.JsonDocument.Parse(reEncoded);
+                        return doc.RootElement.Clone();
+                    }
+                }
+            }
+
             masked = false;
             return value;
         }
@@ -256,9 +289,33 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         return MaskResultDataAsync(data, principal, aliasToFieldMap).AsTask().GetAwaiter().GetResult();
     }
 
+    private static object? ToMaskableObject(object? node)
+    {
+        if (node is System.Text.Json.JsonElement je)
+        {
+            return je.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.Object => je.EnumerateObject().ToDictionary(p => p.Name, p => ToMaskableObject(p.Value), StringComparer.OrdinalIgnoreCase),
+                System.Text.Json.JsonValueKind.Array => je.EnumerateArray().Select(item => ToMaskableObject(item)).ToList(),
+                System.Text.Json.JsonValueKind.String => je.GetString(),
+                System.Text.Json.JsonValueKind.Number => je.TryGetInt64(out var l) ? l : je.TryGetDouble(out var d) ? d : je.GetRawText(),
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                System.Text.Json.JsonValueKind.Null => null,
+                _ => je.GetRawText()
+            };
+        }
+        return node;
+    }
+
     private object? MaskRecursive(object? node, IReadOnlyDictionary<string, string>? aliasToFieldMap, string? path, MaskContext ctx)
     {
         if (node == null) return null;
+
+        if (node is System.Text.Json.JsonElement)
+        {
+            node = ToMaskableObject(node);
+        }
 
         if (node is IReadOnlyDictionary<string, object?> dict)
         {

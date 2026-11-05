@@ -373,7 +373,7 @@ public static partial class GovernanceEndpoints
           .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
 
         // GDPR Article 15 PDF Export for Data Protection Officers (DSB)
-        app.MapGet("/api/governance/gdpr/export-pdf", async (
+        app.MapGet("/api/governance/gdpr/export-pdf", (
             string? domain,
             string? schema,
             string? table,
@@ -382,65 +382,8 @@ public static partial class GovernanceEndpoints
             ILineageImpactAnalyzerService lineageService,
             IGdprAuditReportExporter pdfExporter,
             HttpContext context,
-            CancellationToken ct) =>
-        {
-            var principal = context.User;
-            var userSid = principal.GetUserSid() ?? new Sid("S-1-5-21-ANONYMOUS");
-            var groupSids = principal.GetGroupSids().ToList();
-            var roles = principal.GetUserRoles().ToList();
-
-            var tenantId = EndpointSecurity.GetRequestTenant(context);
-
-            bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
-            bool isClusterAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
-            bool isPrivacyAdmin = roles.Contains("PrivacyAdmin", StringComparer.OrdinalIgnoreCase) ||
-                                  roles.Contains("DataProtectionOfficer", StringComparer.OrdinalIgnoreCase);
-
-            var callerContext = new CallerSecurityContext(
-                userSid,
-                groupSids,
-                roles,
-                tenantId,
-                isGovAdmin,
-                isClusterAdmin);
-
-            TableIdentifier? tableId = !string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(schema) && !string.IsNullOrWhiteSpace(table)
-                ? new TableIdentifier(domain, schema, table)
-                : null;
-            Sid? sid = !string.IsNullOrWhiteSpace(subjectSid) ? new Sid(subjectSid) : (Sid?)null;
-
-            bool canAccessForeignReports = isPrivacyAdmin || isGovAdmin || isClusterAdmin;
-            var effectiveSid = sid ?? (canAccessForeignReports ? (Sid?)null : callerContext.UserSid);
-
-            if (effectiveSid.HasValue && !effectiveSid.Value.Equals(callerContext.UserSid) && !canAccessForeignReports)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            GdprDisclosureReport report;
-            try
-            {
-                report = await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
-            }
-            catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException)
-            {
-                // MISC-11: no table scope means no honest report; never a report that implies completeness.
-                return ApiProblems.Unprocessable(
-                    Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode,
-                    "The GDPR report scope cannot be resolved: name the table that holds the data subject's data.",
-                    context);
-            }
-
-            var exportResult = pdfExporter.ExportReportToPdf(report);
-
-            // MISC-12: only a keyed seal is published; without a signer the header is omitted.
-            if (exportResult.AuditSeal != null)
-            {
-                context.Response.Headers["X-Audit-Seal"] = exportResult.AuditSeal;
-            }
-
-            return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
-        }).RequireAuthorization()
+            CancellationToken ct) => ExportGdprPdfAsync(domain, schema, table, subjectSid, timeWindowDays, lineageService, pdfExporter, context, ct))
+          .RequireAuthorization()
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
 
         // OpenLineage Lineage Push Trigger
@@ -450,6 +393,84 @@ public static partial class GovernanceEndpoints
             CancellationToken ct) => SyncOpenLineageAsync(openLineageClient, context, ct))
           .RequireAuthorization()
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+    }
+
+    internal static async Task<IResult> ExportGdprPdfAsync(
+        string? domain,
+        string? schema,
+        string? table,
+        string? subjectSid,
+        int? timeWindowDays,
+        ILineageImpactAnalyzerService lineageService,
+        IGdprAuditReportExporter pdfExporter,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var principal = context.User;
+        var userSid = principal.GetUserSid();
+        if (userSid == null || string.IsNullOrWhiteSpace(userSid.Value.Value))
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
+
+        var groupSids = principal.GetGroupSids().ToList();
+        var roles = principal.GetUserRoles().ToList();
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context);
+
+        bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+        bool isClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        bool isPrivacyAdmin = roles.Contains("PrivacyAdmin", StringComparer.OrdinalIgnoreCase) ||
+                              roles.Contains("DataProtectionOfficer", StringComparer.OrdinalIgnoreCase);
+
+        var callerContext = new CallerSecurityContext(
+            userSid.Value,
+            groupSids,
+            roles,
+            tenantId,
+            isGovAdmin,
+            isClusterAdmin);
+
+        TableIdentifier? tableId = !string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(schema) && !string.IsNullOrWhiteSpace(table)
+            ? new TableIdentifier(domain, schema, table)
+            : null;
+        Sid? sid = !string.IsNullOrWhiteSpace(subjectSid) ? new Sid(subjectSid) : (Sid?)null;
+
+        bool canAccessForeignReports = isPrivacyAdmin || isGovAdmin || isClusterAdmin;
+        var effectiveSid = sid ?? (canAccessForeignReports ? (Sid?)null : callerContext.UserSid);
+
+        if (effectiveSid.HasValue && !effectiveSid.Value.Equals(callerContext.UserSid) && !canAccessForeignReports)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        GdprDisclosureReport report;
+        try
+        {
+            report = await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException)
+        {
+            // MISC-11: no table scope means no honest report; never a report that implies completeness.
+            return ApiProblems.Unprocessable(
+                Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode,
+                "The GDPR report scope cannot be resolved: name the table that holds the data subject's data.",
+                context);
+        }
+
+        var exportResult = pdfExporter.ExportReportToPdf(report);
+
+        // MISC-12: only a keyed seal is published; without a signer the header is omitted.
+        if (exportResult.AuditSeal != null)
+        {
+            context.Response.Headers["X-Audit-Seal"] = exportResult.AuditSeal;
+        }
+
+        return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
     }
 
     internal static async Task<IResult> SyncOpenLineageAsync(
