@@ -41,6 +41,10 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 
 WP-SIMPL-18 therefore only deletes differential-privacy noise, CDN purge and SchemaRegistry (PRs A, B, E). WP-38..40 run in Stage 1/2 alongside the security lane; WP-40's storage move depends on WP-SIMPL-20.
 
+## Security advisories
+
+Neutral index of all referenced advisories with component, severity, state and work package: [advisories-overview.md](advisories-overview.md).
+
 ## Not committed
 
-Developer-only notes for the security lane (root cause and fix details of the private advisories) are kept outside the repository and are handed over privately; never commit them (SEC-SIMPL-01).
+Root cause, fix approach and test notes for the open advisories are stored in the private GitHub advisories (section "Implementation notes (WP-SIMPL-36)"); never copy them into the repository (SEC-SIMPL-01).
