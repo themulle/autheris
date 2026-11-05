@@ -68,7 +68,8 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
         // 2. Resolve authoritative realm deterministically from scheme or issuer (CRIT-01)
         var issuer = identity.FindFirst("iss")?.Value;
         IdentityRealm? realm = (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
-            ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType);
+            ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType)
+            ?? _realmRegistry?.GetDefaultRealm();
 
         var realmId = realm?.RealmId ?? "workforce-entra";
 
