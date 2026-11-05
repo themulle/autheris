@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (pending owner acceptance). Date: 2026-11-05. Revised the same day for binding owner decisions OD-12 (Oracle and Databricks kept as governed data sources) , OD-14 (Snowflake generator deleted, Ansi kept generator-only) and OD-15 (cross-source federation and DuckDB stay core); they override earlier text of this ADR where they conflict.
+Accepted (owner, 2026-11-05). Date: 2026-11-05. Revised the same day for binding owner decisions OD-12 (Oracle and Databricks kept as governed data sources) , OD-14 (Snowflake generator deleted, Ansi kept generator-only) and OD-15 (cross-source federation and DuckDB stay core); they override earlier text of this ADR where they conflict.
 
 Supplements ADR-017 §2 and its amendments of 2026-10-11 and 2026-10-13. ADR-017 introduced the AST dialect generator without an alternatives assessment; this ADR records that assessment after the fact and narrows the dialect scope. On acceptance it supersedes the tier list in the 2026-10-11 amendment (item 5) and the admission list in the 2026-10-13 amendment (item 4).
 
