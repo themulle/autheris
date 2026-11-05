@@ -49,7 +49,8 @@ A critical whole-project review (10 findings) concluded that Autheris is an AI-g
 - **OD-12 (binding, owner, 2026-11-05):** Oracle database support MUST be kept and Databricks is an important data source and MUST be kept. The Oracle and Databricks SQL dialect generators stay in core as governed data sources (incl. DatabricksOboTokenProvider / Databricks executor and Oracle connection support; Oracle.ManagedDataAccess.Core stays a core dependency). The governance store remains PostgreSQL + SQL Server only (OD-1). Overrides earlier DELETE classifications and D5/ADR-019 where they conflict.
 - **OD-13 (binding, owner, 2026-11-05):** the PostgreSQL wire protocol endpoint proposal (REQ-PG-WIRE-01, backlog rank 5) is dropped (REJECTED).
 - **OD-14 (binding, owner, 2026-11-05, revised):** the Snowflake dialect generator is deleted (no value for Databricks or the integration tests; only generator unit tests and "non-admitted dialect" examples use it, which switch to another non-admitted value). The ANSI generator is kept as a generator-only dialect (not admitted as a data source per `SqlDialectMapper` / `DialectAdmissionTests`). Supersedes the open D16.
-- **OD-15 (binding, owner, 2026-11-05):** cross-source joins in the engine are core functionality (for example a Databricks table joined with a SQL Server table or with a declarative HTTP source). `FederatedDuckDbExecutionService`, `CrossSourcePlanner`, the subtree compiler/partitioner and federated staging stay in core; DuckDB.NET and the DuckDB dialect generator (federated staging SQL) stay core dependencies. Federation paths need parity and integration coverage in core.
+- **OD-15 (binding, owner, 2026-11-05):** cross-source joins in the engine are core functionality (for example a Databricks table joined with a SQL Server table or with a declarative HTTP source). `FederatedDuckDbExecutionService`, `CrossSourcePlanner`, the subtree compiler/partitioner and federated staging stay in core; DuckDB.NET and the DuckDB dialect generator (federated staging SQL) stay core dependencies. Federation paths need parity and integration coverage in core. **Extended (binding, owner, 2026-11-05):** DuckDB belongs entirely in core, not only federation: the Olap engine and endpoints (`Application/Olap`, `DuckDbOlapEndpoints`), the DuckDB-backed table cache (#475 fixed in core), the DuckDB dialect generator and the DuckDB parity/integration tests. The Olap module is dropped; OData is the module pilot.
+- **Forward-looking note (OD-15, no feature work during the freeze):** DuckDB is the intended future place for central views and measures (for example as the basis for data products). Nothing in this program may block a later central views/measures layer on DuckDB: the semantic metric model and metric query path stay in core (Catalog/Analytics) and stay compatible with DuckDB execution; dbt ingestion stays a module that only imports manifests into the core metric model (default taken; no conflict found once `SemanticMetricCatalogProjection` moves from `Application/Dbt` to core, see PLAN-SIMPL WP-SIMPL-28).
 
 ### 2.1 Positioning (one sentence)
 
@@ -139,7 +140,7 @@ Sizes are verified 2026-11-05 line counts of the owning folders (Application / E
 | OData (1,927 + 768) | MODULE | see 2.3 | install module |
 | Arrow Flight SQL over HTTP | DELETE | misnamed, see 2.3 | switch to REST + Arrow IPC export |
 | Arrow IPC export (ArrowExport) | KEEP (as REST format) | C1 via normal pipeline | none |
-| Olap (3,342, DuckDbOlapEndpoints) | MODULE candidate, re-evaluated in PLAN-SIMPL after OD-15 | DuckDB.NET stays core (OD-15), so the module no longer removes the dependency; only the endpoint surface would move | if moved: Olap endpoints require the module; DuckDB package stays in core |
+| Olap (3,342, DuckDbOlapEndpoints) and the DuckDB table cache | KEEP core (OD-15 extended) | DuckDB is a strategic core component (future central views and measures) | none |
 | FinOps (278) | DELETE | C1 false, C5 none | none |
 | Mesh (542) | DELETE | C1 false, C5 none | none |
 | Analytics (4,464, AnalyticsEndpoints) | MODULE or DELETE per item | keep only audit/usage analytics fed by audit; rest DELETE. Phase 2 triages file by file | endpoints removed or moved |
@@ -357,7 +358,7 @@ Governance persistence unification (05; ARCH-MNT-22); SQL dialect parity on real
 
 ### Stage 3 - Modules and polish
 
-Extract MODULE items (OpenMetadata, dbt, Lakehouse, OData, Olap, CDC/Webhooks, SCIM, TOTP, Negotiate, Envoy, Lineage) behind `Autheris.Modules.Abstractions`; core image budget (09); plan-id comment cleanup (5.4); README rewrite and migration guide (06); benchmark protocol and published numbers (03). Exit: all program targets in the table below met; feature freeze lifted.
+Extract MODULE items (OpenMetadata, dbt, Lakehouse, OData (pilot), CDC/Webhooks, SCIM, TOTP, Negotiate, Envoy, Lineage) behind `Autheris.Modules.Abstractions`; core image budget (09); plan-id comment cleanup (5.4); README rewrite and migration guide (06); benchmark protocol and published numbers (03). Exit: all program targets in the table below met; feature freeze lifted.
 
 Stage order rationale: truth first (cheap, restores credibility), delete before refactor (do not refactor code that will be removed), structure before modules (modules need stable abstractions).
 
