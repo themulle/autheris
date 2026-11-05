@@ -31,12 +31,9 @@
     <OptimizationPreference>Speed</OptimizationPreference>
   </PropertyGroup>
 
-  <!-- PLAN-OPS-150 WP-D: ReadyToRun on the framework-dependent publish (docker-publish.yml). RuntimeIdentifiers keeps the
-       linux-x64 graph in the locked restore; PublishReadyToRun only acts in publish targets; the self-contained
-       single-file release publish (release.yml) is unchanged. -->
+  <!-- #509: ReadyToRun removed (spike NO-GO, benchmarks/results/r2r-spike-report.md). RuntimeIdentifiers keeps the linux-x64 graph in the locked restore used by the framework-dependent publish. -->
   <PropertyGroup>
     <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
-    <PublishReadyToRun Condition="'$(SelfContained)' != 'true'">true</PublishReadyToRun>
     <RuntimeIdentifier Condition="'$(_IsPublishing)' == 'true' And '$(RuntimeIdentifier)' == '' And '$(SelfContained)' != 'true'">linux-x64</RuntimeIdentifier>
     <SelfContained Condition="'$(RuntimeIdentifier)' == 'linux-x64' And '$(SelfContained)' == ''">false</SelfContained>
   </PropertyGroup>
