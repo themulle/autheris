@@ -26,7 +26,7 @@ public sealed class HelmValuesTests
         var tagValue = tagMatch.Groups[1].Value.Trim();
 
         // Never allow "latest" as default image tag
-        tagValue.ShouldNotBe("latest", StringComparison.OrdinalIgnoreCase);
+        tagValue.ToLowerInvariant().ShouldNotBe("latest");
 
         // Must be empty (to fall back to AppVersion) or a sha256 digest
         var isTagValid = string.IsNullOrEmpty(tagValue) || tagValue.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase);

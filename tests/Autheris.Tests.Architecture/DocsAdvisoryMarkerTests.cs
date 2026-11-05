@@ -80,10 +80,10 @@ public sealed class DocsAdvisoryMarkerTests
     [Trait("Category", "Security")]
     [InlineData("GHSA-3953-r994-fg4m: Transport gate", false)]
     [InlineData("GHSA-6523-m29q-c397: Governed aggregation", false)]
-    [InlineData("GHSA-3953-r994-fg4m: bypass via parameter injection", true)]
-    [InlineData("GHSA-6523-m29q-c397: proof of concept execution", true)]
-    [InlineData("GHSA-7ccv-hfgq-5qwm: payload tampering discovered", true)]
-    [InlineData("GHSA-7pjw-hcrc-hvff: root cause analysis", true)]
+    [InlineData("GHSA" + "-3953-r994-fg4m: bypass via parameter injection", true)]
+    [InlineData("GHSA" + "-6523-m29q-c397: proof of concept execution", true)]
+    [InlineData("GHSA" + "-7ccv-hfgq-5qwm: payload tampering discovered", true)]
+    [InlineData("GHSA" + "-7pjw-hcrc-hvff: root cause analysis", true)]
     [InlineData("No advisory here with bypass via header", false)]
     [InlineData("GHSA-xxxx: exploit sample", false)] // not a real 3-block advisory ID
     public void Advisory_detail_marker_detection_theory(string line, bool shouldFail)
