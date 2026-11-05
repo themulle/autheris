@@ -1,0 +1,30 @@
+{
+  "metric": "repo-metrics",
+  "date": "2026-11-05",
+  "sha": "7900268",
+  "host": {
+    "hostname": "6c2a39d7878e",
+    "os": "Linux",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "arch": "x86_64",
+    "cpu": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics"
+  },
+  "values": {
+    "src_loc": 302798,
+    "modules_loc": 0,
+    "test_loc": 383711,
+    "map_endpoints": 306,
+    "application_folders": 49,
+    "options_classes": 173,
+    "enabled_flags": 96,
+    "hosted_services": 39,
+    "di_registrations": 636,
+    "substitute_for": 4112,
+    "received": 527,
+    "sleeps": 90,
+    "container_test_files": 29,
+    "total_test_files": 1936,
+    "container_share_pct": 1.50
+  },
+  "method": "bash benchmarks/scripts/repo-metrics.sh"
+}
