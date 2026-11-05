@@ -1,6 +1,6 @@
 # WP-SIMPL-44 Data access only: no source metadata reads
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#issues-51) (WP added by OD-25; folds in #459) | [PRD OD-25](../2026-11-05-req-project-simplification.md) | Issues: #459 (whole issue, widened by OD-25) | Owner decisions: OD-25 (binding), OD-3, OD-18, OD-22, OD-23, OD-17 | Security conditions: SEC-SIMPL-01, 02, 03, 21, 23, 25, 26, 30, 31, 32; new SEC-SIMPL-140..147 (proposed below, to be confirmed by Phase 3); ADR-018
+Parent: [plan](../2026-11-05-plan-project-simplification.md#issues-51) (WP added by OD-25; folds in #459) | [PRD OD-25](../2026-11-05-req-project-simplification.md) | Issues: #459 (whole issue, widened by OD-25) | Owner decisions: OD-25 (binding), OD-3, OD-18, OD-22, OD-23, OD-17 | Security conditions: SEC-SIMPL-01, 02, 03, 21, 23, 25, 26, 30, 31, 32; SEC-SIMPL-140..147 (section "Phase 3 conditions", binding per the sec plan section 11.2, row 44); ADR-018
 
 ## 1. Goal and outcome
 Autheris reads data from data sources and never reads their metadata. After this WP:
@@ -19,7 +19,10 @@ Autheris reads data from data sources and never reads their metadata. After this
 - Coordinates with:
   - WP-SIMPL-41: the statistics and samples upload `PUT /api/v1/catalog/datasets/{id}/discovery-artifacts` is the external path for statistics and samples. This WP adds nothing for them and only asserts that no statistics or samples are computed from sources.
   - WP-SIMPL-38: `TrinoMetadataQueryHandler` already answers from `ITableMetadataRepository` and never forwards. This WP adds the guard and a test (no new handler work).
-- Parallel-safe with WP-SIMPL-42/43. With WP-SIMPL-39, rebase PR 3 on top of it; this WP removes the catalog validation that WP-39 D3 keeps (conflict resolved by OD-25, see D3).
+- Parallel-safe with WP-SIMPL-43 and with WP-SIMPL-42 except its PR-3. With WP-SIMPL-39, rebase PR 3 on top of it; WP-39 does not extend the catalog validation (its OD-25 banner) and this WP deletes it (D3).
+  - `GovernedProcedureExecutionService.cs` is also edited by WP-SIMPL-39, WP-SIMPL-46 step 4 and WP-SIMPL-42 PR-3: PR 3 does not run in parallel with those PRs; whichever merges second rebases.
+  - WP-SIMPL-37 PR C (Databricks tier flip, OD-36) edits the `GovernedCatalogProvider` admission rules of step 7; whichever merges second rebases.
+  - WP-SIMPL-45 owns the write connection (`WriteConnection`) and its privileges; the operator template below links to it.
 
 ## 3. Scope
 ### In scope
@@ -113,13 +116,13 @@ Gaps:
    - `GatewayExceptionStatusMapper.cs:55` and `GatewayExceptionHandler.cs:151` map both kinds to 502, with codes `SOURCE_SCHEMA_MISMATCH` and `SOURCE_PERMISSION_DENIED` in `ApiErrorCodes.cs`. The message is generic, with no object or column names and no SQL (SEC-SIMPL-25).
    - `SourceMetadataAccessDeniedException` maps to 500 `SOURCE_METADATA_READ_BLOCKED` (an internal defect, not a client error).
 6. **Declared column metadata (PR 2).** Add `public string? Collation { get; init; }` and `public string? LengthSemantics { get; init; }` (Oracle `char`/`byte`) to `TableColumn` (`TableModels.cs:213`).
-   - Governance migration: next free step, e.g. `0006_column_collation`, for `postgresql` and `sqlserver` (`Persistence/Migrations/Steps/`). It adds two nullable columns to the column table with a shape file and is forward-only (SEC-SIMPL-16).
+   - Governance migration: the next free forward-only migration step at merge time (per the frozen v1.5.0 base policy), named `column_collation`, for `postgresql` and `sqlserver` (`Persistence/Migrations/Steps/`). It adds two nullable columns to the column table with a shape file (SEC-SIMPL-16).
    - Repository read and write follow.
    - `DataType` becomes the declared native type, including length/precision/scale (`nvarchar(64)`, `numeric(18,2)`). The uploader validates it per dialect with a strict grammar (`^[a-z][a-z0-9 _]*(\(\d+(,\s*\d+)?\|max\))?$`, case-insensitive).
 7. **Catalog provider from declared metadata (PR 2).** In `GovernedCatalogProvider`:
    - Delete the `_readers`/`_keyReaders` fields and ctor parameters, `OpenAsync` and the connection in `GetCatalogAsync`.
    - `LoadAsync` builds `TableCatalogEntry` from `metadata.Columns` in declared order, using `CatalogColumn(c.ColumnName, c.DataType, c.Collation)`.
-   - Admission rules stay: registered, `DataSourceType.Sql`, source name and dialect match, at least one column, tenant column among the columns, SQLite affinity check on the declared type until WP-31, Databricks still denied for the compiler.
+   - Admission rules stay: registered, `DataSourceType.Sql`, source name and dialect match, at least one column, tenant column among the columns, SQLite affinity check on the declared type until WP-31, dialect admitted only when `SqlDialectMapper.IsExecutable` is true (tier `Production`; Databricks after WP-SIMPL-37 PR C, OD-36), with no explicit per-dialect branch.
    - `Fingerprint` (`:225-237`) adds each column's `DataType` and `Collation`, so a declared type change invalidates the cache.
    - `CatalogColumnVersion` is unchanged.
    - `KeySetKeyTypes.IsBindablePair` with a null collation on a string type returns false (fail closed: not bindable). Add this if it is not already the behaviour.
@@ -171,7 +174,7 @@ Gaps:
 
 ## 6. Tests ([S] = `[Trait("Category","Security")]`; project `tests/Autheris.Tests.Unit` unless stated)
 - `Tests.Architecture/ArchitectureNoSourceMetadataReadsTests` [S]:
-  - `ProductionCode_ContainsNoSourceMetadataRead`
+  - `No_source_metadata_read` (sec plan 11.2 row 44)
   - `EveryPattern_HasPositiveSample`
   - `Allowlist_EntriesExistAndStillMatch` (a stale entry fails)
   - `NoCommandBehaviorKeyInfoOrDeriveParameters`
@@ -187,7 +190,7 @@ Gaps:
   - `Rejects_UnterminatedLiteralOrComment`
   - `Exception_CarriesRuleIdNotSql`
 - `Persistence/MetadataGuardedConnectionTests` [S]:
-  - `ExecuteReader_WithCatalogSql_ThrowsBeforeInnerCommandRuns` (fake inner command counts executions = 0)
+  - `RuntimeGuard_denies_system_catalog_reads_and_never_logs_sql` (sec plan 11.2 row 44; fake inner command counts executions = 0, no SQL in logs)
   - `ExecuteNonQueryScalarPrepare_AllGuarded`
   - `SessionPins_RunOnRawConnection_NotRejected`
   - `Violation_EmitsAuditAndWarning_WithoutSql`
@@ -206,14 +209,14 @@ Gaps:
 - `Catalog/CatalogDatasetDefinitionEndpointTests`:
   - [S] `Put_RequiresGovernanceAdmin`
   - `Put_CreatesThenReplaces_KeepsMaskingAndConsent`
-  - [S] `Put_ReservedSourceName_Rejected` (Theory: `sys`, `information_schema`, `pg_catalog`, `SYS`, `system`, `ALL_TABLES`)
+  - [S] `Reserved_source_names_rejected` (sec plan 11.2 row 44; Theory: `sys`, `information_schema`, `pg_catalog`, `SYS`, `system`, `ALL_TABLES`)
   - [S] `Put_LimitsEnforced`
   - `Put_InvalidNativeType_Rejected`
   - [S] `Put_NeverOpensSourceConnection`
 - `Catalog/CatalogSourceNameValidatorTests` [S]: `DbtOpenMetadataOpenApiUpserts_ReservedNames_Rejected`.
 - `Procedures/ProcedureRowScopeKeyClosureTests`:
   - [S] `BuildKeyQuery_GroupsByKey_HavingAllRowsPassFilterAndTenant`
-  - [S] `NonUniqueKey_WithOneFailingRow_KeyDenied` (SQLite in-memory until WP-31, then the PostgreSQL container in Tests.Integration)
+  - [S] `Non_unique_key_never_widens_access` (sec plan 11.2 row 44; PostgreSQL container in `Tests.Integration`)
   - `UniqueKey_SameResultAsBefore`
 - `Procedures/ProcedureDeclaredOnlyTests`:
   - [S] `ValidationKey_Rejected`
@@ -298,7 +301,7 @@ git grep -nE "sys\.(indexes|columns|objects|parameters)|pg_index|information_sch
 Src: about +1,080 / -2,650 (net about -1,570). Tests: about +1,100 / -2,300. Effort: 6 person-days (PR 1 1.5, PR 2 1.5, PR 3 1.5, PR 4 1.5).
 
 ## Operator template (content for `docs/operations/source-least-privilege-roles.md`)
-Grant per governed object, never per database or catalog. DML only where OD-3 allows it.
+Grant per governed object, never per database or catalog. The data login below is read-only. Writes use a separate login configured as `WriteConnection` ([WP-SIMPL-45](WP-SIMPL-45-governed-write-access.md), OD-25/OD-26) that holds only the privileges listed by `GET /api/v1/admin/datasources/{name}/required-write-privileges` (column-level `INSERT`/`UPDATE` on tables with active write grants, `DELETE` only where a delete grant exists); it never holds catalog privileges either.
 - **PostgreSQL**:
   ```sql
   CREATE ROLE autheris_data NOLOGIN;
@@ -348,7 +351,7 @@ Grant per governed object, never per database or catalog. DML only where OD-3 al
   - Grant `CAN USE` on the SQL warehouse only.
   - Never grant `BROWSE`, `ALL PRIVILEGES`, `MANAGE`, ownership, or any privilege on catalog `system`.
 
-## Proposed Phase 3 conditions (Phase 3 to confirm and renumber)
+## Phase 3 conditions (binding, sec plan section 11.2, row 44)
 - SEC-SIMPL-140 (no source metadata read): the architecture test is a required check, and allowlist changes need a CODEOWNERS security review.
 - SEC-SIMPL-141 (runtime guard fail closed): every `ISqlConnectionFactory` connection is guarded. Lexer errors are violations. The violation path never executes the inner command and never logs SQL.
 - SEC-SIMPL-142 (declared metadata only): the compiler catalog opens no source connection, the fingerprint covers declared type and collation, and a string key with unknown collation is not bindable.
@@ -364,7 +367,7 @@ Grant per governed object, never per database or catalog. DML only where OD-3 al
 - D3 Procedures, a conflict with WP-39 D3 resolved by OD-25: SQL Server catalog validation (signature, browse-mode sources, `sys.security_policies` presence) is removed. Signatures, outputs, column sources and referenced tables are declared. The unverifiable database SECURITY POLICY becomes defense in depth, and Autheris-side key closure is mandatory where row filters apply.
 - D4 Row-scope uniqueness (#459 and the SEC-94-10 allowlist reason) is superseded by OD-25. Key closure gives the same guarantee without any metadata.
 - D5 Npgsql `NoTypeLoading` on data-source connections, because driver type loading is a `pg_catalog` read issued on Autheris's behalf.
-- D6 CDC `CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@t))` (module, WP-29) is the only allowlisted metadata function. It resolves only a declared, granted object, needs no catalog privilege (`VIEW CHANGE TRACKING`) and has no data-only alternative. Owner confirmation is requested at Phase 3.
+- D6 CDC `CHANGE_TRACKING_MIN_VALID_VERSION(OBJECT_ID(@t))` (module, WP-29) is the only allowlisted metadata function. It resolves only a declared, granted object, needs no catalog privilege (`VIEW CHANGE TRACKING`) and has no data-only alternative. Decision taken: allowlisted (default; the sec plan section 11.2 row 44 adopts SEC-SIMPL-140..147 with this allowlist, and allowlist changes need a CODEOWNERS security review).
 - D7 Lakehouse: reading the Delta log or Iceberg metadata is reading the table format and is out of scope. The module must still reject columns that are not declared.
 - D8 Drift: no auto-discovery and no cache-repair read. Mismatch and permission errors map to 502 with stable codes. The fix is a new upload.
-- D9 New SEC ids start at 140 to avoid collisions with WP-41/43 (99-114).
+- D9 This WP uses the condition ids SEC-SIMPL-140..147, a range no other WP uses.

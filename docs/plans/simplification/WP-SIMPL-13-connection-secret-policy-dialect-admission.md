@@ -1,6 +1,6 @@
 # WP-SIMPL-13 Connection-secret policy and data-source dialect admission
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-13-connection-secret-policy-and-data-source-dialect-admission-adr-019-od-12-od-14) | Issues: #507 (plaintext-password bundle), #483 (Oracle TCPS, fix-in-core) | Owner decisions: OD-12, OD-14, OD-15 | Security conditions: SEC-SIMPL-38, SEC-SIMPL-90, SEC-SIMPL-91, SEC-SIMPL-92 (gate: OD-12 tests green before any dialect change merges)
+Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-13-connection-secret-policy-and-data-source-dialect-admission-adr-019-od-12-od-14) | Issues: #507 (plaintext-password bundle), #483 (TCPS check preserved; remaining Oracle part after WP-SIMPL-21) | Owner decisions: OD-12, OD-14, OD-15, OD-36 (Databricks tier flip owned by WP-SIMPL-37) | Security conditions: SEC-SIMPL-38, SEC-SIMPL-90, SEC-SIMPL-91, SEC-SIMPL-92 (gate: OD-12 tests green before any dialect change merges)
 
 ## 1. Goal and outcome
 - Outside Development, a literal `Password` in the connection string of a PostgreSQL, SQL Server or Oracle data source fails startup and connection creation (today only Oracle does). One provider-neutral policy class replaces the Oracle-only check.
@@ -10,7 +10,7 @@ Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-13-connecti
 
 ## 2. Preconditions and dependencies
 - None (engine lane). Start from current `main`.
-- Can run in parallel with WP-SIMPL-11/12/14..18. Must merge before WP-SIMPL-21, which depends on Step 3 (dialect gate).
+- Can run in parallel with WP-SIMPL-11/12/14..18. Must merge before WP-SIMPL-21, which depends on PR 2 and PR 3 (steps 5-6: Snowflake deletion and dialect startup check).
 - SEC-SIMPL-90/91 tests must be green before PR 2 (Snowflake deletion) merges. PR 1 adds the SEC-SIMPL-91 test.
 
 ## 3. Scope
@@ -19,7 +19,7 @@ Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-13-connecti
 - Delete Snowflake from the generator, the enum, the factory, the emitter marker table, base-generator switch cases, the README and tests.
 - A startup data-source dialect check that returns a typed error.
 ### Out of scope
-- Any Oracle or Databricks deletion (OD-12). No WebSQL tier flip: Databricks stays `Experimental` in `DialectCapabilityTable` until X1-DBX, and `DialectAdmissionTests.Admission_ExactSet` keeps PG, SS, Sqlite, Oracle.
+- Any Oracle or Databricks deletion (OD-12). No WebSQL tier flip: Databricks stays `Experimental` in `DialectCapabilityTable` until X1-DBX, and `DialectAdmissionTests.Admission_ExactSet` keeps PG, SS, Sqlite, Oracle. The X1-DBX tier flip (Databricks enabled on WebSQL, Trino and MCP with parity tests, `Admission_ExactSet` changed in the same commit) is owned by WP-SIMPL-37 (OD-36).
 - SQLite removal (WP-SIMPL-31), the Spark CI job move to nightly (WP-SIMPL-21) and the OBO token cache rework (SEC-SIMPL-90 is covered by existing tests; only verify they exist).
 
 ## 4. Current state (verified at 63cbb893)
@@ -123,7 +123,7 @@ git grep -n 'ValidateOracleRuntime' -- src tests                              # 
 - Risk: existing PG/SS deployments with a literal password stop starting outside Development. This is intended (no production yet). Rollback means reverting PR 1.
 - Risk: a Snowflake `InlineData` row may be the only row of a Theory. In that case delete the method; do not replace it with `Ansi` when Ansi is already covered.
 - Do NOT delete or move Oracle or Databricks code, `DatabricksOboTokenProvider`, Testcontainers.Oracle, or the Spark CI job.
-- Do NOT flip any `DialectSupportTier`, and do NOT change `Admission_ExactSet`.
+- Do NOT flip any `DialectSupportTier`, and do NOT change `Admission_ExactSet` (the Databricks flip belongs to WP-SIMPL-37, OD-36).
 - Do NOT log connection strings or passwords. Error messages name the data source and provider only.
 - Do NOT add a generic-dialect fallback anywhere.
 
@@ -138,3 +138,4 @@ git grep -n 'ValidateOracleRuntime' -- src tests                              # 
 3. Step 2 "admission" means startup provider validation, not the WebSQL capability tier. Databricks stays `Experimental` for WebSQL until X1-DBX (consistent with `SqlDialectMapper.cs:54` and `Admission_ExactSet`).
 4. `GovernedSqlExecutorX1Tests:413 "Snowflake"` stays as an unknown-provider string; `"Ansi"` is added as a row instead of replacing it.
 5. The new validator lives in its own file, so the 768-line `GatewayStartupValidator.cs` does not grow toward its size ceiling.
+6. Owner of the Databricks tier flip (X1-DBX): WP-SIMPL-37 (OD-36), after the Databricks contract/nightly lane of WP-SIMPL-21 is green, with a Phase 3 review and the `Admission_ExactSet` change in the same commit. This WP never flips a tier.

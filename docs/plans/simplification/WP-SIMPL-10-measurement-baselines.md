@@ -8,7 +8,7 @@ Check in a reproducible measurement protocol and three scripts that produce the 
 ## 2. Preconditions and dependencies
 - **#516 (CI hang regression) and #517 (job timeouts, hang dumps) must be merged before any CI measurement** (plan sequencing rule 1); CI runs taken while CI hangs are invalid. `ci-duration.sh` only counts runs created after the #517 merge commit date (parameter `--since`).
 - #518-#522 are not preconditions; the baseline is taken after #516/#517 and before #519/#520/#521/#522 land, and re-run after each lands (results files are appended, never overwritten). #523 defines the CI metric.
-- Footprint "before" run on the WP-SIMPL-01 base commit, "after" run on the WP-SIMPL-01 merge commit (lane L-RAT). Repo metrics need no dependency.
+- Footprint "before" run on the WP-SIMPL-01 base commit (PR 1, merged before WP-SIMPL-01), "after" run on the WP-SIMPL-01 merge commit (PR 2, lane L-RAT). Repo metrics and footprint need no CI dependency; only the CI measurement (PR 2) waits for #516/#517.
 - No ci.yml change in this WP (CI budget job is WP-SIMPL-35 `[WF]`).
 
 ## 3. Scope
@@ -50,7 +50,7 @@ Check in a reproducible measurement protocol and three scripts that produce the 
 - [ ] `MeasurementScriptTests` green.
 
 ## 9. PR slicing
-1. PR 1: README, `repo-metrics.sh`, `MeasurementScriptTests`, repo-metrics JSON, footprint "before" JSON (~+350 script/test lines).
+1. PR 1 (must merge before WP-SIMPL-01; needs no CI precondition): README, `repo-metrics.sh`, `footprint.sh`, `MeasurementScriptTests`, repo-metrics JSON, footprint "before" JSON measured on the WP-SIMPL-01 base commit (~+400 script/test lines).
 2. PR 2 (after #516/#517 and WP-SIMPL-01): `ci-duration.sh`, ci-duration JSON, footprint "after" JSON.
 
 ## 10. Risks, rollback, must NOT

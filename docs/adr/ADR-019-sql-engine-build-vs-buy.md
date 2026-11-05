@@ -110,7 +110,7 @@ Verification: line counts with `wc -l` over the two projects; the generator coun
 
 Re-open this ADR when any of the following happens:
 
-1. A named customer or design partner commits to a third dialect. Use the module route from Decision 3; do not change the core.
+1. A named customer or design partner commits to a third dialect. Use a module (PLAN-SIMPL AD-3); do not change the core.
 2. A maintained .NET parser offers both PostgreSQL and T-SQL fidelity together with a strict (reject-unknown) mode. Re-assess option 2.
 3. The product drops free-form SQL (Web SQL, async SQL jobs, MCP SQL tools). Re-assess option 5.
 4. The engine's mutation score stays below the floor for two consecutive releases, or engine-originated security advisories exceed one per quarter for two quarters.

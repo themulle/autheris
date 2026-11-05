@@ -23,7 +23,7 @@ Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-22-real-dat
 
 ## 5. Implementation steps (TDD order, one domain folder per PR)
 1. Red: add `tests/Autheris.Tests.Architecture/TestLayeringArchitectureTests.cs` scanning `tests/Autheris.Tests.Unit/**/*.cs` for `SqliteConnection`, `DuckDBConnection`, `NpgsqlConnection`, `SqlConnection`, `TestServer`, `WebApplication.Create`. Baseline file `tests/Autheris.Tests.Architecture/Baselines/unit-db-host-files.txt` with the current 88 paths; test fails on any file not in baseline and on any baseline entry that no longer matches (ratchet down only).
-2. Per file, classify (write the class into the PR description table): (i) store convenience -> replace with existing in-memory store or a new `InMemory<Store>` fake in `Autheris.Tests.Common/Fakes`; (ii) DB semantics (SQL text, transactions, constraints, tenant predicates) -> move to `tests/Autheris.Tests.Integration/<Domain>/` using the shared PG fixture and `[RequiresContainerRuntimeFact]`; (iii) DuckDB/Olap -> `tests/Autheris.Tests.Integration/Olap/` with in-process DuckDB (no container); (iv) TestServer/WebApplication -> `Autheris.Tests.Integration` using the reused host from #520.
+2. Per file, classify (write the class into the PR description table): (i) store convenience -> replace with existing in-memory store or a new `InMemory<Store>` fake in `Autheris.Tests.Common/Fakes`; (ii) DB semantics (SQL text, transactions, constraints, tenant predicates) -> move to `tests/Autheris.Tests.Integration/<Domain>/` using the shared PG fixture and `[RequiresContainerRuntimeFact]`; (iii) DuckDB/Olap -> `tests/Autheris.Tests.Integration/Olap/` with in-process DuckDB (no container); the PR that creates the folder makes the `Olap` entry of the WP-SIMPL-21 DuckDB lane gate strict; (iv) TestServer/WebApplication -> `Autheris.Tests.Integration` using the reused host from #520.
 3. Security property preservation (SEC-SIMPL-52): a moved Security test keeps class and method name (namespace may change); a rewritten one asserts the same property (tenant isolation, audit append-only, masking) and gets a coverage-map row old id -> new id.
 4. Remove the file from `unit-db-host-files.txt` in the same commit; when empty, delete the baseline and make the test absolute.
 5. Repeat step 1-4 for SqlCompilerGate, Simulation, Sim.ApiHost, TrinoSqlEngine.Tests (engine semantics via PG fixture or in-memory row source).
@@ -49,7 +49,8 @@ Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-22-real-dat
 - [ ] Integration project in required checks with the same categories (SEC-SIMPL-52); Security skipped = 0 in CI.
 - [ ] Coverage map has a row for every moved/renamed Security test.
 - [ ] Unit project has no SQLite/DuckDB package reference.
-- [ ] Median PR wall-clock not above the Stage 2 budget (<= 40 min); one container per test assembly.
+- [ ] Median PR wall-clock (including queue) not worse than the WP-SIMPL-10 baseline (OD-6 target < 30 min, enforced by WP-SIMPL-35); one container per test assembly.
+- [ ] The `Integration/Olap` suite is part of the WP-SIMPL-21 DuckDB parity lane (`DialectParityGateTests.DuckDb_parity_lane_runs_on_pr` strict for `Olap`).
 
 ## 9. PR slicing (tests only; target <= 400 net added lines per PR, deletions unlimited)
 22-1 layering test + baseline; then one PR per domain folder group (Governance/Audit, Catalog/Dbt, Sql/Data, Olap/DuckDB, Api host tests, Streaming/Cdc, rest); last PR: secondary projects + package removal + shard weights.

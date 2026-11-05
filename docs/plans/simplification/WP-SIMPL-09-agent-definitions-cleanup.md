@@ -28,7 +28,7 @@ Delete the four agent definitions without a product match and fix their referenc
 4. Re-read the diff: no line mentioning fail-closed, Phase 3, security expert or advisory confidentiality is removed (SEC-SIMPL-74).
 
 ## 6. Tests
-- No C# test. If WP-SIMPL-05's docs check (`Docs_reference_existing_source_paths`) is merged, it must stay green (it catches links to deleted files).
+- No C# test. If WP-SIMPL-05 is merged, `DocsIntegrityTests.Backticked_source_paths_exist` (SEC-SIMPL-74 `Docs_reference_existing_source_paths`) and `DocsIntegrityTests.Relative_links_resolve` must stay green (they catch references and links to deleted files).
 
 ## 7. Verification commands
 - `git grep -n -E 'conversion-copywriter|qa-cro-reviewer|frontend-developer|ui-ux-architect' -- ':!docs/plans/'` -> empty.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted by the owner on 2026-11-05 (OD-30). This ADR revises OD-7 (ReBAC enforcement, GHSA-78j7-3gh6-7cqx) and replaces SEC-SIMPL-85; implementation in WP-SIMPL-46.
+Accepted by the owner on 2026-11-05 (OD-30). This ADR revises OD-7 (ReBAC enforcement; advisory GHSA-78j7-3gh6-7cqx, details in the private advisory) and replaces SEC-SIMPL-85; implementation in WP-SIMPL-46. Amended by OD-32..OD-35 (access-profile assignments materialize grant records; owner grant records; independent write grants; write enforcement in the shared pipeline).
 
 ## Context
 
@@ -29,7 +29,7 @@ Precedence today (`TableAccessPolicy.DecideAsync`, first terminal result wins): 
 1. **Approved consent, still denied.** With `EnforceOnQueryPaths=true` (or on any PDP path, where ReBAC applies whenever enabled), a data-owner-approved consent is denied because the consent workflow never writes a tuple. Only `AccessPlanningService.cs:346-349`, catalog sync and dbt ingestion write tuples.
 2. **Applied plan, still denied.** The governance plan apply writes only `can_query` tuples and reports "Column-level access levels are not applied (no ReBAC consumer)" (`AccessPlanningService.cs:337-349` and the result text after it). The user then fails the consent zero-trust rule; `TableAccessPolicy.cs:383-391` even annotates "ReBAC: Allowed, Consent: Denied".
 3. **Group grants break under ReBAC.** `RebacTableGate.IsAllowedAsync` checks the user SID only (`RebacTableGate.cs:70`). An AD-group consent (OD-22, OD-27) needs group-membership tuples that neither token groups nor SCIM populate.
-4. **Same caller, different answer per transport.** PDP paths enforce ReBAC whenever enabled (default on), OData/REST/WebSQL/procedures only with `EnforceOnQueryPaths` (default off), streaming only with `EnforceOnStreaming`, Arrow export checks `viewer` instead of `can_query`, Envoy checks neither ReBAC nor consent. This is the root of GHSA-78j7-3gh6-7cqx (see private advisory).
+4. **Same caller, different answer per transport.** PDP paths enforce ReBAC whenever enabled (default on), OData/REST/WebSQL/procedures only with `EnforceOnQueryPaths` (default off), streaming only with `EnforceOnStreaming`, Arrow export checks `viewer` instead of `can_query`, Envoy checks neither ReBAC nor consent.
 5. **Revocation is asymmetric.** Revoking a consent does not remove a tuple; tuples carry only `ExpiresAt`.
 6. **Durability.** Tuples are lost on restart without Redis; consents are durable, audited and signed (OD-29).
 7. **Roles grant data.** `GranteeType.Role` consents and profile assignments, and the `ClusterAdmin`/`DmlWriterRoles` write bypass, contradict OD-22 (subjects are users and groups) and OD-26 (write grants are explicit).
@@ -55,15 +55,15 @@ Correctness (one answer per subject x object x operation on every transport), ex
 | Explainability | Trace across six stores (two non-durable). | One trace over consents, deny records, profiles, filters. | Graph walk plus a side store. |
 | Performance/caching | Two cache/invalidation channels (ReBAC generation keys + consent epoch). | One epoch-based cache (existing consent decision cache); ReBAC event-bus invalidation removed. | Graph traversal per object; discovery batch checks for every table. |
 | Migration effort | Lowest code change, highest config/operations burden. | Medium: about -3,000 src lines, re-route six call sites, migrate role grantees and plan apply. No production data (not deployed). | Highest: rewrite of consent, masking and RLS. |
-| Security risk | Highest: switches per path (GHSA-78j7 class), Casbin-only Envoy. | Lowest: default deny, explicit deny wins, no role bypass, one parity-tested seam. | High during rewrite. |
+| Security risk | Highest: switches per path, Casbin-only Envoy. | Lowest: default deny, explicit deny wins, no role bypass, one parity-tested seam. | High during rewrite. |
 
-## Decision (proposed)
+## Decision
 
 Adopt **option B**.
 
-1. **Single grant model.** Data access (read, insert, update, delete, execute) is decided only by grants: consents (data-owner approved, time-limited, OD-29) and approved access-profile assignments, granted to a user (incl. service principals as non-human users) or an AD group (effective groups per OD-27). Grants carry operation, column set (with Clear/Masked per PII column), row scope (IN list or subquery, optionally bound to caller attributes) and validity. Write grants are WP-SIMPL-45 `WriteRule`s on the same records.
+1. **Single grant model.** Data access (read, insert, update, delete, execute) is decided only by grant records: consents (data-owner approved, time-limited, OD-29) and the grant records that approved access-profile assignments materialize (OD-32), granted to a user (incl. service principals as non-human users) or an AD group (effective groups per OD-27). Grants carry operation, column set (with Clear/Masked per PII column), row scope (IN list or subquery, optionally bound to caller attributes) and validity. Write grants (WP-SIMPL-45 `WriteRule`s on the same records) are independent of read grants: no read grant is needed for INSERT or UPDATE, and `own rows` UPDATE applies the caller's RLS predicate (OD-33). A data owner reads own data only through an automatically created, auditable owner grant record (OD-34); there is no implicit owner access. Grant records are the only data-access source; an access profile never grants by itself. Assigning a profile runs the consent approval path and on approval materializes one time-limited grant record per table matched at approval time; later tables are not covered until a new approval (OD-32). Write enforcement sits in the shared pipeline; only WebSQL is wired, other transports reject writes fail-closed until a separately approved WP wires them (OD-35).
 2. **One PDP.** `IAccessDecisionPoint` (WP-SIMPL-46) is the only component allowed to decide data access. GraphQL, REST, OData, WebSQL, Trino protocol, MCP, procedures, analytics, federation, export, streaming, Lakehouse, Envoy ext_authz and discovery (WP-SIMPL-41) call it.
-3. **Deterministic precedence:** fail-closed preconditions (unresolved identity, degraded groups, inactive object, transport not allowed) -> **explicit deny** (deny consents, column deny rules, hidden columns, virtual-filter deny, narrowing inputs) -> **grant** (union of matching allow grants; row predicates ORed across grants, then ANDed with mandatory virtual filters; masking from column rules and profiles) -> **default deny**. Explicit deny wins over every grant, including break-glass.
+3. **Deterministic precedence:** fail-closed preconditions (unresolved identity, degraded groups, inactive object, transport not allowed) -> **explicit deny** (deny consents, column deny rules, hidden columns, virtual-filter deny, narrowing inputs) -> **grant** (union of matching allow grants; row predicates ORed across grants, then ANDed with mandatory virtual filters; masking from column rules and profiles) -> **default deny**. Explicit deny wins over every grant, including profile-materialized grants (break-glass assignments no longer exist, OD-5).
 4. **Roles are control plane only.** `GatewayRole` and `FunctionalRight` guard admin, governance, catalog and approval endpoints. No role, including `ClusterAdmin`, grants or bypasses data access. `GranteeType.Role` grants are migrated and no longer match.
 5. **ABAC is an input, not a decider.** Caller attributes bind values into row predicates; an unresolved attribute denies.
 6. **ReBAC is removed** (evaluator, stores, tuple API, endpoint filter, options, `danger_bypass_rebac`). Old keys fail fast (SEC-SIMPL-31), removed routes return 404 (SEC-SIMPL-30).
@@ -76,11 +76,11 @@ Adopt **option B**.
 - One answer per request on every transport, proven by a cross-transport parity matrix.
 - Grants are durable, audited, signed and time-limited in one store; revocation is immediate through the policy epoch.
 - About 3,000 fewer src lines (ReBAC) plus the Casbin engine; one cache invalidation channel.
-- GHSA-78j7-3gh6-7cqx is resolved by removal (OBSOLETE-BY-REMOVAL) once WP-SIMPL-46 PR 5 merges.
+- The class of per-path enforcement switches disappears structurally once WP-SIMPL-46 PR 5 merges.
 
 ### Negative / Risks
 - Hierarchical grants (all tables of a schema or domain) are no longer expressed by tuples. They stay available through access-profile table patterns and bulk consent requests; per-object consent rows grow.
-- OD-7 and SEC-SIMPL-85 must be revised by the owner; WP-SIMPL-36 sub-package 6b is replaced if this ADR is accepted before 6b starts.
+- OD-7 and SEC-SIMPL-85 are revised by OD-30; WP-SIMPL-36 sub-package 6b is replaced by WP-SIMPL-46 PR 5.
 - Customers that used role-based consents must re-grant to groups (migration report provided).
 
 ## Revisit Triggers

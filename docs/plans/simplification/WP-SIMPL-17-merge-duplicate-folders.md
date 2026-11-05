@@ -1,12 +1,12 @@
 # WP-SIMPL-17 Merge duplicate folders
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-17-merge-duplicate-folders) | Issues: #515 (stage 1), #459 (sequenced after this WP) | Owner decisions: OD-12 (OpenMetadata adapter stays for WP-SIMPL-28) | Security conditions: SEC-SIMPL-03 (tests move with code, names stable), SEC-SIMPL-05 (stage order); GHSA-v5c2-29pv-cc86 fix lands before the Catalog merge (plan section on advisories)
+Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-17-merge-duplicate-folders) | Issues: #515 (stage 1), #459 (sequenced after this WP) | Owner decisions: PRD section 3.2 (OpenMetadata and dbt = MODULE, WP-SIMPL-28); forward-looking note OD-15 (`SemanticMetricCatalogProjection` goes to core `Catalog/Semantic`) | Security conditions: SEC-SIMPL-03 (tests move with code, names stable), SEC-SIMPL-05 (stage order); GHSA-v5c2-29pv-cc86 fix lands before the Catalog merge (plan section on advisories)
 
 ## 1. Goal and outcome
 Remove four duplicate/vendor-named top-level folders from `src/Autheris.Application`: `Auditing`, `DataCatalog`, `Dbt`, `OpenMetadata`. Application top-level folder count drops by exactly 4 (49 today; 45 if run on today's tree). Pure move/rename refactoring: no behaviour change, all existing tests green, `namespace-assembly-violations.txt` does not grow, no new file in `Application` named after a vendor.
 
 ## 2. Preconditions and dependencies
-- Merged first: WP-SIMPL-07 (creates `ProgramRatchetTests.Application_top_level_folders_are_allow_listed` and its allow-list), WP-SIMPL-12 (vendor catalog connector deletions; shrinks `DataCatalog` interfaces/models), the security-lane fix for GHSA-v5c2-29pv-cc86 (data source registration; touches Catalog code; avoids a conflicting rename).
+- Merged first: WP-SIMPL-07 (creates `ProgramRatchetTests.Application_top_level_folders_are_allow_listed` and its allow-list), WP-SIMPL-12 (vendor catalog connector deletions; shrinks `DataCatalog` interfaces/models), the security-lane fix for GHSA-v5c2-29pv-cc86 (Data source registration; details: private advisory; merge order only, to avoid a conflicting rename).
 - Blocks: WP-SIMPL-24 (folder consolidation), #459 (dbt `meta.indexes`), WP-SIMPL-28 (dbt/OpenMetadata module).
 - May run in parallel with engine-lane WPs (13, 21) and persistence lane (11, 19, 20); conflicts only in DI snapshot files (resolve by regenerating).
 

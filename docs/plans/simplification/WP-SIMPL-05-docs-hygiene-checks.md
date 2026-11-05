@@ -1,6 +1,6 @@
 # WP-SIMPL-05 Docs hygiene and docs checks
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-05-docs-hygiene-and-docs-checks-513) | Issues: #513 | Owner decisions: OD-17 (accepted defaults, incl. Q15: docs/plans rewritten but not gated) | Security conditions: none specific
+Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-05-docs-hygiene-and-docs-checks-513) | Issues: #513 | Owner decisions: OD-17 (accepted defaults, incl. Q15: docs/plans rewritten but not gated) | Security conditions: SEC-SIMPL-74 (docs checks additive; `Backticked_source_paths_exist` is its `Docs_reference_existing_source_paths`)
 
 ## 1. Goal and outcome
 Docs are navigable and honest, enforced by architecture tests. Measurable, in the gated scope (README.md, root `*.md`, `docs/` outside `docs/plans/`, module READMEs): `file:///` links 0, broken relative links 0, backticked source paths that do not exist 0, `Status:` tags 0, "100% GA"/"Production-Ready" wording 0, German documents 0.
@@ -29,7 +29,7 @@ Docs are navigable and honest, enforced by architecture tests. Measurable, in th
 - `RepositoryScan` helper exists in the architecture test project (`OptionsConsumptionInventoryTests.cs:35` uses `RepositoryScan.ReadBaseline`).
 
 ## 5. Implementation steps (TDD order)
-1. RED: add `DocsIntegrityTests` (section 6) with a shared `GatedMarkdownFiles()` = `git ls-files`-equivalent enumeration from repo root (use `RepositoryScan` root; skip `bin/`, `obj/`, `node_modules/`, `.git/`, `docs/plans/`) of `README.md`, root `*.md`, `docs/**/*.md`, `src/**/README.md`, `modules/**/README.md`. Exclude `.agents/**` and `CHANGELOG.md` from status/English gates but include them in `No_absolute_file_links` (all tracked md).
+1. RED: add `DocsIntegrityTests` (section 6) with a shared `GatedMarkdownFiles()` = `git ls-files`-equivalent enumeration from repo root (use `RepositoryScan` root; skip `bin/`, `obj/`, `node_modules/`, `.git/`, `docs/plans/`) of `README.md`, root `*.md`, `docs/**/*.md`, `src/**/README.md`, `modules/**/README.md`. Exclude `.agents/**` and `CHANGELOG.md` from status/English gates but include them in `No_absolute_file_links` (all tracked md). Exclude `docs/adr/**` from `Backticked_source_paths_exist` only (ADRs are historical decisions, same rule as WP-SIMPL-04); ADRs stay in the link and status-tag gates.
 2. Link rewrite: one-off script (do not commit it) in the scratchpad: for each tracked `*.md`, replace `file:///root/autheris/<path>` with `os.path.relpath(<path>, dirname(md))`, preserving `#anchor`. Commit the result as a separate commit `docs: rewrite absolute file links to relative`.
 3. Fix broken relative links reported by `Relative_links_resolve`: retarget to the moved file or remove the link (keep text). Anchors are not checked.
 4. Remove `Status:` lines (regex `^\s*(\*\*)?Status:?(\*\*)?:?\s` at line start, also table rows `| Status |` in feature headers) and replace "100% GA"/"Production-Ready" wording with neutral text (delete the phrase; do not invent a maturity claim).
@@ -41,10 +41,11 @@ Docs are navigable and honest, enforced by architecture tests. Measurable, in th
 Project `tests/Autheris.Tests.Architecture`, class `DocsIntegrityTests`:
 - `No_absolute_file_links` - no `file://` in any tracked `*.md` (all paths, including docs/plans, CLAUDE.md, AGENTS.md).
 - `Relative_links_resolve` - every `](target)` in the gated scope that is not `http(s):`, `mailto:` or a pure `#anchor` resolves to an existing file or directory (strip `#...` and `?...`, URL-decode).
-- `Backticked_source_paths_exist` - every backticked token matching `^(src|tests|docs|deploy|benchmarks|scripts)/[\w./-]+$` (no `*`, `<`, `{`) exists. This is the `Docs_reference_existing_source_paths` check named in WP-SIMPL-04.
+- `Backticked_source_paths_exist` - every backticked token matching `^(src|tests|docs|deploy|benchmarks|scripts)/[\w./-]+$` (no `*`, `<`, `{`) in the gated scope except `docs/adr/**` exists. This is the `Docs_reference_existing_source_paths` check named in SEC-SIMPL-74.
 - `No_status_tags_outside_plans` - no line matching the step-4 regex and no `100% GA` / `production-ready` (case-insensitive) in the gated scope.
 - `Docs_are_english` - per file, German stop-word density (`der|die|das|und|nicht|mit|für|ist|werden|eine` as whole words, case-insensitive) / total words < 0.03; files under 50 words skipped.
 Each test reports up to 50 `path:line` offenders. No security-trait tests. No tests deleted.
+- Not here: the SEC-SIMPL-01 advisory-marker scan (`DocsAdvisoryMarkerTests.Docs_and_changelog_contain_no_advisory_detail_markers`, scope `docs/**`, `src/**`, `tests/**`, `.github/**`, `CHANGELOG.md`) is owned by WP-SIMPL-02; this WP must keep it green (it adds no GHSA text).
 
 ## 7. Verification commands
 - `dotnet build Autheris.sln -c Release -warnaserror`
@@ -71,5 +72,5 @@ One PR, three commits: (1) tests (red), (2) scripted link rewrite, (3) manual fi
 
 ## Decisions taken in this spec
 - `.agents/**` and `CHANGELOG.md` are outside status/English gates (agent prompts may legitimately say "Status:"), but inside the `file:///` gate.
-- `docs/adr/**` is gated for links and status tags (ADR "Status: Accepted" lines are reworded to "Decision date:" / removed, consistent with "no status tags outside docs/plans").
+- `docs/adr/**` is gated for links and status tags only (ADR "Status: Accepted" lines are reworded to "Decision date:" / removed, consistent with "no status tags outside docs/plans"). `Backticked_source_paths_exist` excludes `docs/adr/**` (historical decisions, same rule as WP-SIMPL-04), so later deletion WPs do not have to edit historical ADR text.
 - German detection threshold fixed at 0.03 stop-word density.

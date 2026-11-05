@@ -1,13 +1,13 @@
 # WP-SIMPL-19 Governance repository contract suite
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-19-governance-repository-contract-suite-persistence-lane-first) | Issues: #515 (stage 2) | Owner decisions: OD-1, OD-17(9) | Security conditions: SEC-SIMPL-05, SEC-SIMPL-13, SEC-SIMPL-20, SEC-SIMPL-23
+Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-19-governance-repository-contract-suite-persistence-lane-first) | Issues: #515 (stage 1, persistence lane: WP-SIMPL-11 -> 12 -> 19 -> 20) | Owner decisions: OD-1, OD-17(9) | Security conditions: SEC-SIMPL-05, SEC-SIMPL-13, SEC-SIMPL-20, SEC-SIMPL-23
 
 ## 1. Goal and outcome
 One engine-neutral contract suite pins the behaviour of the existing PostgreSQL and SQL Server governance repository families (26 partials each) before WP-SIMPL-20 merges them. Outcome: one abstract `*Contract` class per aggregate, run by exactly two sealed subclasses (PostgreSQL, SQL Server) with identical expectations; the 40+ per-engine `PostgreSql*ContractTests`/`SqlServer*ContractTests` copies are replaced. Suite green on both engines; no `Skip`.
 
 ## 2. Preconditions and dependencies
 - Merged: WP-SIMPL-11 (SQLite family gone, `GovernancePostgresFixture` exists), WP-SIMPL-12 (ITSM/Backstage/external catalog repositories gone, so they are not pinned).
-- Blocks WP-SIMPL-20 (SEC-SIMPL-05/20). Persistence lane serial; parallel only with non-Persistence WPs.
+- Blocks WP-SIMPL-20 (SEC-SIMPL-05/20). Persistence lane serial (WP-SIMPL-11 -> 12 -> 19 -> 20; this order wins over any table that lists 19 before 11); parallel only with non-Persistence WPs.
 
 ## 3. Scope
 ### In scope

@@ -39,14 +39,14 @@ Disable ReadyToRun for the framework-dependent API publish (the R2R spike was a 
 ## 6. Tests
 - New `Autheris.Tests.Architecture`: `NoReadyToRunArchitectureTests.No_project_or_props_file_enables_PublishReadyToRun` (`[Trait("Category","Security")]` not required; plain architecture test).
 - Changed `Autheris.Tests.Unit`: `ReadyToRunPublishSecurityTests.DockerPublish_ReadyToRun_KeepsLockedRestoreAuditPinsAndTestAuthExclusion` (Security, now asserts absence), `ApiCsproj_NoReadyToRun_NotSelfContained_NotForSelfContainedRelease` (renamed, non-security).
-- Unchanged and must pass: `ApiCsproj_ReadyToRun_NoPackVersionOverrideNoFeedOrAuditChange`, `ApiLockFile_HasLinuxX64Target_RestoreLockedModeCondition_Unchanged`, `ApiCsproj_KeepsTieredPgo`, `ReleaseBuildExcludesTestAuthTests`, `BenchmarkStackHardeningTests`.
+- Unchanged and must pass: `ApiCsproj_ReadyToRun_NoPackVersionOverrideNoFeedOrAuditChange`, `ApiLockFile_HasLinuxX64Target_RestoreLockedModeCondition_Unchanged`, `ApiCsproj_KeepsTieredPgo` (Unit); `ReleaseBuildExcludesTestAuthTests`, `BenchmarkStackHardeningTests` (Architecture).
 - No test deleted; Security count unchanged (SEC-SIMPL-03).
 
 ## 7. Verification commands
 - `dotnet restore Autheris.sln --locked-mode` (must succeed with no lock file diff: `git diff --exit-code -- '*packages.lock.json'`).
 - `dotnet build Autheris.sln -c Release -warnaserror`
-- `dotnet test tests/Autheris.Tests.Architecture -c Release --no-build --filter "FullyQualifiedName~NoReadyToRunArchitectureTests"`
-- `dotnet test tests/Autheris.Tests.Unit -c Release --no-build --filter "FullyQualifiedName~ReadyToRunPublishSecurityTests|FullyQualifiedName~ReleaseBuildExcludesTestAuthTests"`
+- `dotnet test tests/Autheris.Tests.Architecture -c Release --no-build --filter "FullyQualifiedName~NoReadyToRunArchitectureTests|FullyQualifiedName~ReleaseBuildExcludesTestAuthTests|FullyQualifiedName~BenchmarkStackHardeningTests"` (both guard classes live in `tests/Autheris.Tests.Architecture`)
+- `dotnet test tests/Autheris.Tests.Unit -c Release --no-build --filter "FullyQualifiedName~ReadyToRunPublishSecurityTests"`
 - `dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release --no-restore -p:AutherisIncludeTestAuth=false -o /tmp/pub && ! ls /tmp/pub/*.r2r* 2>/dev/null`
 - `git grep -n 'PublishReadyToRun' -- '*.csproj' '*.props' '*.targets'` returns nothing.
 

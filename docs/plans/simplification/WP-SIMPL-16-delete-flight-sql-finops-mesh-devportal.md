@@ -1,67 +1,76 @@
-# WP-SIMPL-16 Delete Arrow Flight SQL over HTTP, FinOps, Mesh, dev portal in release builds
+# WP-SIMPL-16 Delete Arrow Flight SQL over HTTP and the dev portal
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-16-delete-arrow-flight-sql-over-http-finops-mesh-dev-portal-in-release-builds) | Issues: #487 (Flight part), #485 (Arrow part), #491 (part), #512 | Owner decisions: D2, D12 | Security conditions: SEC-SIMPL-30, 31, 35, 37; GHSA-v75c-28mx-7wm7 (Flight-only part) - see private advisory
+Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-16-delete-arrow-flight-sql-over-http-and-the-dev-portal) | Issues: #487 (Flight part), #485 (Arrow part), #491 (part), #512 | Owner decisions: D2, D12, OD-20 (FinOps replaced by WP-SIMPL-42), OD-21 (Mesh/Envoy ext_authz core), OD-37 (dev portal deleted) | Security conditions: SEC-SIMPL-30, 31, 35, 37; GHSA-v75c-28mx-7wm7 (WebSQL DML request handling; details: private advisory)
 
-> **Binding overrides (owner decisions OD-20 and OD-21, 2026-11-05):** Mesh (Envoy ext_authz, `Application/Mesh`, `EnvoyExtAuthzEndpoints`) is NOT deleted; it stays core (see [WP-SIMPL-43](WP-SIMPL-43-authentication-authorization-core.md)). FinOps is removed only as part of [WP-SIMPL-42](WP-SIMPL-42-usage-accounting-users-groups.md), which replaces it with usage accounting per user and AD group; do not delete FinOps in this WP. This WP keeps: Flight-SQL-over-HTTP deletion and dev-portal-in-release-builds handling.
+> **Changed by OD-20, OD-21 and OD-37 (2026-11-05):** FinOps is not deleted here; [WP-SIMPL-42](WP-SIMPL-42-usage-accounting-users-groups.md) replaces it (its PR-5). Mesh (Envoy ext_authz, `Application/Mesh`, `EnvoyExtAuthzEndpoints`) stays core ([WP-SIMPL-43](WP-SIMPL-43-authentication-authorization-core.md)). The dev portal is deleted (OD-37; this WP wins over WP-SIMPL-41). The file name keeps its old slug for stable links.
 
 ## 1. Goal and outcome
-Delete the Flight-SQL-over-HTTP endpoints and server, FinOps, and Mesh (Envoy ext_authz); map dev endpoints only in Development and exclude dev portal assets from Release publish. Outcome: about -1,800 src lines; removed routes 404 in Release; Arrow IPC export (`ArrowExportEndpoints.cs`) unchanged with masking, row/column policy and audit.
+Delete the Flight-SQL-over-HTTP endpoints and server, and delete the dev portal (HTML landing page, getting-started page and the `/portal/*` consoles). Outcome: about -1,250 src lines; removed routes 404 for admin and anonymous in every environment; Arrow IPC export (`ArrowExportEndpoints.cs`) unchanged with masking, row/column policy and audit; FinOps, Mesh/Envoy ext_authz, the TOTP enrollment API and the HITL approval API untouched.
 
 ## 2. Preconditions and dependencies
 - Merged first: #504 (security test baseline), `fix/security-batch-5` (touches `ArrowExportEndpoints.cs`), WP-SIMPL-04.
-- Parallel with WP-SIMPL-12/14/15.
+- Parallel with WP-SIMPL-12/14/15 (shared: `UnknownGatewayKeyGuard`, `DeletedFeaturesArchitectureTests`, `RemovedEndpointsTests`, `RemovedConfigKeysTests`, `IngressExemptionTests`; append rows). WP-SIMPL-45 keeps Flight read-only until this WP deletes it.
+- WP-SIMPL-41 PR 1: if `DevPortalAssets.cs` is already deleted here, WP-SIMPL-41 has no OpenSchema badge to remove.
 
 ## 3. Scope
 ### In scope
-- `ArrowFlightSqlEndpoints.cs`, `ArrowFlightSqlServer`, Flight models; `Application/FinOps`, FinOps endpoints, middleware, options, models; `Application/Mesh`, `EnvoyExtAuthzEndpoints.cs`; dev portal/dev endpoints gating and Release asset exclusion; docs and tests.
+- `ArrowFlightSqlEndpoints.cs`, `ArrowFlightSqlServer`, `IArrowFlightSqlServer`, Flight models, Flight DI, docs and tests.
+- Dev portal: `DevPortalEndpoints.cs` (routes `/`, `/getting-started`, `/portal/2fa/enroll`, `/portal/2fa/enroll/verify`, `/portal/approvals`, `/portal/approvals/{ticketId}/step-up`), `DevPortalAssets.cs`, their mapping, docs and tests.
+- Verify that `DevEndpoints` (`/api/dev/*`, F-AUTH-DX) maps routes only in Development; gate it if not.
 ### Out of scope
 - `ArrowExportEndpoints.cs` and Arrow IPC serialization (kept); query cost options (WP-SIMPL-06).
+- FinOps (removed with replacement by WP-SIMPL-42 PR-5).
+- Mesh / Envoy ext_authz (core, WP-SIMPL-43).
+- The TOTP enrollment API `/api/v1/governance/2fa/*` (`GovernanceApiEndpoints.cs:61-65`) and the HITL approval API `/api/governance/hitl/*` (`HitLEndpoints.cs`): kept; they replace the deleted HTML consoles.
 
-## 4. Current state (verified at 63cbb893)
+## 4. Current state (verified at 63cbb893; dev portal re-verified at 88e5ab74)
 - Flight: `Api/Endpoints/ArrowFlightSqlEndpoints.cs` (141, mapped `GatewayApplicationBuilderExtensions.cs:261`), `Application/Serialization/{ArrowFlightSqlServer(297),IArrowFlightSqlServer(34)}.cs`, `Domain/Model/ArrowFlightSqlModels.cs` (33), DI `GatewayExecutionServiceExtensions.cs:107`.
-- FinOps: `Application/FinOps/{Interfaces/IFinOpsAccountingService(37),Services/FocusCostAccountingService(241)}.cs`, `Api/Endpoints/FinOpsEndpoints.cs` (142, mapped :245), `Api/Middleware/FinOpsBudgetMiddleware.cs` (130, `UseMiddleware` :108), `Domain/Options/Resilience/FinOpsOptions.cs` (17), `Domain/Model/FinOpsModels.cs` (34), DI `GatewayExecutionServiceExtensions.cs:167`.
-- Mesh: `Application/Mesh/{Interfaces/IEnvoyExtAuthzService(33),Services/EnvoyExportValidation(40),Services/EnvoyExtAuthzService(469)}.cs`, `Api/Endpoints/EnvoyExtAuthzEndpoints.cs` (mapped :271), DI `GatewaySecurityServiceExtensions.cs:118`.
-- Dev: `DevPortalEndpoints.cs` (245, :290), `DevPortalAssets.cs` (495), `DevEndpoints.cs` (175, :291, already Development-only per comment - verify).
-- Tests (delete): Unit `Security/ArrowFlightSqlSecurityTests.cs`, `Security/FlightSqlGovernedExecutionTests.cs`, `Security/FlightSqlStreamEndpointTests.cs`, `Security/FlightSqlTableListingTests.cs`, `FinOps/FocusCostAccountingTests.cs`, `Mesh/EnvoyExportValidationTests.cs`; Integration `FinOpsEndToEndSqliteTests.cs`, `FinOpsIntegrationTests.cs`. Keep `Security/ArrowExportSecurityTests.cs`, `DevPortal/DevPortalTwoFactorConsoleTests.cs` (Development path).
-- Docs: `docs/features/f-data-04-arrow-flight-sql.md`, `f-ai-08-focus-finops-accounting.md`; Mesh/Envoy sections (grep `ext_authz`).
+- FinOps: see WP-SIMPL-42 section 4 (not touched here).
+- Mesh: `Application/Mesh/**`, `EnvoyExtAuthzEndpoints.cs` (core, not touched here).
+- Dev portal: `DevPortalEndpoints.cs` (245, mapped `GatewayApplicationBuilderExtensions.cs:290` in every environment). `/` and `/getting-started` return 404 outside Development inside the handler; the `/portal/2fa/*` and `/portal/approvals/*` consoles are mapped in every environment. `DevPortalAssets.cs` (495) generates the HTML. Comment-only mentions: `BasicAuthenticationHandler.cs:333`, `AuditEventTypes.cs:105`.
+- Dev endpoints: `DevEndpoints.cs` (175, mapped `:291`, routes created only when `DevFeatures.Resolve(options, env.IsDevelopment())` allows; verify).
+- Tests (delete): Unit `Security/ArrowFlightSqlSecurityTests.cs`, `Security/FlightSqlGovernedExecutionTests.cs`, `Security/FlightSqlStreamEndpointTests.cs`, `Security/FlightSqlTableListingTests.cs`, `DevPortal/DevPortalTwoFactorConsoleTests.cs`. Keep `Security/ArrowExportSecurityTests.cs`, `Mesh/EnvoyExportValidationTests.cs`, all FinOps tests (WP-SIMPL-42 owns them).
+- Docs: `docs/features/f-data-04-arrow-flight-sql.md`; dev portal mentions in `docs/features/f-api-09-datasource-connectivity-testing.md` and `f-auth-dx-basic-auth-session.md`.
 
 ## 5. Implementation steps (TDD order)
-1. Baseline Security test list on #504 commit. Map each Flight security test to: (a) deleted surface, or (b) an Arrow export equivalent; add any missing scenario (masking, row policy, tenant, audit, DML ticket refusal) to `ArrowExportSecurityTests` before deleting.
-2. Red: add tests of section 6.
+1. Baseline Security test list on the #504 commit. Map each Flight security test to: (a) deleted surface, or (b) an Arrow export equivalent; add any missing scenario (masking, row policy, tenant, audit, DML ticket refusal) to `ArrowExportSecurityTests` before deleting. Map each `DevPortalTwoFactorConsoleTests` security case to the existing TOTP enrollment API tests (`/api/v1/governance/2fa/*`) or add the missing case there.
+2. Red: add the section 6 tests.
 3. Delete Flight files, DI line 107, mapping line 261.
-4. Delete FinOps files, middleware line 108, mapping 245, DI 167, options.
-5. Delete Mesh files, mapping 271, DI 118.
-6. Gate `MapDevPortalEndpoints`/`MapDevEndpoints` behind `app.Environment.IsDevelopment()` in `GatewayApplicationBuilderExtensions.cs:290-291`; in `Autheris.Api.csproj` add `<Content Remove="...devportal assets..." Condition="'$(Configuration)'=='Release'" />` (assets live in `DevPortalAssets.cs` as code: wrap the class in `#if DEBUG` or move it to a Development-only partial; default per D2 is delete if no owner is named).
-7. `UnknownGatewayKeyGuard`: `Gateway:FinOps`, Flight SQL keys, Mesh/Envoy ext_authz keys (any value).
-8. Ingress/rate-limit exemptions, Helm and OpenAPI cleanup (SEC-SIMPL-37); docs, migration guide.
+4. Delete `DevPortalEndpoints.cs`, `DevPortalAssets.cs` and the mapping `:290`; fix the two comment mentions. Confirm that `DevEndpoints` creates no route outside Development (gate the `MapDevEndpoints` call with `app.Environment.IsDevelopment()` if the check shows otherwise).
+5. `UnknownGatewayKeyGuard`: Flight SQL keys (any value). The dev portal has no option section; if one exists at implementation time, guard it too.
+6. Ingress/rate-limit exemptions, Helm and OpenAPI cleanup for the removed routes (SEC-SIMPL-37); docs (reference text only) and migration guide rows ("dev portal removed; use `/api/v1/governance/2fa/*` and `/api/governance/hitl/*`").
 
 ## 6. Tests
-- Integration `RemovedRoutesTests.Removed_routes_return_404_for_admin_and_anonymous` [Trait("Category","Security")] Theory rows: Flight SQL routes, FinOps routes, Envoy ext_authz routes; `Removed_routes_absent_from_openapi_and_exemptions`.
-- Integration `ReleaseSurfaceTests.Dev_endpoints_absent_outside_development` [Security] (Production environment: dev portal and dev routes 404, no static fallback 200).
+- Integration `RemovedEndpointsTests.Removed_routes_return_404_for_admin_and_anonymous` [Trait("Category","Security")] (shared 4.2 class; create if absent, append rows): Flight SQL routes; `/getting-started`, `/portal/2fa/enroll`, `/portal/2fa/enroll/verify`, `/portal/approvals`, `/portal/approvals/{ticketId}/step-up`; `/` returns no dev portal HTML. Rows also assert absence from OpenAPI.
+- Integration `IngressExemptionTests.Exemption_list_contains_only_existing_routes` [Security] (SEC-SIMPL-37) and `AuthorizationInventoryTests.Every_endpoint_has_authorization_or_is_on_the_public_allowlist` [Security], green before and after.
+- Integration `ReleaseSurfaceTests.Dev_endpoints_absent_outside_development` [Security] (Production environment: `/api/dev/*` 404, no static fallback 200).
 - Unit `ArrowExportSecurityTests.Export_applies_masking_and_audit` [Security] stays green (SEC-SIMPL-35) plus ported scenarios from step 1.
-- Unit `Configuration/RemovedConfigKeysTests.FinOps_keys_fail_startup`, `.FlightSql_keys_fail_startup`, `.Mesh_keys_fail_startup` [Security].
-- Architecture `DeletedFeaturesArchitectureTests` entries `Autheris.Application.FinOps`, `Autheris.Application.Mesh`, `ArrowFlightSql*` type names.
+- Unit `Configuration/RemovedConfigKeysTests.Every_removed_key_fails_startup` (append Flight rows) and `.FlightSql_keys_fail_startup` [Security].
+- Architecture `DeletedFeaturesArchitectureTests` entries `ArrowFlightSql*` type names, `DevPortalEndpoints`, `DevPortalAssets`.
 
 ## 7. Verification commands
-- `dotnet build Autheris.sln -c Release -warnaserror`; `dotnet publish src/Autheris.Api -c Release -o <scratch>` then assert no dev portal asset in output.
-- `git grep -inE "FlightSql|ArrowFlight|FinOps|EnvoyExtAuthz|ext_authz" -- src deploy docs ':!docs/plans'` -> empty.
+- `dotnet build Autheris.sln -c Release -warnaserror`; `dotnet publish src/Autheris.Api -c Release -o <scratch>` then assert no dev portal asset in the output.
+- `git grep -inE "FlightSql|ArrowFlight|DevPortal" -- src deploy docs ':!docs/plans'` -> empty.
+- `git grep -n -E "FinOps|EnvoyExtAuthz" -- src` still matches (kept features; FinOps disappears only with WP-SIMPL-42 PR-5).
 
 ## 8. Acceptance criteria
-- [ ] grep empty; removed routes 404 (admin and anonymous); Release publish has no dev portal assets.
+- [ ] Flight and dev portal grep empty; removed routes 404 (admin and anonymous) and absent from OpenAPI and exemptions; Release publish has no dev portal assets.
+- [ ] FinOps, Mesh/Envoy ext_authz, the TOTP enrollment API and the HITL approval API unchanged and their tests green.
 - [ ] Arrow export security tests green; Security-test diff fully mapped.
 - [ ] Removed keys fail startup.
 
 ## 9. PR slicing
-1. PR-A: Flight removal + ported Arrow export tests.
-2. PR-B: FinOps + Mesh removal.
-3. PR-C: dev portal gating and Release exclusion.
+1. PR-A: Flight removal + ported Arrow export tests (steps 1-3, 5 for Flight keys).
+2. PR-B: dev portal deletion, dev-endpoint gating check, migration-guide rows (steps 4, 6).
 
 ## 10. Risks, rollback, must NOT do
 - Do NOT touch `ArrowExportEndpoints.cs` behaviour. Do NOT open any new Arrow listener. Do NOT leave a SPA/static fallback that answers 200 on removed paths.
+- Do NOT delete or guard anything of FinOps, `Application/Mesh`, `EnvoyExtAuthzEndpoints`, the TOTP enrollment API or the HITL approval API.
 - Rollback: revert per PR.
 
 ## 11. Estimate
-+200 / -2,000 src; tests -1,100; 2 person-days.
++50 / -1,250 src (Flight about -510, dev portal about -740 incl. assets); tests about -600; 1 person-day.
 
 ## Decisions taken in this spec
-- D-16a: Dev portal kept for Development only (not deleted) unless no owner is named before PR-C; then delete (D2 default).
+- D-16a: Dev portal deleted (OD-37, owner default confirmed); its HTML consoles are replaced by the existing TOTP enrollment and HITL approval APIs.
+- D-16b: FinOps and Mesh are out of scope (OD-20, OD-21); FinOps is removed with its replacement by WP-SIMPL-42 PR-5.
