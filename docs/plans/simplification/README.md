@@ -45,6 +45,7 @@ WP-SIMPL-18 therefore only deletes differential-privacy noise, CDN purge and Sch
 
 - [WP-SIMPL-44](WP-SIMPL-44-no-source-metadata-reads.md) No source-metadata reads (OD-25): only data access on sources; schema, keys, indexes, samples and statistics come from outside; folds in #459.
 - [WP-SIMPL-45](WP-SIMPL-45-governed-write-access.md) Governed write access (OD-26): INSERT and column-level UPDATE per user/AD group via data-owner consent; supersedes the DML-bundle design of WP-SIMPL-36.
+- [WP-SIMPL-47](WP-SIMPL-47-external-catalog-and-consent-api.md) Catalog and consent API, workflow internal or external via webhook, signed time-limited grants with verification (OD-28, OD-29).
 - OD-22 core access model and OD-23 heterogeneous data gateway are recorded in the PRD and bind every WP.
 - OD-24: OData stays core; [WP-SIMPL-26](WP-SIMPL-26-pilot-module-odata.md) is reduced to cleanup and Power BI / Excel interop tests; the module pilot is Lakehouse ([WP-SIMPL-27](WP-SIMPL-27-module-lakehouse.md)).
 
