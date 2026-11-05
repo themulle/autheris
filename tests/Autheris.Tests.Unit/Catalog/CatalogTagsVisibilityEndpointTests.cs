@@ -53,7 +53,7 @@ public sealed class CatalogTagsVisibilityEndpointTests
         var (status, body) = await Run(await CatalogApiEndpoints.GetDatasetCatalogSettingsHandler("sales.dbo.orders", _service, Context(), default));
 
         status.ShouldBe(200);
-        body.ShouldBe("{\"datasetId\":\"sales.dbo.orders\",\"tags\":[{\"tag\":\"pii\",\"source\":\"admin\"},{\"tag\":\"sales\",\"source\":\"dbt\"}],\"visibility\":\"Summary\",\"tierEffective\":false}");
+        body.ShouldBe("{\"datasetId\":\"sales.dbo.orders\",\"tags\":[{\"tag\":\"pii\",\"source\":\"admin\"},{\"tag\":\"sales\",\"source\":\"dbt\"}],\"visibility\":\"Summary\",\"tierEffective\":false,\"minGroupSize\":null,\"nonPersonal\":null,\"warning\":null}");
     }
 
     [Fact]

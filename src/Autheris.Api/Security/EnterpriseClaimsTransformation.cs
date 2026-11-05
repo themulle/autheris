@@ -67,7 +67,8 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
         // 2. Resolve authoritative realm deterministically from scheme or issuer (CRIT-01)
         var issuer = identity.FindFirst("iss")?.Value;
-        IdentityRealm? realm = _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType);
+        IdentityRealm? realm = (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
+            ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType);
 
         var realmId = realm?.RealmId ?? "workforce-entra";
 
@@ -101,8 +102,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
         // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
         // Inbound tenant_source claims are removed, the resolved tenant is stamped.
-        // realmBound is only true when the realm has an explicit binding (Fixed or ClaimMapped), not Unbound.
-        var isRealmBound = realm != null && !tenantByClaims && realm.TenantBinding.Kind != TenantBindingKind.Unbound;
+        var isRealmBound = realm != null && !tenantByClaims;
         var resolution = TenantStamping.Apply(identity, _tenantResolver, isRealmBound);
         if (realm == null || tenantByClaims)
         {

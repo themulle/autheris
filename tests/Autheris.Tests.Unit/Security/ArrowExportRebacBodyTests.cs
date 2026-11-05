@@ -45,7 +45,7 @@ public sealed class ArrowExportRebacBodyTests
         var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
         foreach (var table in viewerTables)
         {
-            await store.AddTupleAsync(new RebacTuple(Tenant, User, "viewer", "table:" + TableIdentifierNormalizer.Normalize(table).ToQualifiedName()));
+            await store.AddTupleAsync(new RebacTuple(Tenant, User, "viewer", Autheris.Application.Policy.RebacTableGate.ObjectId(TableIdentifierNormalizer.Normalize(table))));
         }
 
         var services = new ServiceCollection();

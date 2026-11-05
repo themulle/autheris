@@ -258,7 +258,7 @@ public sealed class DataSourceTransportGate : IDataSourceTransportGate
 /// in production: the setter is <c>internal</c>, so only the test assemblies that see Application internals can install a different gate
 /// (SEC-ATR-01: there is no configuration, option or public API that turns the check off).
 /// </summary>
-internal static class TransportGateFallback
+public static class TransportGateFallback
 {
-    internal static IDataSourceTransportGate Current { get; set; } = DenyAllTransportGate.Instance;
+    public static IDataSourceTransportGate Current { get; internal set; } = DenyAllTransportGate.Instance;
 }

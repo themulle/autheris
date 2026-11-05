@@ -339,6 +339,7 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
 
         Array.Sort(files, StringComparer.Ordinal);
         AuditChainAnchor? best = null;
+        AuditChainAnchor? previous = null;
         var skipped = 0;
         foreach (var file in files.Reverse().Take(8))
         {
@@ -367,17 +368,22 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
             if (best == null)
             {
                 best = anchor;
+                previous = anchor;
             }
-            else if (anchor.Sequence == best.Sequence && !string.Equals(anchor.EntryHash, best.EntryHash, StringComparison.Ordinal))
+            else if (anchor.Sequence == previous!.Sequence && !string.Equals(anchor.EntryHash, previous.EntryHash, StringComparison.Ordinal))
             {
                 // Two different valid anchors for one sequence: history was rewritten or the chain forked.
                 return Invalid;
             }
-            else if (best.Sequence - anchor.Sequence > 1)
+            else if (previous!.Sequence - anchor.Sequence > 1)
             {
                 // GHSA-4qx8-fv2p-q8r2: Sequence gap detected between consecutive anchors in the WORM directory
-                _logger?.LogCritical("CRITICAL: WORM audit anchor sequence gap detected between {Newer} and {Older}. Possible deleted span.", best.Sequence, anchor.Sequence);
+                _logger?.LogCritical("CRITICAL: WORM audit anchor sequence gap detected between {Newer} and {Older}. Possible deleted span.", previous.Sequence, anchor.Sequence);
                 return Invalid;
+            }
+            else
+            {
+                previous = anchor;
             }
         }
 

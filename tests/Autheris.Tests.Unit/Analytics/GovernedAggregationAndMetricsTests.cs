@@ -344,7 +344,18 @@ public sealed class GovernedAggregationAndMetricsTests
         metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(metadata);
 
         var rows = new List<IReadOnlyDictionary<string, object?>>();
-        // Group "Engineering": 6 rows (5 active, 1 inactive), each amount = 100
+        // Group "Sales": 10 rows (survives unfiltered, 0 VIP rows), each amount = 100
+        for (int i = 0; i < 10; i++)
+        {
+            rows.Add(new Dictionary<string, object?>
+            {
+                ["id"] = 200 + i,
+                ["department"] = "Sales",
+                ["status"] = "Standard",
+                ["amount"] = 100m
+            });
+        }
+        // Group "Engineering": 6 rows (3 VIP, 3 Standard), each amount = 100 (complementary suppressed unfiltered)
         for (int i = 0; i < 6; i++)
         {
             rows.Add(new Dictionary<string, object?>
@@ -355,7 +366,7 @@ public sealed class GovernedAggregationAndMetricsTests
                 ["amount"] = 100m
             });
         }
-        // Group "Executive": only 2 rows, each amount = 1000 (must be suppressed because 2 < 5)
+        // Group "Executive": only 2 rows, each amount = 1000 (must be primary suppressed because 2 < 5)
         for (int i = 0; i < 2; i++)
         {
             rows.Add(new Dictionary<string, object?>
@@ -382,7 +393,7 @@ public sealed class GovernedAggregationAndMetricsTests
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
             analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5 }));
 
-        // 1. Unfiltered query: "Engineering" (6 rows, sum=600) survives; "Executive" (2 rows, sum=2000) is suppressed.
+        // 1. Unfiltered query: "Sales" (10 rows, sum=1000) survives; "Executive" (2 rows) is primary suppressed, "Engineering" (6 rows) is complementary suppressed.
         var unfilteredQuery = new AggregationQuery(
             OrdersTableId,
             GroupBy: ["department"],
@@ -392,17 +403,17 @@ public sealed class GovernedAggregationAndMetricsTests
         var result = await service.ExecuteAggregationAsync(principal, unfilteredQuery);
 
         result.Suppressed.ShouldBeTrue();
-        result.SuppressedGroupsCount.ShouldBe(1);
-        result.SuppressedRowsCount.ShouldBe(2);
+        result.SuppressedGroupsCount.ShouldBe(2);
+        result.SuppressedRowsCount.ShouldBe(8);
         result.Groups.Count.ShouldBe(1);
-        result.Groups[0].GroupKey["department"].ShouldBe("Engineering");
-        result.Groups[0].Count.ShouldBe(6);
-        result.Groups[0].Sum["amount"].ShouldBe(600m);
+        result.Groups[0].GroupKey["department"].ShouldBe("Sales");
+        result.Groups[0].Count.ShouldBe(10);
+        result.Groups[0].Sum["amount"].ShouldBe(1000m);
 
-        // Differencing protection: Totals must equal ONLY the surviving group (600, NOT 2600!)
+        // Differencing protection: Totals must equal ONLY the surviving group (1000)
         result.Totals.ShouldNotBeNull();
-        result.Totals!.Count.ShouldBe(6);
-        result.Totals.Sum["amount"].ShouldBe(600m);
+        result.Totals!.Count.ShouldBe(10);
+        result.Totals.Sum["amount"].ShouldBe(1000m);
 
         // 2. Filtered query narrowing "Engineering" to 3 rows (status = 'VIP'): now BOTH groups are < 5 and suppressed!
         var narrowedQuery = new AggregationQuery(
@@ -572,10 +583,11 @@ public sealed class GovernedAggregationAndMetricsTests
         metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(metadata);
         metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([metadata]);
 
-        // 5 EU Software orders (amount = 100 each -> mrr = 500), 2 EU Hardware orders (amount = 50 each -> suppressed because 2 < 5),
+        // 10 EU Software orders (amount = 100 each -> mrr = 1000, survives), 5 EU Services orders (complementary suppressed),
+        // 2 EU Hardware orders (amount = 50 each -> primary suppressed because 2 < 5),
         // and 6 US Software orders (amount = 200 each -> filtered out by EU caller's RLS!)
         var rows = new List<IReadOnlyDictionary<string, object?>>();
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 10; i++)
         {
             rows.Add(new Dictionary<string, object?>
             {
@@ -586,11 +598,22 @@ public sealed class GovernedAggregationAndMetricsTests
                 ["discount_secret"] = 10m
             });
         }
+        for (int i = 0; i < 5; i++)
+        {
+            rows.Add(new Dictionary<string, object?>
+            {
+                ["id"] = 15 + i,
+                ["region"] = "EU",
+                ["category"] = "Services",
+                ["amount"] = 100m,
+                ["discount_secret"] = 10m
+            });
+        }
         for (int i = 0; i < 2; i++)
         {
             rows.Add(new Dictionary<string, object?>
             {
-                ["id"] = 20 + i,
+                ["id"] = 25 + i,
                 ["region"] = "EU",
                 ["category"] = "Hardware",
                 ["amount"] = 50m,
@@ -725,18 +748,18 @@ public sealed class GovernedAggregationAndMetricsTests
 
         metricResult.ManifestVersion.ShouldBe("2.4.0");
         metricResult.Suppressed.ShouldBeTrue();
-        metricResult.SuppressedGroupsCount.ShouldBe(1); // EU Hardware (2 rows < 5) suppressed
+        metricResult.SuppressedGroupsCount.ShouldBe(2);
         metricResult.Groups.Count.ShouldBe(1);
 
         var softwareBucket = metricResult.Groups[0];
         softwareBucket.GroupKey["category"].ShouldBe("Software");
-        softwareBucket.Count.ShouldBe(5); // Only EU Software (5 rows), US Software (6 rows) excluded by RLS!
-        softwareBucket.Values["mrr"].ShouldBe(500m);
+        softwareBucket.Count.ShouldBe(10); // Only EU Software (10 rows), US Software (6 rows) excluded by RLS!
+        softwareBucket.Values["mrr"].ShouldBe(1000m);
         softwareBucket.Values["avg_order_value"].ShouldBe(100m);
 
-        // Totals must reflect ONLY surviving EU Software bucket (500m)
+        // Totals must reflect ONLY surviving EU Software bucket (1000m)
         metricResult.Totals.ShouldNotBeNull();
-        metricResult.Totals!.Values["mrr"].ShouldBe(500m);
+        metricResult.Totals!.Values["mrr"].ShouldBe(1000m);
 
         // 2. Querying a metric backed by a masked column throws MaskedAggregationException (AGGREGATION_ON_MASKED_COLUMN)
         var maskedEx = await Should.ThrowAsync<MaskedAggregationException>(() =>

@@ -60,12 +60,12 @@ public sealed class DatasetDataEndpointErrorTests
     }
 
     [Fact]
-    public async Task TableNotFound_Is404ResourceNotFound_WithoutExceptionText_SEC_PG_14()
+    public async Task TableNotFound_Is403AccessDenied_WithoutExceptionText_SEC_PG_14()
     {
         var (status, body, raw) = await RunAsync(new TableNotFoundException(new TableIdentifier("sales", "dbo", "secret_tbl")));
 
-        status.ShouldBe(404);
-        body.GetProperty("code").GetString().ShouldBe("RESOURCE_NOT_FOUND");
+        status.ShouldBe(403);
+        body.GetProperty("code").GetString().ShouldBe("ACCESS_DENIED");
         raw.ShouldNotContain("secret_tbl");
     }
 
