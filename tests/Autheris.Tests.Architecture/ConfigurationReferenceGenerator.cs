@@ -455,19 +455,22 @@ internal static class ConfigurationReferenceGenerator
     {
         // Strip XML tags
         var stripped = Regex.Replace(raw, @"<[^>]+>", " ");
+        // Unescape standard XML entities
+        var unescaped = stripped.Replace("&gt;", ">").Replace("&lt;", "<").Replace("&amp;", "&");
         // Collapse whitespace
-        var collapsed = Regex.Replace(stripped, @"\s+", " ").Trim();
+        var collapsed = Regex.Replace(unescaped, @"\s+", " ").Trim();
         // Escape markdown pipe
         return collapsed.Replace("|", "\\|");
     }
 
     private static string? ExtractPropertySummaryFromSource(string sourceCode, string propertyName)
     {
-        var pattern = $@"(?:\/\/\/\s*<summary>\s*((?:(?!\/\/\/\s*<\/summary>)[\s\S])*?)\s*\/\/\/\s*<\/summary>\s*(?:\[[^\]]+\]\s*)*public\s+[^\n]+\b{Regex.Escape(propertyName)}\b)";
+        var pattern = $@"(?:(?:(?:\/\/\/\s*<summary>([^\r\n]*?)<\/summary>)|(?:\/\/\/\s*<summary>\s*((?:(?!<\/summary>)[\s\S])*?)\s*<\/summary>))\s*(?:\[[^\]]+\]\s*)*public\s+[^\r\n]+\b{Regex.Escape(propertyName)}\b)";
         var match = Regex.Match(sourceCode, pattern);
         if (match.Success)
         {
-            var lines = match.Groups[1].Value.Split('\n');
+            var raw = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+            var lines = raw.Split('\n');
             var cleaned = lines.Select(l => l.Trim().TrimStart('/', ' ')).Where(l => l.Length > 0);
             return string.Join(" ", cleaned);
         }
