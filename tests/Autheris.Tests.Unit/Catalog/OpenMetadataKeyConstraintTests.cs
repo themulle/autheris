@@ -113,8 +113,10 @@ public sealed class OpenMetadataKeyConstraintTests
     [Fact]
     public async Task TooManyUniqueConstraints_DefinitionDropped()
     {
-        var constraints = Enumerable.Range(0, 70).Select(_ => Constraint("UNIQUE", "a")).ToArray();
-        var meta = await SyncAsync(Table(constraints));
+        var columns = Enumerable.Range(0, 70).Select(i => new OpenMetadataColumn { Name = $"c{i}", DataType = "INT" }).ToList();
+        var constraints = Enumerable.Range(0, 70).Select(i => Constraint("UNIQUE", $"c{i}")).ToArray();
+        var table = Table(constraints) with { Columns = columns };
+        var meta = await SyncAsync(table);
         meta.ReplaceKeyDefinition.ShouldBeFalse();
         meta.Indexes.ShouldBeEmpty();
     }

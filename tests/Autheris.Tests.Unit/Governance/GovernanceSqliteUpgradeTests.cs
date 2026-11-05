@@ -106,10 +106,10 @@ public sealed class GovernanceSqliteUpgradeTests
         consents.ShouldBe(1);
         audit.ShouldBeGreaterThanOrEqualTo(25);
 
-        var step = ProbeStep(5);
+        var step = ProbeStep(6);
         await new SqliteGovernanceMigrationRunner(repository, options) { AdditionalSteps = [step] }.RunAsync();
 
-        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 5 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 6 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('CONSENTS') WHERE name = 'probe_388'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM CONSENTS").ShouldBe(consents);
         Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);
@@ -333,12 +333,12 @@ public sealed class GovernanceSqliteUpgradeTests
         var cs = $"Data Source=up0004i_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         var options = Opts(cs);
         using var repository = NewUnmigrated(options);
-        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+        await new SqliteGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 4 }.RunAsync();
         Exec(repository, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)");
         Exec(repository, "INSERT INTO TABLE_PHYSICAL_INDEXES (id, table_id, index_ordinal) VALUES ('i1', 't', 1)");
         Exec(repository, "DELETE FROM autheris_schema_migrations WHERE version = 4");
 
-        await new SqliteGovernanceMigrationRunner(repository, options).RunAsync();
+        await new SqliteGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 4 }.RunAsync();
 
         Scalar(repository, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM TABLE_PHYSICAL_INDEXES").ShouldBe(1, "the guard skipped the statements, no data loss");

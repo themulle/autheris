@@ -760,12 +760,12 @@ WHERE rm.member_sid = @sid";
 
                 if (shouldOverwriteDoc != null)
                 {
-                    bool canOverwriteColDesc = string.IsNullOrWhiteSpace(existingCol.Description) ||
-                                               (!string.IsNullOrWhiteSpace(col.Description) &&
+                    bool canOverwriteColDesc = !string.IsNullOrWhiteSpace(col.Description) &&
+                                               (string.IsNullOrWhiteSpace(existingCol.Description) ||
                                                 shouldOverwriteDoc(existingCol.DocSource, incomingColSource));
 
-                    bool canOverwriteColLongDesc = string.IsNullOrWhiteSpace(existingCol.LongDescription) ||
-                                                   (!string.IsNullOrWhiteSpace(col.LongDescription) &&
+                    bool canOverwriteColLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription) &&
+                                                   (string.IsNullOrWhiteSpace(existingCol.LongDescription) ||
                                                     shouldOverwriteDoc(existingCol.DocSource, incomingColSource));
 
                     targetColDesc = canOverwriteColDesc ? col.Description : existingCol.Description;

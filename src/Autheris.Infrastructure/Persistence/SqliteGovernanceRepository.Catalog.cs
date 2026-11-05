@@ -447,12 +447,12 @@ RETURNING structure_version, content_version;";
                         structuralChange = true;
                     }
 
-                    bool canOverwriteDesc = string.IsNullOrWhiteSpace(existingDesc) ||
-                                            (!string.IsNullOrWhiteSpace(metadata.Table.Description) &&
+                    bool canOverwriteDesc = !string.IsNullOrWhiteSpace(metadata.Table.Description) &&
+                                            (string.IsNullOrWhiteSpace(existingDesc) ||
                                              ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
 
-                    bool canOverwriteLongDesc = string.IsNullOrWhiteSpace(existingLongDesc) ||
-                                                (!string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
+                    bool canOverwriteLongDesc = !string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
+                                                (string.IsNullOrWhiteSpace(existingLongDesc) ||
                                                  ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
 
                     targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
@@ -552,7 +552,15 @@ RETURNING structure_version, content_version;";
         QueueMetadataInvalidation(metadata.Identifier);
         await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
 
-        return (await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false))!;
+        try
+        {
+            return (await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false)) ?? metadata;
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            // The stored definition is invalid and this write did not replace it: the upsert itself succeeded and stays untouched by it.
+            return metadata;
+        }
     }
 
     public async Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(

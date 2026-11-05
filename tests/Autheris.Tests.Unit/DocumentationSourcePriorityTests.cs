@@ -420,6 +420,7 @@ public sealed class DocumentationSourcePriorityTests
             cmd.CommandText = "UPDATE TABLE_COLUMNS SET meta_json = '{\"pii\": false}' WHERE column_name = 'email'";
             await cmd.ExecuteNonQueryAsync();
         }
+        repository.InvalidateMetadataCacheForTesting();
 
         // Test GetTableMetadataAsync
         var fetched = await repository.GetTableMetadataAsync(tableId);
