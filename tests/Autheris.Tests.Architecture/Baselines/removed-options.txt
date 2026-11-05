@@ -1,6 +1,4 @@
-# ARCH-MNT-05: option properties no src code reads. Format: Namespace.Type.Property. May only shrink.
-Autheris.Application.Auditing.AuditGroupCommitOptions.MaxBatchDelayMs
-Autheris.Application.Security.TenantRegistryGateOptions.CacheTtl
+# WP-SIMPL-06: 31 unconsumed options deleted from src. Format: Namespace.Type.Property.
 Autheris.Domain.Model.EnvoyFilterExportOptions.PathPrefixes
 Autheris.Domain.Model.OpenApiDocumentOptions.IncludeGovernanceMetadata
 Autheris.Domain.Options.AlationOptions.CustomFieldIdPii
@@ -19,7 +17,6 @@ Autheris.Domain.Options.FederationOptions.GatewayPackagePath
 Autheris.Domain.Options.FinOpsOptions.ScopeMonthlyBudgets
 Autheris.Domain.Options.GarnetOptions.DisableConsole
 Autheris.Domain.Options.GatewayOptions.CustomQueryPoller
-Autheris.Domain.Options.GatewayOptions.OpenSchema
 Autheris.Domain.Options.GovernanceDbOptions.EnableOutboxProcessor
 Autheris.Domain.Options.L1MemoryCacheOptions.DefaultTtlMinutes
 Autheris.Domain.Options.LakehouseOptions.MaxConcurrentFileScans
@@ -32,15 +29,4 @@ Autheris.Domain.Options.QueryCostOptions.CostPerRowReturned
 Autheris.Domain.Options.QueryCostOptions.NestedDepthFactor
 Autheris.Domain.Options.RebacOptions.OpenFgaApiUrl
 Autheris.Domain.Options.RebacOptions.OpenFgaStoreId
-Autheris.Domain.Options.Security.IdentityRealmsOptions.DefaultRealm
 Autheris.Domain.Options.TableCache.TableCacheTargetOptions.CronExpression
-Autheris.Domain.Options.WebhooksOptions.AutoDisableAfterConsecutiveFailures
-Autheris.Domain.Options.WebhooksOptions.CircuitCooldownSeconds
-Autheris.Domain.Options.WebhooksOptions.DeliveryBatchSize
-Autheris.Domain.Options.WebhooksOptions.DeliveryWorkers
-Autheris.Domain.Options.WebhooksOptions.MaxPayloadBytes
-Autheris.Domain.Options.WebhooksOptions.MaxRetryAfterSeconds
-Autheris.Domain.Options.WebhooksOptions.PollIntervalSeconds
-Autheris.Domain.Options.WebhooksOptions.RetryBaseSeconds
-Autheris.Domain.Options.WebhooksOptions.RetryMaxDelaySeconds
-Autheris.Domain.Options.WorkflowOptions.ActiveProfile

@@ -37,11 +37,6 @@ public sealed class GarnetOptions
     [Range(1024, 65535)] public int Port { get; init; } = 3278;
 
     /// <summary>
-    /// Disables internal console output of Garnet so stdout is not flooded with cache logs.
-    /// </summary>
-    public bool DisableConsole { get; init; } = true;
-
-    /// <summary>
     /// Directory for persistence checkpoints (optional).
     /// </summary>
     public string? CheckpointDir { get; init; }
@@ -84,7 +79,6 @@ public sealed class GarnetOptions
 public sealed class L1MemoryCacheOptions
 {
     [Range(16, 4096)] public int SizeLimitMb { get; init; } = 512;
-    [Range(1, 120)] public int DefaultTtlMinutes { get; init; } = 10;
     [Range(0, 5000)] public int AccessProfileEpochCacheMilliseconds { get; init; } = 1000;
 }
 

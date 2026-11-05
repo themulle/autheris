@@ -46,7 +46,6 @@ public sealed class LakehouseOptions
 {
     public bool Enabled { get; init; } = false;
     [Range(1, 1440)] public int MetadataCacheTtlMinutes { get; init; } = 15;
-    [Range(1, 64)] public int MaxConcurrentFileScans { get; init; } = 16;
     [Range(1, 500000)] public int MaxScanRowsLimit { get; init; } = 50000;
     public LakehouseStorageOptions Storage { get; init; } = new();
     public Dictionary<string, LakehouseTableOptions> Tables { get; init; } = new(StringComparer.OrdinalIgnoreCase);

@@ -251,9 +251,6 @@ public sealed class DatabricksOboOptions
 
     /// <summary>Optional custom Entra ID authority URL (e.g. for national clouds).</summary>
     public string? Authority { get; init; }
-
-    /// <summary>Controls refresh token retention for long-running statements (default false).</summary>
-    public bool AllowLongRunning { get; init; } = false;
 }
 
 public sealed class DatabricksAuthOptions

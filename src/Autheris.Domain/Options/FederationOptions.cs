@@ -14,11 +14,6 @@ public sealed class FederationOptions
     public bool Enabled { get; init; } = false;
 
     /// <summary>
-    /// Path to the compiled Fusion Gateway Package file (.fgp) containing the composed supergraph.
-    /// </summary>
-    public string GatewayPackagePath { get; init; } = string.Empty;
-
-    /// <summary>
     /// Enables Zero-Trust context forwarding (User SID, Tenant ID, Roles) to downstream subgraphs.
     /// </summary>
     public bool EnableZeroTrustContextForwarding { get; init; } = true;

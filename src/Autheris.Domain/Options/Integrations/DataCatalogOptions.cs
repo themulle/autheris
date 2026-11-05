@@ -18,14 +18,12 @@ public sealed class CollibraOptions
     public string ApiToken { get; init; } = string.Empty;
     public string Username { get; init; } = string.Empty;
     public string Password { get; init; } = string.Empty;
-    public string? CommunityId { get; init; }
 }
 
 public sealed class AlationOptions
 {
     public string BaseUrl { get; init; } = string.Empty;
     public string ApiToken { get; init; } = string.Empty;
-    public int CustomFieldIdPii { get; init; } = 1001;
 
     /// <summary>
     /// SEC E-08: Explicit mapping of Alation data source (<c>ds_id</c>, numeric) -&gt; Gateway domain.
@@ -44,7 +42,6 @@ public sealed class DataCatalogOptions
 {
     public bool Enabled { get; init; } = false;
     public DataCatalogProviderType Provider { get; init; } = DataCatalogProviderType.OpenMetadata;
-    public DataCatalogSyncMode SyncMode { get; init; } = DataCatalogSyncMode.Mirror;
     [Range(1, 1440)] public int SyncIntervalMinutes { get; init; } = 60;
     public string WebhookSecret { get; init; } = string.Empty;
 

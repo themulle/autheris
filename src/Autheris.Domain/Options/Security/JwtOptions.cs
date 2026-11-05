@@ -11,7 +11,6 @@ public sealed class AuthenticationOptions
     public bool RequireKerberosOnly { get; init; } = true;
     public bool EnableKerberos { get; init; } = false;
     public bool IsKerberosConfigured => EnableKerberos;
-    [Range(1, 60)] public int GroupCacheTtlMinutes { get; init; } = 5;
     public bool EnableTestAuthHandler { get; init; }
 
     public BasicAuthOptions BasicAuth { get; init; } = new();

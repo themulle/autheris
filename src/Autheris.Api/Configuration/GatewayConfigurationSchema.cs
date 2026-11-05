@@ -9,6 +9,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Options.Observability;
 using Autheris.Domain.Options.Plugins;
+using Autheris.Domain.Options.Protocols;
 using Autheris.Domain.Options.Security;
 using Autheris.Domain.Options.TableCache;
 using Microsoft.Extensions.Configuration;
@@ -50,8 +51,17 @@ public static class GatewayConfigurationSchema
         ("Gateway:State", typeof(StateOptions)),
         ("Gateway:TableCache", typeof(TableCacheOptions)),
         ("Gateway:AsyncJobs", typeof(AsyncJobOptions)),
-        ("Gateway:Tenancy", typeof(TenancyOptions))
+        ("Gateway:Tenancy", typeof(TenancyOptions)),
+        ("Gateway:CustomQueryPoller", typeof(CustomQueryPollerOptions))
     ];
+
+    /// <summary>
+    /// All configured configuration schema entry points: root GatewayOptions and all side-bound sections.
+    /// </summary>
+    public static IReadOnlyList<(string Path, Type Type)> Entries { get; } =
+        new List<(string Path, Type Type)> { (Root, typeof(GatewayOptions)) }
+            .Concat(SideBound)
+            .ToList();
 
     /// <summary>
     /// Keys (and subtrees) that are not options properties but are owned by a dedicated guard or validator that reports a specific message.
@@ -99,9 +109,9 @@ public static class GatewayConfigurationSchema
         OwnedByOtherGuards.Concat(RawReadKeys).Any(o => string.Equals(path, o, StringComparison.OrdinalIgnoreCase)
             || path.StartsWith(o + ":", StringComparison.OrdinalIgnoreCase));
 
-    internal enum Shape { Scalar, Complex, List, Dictionary, FreeForm }
+    public enum Shape { Scalar, Complex, List, Dictionary, FreeForm }
 
-    internal static Shape Classify(Type type, out Type? element)
+    public static Shape Classify(Type type, out Type? element)
     {
         element = null;
         type = Nullable.GetUnderlyingType(type) ?? type;

@@ -27,8 +27,6 @@ public sealed class TableCacheTargetOptions
 
     public int? RefreshIntervalSeconds { get; init; }
 
-    public string? CronExpression { get; init; }
-
     public long? MaxRows { get; init; }
 
     public TableCacheOfflinePolicy OfflinePolicy { get; init; } = TableCacheOfflinePolicy.FailClosed;

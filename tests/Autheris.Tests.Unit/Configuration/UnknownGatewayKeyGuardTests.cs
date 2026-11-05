@@ -239,6 +239,47 @@ public sealed class UnknownGatewayKeyGuardTests
         ex.Message.ShouldContain("Gateway:" + relativeKey);
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Gateway:Audit:ElasticsearchSinkUrl")]
+    [InlineData("Gateway:Audit:CatalogReadMode")]
+    [InlineData("Gateway:Audit:CatalogSummaryWindowSeconds")]
+    [InlineData("Gateway:Audit:TierBAggregationWindowSeconds")]
+    [InlineData("Gateway:QueryCost:BaseQueryCost")]
+    [InlineData("Gateway:QueryCost:CostPerRowReturned")]
+    [InlineData("Gateway:QueryCost:NestedDepthFactor")]
+    [InlineData("Gateway:Rebac:OpenFgaApiUrl")]
+    [InlineData("Gateway:Rebac:OpenFgaStoreId")]
+    [InlineData("Gateway:Authentication:GroupCacheTtlMinutes")]
+    [InlineData("Gateway:Databricks:Obo:AllowLongRunning")]
+    [InlineData("Gateway:CatalogSearch:FieldWeights")]
+    [InlineData("Gateway:DataMasking:MaskingCacheTtlHours")]
+    [InlineData("Gateway:Federation:GatewayPackagePath")]
+    [InlineData("Gateway:FinOps:ScopeMonthlyBudgets")]
+    [InlineData("Gateway:Caching:L1MemoryCache:DefaultTtlMinutes")]
+    [InlineData("Gateway:Lakehouse:MaxConcurrentFileScans")]
+    [InlineData("Gateway:Catalog:Alation:CustomFieldIdPii")]
+    [InlineData("Gateway:Catalog:Collibra:CommunityId")]
+    [InlineData("Gateway:Catalog:SyncMode")]
+    [InlineData("Gateway:Telemetry:Metrics:DataSourceCardinalityLimit")]
+    [InlineData("Gateway:Telemetry:Metrics:DefaultCardinalityLimit")]
+    [InlineData("Gateway:Telemetry:Metrics:TenantCardinalityLimit")]
+    [InlineData("Gateway:Telemetry:Redaction:AttributeValueLengthLimit")]
+    [InlineData("Gateway:TableCache:CronExpression")]
+    public void Removed_unconsumed_option_keys_fail_startup(string key)
+    {
+        foreach (var value in new[] { "false", "", "sample" })
+        {
+            var configuration = Config((key, value));
+            var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+            ex.Message.ShouldContain(key);
+            if (!string.IsNullOrEmpty(value))
+            {
+                ex.Message.ShouldNotContain(value);
+            }
+        }
+    }
+
     [Fact]
     public void SideBoundPairs_CoverEverySectionNameConstant()
     {
@@ -292,7 +333,6 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:Classification:Workflow:Profiles:OwnerResolution:RuleBasedMappings",
         "Gateway:Dbt:DatabaseMappings",
         "Gateway:Federation:FieldClassifications",
-        "Gateway:FinOps:ScopeMonthlyBudgets",
         "Gateway:FinOps:TenantMonthlyBudgets",
         "Gateway:Itsm:InstanceToTenantMap",
         "Gateway:OpenMetadata:RoleToGatewayRoleMap",

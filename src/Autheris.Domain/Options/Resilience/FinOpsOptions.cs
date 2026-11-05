@@ -13,5 +13,4 @@ public sealed class FinOpsOptions
     public decimal PricePerThousandCompletionTokens { get; init; } = 0.015m;
     public decimal PricePerComputeSecond { get; init; } = 0.0001m;
     public Dictionary<string, decimal> TenantMonthlyBudgets { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-    public Dictionary<string, decimal> ScopeMonthlyBudgets { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
