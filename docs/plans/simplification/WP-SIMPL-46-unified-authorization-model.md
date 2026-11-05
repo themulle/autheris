@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [ADR-020](../../adr/ADR-020-unified-authorization-model.md) (Proposed; this spec starts only after the owner accepts it) and [plan](../2026-11-05-plan-project-simplification.md) | Issues: GHSA-78j7-3gh6-7cqx (see private advisory) | Owner decisions: OD-22, OD-26, OD-21, OD-27, OD-9, OD-19, OD-29; revises OD-7 | Security conditions: SEC-SIMPL-30, 31, 33; replaces SEC-SIMPL-85; proposed SEC-AZ-01..10 (section 10)
 
+> **Owner decision OD-31 (2026-11-05):** customer DLL plugins stay. The access decision point consumes `EvaluateAuthorizationHooksAsync` as a narrowing input (deny or extra row filter, never grant). `EnrichRolesAsync` may only add control-plane roles; add a test `PluginRoleEnrichment_never_grants_data_access` (Category=Security) asserting that an enriched role neither satisfies a data grant nor bypasses write grants.
+
 ## 1. Goal and outcome
 Every data-access decision (read, insert, update, delete, execute, discover) in Autheris is made by one component, `IAccessDecisionPoint`, from one grant model (consents and access-profile assignments for users and AD groups) with the precedence explicit deny > grant > default deny. Measurable: (a) zero `new TableAccessPolicy(` outside `Application/Policy/Pdp/`; (b) zero references to `IRebacEvaluator`, `IRebacStore`, `RebacTableGate`, `IPolicyEnforcementService` in `src`; (c) the cross-transport parity matrix (section 6.3) passes with identical outcomes on all transports; (d) `GET /api/v1/authz/explain` answers "why can X see Y" with a complete, ordered trace; (e) no role grants or bypasses data access.
 
