@@ -33,11 +33,13 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 - **WP-07/10:** a broad grep finds 305 `Map*` calls (plan: 275); the ratchet regex is the baseline. WP-33 counts 684 plan-id comment lines with the narrow regex (PRD estimate ~1,860).
 - **WP-24:** the <= 32 folder target holds only if WP-12, 15, 16 and 17 merge first.
 
-## Pending owner confirmations (do not start the affected PRs before confirmation)
+## Kept by owner decision OD-18 (redesigned cleanly instead of deleted)
 
-1. **WP-18 PR C - Trino client route `/v1/statement`:** spec deletes it (D1 default); the issue assessment for #470 says it stays core.
-2. **WP-18 PR D - Procedures** (~5,200 src lines, 8 routes): deleted by the D2 default because no module owner is named.
-3. **WP-18 PR F - Docs ingestion and MCP doc tools:** spec deletes it (D2 default); the advisory assessment for GHSA-p234-g3ph-gqh2 assumed it stays with the MCP transport.
+- [WP-SIMPL-38](WP-SIMPL-38-trino-protocol-clean.md) Trino client protocol `/v1/statement` (#470, #484).
+- [WP-SIMPL-39](WP-SIMPL-39-procedures-clean.md) Governed stored procedures.
+- [WP-SIMPL-40](WP-SIMPL-40-docs-ingestion-clean.md) Docs ingestion and MCP doc tools (GHSA-p234-g3ph-gqh2).
+
+WP-SIMPL-18 therefore only deletes differential-privacy noise, CDN purge and SchemaRegistry (PRs A, B, E). WP-38..40 run in Stage 1/2 alongside the security lane; WP-40's storage move depends on WP-SIMPL-20.
 
 ## Not committed
 
