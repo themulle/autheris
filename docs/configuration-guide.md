@@ -2,6 +2,8 @@
 
 Dieses Handbuch bietet eine vollständige, praxiserprobte Referenz aller Konfigurationsoptionen des **GraphQL Enterprise Gateway**, inklusive Validierungsregeln, Sicherheitsinvariablen, Umgebungsvariablen, Kubernetes-Konfiguration und Profilen (Entwicklung vs. Produktion).
 
+Eine automatisch generierte, vollständige Referenz aller gebundenen Konfigurationsschlüssel finden Sie in der [Configuration Reference](reference/configuration.md).
+
 ---
 
 ## 1. Architektur der Konfiguration
@@ -39,7 +41,7 @@ Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensi
 
 ## 2. Vollständige Referenz der Konfigurationssektionen (`Gateway:*`)
 
-Alle gateway-spezifischen Optionen befinden sich unter dem Hauptknoten `"Gateway"`.
+Alle gateway-spezifischen Optionen befinden sich unter dem Hauptknoten `"Gateway"`. Eine automatisch generierte Tabelle aller Optionen und ihrer Quellcodedateien ist in der [Configuration Reference](reference/configuration.md) hinterlegt.
 
 ### 2.1 `HighAvailability` (Hochverfügbarkeit & Graceful Shutdown)
 
@@ -75,7 +77,6 @@ Das Gateway unterstützt ein flexibles, mehrgleisiges Authentifizierungskonzept 
 | `Domain` | `string` | Gültiger FQDN | `"CORP.LOCAL"` | Active Directory Domäne. |
 | `ServicePrincipalName` | `string` | SPN-Format | `"HTTP/gql-gateway.corp.local"` | Kerberos Service Principal Name für SPNEGO/Negotiate. |
 | `RequireKerberosOnly` | `bool` | `true \| false` | `true` | Enforces Kerberos: `NTLM` Authorization headers are not routed to Negotiate, and identities authenticated by Negotiate with an authentication type other than Kerberos (e.g. NTLM) are rejected. `PersistNtlmCredentials`/`PersistKerberosCredentials` are always disabled so credentials never carry over on shared upstream connections. |
-| `GroupCacheTtlMinutes` | `int` | `1 .. 60` | `5` | TTL für den lokalen Cache aufgelöster Windows-Gruppen-SIDs. |
 | `EnableTestAuthHandler` | `bool` | `true \| false` | `false` | Ermöglicht `X-Test-User-Sid`-Header zur Simulation von Identitäten (**nur in Development erlaubt!**). |
 
 #### 2.2.2 `Authentication.ForwardAuth` (Kubernetes / Traefik Ingress)

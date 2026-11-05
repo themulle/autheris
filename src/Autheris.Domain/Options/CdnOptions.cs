@@ -3,7 +3,6 @@ namespace Autheris.Domain.Options;
 public sealed class CdnOptions
 {
     public bool Enabled { get; init; } = false;
-    public string PurgeMode { get; init; } = "Tags"; // "Tags" | "Urls" | "All"
     public CloudflareOptions Cloudflare { get; init; } = new();
     public FastlyOptions Fastly { get; init; } = new();
 }

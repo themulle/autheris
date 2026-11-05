@@ -72,19 +72,11 @@ public sealed class PropagationOptions
 public sealed class RedactionOptions
 {
     public bool AllowStatementText { get; init; }
-
-    public int AttributeValueLengthLimit { get; init; } = 1024;
 }
 
 public sealed class MetricsOptions
 {
     public bool IncludeTenant { get; init; }
-
-    public int DefaultCardinalityLimit { get; init; } = 2000;
-
-    public int TenantCardinalityLimit { get; init; } = 500;
-
-    public int DataSourceCardinalityLimit { get; init; } = 200;
 }
 
 public sealed class IdentityOptions

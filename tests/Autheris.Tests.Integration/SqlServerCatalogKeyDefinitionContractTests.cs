@@ -49,7 +49,7 @@ public sealed class SqlServerCatalogKeyDefinitionContractTests : CatalogKeyDefin
             env.EnvironmentName.Returns("Development");
             var options = Options.Create(new GatewayOptions
             {
-                GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+                GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false }
             });
             Repository = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);
             Available = true;

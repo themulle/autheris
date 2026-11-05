@@ -51,7 +51,6 @@ public sealed class SqlServerWebhookOutboxContractTests : WebhookOutboxContractT
             {
                 Provider = "SqlServer",
                 ConnectionString = _db.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         });

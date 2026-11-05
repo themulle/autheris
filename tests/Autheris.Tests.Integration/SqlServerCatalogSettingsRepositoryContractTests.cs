@@ -24,7 +24,7 @@ public sealed class SqlServerCatalogSettingsRepositoryContractTests : CatalogSet
         env.EnvironmentName.Returns("Development");
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false },
+            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, SeedDemoData = false },
             Catalog = new DataCatalogOptions { DefaultVisibility = newTableDefault }
         });
         var repo = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);

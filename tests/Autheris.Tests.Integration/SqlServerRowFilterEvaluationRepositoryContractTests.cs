@@ -27,7 +27,7 @@ public sealed class SqlServerRowFilterEvaluationRepositoryContractTests : RowFil
         env.EnvironmentName.Returns("Development");
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false }
         });
         _repo = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);
         return _repo;

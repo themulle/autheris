@@ -51,7 +51,6 @@ public sealed class PostgreSqlWebhookOutboxContractTests : WebhookOutboxContract
             {
                 Provider = "PostgreSql",
                 ConnectionString = _db.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         });

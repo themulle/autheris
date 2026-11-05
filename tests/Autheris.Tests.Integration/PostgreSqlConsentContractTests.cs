@@ -58,7 +58,6 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
             {
                 Provider = "PostgreSql",
                 ConnectionString = _db!.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         });

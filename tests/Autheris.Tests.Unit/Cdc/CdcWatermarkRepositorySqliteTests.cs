@@ -29,8 +29,7 @@ public sealed class CdcWatermarkRepositorySqliteTests : IDisposable
             GovernanceDb = new GovernanceDbOptions
             {
                 ConnectionString = $"Data Source={System.IO.Path.Combine(_dir.Path, "gov.db")}",
-                SeedDemoData = false,
-                EnableOutboxProcessor = false
+                SeedDemoData = false
             }
         });
         return GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, env);

@@ -51,7 +51,6 @@ public sealed class SqlServerCloudEventSubscriptionStoreContractTests : CloudEve
             {
                 Provider = "SqlServer",
                 ConnectionString = _db.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         });

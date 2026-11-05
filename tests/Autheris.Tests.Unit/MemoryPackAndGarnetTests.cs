@@ -89,8 +89,7 @@ public class MemoryPackAndGarnetTests
                 {
                     EnableEmbeddedServer = true,
                     Host = "127.0.0.1",
-                    Port = port,
-                    DisableConsole = true
+                    Port = port
                 }
             }
         };
@@ -138,8 +137,7 @@ public class MemoryPackAndGarnetTests
                 {
                     EnableEmbeddedServer = true,
                     Host = "127.0.0.1",
-                    Port = port,
-                    DisableConsole = true
+                    Port = port
                 },
                 Redis = new RedisOptions
                 {

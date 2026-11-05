@@ -32,7 +32,7 @@ public sealed class SqlServerConsentQueryContractTests : ConsentQueryContractTes
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "SqlServer", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false
+                Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false
             }
         });
         _repo = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);

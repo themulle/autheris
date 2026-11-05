@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// F-OPS-03: Subgraph Dynamic Feature Flags & Canary Traffic Splitting configuration.
+/// F-OPS-03: Subgraph Dynamic Feature Flags &amp; Canary Traffic Splitting configuration.
 /// </summary>
 public sealed record SubgraphCanaryRule(
     string RuleId,

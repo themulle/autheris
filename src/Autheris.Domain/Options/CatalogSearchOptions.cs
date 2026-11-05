@@ -50,20 +50,6 @@ public sealed class CatalogSearchOptions
     /// <summary>Maximale Abfragelänge in Zeichen zur Abwehr von DoS-Attacken.</summary>
     public int MaxQueryLength { get; set; } = 256;
 
-    /// <summary>Gewichtungen für einzelne Metadaten-Felder.</summary>
-    public CatalogSearchFieldWeights FieldWeights { get; set; } = new();
-
     /// <summary>Dimension of the embedding vectors (LocalOnnx, Ollama).</summary>
     public int EmbeddingDimensions { get; set; } = 384;
-}
-
-public sealed class CatalogSearchFieldWeights
-{
-    public double TechnicalName { get; set; } = 10.0;
-    public double DisplayName { get; set; } = 8.0;
-    public double TagsAndOwner { get; set; } = 5.0;
-    public double ShortDescription { get; set; } = 3.0;
-    public double LongDescription { get; set; } = 2.0;
-    public double ColumnNames { get; set; } = 2.0;
-    public double ColumnDescriptions { get; set; } = 1.0;
 }

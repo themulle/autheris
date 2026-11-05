@@ -44,8 +44,6 @@ public sealed class RebacOptions
     /// tuples from automatically granting full analytical and raw egress capabilities.
     /// </summary>
     public bool InheritCanQueryFromViewer { get; init; } = true;
-    public string? OpenFgaApiUrl { get; init; }
-    public string? OpenFgaStoreId { get; init; }
 
     /// <summary>
     /// Initial relationship tuples seeded into the ReBAC store on startup (for Development, PoC, or testing).

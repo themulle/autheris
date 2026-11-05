@@ -11,7 +11,6 @@ public sealed class GovernanceDbOptions
     /// </summary>
     public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
-    public bool EnableOutboxProcessor { get; init; } = true;
     public bool? SeedDemoData { get; init; } = null;
     public string? AuditHmacKeyVaultRef { get; init; }
 

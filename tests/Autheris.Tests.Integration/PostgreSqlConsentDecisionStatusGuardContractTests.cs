@@ -33,7 +33,7 @@ public sealed class PostgreSqlConsentDecisionStatusGuardContractTests : ConsentD
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "PostgreSql", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false
+                Provider = "PostgreSql", ConnectionString = _db.ConnectionString, SeedDemoData = false
             }
         });
         _repo = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);
