@@ -25,10 +25,15 @@ public sealed class GovernanceEmptyBodyValidationTests
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
-    private static DefaultHttpContext CreateContext(params string[] roles)
+    private static DefaultHttpContext CreateContext(params string[] roles) => CreateContext(includeTenant: true, roles);
+
+    private static DefaultHttpContext CreateContext(bool includeTenant, params string[] roles)
     {
         var claims = roles.Select(r => new Claim(ClaimTypes.Role, r)).ToList();
-        claims.Add(new Claim("tenant_id", "tenant-a"));
+        if (includeTenant)
+        {
+            claims.Add(new Claim("tenant_id", "tenant-a"));
+        }
         var services = new ServiceCollection().AddLogging().AddOptions().BuildServiceProvider();
         var context = new DefaultHttpContext
         {
@@ -36,7 +41,10 @@ public sealed class GovernanceEmptyBodyValidationTests
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test", ClaimTypes.Name, ClaimTypes.Role))
         };
         context.Response.Body = new MemoryStream();
-        context.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
+        if (includeTenant)
+        {
+            context.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
+        }
         return context;
     }
 
@@ -104,7 +112,7 @@ public sealed class GovernanceEmptyBodyValidationTests
     public async Task RegisterRule_EmptyOrIncompleteBody_Returns400(string json)
     {
         var service = Substitute.For<ISchemaSunsettingService>();
-        var context = CreateContext("GovernanceAdmin");
+        var context = CreateContext(includeTenant: false, "GovernanceAdmin");
 
         var result = await GovernanceEndpoints.RegisterSunsettingRuleAsync(Bind<FieldSunsettingRule>(json), service, context);
 
@@ -127,7 +135,7 @@ public sealed class GovernanceEmptyBodyValidationTests
     public async Task RegisterRule_ValidBody_Returns201()
     {
         var service = Substitute.For<ISchemaSunsettingService>();
-        var context = CreateContext("GovernanceAdmin");
+        var context = CreateContext(includeTenant: false, "GovernanceAdmin");
         var rule = new FieldSunsettingRule(Guid.NewGuid(), "src.public.t", "f", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(30));
 
         var result = await GovernanceEndpoints.RegisterSunsettingRuleAsync(rule, service, context);

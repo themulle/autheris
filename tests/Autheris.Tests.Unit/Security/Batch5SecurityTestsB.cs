@@ -126,7 +126,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         ex.Message.ShouldContain("ISubgraphResultMasker");
 
         // HostedService StartAsync must also fail
-        var hostedService = new FederationMaskingStartupCheck(Options.Create(options), servicesWithoutMasker);
+        var hostedService = new FederationMaskingStartupCheck(Options.Create(options.Federation), servicesWithoutMasker);
         Should.Throw<InvalidOperationException>(async () =>
             await hostedService.StartAsync(CancellationToken.None));
 
@@ -532,7 +532,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
                 new Claim("azp", "unlisted-client-3"),
                 new Claim("autheris:realm", "realm-entra")
             ],
-            "TestAuth"));
+            "Bearer"));
 
         var result = await transformation.TransformAsync(unlistedPrincipal);
         result.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeTrue();
@@ -549,7 +549,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
                 new Claim("azp", "authorized-client-1"),
                 new Claim("autheris:realm", "realm-entra")
             ],
-            "TestAuth"));
+            "Bearer"));
 
         var listedResult = await transformation.TransformAsync(listedPrincipal);
         listedResult.Claims.Any(c => c.Type == RoleResolutionClaims.ClaimType && c.Value == RoleResolutionClaims.Degraded).ShouldBeFalse();

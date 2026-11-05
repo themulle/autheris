@@ -39,6 +39,7 @@ public sealed class StartupWarmupExecutorIntegrationTests
     private static WebApplicationFactory<Program> Factory(Action<IServiceCollection>? configure = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-warmupc-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");

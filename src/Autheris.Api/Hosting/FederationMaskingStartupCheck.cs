@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 /// GHSA-xpw9-4m63-69pf: Validates that when Federation result masking is enabled, an ISubgraphResultMasker is registered.
 /// </summary>
 public sealed class FederationMaskingStartupCheck(
-    IOptions<GatewayOptions> options,
+    IOptions<FederationOptions> options,
     IServiceProvider services) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
@@ -22,12 +22,12 @@ public sealed class FederationMaskingStartupCheck(
         return Task.CompletedTask;
     }
 
-    public static void Validate(GatewayOptions options, IServiceProvider services)
+    public static void Validate(FederationOptions options, IServiceProvider services)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(services);
 
-        if (options.Federation.Enabled && options.Federation.EnableResultMasking)
+        if (options.Enabled && options.EnableResultMasking)
         {
             var masker = services.GetService<ISubgraphResultMasker>();
             if (masker == null)
@@ -35,6 +35,12 @@ public sealed class FederationMaskingStartupCheck(
                 throw new InvalidOperationException("Security violation: Federation result masking is enabled (Federation:EnableResultMasking = true), but no ISubgraphResultMasker is registered in the service provider.");
             }
         }
+    }
+
+    public static void Validate(GatewayOptions options, IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Validate(options.Federation, services);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

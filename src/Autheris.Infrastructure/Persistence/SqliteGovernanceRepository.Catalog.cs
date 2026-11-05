@@ -400,21 +400,22 @@ RETURNING structure_version, content_version;";
             metadata = TableKeyDefinitionValidator.Validate(metadata);
         }
 
-        await using var scope = await WriteScopeAsync(ct).ConfigureAwait(false);
-        var conn = scope.Connection;
-        var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
-        var tableExisted = false;
-        var structuralChange = false;
-        var targetDesc = metadata.Table.Description;
-        var targetLongDesc = metadata.Table.LongDescription;
-        var targetDocSource = metadata.Table.DocumentationSource;
-        IReadOnlyList<string> persistedPks;
-        IReadOnlyList<KeyColumnDirection> persistedPkDirections;
-        IReadOnlyList<TableIndexDefinition> persistedIndexes;
-
-        using var tx = conn.BeginTransaction();
-        try
+        await using (var scope = await WriteScopeAsync(ct).ConfigureAwait(false))
         {
+            var conn = scope.Connection;
+            var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
+            var tableExisted = false;
+            var structuralChange = false;
+            var targetDesc = metadata.Table.Description;
+            var targetLongDesc = metadata.Table.LongDescription;
+            var targetDocSource = metadata.Table.DocumentationSource;
+            IReadOnlyList<string> persistedPks;
+            IReadOnlyList<KeyColumnDirection> persistedPkDirections;
+            IReadOnlyList<TableIndexDefinition> persistedIndexes;
+
+            using var tx = conn.BeginTransaction();
+            try
+            {
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
@@ -546,29 +547,10 @@ RETURNING structure_version, content_version;";
             await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
+        }
 
         QueueMetadataInvalidation(metadata.Identifier);
         await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
-
-        var updatedTable = new Table
-        {
-            Id = tableId,
-            SourceType = metadata.Table.SourceType,
-            SourceName = metadata.Identifier.Domain,
-            SchemaName = metadata.Identifier.Schema,
-            TableName = metadata.Identifier.TableName,
-            DisplayName = metadata.Table.DisplayName,
-            Sensitivity = metadata.Table.Sensitivity,
-            RequiresFourEyes = metadata.Table.RequiresFourEyes,
-            IsActive = metadata.Table.IsActive,
-            DataSourceType = metadata.Table.DataSourceType,
-            HttpEndpoint = metadata.Table.HttpEndpoint,
-            PluginName = metadata.Table.PluginName,
-            Description = targetDesc,
-            LongDescription = targetLongDesc,
-            Texts = metadata.Table.Texts,
-            DocumentationSource = targetDocSource
-        };
 
         return (await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false))!;
     }
