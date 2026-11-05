@@ -101,7 +101,7 @@ Never delete a SQLite parity cell before the PostgreSQL and SQL Server cells for
 | Unconsumed options baseline | 46 lines | 0 (Stage 0) | 0 | 0, file removed |
 | Tests: container+integration share / Substitute.For / Received / sleeps | 6.3% / 4,159 / 986 / 92 | ratchets active | >= 12% / <= 3,000 / <= 700 / <= 40 | >= 15% / <= 2,000 / <= 400 / <= 20 |
 | Test LOC | 382,125 | follows deletions | <= 300,000 | <= 240,000 |
-| CI time PR / full | measured in WP-SIMPL-10 | not worse than baseline | <= 20 / <= 40 min | <= 15 / <= 30 min (D7) |
+| CI time (OD-6: PR wall-clock push to last required check, median, queue time included) | measured in WP-SIMPL-10 | not worse than baseline | <= 40 min | < 30 min (OD-6); full/nightly reported, no target |
 | Hosted services / DI registrations | 39 / 549 | measured | measured | <= 20 / <= 330 |
 
 ## 4. Work packages
@@ -266,7 +266,7 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 
 | Item | Default | Reason | Issues |
 |---|---|---|---|
-| Analytics (governed aggregation) + differential privacy | MODULE `governed-aggregates` if owner, else DELETE | C1 adjacent, no evidence of use | drives #467, #468 |
+| Analytics (governed aggregation) + differential privacy | **Decided (OD-11):** aggregation with small-group suppression and time buckets KEEP (core); differential-privacy noise DELETE | owner decision 2026-11-05 | #467, #468 obsolete by removal |
 | CDN cache purge | DELETE | C1 false; outbound HTTP (C2) | #474 closed by this WP (R1) |
 | Table cache (DuckDB-backed) | MODULE with Olap (WP-SIMPL-26); core Caching stays | DuckDB leaves core | #475 fixed inside WP-SIMPL-26 or closed by removal |
 | Trino client protocol route `/v1/statement` | DELETE (fourth SQL transport, D1); MODULE only with an owner and a client interop test | one SQL entry per transport | #470, #484 |
@@ -469,15 +469,15 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | Issue | Title | Verdict | Prio | Work package / sequencing |
 |---|---|---|---|---|
 | #459 | Declared keys/indexes only; read `meta.indexes` from dbt | FIX-IN-CORE | P2 | After WP-SIMPL-17 (Dbt folder merge), before WP-SIMPL-28 (dbt module) |
-| #467 | Differential privacy: noise, budget, ordering | NEEDS-DECISION | P1 if kept | D-ANALYTICS (WP-SIMPL-18): obsolete if Analytics/DP is deleted, otherwise in the module extraction (WP-SIMPL-30) |
-| #468 | Noisy aggregate cache hit without audit entry | NEEDS-DECISION | P1 if kept | Bundle with #467 |
+| #467 | Differential privacy: noise, budget, ordering | OBSOLETE-BY-REMOVAL | - | Closed by the WP-SIMPL-18 deletion of differential-privacy noise (OD-11) |
+| #468 | Noisy aggregate cache hit without audit entry | OBSOLETE-BY-REMOVAL | - | Closed with #467 (OD-11) |
 | #469 | `Sid.GetUserSid` client-id fallback; static `RealmLookup` | FIX-IN-CORE | **P0** | Security lane |
 | #470 | WebSQL `wait_timeout` requests treated as Trino transport | FIX-IN-CORE | P1 | Security lane; `/v1/statement` stays core (see WP-SIMPL-18 row) |
 | #471 | MCP JSON-RPC batch guard inspects only 512 bytes | QUICK-WIN | P1 | Security lane (MCP is core) |
 | #472 | `/health/ready` anonymous, uncached, not rate limited | QUICK-WIN | P2 | Security lane; SQLite lock contention part closed by WP-SIMPL-11 |
 | #473 | Audit batch lost on shutdown; exact-match redaction | PARTLY-OBSOLETE | P1 | Split: redaction now (security lane); shutdown batch loss in the unified repository (WP-SIMPL-20) |
 | #474 | CDN purge reports success without provider | QUICK-WIN | P2 | Depends on the CDN row in WP-SIMPL-18; fix only if kept |
-| #475 | Table cache applies CDC mutations as string literals | NEEDS-DECISION | P2 | Table cache row in WP-SIMPL-18 (DuckDB leaves core with WP-SIMPL-26); with WP-SIMPL-29 if kept |
+| #475 | Table cache applies CDC mutations as string literals | PARTLY-OBSOLETE | P2 | Default taken (WP-SIMPL-18 row): the DuckDB table cache moves to the Olap module, so #475 is fixed inside WP-SIMPL-26 or closed by removal |
 | #476 | CDC custom query poller read-only only on SQLite/PostgreSQL | FIX-IN-CORE | P1 | Before or inside WP-SIMPL-29 (Events module) |
 | #477 | Options with no effect; pre-filled security allowlists | PARTLY-OBSOLETE | P2 | Unconsumed options: WP-SIMPL-06; allowlists: security lane |
 | #478 | Flat AND/OR chains hit AST depth limit | FIX-IN-CORE | P2 | SQL engine lane, bundled with #481 |
@@ -494,7 +494,7 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #489 | Caller labels, revocation, CSRF, ForwardAuth SID | FIX-IN-CORE | P1 | Security lane |
 | #490 | Download re-authorisation; Lakehouse LIMIT ordering | PARTLY-OBSOLETE | P1 | Re-authorisation in security lane; Lakehouse part with its module extraction |
 | #491 | Unwired code paths and kill switch | FIX-IN-CORE | P1 | Mostly deletions: folded into WP-SIMPL-12..16 |
-| #492 | Query analysis against another read-only scope | NEEDS-DECISION | P2 | Freeze rule: no new features; default taken: defer until Stage 3 exit |
+| #492 | Query analysis against another read-only scope | DEFERRED (default taken) | P2 | Feature request under the freeze; revisit after Stage 3 exit |
 | #500 | Catalog text untrusted before MCP/LLM clients | FIX-IN-CORE | P1 | Security lane (MCP and catalog are core) |
 | #501 | Catalog search index race, staleness, rate limit | FIX-IN-CORE | P2 | Security lane (OD-4: catalog search is core) |
 | #502 | Set-based nested lists: cost window; SQLite version | PARTLY-OBSOLETE | P2 | Cost part SQL engine lane; SQLite part closed by WP-SIMPL-31 |
@@ -510,7 +510,7 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #512 | Docs describe non-existent components | PARTLY-OBSOLETE | P3 | WP-SIMPL-04; Flight claims vanish with WP-SIMPL-16 |
 | #513 | Docs hygiene | FIX-IN-CORE | P3 | WP-SIMPL-05 |
 | #514 | Delete unconsumed options; config reference | FIX-IN-CORE | P2 | WP-SIMPL-06 (absorbs #477) |
-| #515 | Structural simplification umbrella | NEEDS-DECISION | P1 | This plan, Stages 1-3; one child issue per stage/module |
+| #515 | Structural simplification umbrella | PLANNED (this plan) | P1 | This plan, Stages 1-3; one child issue per stage/module |
 | #516 | CI hang regression since #464 | **BLOCKER** | **P0** | First, before every WP (rule 1) |
 | #517 | Job timeouts and hang dumps | QUICK-WIN | **P0** | With or just before #516; `[WF]` bundle with #518 |
 | #518 | Coalesce main runs, path filters, concurrency | QUICK-WIN | P1 | `[WF]` bundle with #517 |
@@ -518,7 +518,7 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #520 | Reuse test hosts | FIX-IN-CORE | P1 | Hard dependency of WP-SIMPL-11 and WP-SIMPL-22 (rule 6) |
 | #521 | Pre-pull Testcontainers images | PARTLY-OBSOLETE | P2 | Oracle part closed by WP-SIMPL-13; rest bundled with #519 |
 | #522 | Oracle/Stress/Spark suites to nightly | PARTLY-OBSOLETE | P2 | Oracle part closed by WP-SIMPL-13; rest after #519 |
-| #523 | CI under 30 min (umbrella) | NEEDS-DECISION | P1 | Umbrella for #516-#522; target definition per D-CIQUEUE |
+| #523 | CI under 30 min (umbrella) | FIX-IN-CORE | P1 | Umbrella for #516-#522; target definition decided (OD-6) |
 
 ### Draft security advisories (29)
 
@@ -528,9 +528,9 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 |---|---|---|---|---|
 | GHSA-7ccv-hfgq-5qwm | Federation column access checks | FIX-IN-CORE | **P0** | Security lane |
 | GHSA-7pjw-hcrc-hvff | Federation masking catalog | FIX-IN-CORE | **P0** | Security lane |
-| GHSA-v5c2-29pv-cc86 | Data source registration | FIX-IN-CORE | **P0** | Security lane, before WP-SIMPL-17 (Catalog folder merge) |
-| GHSA-9229-wx6j-wvm9 | Admin catalog operations | PARTLY-OBSOLETE | **P0** | Security lane; Backstage part closed by WP-SIMPL-12 |
-| GHSA-qx32-576x-5cq2 | GDPR disclosure report | FIX-IN-CORE | **P0** | Batch 5; placement per D-GDPR, before WP-SIMPL-29 |
+| GHSA-v5c2-29pv-cc86 | Data source registration | FIX-IN-CORE | **P0** | Security lane on the OD-9 role model, before WP-SIMPL-17 (Catalog folder merge) |
+| GHSA-9229-wx6j-wvm9 | Admin catalog operations | PARTLY-OBSOLETE | **P0** | Security lane on the OD-9 role model; Backstage part closed by WP-SIMPL-12 |
+| GHSA-qx32-576x-5cq2 | GDPR disclosure report | FIX-IN-CORE | **P0** | Batch 5; stays core (OD-10), not moved with Lineage in WP-SIMPL-29 |
 | GHSA-jcf8-hchm-55h3 | WebSQL DML authorization | FIX-IN-CORE | P1 | Security lane (OD-3: DML stays core); fix on the core grant path, not Casbin |
 | GHSA-3prq-qxg7-92qf | WebSQL DML scoping | FIX-IN-CORE | P1 | Security lane, DML bundle |
 | GHSA-83g2-c2jr-c8vq | WebSQL DML write scope | FIX-IN-CORE | P1 | Security lane, DML bundle |
@@ -541,35 +541,28 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | GHSA-92vp-663x-pp52 | Transport gate | FIX-IN-CORE | P1 | Security lane; module parts before WP-SIMPL-29 and the Lakehouse extraction |
 | GHSA-wg8p-wfw5-qvgj | HITL step-up | QUICK-WIN | P1 | Batch 5 |
 | GHSA-hw85-rqjh-cwxx | Client allowlist for non-Entra realms | FIX-IN-CORE | P1 | Batch 5; before WP-SIMPL-30 |
-| GHSA-jcpx-6m27-2m97 | Uniform error responses | PARTLY-OBSOLETE | P1 | Batch 5; Analytics part per D-ANALYTICS |
-| GHSA-mgv5-4r69-mwww | Admin scoping model | FIX-IN-CORE | P1 | Batch 5; model confirmation per D-ADMIN; before WP-SIMPL-28/29 |
+| GHSA-jcpx-6m27-2m97 | Uniform error responses | FIX-IN-CORE | P1 | Batch 5 (Analytics stays core, OD-11) |
+| GHSA-mgv5-4r69-mwww | Admin scoping model | FIX-IN-CORE | P1 | Batch 5 **adjusted to OD-9 before merge**; before WP-SIMPL-28/29 |
 | GHSA-cj7m-c75j-6p6h | Async job quotas and GraphQL batching | FIX-IN-CORE | P1 | Batch 5 |
 | GHSA-wvwx-q6jg-44wv | CDC webhook lifecycle | FIX-IN-CORE | P1 | Batch 5 plus an M follow-up (residual) in the security lane, before WP-SIMPL-29 |
-| GHSA-78j7-3gh6-7cqx | ReBAC object ids and defaults | NEEDS-DECISION | P1 | Part 1 in batch 5; part 2 per D-REBAC |
-| GHSA-4qx8-fv2p-q8r2 | Audit archive export and anchors | NEEDS-DECISION | P1 | Anchor part in batch 5; export per D-ARCHIVE, before or with WP-SIMPL-20 |
+| GHSA-78j7-3gh6-7cqx | ReBAC object ids and defaults | FIX-IN-CORE | P1 | Part 1 in batch 5; part 2 per OD-7 in the security lane (one switch, fail-closed startup check) |
+| GHSA-4qx8-fv2p-q8r2 | Audit archive export and anchors | PARTLY-OBSOLETE | P1 | Export deleted per OD-8 (security lane, startup check on `Audit:Worm:Enabled`); anchor and purge checkpoint part in batch 5 and WP-SIMPL-20 |
 | GHSA-335j-6vwc-7p4c | Access profile revocation | QUICK-WIN | P1 | Batch 5 |
 | GHSA-x8g9-cm3h-p6jq | Authorization cache invalidation | FIX-IN-CORE | P2 | Security lane; coordinate with WP-SIMPL-15 (Garnet removal) |
 | GHSA-v77c-jh96-7rgr | Persisted enum handling | QUICK-WIN | P2 | Security lane, before WP-SIMPL-20 (access-profile break-glass assignments stay; OD-5) |
-| GHSA-rxr4-mf28-p2hv | Small-group suppression | NEEDS-DECISION | P2 | Per D-ANALYTICS |
+| GHSA-rxr4-mf28-p2hv | Small-group suppression | FIX-IN-CORE | P2 | Security lane; solved by small-group suppression alone (OD-11) |
 | GHSA-jfrx-2mgc-pfh5 | External catalog sync | PARTLY-OBSOLETE | P2 | Batch 5; vendor part closed by WP-SIMPL-12; OpenMetadata part with WP-SIMPL-28 |
 | GHSA-xpw9-4m63-69pf | Federation masking | FIX-IN-CORE | P2 | Batch 5 |
 | GHSA-95f9-ffc7-vw2c | Catalog search | FIX-IN-CORE | P2 | Batch 5 (partial); residual in security lane (OD-4: catalog search is core) |
-| GHSA-p234-g3ph-gqh2 | MCP document store | NEEDS-DECISION | P3 | Docs ingestion row in WP-SIMPL-18; default taken: keep in core with the MCP transport, fix in the security lane |
+| GHSA-p234-g3ph-gqh2 | MCP document store | FIX-IN-CORE (default taken) | P3 | Keep with the MCP transport (docs ingestion row in WP-SIMPL-18); fix in the security lane |
 
 ### Owner decisions from the assessment
 
 Decided by the owner on 2026-11-05 (binding, recorded in the PRD section 2.0): **OD-3** WebSQL DML stays core; **OD-4** catalog search including embeddings is core; **OD-5** ITSM integration and the header-based break-glass/justification flow are deleted (access-profile break-glass assignments stay).
 
-Still open (recommended default; work proceeds on the default until the owner decides):
+Also decided by the owner on 2026-11-05 (binding, PRD section 2.0): **OD-6** the CI target counts queue time (#523 definition: PR wall-clock from push to the last required check, median, < 30 min); **OD-7** ReBAC enforced on all paths once a tenant has tuples, one switch, fail-closed startup check (GHSA-78j7-3gh6-7cqx); **OD-8** unwired WORM archive export deleted, startup fails on `Audit:Worm:Enabled`, retention purge keeps signed checkpoints and anchors (GHSA-4qx8-fv2p-q8r2); **OD-9** global operations only for canonical `ClusterAdmin`, `GovernanceAdmin` always tenant-bound, no-tenant tokens fall back to the default tenant (GHSA-mgv5-4r69-mwww; batch 5 is adjusted before merge); **OD-10** the GDPR disclosure report stays core (GHSA-qx32-576x-5cq2); **OD-11** governed aggregation with small-group suppression and time buckets stays core, differential-privacy noise is deleted (#467, #468 obsolete; GHSA-rxr4-mf28-p2hv solved by suppression alone).
 
-| Id | Question | Recommendation | Effect |
-|---|---|---|---|
-| D-CIQUEUE | Does runner queue time count in the CI time target? | **Yes**, the #523 definition: wall-clock from push to final status. | Section 3 CI targets use that definition. |
-| D-REBAC | GHSA-78j7-3gh6-7cqx part 2: ReBAC default enforcement | **Enforce by default (fail closed)** for tenants with ReBAC relations; explicit opt-out per tenant, audited. | Security lane, S/M. |
-| D-ARCHIVE | GHSA-4qx8-fv2p-q8r2: audit archive export | **Delete the unwired archive export and gate purge** behind the anchor verification; rebuild export later only on demand. | Closes the export part by removal; anchor hardening stays in batch 5 and WP-SIMPL-20. |
-| D-ADMIN | GHSA-mgv5-4r69-mwww: admin scoping model | **Confirm the batch-5 model** (a tenant-less governance admin is global only with the cluster-admin role; otherwise tenant-scoped). | No extra work if confirmed. |
-| D-GDPR | GHSA-qx32-576x-5cq2: GDPR disclosure report placement | **Core** (consent and audit are core; the report must not depend on the optional Lineage module); lineage enrichment optional. | WP-SIMPL-29 moves only lineage graph code; the report stays in core. |
-| D-ANALYTICS | Analytics and differential privacy (#467, #468, GHSA-rxr4-mf28-p2hv, part of GHSA-jcpx-6m27-2m97) | As in WP-SIMPL-18: **module only if a human owner is named by Stage 1 exit, otherwise delete.** | Obsolete if deleted; P1 in the module if kept. |
+No owner decision from the assessment remains open. The remaining defaults of the PRD (D1-D15) and of section 8 stay as recorded there.
 
 ## 8. Open architecture questions (default taken)
 
@@ -582,7 +575,7 @@ Still open (recommended default; work proceeds on the default until the owner de
 | Q5 | Orphaned tables and module-owned stores | One forward-only drop step per engine in WP-20e; the events module uses the governance connection factory, its schema stays in the core migration tree |
 | Q6 | `TargetSqlDialect.Ansi` | Kept only as internal canonical form if used so; never selectable as a data-source target |
 | Q7 | Procedures (ADR-018) | MODULE (SQL Server only, enforcement via SESSION_CONTEXT, outside the AST gate); delete if no owner by Stage 1 |
-| Q8 | Analytics (governed aggregation) and differential privacy | One `governed-aggregates` module if an owner exists; otherwise delete |
+| Q8 | Analytics (governed aggregation) and differential privacy | **Decided (OD-11):** aggregation core, differential-privacy noise deleted |
 | Q9 | DuckDB in tests | Only inside the Olap module tests |
 | Q10 | Manifest signature algorithm | ECDSA P-256 from the BCL; private key in a GitHub secret; rotation by host release |
 | Q11 | Versioning tool | No MinVer; release.yml passes `-p:Version` from the tag; local builds `0.0.0-dev` |

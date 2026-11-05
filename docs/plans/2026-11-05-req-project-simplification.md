@@ -40,6 +40,12 @@ A critical whole-project review (10 findings) concluded that Autheris is an AI-g
 - **OD-3 (binding, owner, 2026-11-05):** WebSQL DML (`RestApi:AllowDml`, opt-in, off by default) stays in the core. The DML advisories and #505 are fixed in the core security lane; the write-grant fix must not rely on Casbin, which is deleted (WP-SIMPL-14).
 - **OD-4 (binding, owner, 2026-11-05):** catalog search, including semantic search and embeddings, is core. #501 and the embeddings part of #488 are FIX-IN-CORE.
 - **OD-5 (binding, owner, 2026-11-05):** the ITSM integration and the header-based break-glass/justification flow (`JustificationAndBreakGlassInterceptor` and its options and headers) are deleted. Access-profile break-glass assignments are a separate feature and stay. The ITSM-related parts of #507 and #485 are OBSOLETE-BY-REMOVAL.
+- **OD-6 (binding, owner, 2026-11-05):** the CI time target counts queue time: wall-clock from push to the last required check, median, < 30 min for PRs (definition of #523). Replaces the tentative D7 split.
+- **OD-7 (binding, owner, 2026-11-05; GHSA-78j7-3gh6-7cqx, ReBAC defaults):** ReBAC is enforced on all paths as soon as a tenant has tuples; `EnforceOnQueryPaths`/`EnforceOnStreaming` are replaced by one switch; startup fails if ReBAC is enabled with tuples but a path is exempted.
+- **OD-8 (binding, owner, 2026-11-05; GHSA-4qx8-fv2p-q8r2, audit archive):** the unwired WORM archive export is deleted; startup fails if `Audit:Worm:Enabled` is still set; retention purge stays with signed purge checkpoints and anchors; long-term archiving is an operator responsibility (SIEM export, database backup) and may return later as a module.
+- **OD-9 (binding, owner, 2026-11-05; GHSA-mgv5-4r69-mwww, admin scoping):** global operations only for the canonical `ClusterAdmin`; `GovernanceAdmin` is always tenant-bound; a token without a tenant claim falls back to the default tenant and is never global. This differs from the model in the in-progress `fix/security-batch-5`, which must be adjusted before merge. It also settles the role model behind GHSA-9229-wx6j-wvm9 and GHSA-v5c2-29pv-cc86.
+- **OD-10 (binding, owner, 2026-11-05; GHSA-qx32-576x-5cq2, GDPR report):** the GDPR disclosure report stays in core (with its authorization fix); the rest of Lineage may become a module.
+- **OD-11 (binding, owner, 2026-11-05):** governed aggregation with small-group suppression and time buckets stays in core; differential-privacy noise is deleted. #467 and #468 are OBSOLETE-BY-REMOVAL; GHSA-rxr4-mf28-p2hv is solved by small-group suppression alone.
 
 ### 2.1 Positioning (one sentence)
 
@@ -408,7 +414,7 @@ Targets are proposals sized from the deletion plan; the Phase 2 architect may re
 | D14 (OD-2) | SQLite as governed DATA SOURCE, parity engine and test engine (full removal; separate from OD-1) | Full removal, staged (governance store, then tests/parity to PostgreSQL Testcontainers and fakes, then dialect and package); default taken; owner may stop after any step |
 | D15 | Data migration tool for SQLite governance stores | None (default taken); document API export in the migration guide |
 | D6 | Staffing for ownership | One primary owner with declared "vacant" backups; recruit or assign a second human before Stage 3 |
-| D7 | CI-time targets | Accept 15/30 min tentatively; confirm after Stage 0 measurement |
+| D7 | CI-time targets | **Decided (OD-6):** PR wall-clock from push to last required check, median, < 30 min, queue time included |
 | D8 | Feature freeze duration | >= 6 weeks, until Stage 3 exit (default taken) |
 | D9 | PR net-LOC ceiling | 400 net added src lines with `size-exception` escape hatch (default taken) |
 | D10 | Agent definitions | Delete the five without product match plus readme-copywriter skill; keep the rest (default taken) |
