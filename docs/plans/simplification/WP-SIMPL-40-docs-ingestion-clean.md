@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-18-borderline-triage-execution) | Issues: #500 (alignment only) | Advisories: GHSA-p234-g3ph-gqh2 (MCP document store tenant isolation) | Owner decisions: OD-18 (keep docs ingestion in core, binding), OD-9 (global operations only for canonical `ClusterAdmin`), OD-1 (governance DB is PostgreSQL or SQL Server), OD-17 | Security conditions: SEC-SIMPL-01, 02, 13, 22, 23, 24, 25, 31, 70
 
+> **Owner addendum (2026-11-05, binding):** docs ingestion is a core discovery feature, especially for MCP. Uploaded external documents describe data, applications and programs based on the data. Required in addition to this spec: (1) a linkage model document <-> dataset (table, view, procedure, column) and document <-> application/program; (2) linked documents are returned by discovery ([WP-SIMPL-41](WP-SIMPL-41-authorized-data-discovery.md)), by catalog search incl. semantic search, and by MCP (`describe_dataset` plus a document search/read tool), with size limits and untrusted-text handling per #500; (3) visibility follows OD-19: every authenticated user of the tenant unless the document is explicitly hidden. Storage, upload, tenant isolation and quotas stay as specified below.
+
 Disclosure rule (SEC-SIMPL-01): the advisory is referenced only by id and the neutral title above. Code comments, test names, commits and PR bodies carry no exploit description; details stay in the private advisory.
 
 ## 1. Goal and outcome

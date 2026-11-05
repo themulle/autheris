@@ -41,6 +41,20 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 
 WP-SIMPL-18 therefore only deletes differential-privacy noise, CDN purge and SchemaRegistry (PRs A, B, E). WP-38..40 run in Stage 1/2 alongside the security lane; WP-40's storage move depends on WP-SIMPL-20.
 
+## Added by owner decisions OD-19..OD-24
+
+- [WP-SIMPL-44](WP-SIMPL-44-no-source-metadata-reads.md) No source-metadata reads (OD-25): only data access on sources; schema, keys, indexes, samples and statistics come from outside; folds in #459.
+- [WP-SIMPL-45](WP-SIMPL-45-governed-write-access.md) Governed write access (OD-26): INSERT and column-level UPDATE per user/AD group via data-owner consent; supersedes the DML-bundle design of WP-SIMPL-36.
+- OD-22 core access model and OD-23 heterogeneous data gateway are recorded in the PRD and bind every WP.
+- OD-24: OData stays core; [WP-SIMPL-26](WP-SIMPL-26-pilot-module-odata.md) is reduced to cleanup and Power BI / Excel interop tests; the module pilot is Lakehouse ([WP-SIMPL-27](WP-SIMPL-27-module-lakehouse.md)).
+
+
+- [WP-SIMPL-41](WP-SIMPL-41-authorized-data-discovery.md) Authorized data discovery for every authenticated user (replaces anonymous OpenSchema; consent request to the data owner; separate column-level requests for PII).
+- [WP-SIMPL-42](WP-SIMPL-42-usage-accounting-users-groups.md) Usage accounting per user and AD group (replaces FinOps).
+- [WP-SIMPL-43](WP-SIMPL-43-authentication-authorization-core.md) Authentication and authorization core: direct and upstream-header (ForwardAuth) modes; WP-SIMPL-30 is cancelled, Envoy ext_authz stays core.
+
+WP-41..43 are core product requirements and run under the freeze exception alongside the security lane.
+
 ## Security advisories
 
 Neutral index of all referenced advisories with component, severity, state and work package: [advisories-overview.md](advisories-overview.md).

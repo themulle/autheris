@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-34-readme-rewrite-feature-docs-migration-guide-completion) | Issues: #515, #511 | Owner decisions: OD-17(6) (freeze exit), OD-15/OD-12 (what stays core) | Security conditions: none specific; docs must not describe advisory details (GHSA id + neutral title only)
 
+> **Owner addendum (OD-29, 2026-11-05):** the README opens with the product core statement of OD-29 (seven points: optional identity, authorization on data as the core, discovery, external approval workflow, cryptographic proof with time-limited grants, usage and per-source cost models, external metadata) and structures the rest of the document along it.
+
 ## 1. Goal and outcome
 README.md describes the simplified product per PRD REQ-SIMPL-11.5; `docs/features/` holds at most 45 feature docs (deleted features lose their docs, module features move to module READMEs); `docs/operations/migration-simplification.md` has one row per DELETE/MODULE item; architecture docs describe the core + module model. Measurable: doc count <= 45, all `DocsIntegrityTests`/`DocsClaimsArchitectureTests` green, owner accepts README (freeze exit criterion).
 

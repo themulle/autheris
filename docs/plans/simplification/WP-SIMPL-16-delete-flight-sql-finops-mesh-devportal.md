@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-16-delete-arrow-flight-sql-over-http-finops-mesh-dev-portal-in-release-builds) | Issues: #487 (Flight part), #485 (Arrow part), #491 (part), #512 | Owner decisions: D2, D12 | Security conditions: SEC-SIMPL-30, 31, 35, 37; GHSA-v75c-28mx-7wm7 (Flight-only part) - see private advisory
 
+> **Binding overrides (owner decisions OD-20 and OD-21, 2026-11-05):** Mesh (Envoy ext_authz, `Application/Mesh`, `EnvoyExtAuthzEndpoints`) is NOT deleted; it stays core (see [WP-SIMPL-43](WP-SIMPL-43-authentication-authorization-core.md)). FinOps is removed only as part of [WP-SIMPL-42](WP-SIMPL-42-usage-accounting-users-groups.md), which replaces it with usage accounting per user and AD group; do not delete FinOps in this WP. This WP keeps: Flight-SQL-over-HTTP deletion and dev-portal-in-release-builds handling.
+
 ## 1. Goal and outcome
 Delete the Flight-SQL-over-HTTP endpoints and server, FinOps, and Mesh (Envoy ext_authz); map dev endpoints only in Development and exclude dev portal assets from Release publish. Outcome: about -1,800 src lines; removed routes 404 in Release; Arrow IPC export (`ArrowExportEndpoints.cs`) unchanged with masking, row/column policy and audit.
 

@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-26-pilot-module-odata-revised-for-od-15-extended) | Issues: #515 | Owner decisions: OD-15 (Olap stays core; OData is the pilot), OD-17 | Security conditions: SEC-SIMPL-02, 03, 05, 30, 31, 43, 48, 49
 
+> **Changed by owner decision OD-24 (2026-11-05):** OData is always required (Power BI, Excel) and stays in core; it is NOT extracted into a module. Do not implement the module extraction steps of this spec. What remains of this WP: OData cleanup within core, removal of the OpenSchema branches per [WP-SIMPL-41](WP-SIMPL-41-authorized-data-discovery.md), and interoperability tests with the Power BI and Excel OData clients (service document, $metadata, paging, $filter/$select/$orderby/$top, authentication). The module pilot moves to [WP-SIMPL-27](WP-SIMPL-27-module-lakehouse.md) (Lakehouse); WP-SIMPL-25 must use Lakehouse as its first real module.
+
 ## 1. Goal and outcome
 Move OData into `modules/Autheris.Modules.OData`, loaded through the WP-SIMPL-25 host. Outcome: core `src` shrinks by about 2,700 lines; with the module enabled all OData routes behave identically (same paths, same auth, same masking); without it they return 404 and `Gateway:OData` config fails fast. Exit decision recorded: runtime loading confirmed, or fallback AD-3.10 adopted for all modules.
 

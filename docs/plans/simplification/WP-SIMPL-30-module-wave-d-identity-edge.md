@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-30-module-wave-d-identity-and-edge-modules) | Issues: #515 | Owner decisions: OD-9 (admin scoping must stay intact) | Security conditions: SEC-SIMPL-03, 05, 30, 31, 32, 43, 44, 48, 49 and the auth-scheme removal condition (`AuthSchemeRemovalTests`)
 
+> **Cancelled by owner decision OD-21 (2026-11-05):** authentication and authorization are core; SCIM, TOTP, Negotiate (Kerberos/NTLM) and Envoy ext_authz stay in core and are NOT moved to modules. The cleanup of this area is specified in [WP-SIMPL-43](WP-SIMPL-43-authentication-authorization-core.md). Do not implement this WP; it is kept for traceability only. The removal of the Api -> Extensions project reference that this WP carried moves to WP-SIMPL-43 or the last module WP.
+
 ## 1. Goal and outcome
 Move SCIM, TOTP local-auth, Negotiate (Kerberos/NTLM) and Envoy ext-authz into four modules (`Autheris.Modules.Scim`, `.Totp`, `.Negotiate`, `.EnvoyExtAuthz`). Package `Microsoft.AspNetCore.Authentication.Negotiate` leaves `Autheris.Api`; 18 endpoints leave core. With a module absent, its routes are 404, its config fails fast, and the authentication pipeline never falls back to anonymous.
 
