@@ -11,7 +11,7 @@ using Xunit;
 namespace Autheris.Tests.Unit;
 
 /// <summary>
-/// PLAN-OPS-150 WP-D: ReadyToRun for the framework-dependent API publish (docker-publish.yml) without touching the
+/// Guards the publish settings after #509 (ReadyToRun removed, spike NO-GO) without touching the
 /// workflows, the locked restore or the supply-chain gates (SEC-OPS150-13, SEC-OPS150-19).
 /// </summary>
 public sealed partial class ReadyToRunPublishSecurityTests
@@ -36,8 +36,7 @@ public sealed partial class ReadyToRunPublishSecurityTests
         }
 
         XElement project = LoadApiCsproj();
-        project.Descendants("PublishReadyToRun").ShouldHaveSingleItem()
-            .Attribute("Condition")!.Value.ShouldBe("'$(SelfContained)' != 'true'");
+        project.Descendants("PublishReadyToRun").ShouldBeEmpty();
         project.Descendants("RuntimeIdentifiers").ShouldHaveSingleItem().Value.ShouldBe("linux-x64");
         project.Descendants("RuntimeIdentifier").ShouldHaveSingleItem()
             .Attribute("Condition")!.Value.ShouldContain("'$(SelfContained)' != 'true'");
@@ -95,12 +94,11 @@ public sealed partial class ReadyToRunPublishSecurityTests
     }
 
     [Fact]
-    public void ApiCsproj_ReadyToRun_NotSelfContained_NotForSelfContainedRelease()
+    public void ApiCsproj_NoReadyToRun_NotSelfContained_NotForSelfContainedRelease()
     {
         XElement project = LoadApiCsproj();
 
-        project.Descendants("PublishReadyToRun").ShouldHaveSingleItem()
-            .Attribute("Condition")!.Value.ShouldContain("'$(SelfContained)' != 'true'");
+        project.Descendants("PublishReadyToRun").ShouldBeEmpty();
         project.Descendants("SelfContained").ShouldHaveSingleItem().Value.ShouldBe("false");
         project.Descendants("SelfContained").Single().Attribute("Condition")!.Value.ShouldContain("'$(SelfContained)' == ''");
         project.Descendants("PublishSingleFile").ShouldBeEmpty();
