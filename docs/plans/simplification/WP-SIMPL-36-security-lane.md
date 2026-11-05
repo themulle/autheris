@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-36-security-lane-freeze-exception-parallel-to-stage-0) | Issues: #469, #475, #504, #505, #506, #507, #508 | Owner decisions: OD-3, OD-4, OD-5, OD-7, OD-8, OD-9, OD-10, OD-11, OD-12, OD-15 | Security conditions: SEC-SIMPL-01, 70, 80, 81, 84, 85, 86, 87, 88, 89, 92, 94
 
+> **Owner decision OD-30 (2026-11-05, ADR-020 accepted):** sub-package 6b (ReBAC enforcement switch) is replaced by [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md) PR 5 (ReBAC removal); GHSA-78j7-3gh6-7cqx part 2 is resolved by removal. The DML bundle design is superseded by WP-SIMPL-45; keep only the urgent fixes here.
+
 Disclosure rule (SEC-SIMPL-01): advisories are named only by GHSA id and a neutral component title. Details are in the private advisory. Commits, PR bodies, test names and code comments carry no exploit description. Developer-only root-cause notes are in a separate local file that is never committed.
 
 ## 1. Goal and outcome

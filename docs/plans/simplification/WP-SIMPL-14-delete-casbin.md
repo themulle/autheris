@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-14-delete-casbin) | Issues: #515, #491 (part) | Owner decisions: OD-3, OD-7 (GHSA-78j7-3gh6-7cqx), D12 | Security conditions: SEC-SIMPL-30, 31, 32, 33, 80, 85
 
+> **Owner decision OD-30 (2026-11-05, ADR-020 accepted):** drop step 3 (`NativePolicyEnforcementService`) and decision D-14a. Casbin and `IPolicyEnforcementService` are deleted without a data-path replacement; data-access decisions come only from the access decision point of [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md). Re-estimate accordingly.
+
 ## 1. Goal and outcome
 Remove the `Casbin.NET` package and every `Casbin*` type from core without weakening authorization. Outcome: `Casbin.NET` absent from all csproj; zero `Casbin` matches in `src`; the single `IPolicyEnforcementService` implementation is a native evaluator with identical decisions for table, column, masking, subject-attribute and row-filter rules; ReBAC stays enforced on all paths (OD-7); the DML write grant (`RestApi:AllowDml` + `DmlWriterRoles`) is independent of Casbin.
 

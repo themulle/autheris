@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md) (supersedes the plan section of WP-SIMPL-30; amends WP-SIMPL-16) | Issues: #482, #489 | Owner decisions: OD-21, OD-22 (core access model, owner clarification 2026-11-05), OD-27 (on-premises AD groups via SCIM), OD-26 (write grants consume the same groups), OD-9, OD-5 | Advisories: GHSA-x8g9-cm3h-p6jq (see private advisory) | Security conditions: SEC-SIMPL-02, 30 (amended), 32, 33, 34, 36 (re-scoped), 48 (re-scoped); new SEC-SIMPL-99..110 proposed in section 10 for Phase 3
 
+> **Owner decision OD-30 (2026-11-05, ADR-020 accepted):** Envoy ext_authz (step 11) calls `IAccessDecisionPoint` from [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md); section 4.3 drops `RebacEndpointFilter`. Roles are control-plane only.
+
 ## 1. Goal and outcome
 Make authentication and authorization one documented core pipeline: **authenticate (scheme) -> normalize claims (`ClaimsNormalizer`) -> resolve realm, tenant, user SID and AD group SIDs -> authorize (policies, ReBAC, consent, access profiles, row filters, masks, column deny, Envoy ext_authz)**. Both deployment modes are first-class and explicitly configured: `Direct` (user authenticates at Autheris) and `Upstream` (trusted proxy passes the identity in headers, ForwardAuth). Outcome, objectively checkable:
 - The same user in the same AD groups gets the same `SecurityContext.UserSid`/`GroupSids` (canonical SIDs) via JWT (Entra, AD FS), Negotiate, Basic, ForwardAuth, WebSocket and MCP; one parameterized test proves it.

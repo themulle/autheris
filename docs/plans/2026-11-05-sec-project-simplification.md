@@ -190,3 +190,7 @@ Advisories are referenced by GHSA id only (SEC-SIMPL-01).
 - **SEC-SIMPL-98 (OD-16, per-tenant principals).** A per-tenant service principal or PAT is used only for its tenant; a tenant without an entry never falls back to another tenant's principal, and falls back to the global principal only when explicitly configured. Token caches are keyed by (data source, tenant, mode, principal). Test: `DatabricksAuthModeSecurityTests.Per_tenant_principal_never_used_for_another_tenant`.
 
 The five earlier tests of this section plus the four OD-12 tests (SEC-SIMPL-90..93) carry `[Trait("Category","Security")]`. Gate rows (add: WP-SIMPL-13 | SEC-SIMPL-38, 90, 91 | OD-12 tests green before any dialect change merges): WP owning each decision (ReBAC, audit retention, batch 5 in WP-SIMPL-36, GDPR report, aggregation) must not merge before its test is green.
+
+## Addendum OD-30 (ADR-020 accepted, 2026-11-05)
+
+SEC-SIMPL-85 (ReBAC enforcement on all paths) is replaced by ReBAC removal under [WP-SIMPL-46](simplification/WP-SIMPL-46-unified-authorization-model.md). The conditions SEC-AZ-01..10 proposed in WP-SIMPL-46 are binding for that work package; Phase 3 reviews WP-SIMPL-46 before its first PR merges and assigns them SEC-SIMPL numbers.

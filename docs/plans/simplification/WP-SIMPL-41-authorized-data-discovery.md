@@ -2,6 +2,8 @@
 Status: Ready for implementation
 Parent: [plan](../2026-11-05-plan-project-simplification.md#4-work-packages) | Related: [WP-SIMPL-40](WP-SIMPL-40-docs-ingestion-clean.md) (document storage/upload), [WP-SIMPL-39](WP-SIMPL-39-procedures-clean.md) | Issues: #500 (untrusted catalog text, alignment) | Owner decisions: OD-19 (binding, 2026-11-05, with the owner clarifications of the same day recorded in section 12), OD-22 (core access model), OD-4 (catalog search incl. semantic search is core), OD-18 (procedures and docs ingestion stay in core) | Security conditions: SEC-SIMPL-99..SEC-SIMPL-114 (proposed in section 13, to be confirmed by Phase 3)
 
+> **Owner decision OD-30 (2026-11-05, ADR-020 accepted):** discovery computes the caller's effective state via `IAccessDecisionPoint.DecideManyAsync(..., Discover, Discovery)` from [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md); the ReBAC filter in `CatalogVisibilityService` is removed (WP-46 step 5).
+
 ## 1. Goal and outcome
 Every authenticated user of a tenant, and every AI agent or MCP client acting for such a user, can find out which data objects (tables, views, governed stored procedures) exist in the tenant, what they contain (descriptions, columns with descriptions, PII/sensitivity flags, uploaded statistics and pseudonymised samples), who the data owner is, what the caller's own access state is, and can request access (table consent plus optional clear access per PII column) from that owner. Only objects and columns that a data owner or administrator explicitly hid are omitted, without an existence oracle. Discovery never returns row data from a source system. The anonymous `OpenSchema` flag is deleted, and every route that branched on it requires authentication.
 

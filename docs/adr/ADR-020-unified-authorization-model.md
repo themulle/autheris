@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-11-05). Owner decision required. On acceptance this ADR revises OD-7 (ReBAC enforcement, GHSA-78j7-3gh6-7cqx) and SEC-SIMPL-85, re-scopes WP-SIMPL-14 (Casbin deletion without a native rule engine on the data path) and is implemented by [WP-SIMPL-46](../plans/simplification/WP-SIMPL-46-unified-authorization-model.md). It must not weaken OD-21, OD-22, OD-26, OD-27 or OD-9.
+Accepted (owner, 2026-11-05) (2026-11-05). Owner decision required. On acceptance this ADR revises OD-7 (ReBAC enforcement, GHSA-78j7-3gh6-7cqx) and SEC-SIMPL-85, re-scopes WP-SIMPL-14 (Casbin deletion without a native rule engine on the data path) and is implemented by [WP-SIMPL-46](../plans/simplification/WP-SIMPL-46-unified-authorization-model.md). It must not weaken OD-21, OD-22, OD-26, OD-27 or OD-9.
 
 ## Context
 
