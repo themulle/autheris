@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (pending owner acceptance). Date: 2026-11-05.
+Proposed (pending owner acceptance). Date: 2026-11-05. Revised the same day for binding owner decisions OD-12 (Oracle and Databricks kept as governed data sources) , OD-14 (Snowflake generator deleted, Ansi kept generator-only) and OD-15 (cross-source federation and DuckDB stay core); they override earlier text of this ADR where they conflict.
 
 Supplements ADR-017 §2 and its amendments of 2026-10-11 and 2026-10-13. ADR-017 introduced the AST dialect generator without an alternatives assessment; this ADR records that assessment after the fact and narrows the dialect scope. On acceptance it supersedes the tier list in the 2026-10-11 amendment (item 5) and the admission list in the 2026-10-13 amendment (item 4).
 
@@ -40,9 +40,9 @@ Not all of the engine was written in-house. Parsing uses ANTLR4 (`Antlr4.Runtime
 |---|---|---|---|---|---|
 | AST-level RLS/mask/consent injection | Yes, existing typed path | Yes, but the visitor needs a mapping layer for each parser AST, or must be rewritten for each one | Only if the visitor is rewritten in Python/Java, or the AST is serialised in both directions | Enforcement moves into the engine; Autheris can only configure it | Yes; there is nothing to parse |
 | Fail-closed on unsupported constructs | Yes; the grammar and visitor allowlist are ours (G1-G10 gate) | Weaker: ScriptDom and sqlparser ports are built to accept broadly, so an allowlist must be rebuilt in front of the visitor | Weak by default: sqlglot transpiles on a best-effort basis and needs a strict error level; Calcite is stricter but has its own dialect | Depends on the engine's access-control semantics | Strongest: only known shapes exist |
-| Dialect coverage | PostgreSQL + SQL Server, with parity | T-SQL only (ScriptDom); PostgreSQL through native wrappers of uncertain maintenance; two ASTs | Broad on paper; fidelity is not proven per dialect | Broad, but on the engine's terms | Not applicable |
+| Dialect coverage | PostgreSQL, SQL Server, Oracle, Databricks, with parity | T-SQL only (ScriptDom); PostgreSQL through native wrappers of uncertain maintenance; two ASTs | Broad on paper; fidelity is not proven per dialect | Broad, but on the engine's terms | Not applicable |
 | One-time effort | S-M (deletion and parity work) | L (new parser per dialect, mapping, gate re-baseline) | L (sidecar, protocol, visitor port) | XL (product re-architecture) | L (Web SQL, async jobs and MCP SQL tools removed or redesigned) |
-| Ongoing effort | Medium, bounded by 2 dialects | Medium-high (track upstream AST changes for each parser) | High (two runtimes, two languages) | High (cluster operations) | Low for SQL; product loss |
+| Ongoing effort | Medium, bounded by 4 dialects | Medium-high (track upstream AST changes for each parser) | High (two runtimes, two languages) | High (cluster operations) | Low for SQL; product loss |
 | Operational footprint | None added | Native library for PostgreSQL wrappers | Extra container, IPC on hot path, new CVE stream | JVM cluster (Trino) or embedded engine without native SQL Server federation (DuckDB) | Lowest |
 | Test investment | ~45k lines stay relevant; generator tests for dropped dialects go | Parser and builder tests lost; visitor tests partly kept | Most engine tests lost | Most engine tests lost | Engine tests lost; GraphQL/REST compile tests stay |
 | Supply chain | 3 packages (ANTLR runtime, build tasks, ObjectPool) | +1-3 parsers, at least one single-maintainer | Python or JVM dependency tree | Full engine distribution | Smallest |
@@ -57,9 +57,9 @@ Notes:
 
 **Option 1: keep the in-house engine and shrink it to the dialects that have parity tests.**
 
-1. **Core dialect set = PostgreSQL and SQL Server** (D5, default taken). These are the only `TargetSqlDialect` values that the core accepts once the shrink is done.
+1. **Core dialect set = PostgreSQL, SQL Server, Oracle and Databricks** (D5 as amended by binding owner decision OD-12, 2026-11-05: Oracle database support and Databricks as data source are kept). These are the only `TargetSqlDialect` values that the core accepts once the shrink is done, plus SQLite until OD-2 stage 3. Oracle keeps its `Production` status from the ADR-017 amendment of 2026-10-11; Databricks keeps `DatabricksOboTokenProvider`, the statement-execution executor and its connection types. The governance store stays PostgreSQL and SQL Server only (OD-1); Oracle and Databricks are governed data sources, never governance stores.
 2. **SQLite is removed in OD-2 stages.** First the governance store (OD-1, binding). Then the tests and the parity suite move to PostgreSQL Testcontainers and fakes. Last, `SqliteDialectGenerator`, `SqliteTypeAffinity` and the SQLite enum value are removed. The owner may stop after any stage. Until the last stage, SQLite stays a supported dialect and must meet the same parity rule.
-3. **Oracle, Snowflake, Databricks, DuckDB-as-target and Ansi-as-target generators are deleted by default.** One may come back only as a separate module with its own real-engine parity suite and mutation gate. The module needs a named demand before it is built. DuckDB stays only as the Olap module's engine, not as a governed target dialect.
+3. **Ansi stays a generator-only dialect; the Snowflake generator is deleted** (binding owner decision OD-14, revised 2026-11-05). Ansi emits SQL as today but is not admitted as a data source (`SqlDialectMapper`, `DialectAdmissionTests`). **DuckDB stays core** (binding OD-15: cross-source joins are core): the DuckDB generator emits the federated staging SQL for `FederatedDuckDbExecutionService`/`CrossSourcePlanner`; it is an internal federation target, not an admitted data source.
 4. **A configured dialect outside the core set fails closed at startup** through configuration validation. Compile-time rejection stays as a second line of defence.
 5. **No new parser dependency.** ANTLR4 and the Trino-derived grammar stay. Grammar productions that only the deleted dialects used may be pruned when an allowlist test proves them unreachable.
 6. **The rationale.** Option 1 is the only option that meets drivers 1 and 2 without new runtimes or a mapping layer. It also has the smallest one-time effort. The real problem was unproven dialect breadth, not the decision to build. Shrinking fixes that directly.
@@ -68,8 +68,8 @@ Notes:
 
 The detailed work packages are in the implementation plan. This ADR fixes only the order:
 
-1. **Parity first.** PostgreSQL and SQL Server parity baselines are built against Testcontainers and turned green. Pending cells for these two dialects are closed before any code is deleted.
-2. **Non-core generators.** Oracle, Databricks and the analytical generators (DuckDb, Snowflake, Ansi as targets) are deleted together with their enum values, capability entries, tests and driver packages. Architecture tests make sure the deleted types stay deleted.
+1. **Parity first.** PostgreSQL and SQL Server parity baselines are built against Testcontainers and turned green on every PR. Oracle runs a security-tagged smoke subset on PR (Testcontainers.Oracle, pre-pulled image) and the full suite nightly. Databricks runs contract tests on PR (generated-SQL snapshots plus an executor contract against a fake statement-execution API) and the full suite nightly against a real workspace when credentials exist, otherwise against the Spark container. Pending cells for the four core dialects are closed before any generator is deleted.
+2. **Non-core generators.** Only the Snowflake generator and enum value are deleted (OD-14). Ansi stays generator-only and DuckDB stays the core federation staging target (OD-15); `DialectAdmissionTests` keeps both out of data-source admission. Federation/DuckDB paths get core parity and integration coverage. Oracle and Databricks generators, connectivity and packages stay (OD-12).
 3. **Startup validation.** An out-of-set dialect in data-source configuration fails the start with a typed configuration error.
 4. **SQLite stages per OD-2.** The governance store goes first, then tests and parity, then the dialect. The SQLite parity suite is removed only after step 1 is green.
 5. **Gate trim.** Stryker configurations are merged to at most 2, and the engine `break` threshold stays at 72 or higher.
@@ -78,14 +78,14 @@ The detailed work packages are in the implementation plan. This ADR fixes only t
 
 ### Positive
 
-- The code to maintain shrinks to two generators on a shared base. Every remaining generator has parity evidence against a real engine.
+- The code to maintain shrinks to four generators on a shared base (plus SQLite until OD-2 stage 3). Every remaining generator has parity evidence: PostgreSQL, SQL Server and Oracle against a real engine, Databricks by contract on PR and against a real workspace or the Spark container nightly.
 - The security-critical path keeps a single typed AST and a single fail-closed visitor. There is no IPC hop and no second runtime.
-- The supply chain stays at 3 engine packages. Oracle, Databricks and Snowflake driver dependencies can leave the default deployment.
+- The supply chain stays at 3 engine packages. `Oracle.ManagedDataAccess.Core` stays in Infrastructure (OD-12); Databricks needs no driver package (HTTP statement-execution API).
 - The engine tests that remain protect code that remains.
 
 ### Negative / Risks
 
-- Oracle is lost. It was `Production` under the 2026-10-11 amendment. This is acceptable because Autheris has no production deployment yet. The loss must be stated in the release notes.
+- Oracle and Databricks stay, so the engine shrinks less (about 2,200 more engine lines than a two-dialect core) and CI carries an Oracle container and a Databricks/Spark nightly lane. Mitigation: full Oracle and Databricks suites run nightly; PRs run only the security-tagged Oracle smoke subset and the Databricks contract tests.
 - The zero-dependency SQLite quickstart goes away after OD-2 stage 3, and DB-backed tests get slower (Testcontainers).
 - A parity gap exists between SQLite parity removal and full PostgreSQL/SQL Server parity. Mitigation: the SQLite parity suite is not deleted until both new baselines are green.
 - The team still owns grammar and generator maintenance (ongoing driver 4). The revisit triggers below bound this cost.
@@ -94,10 +94,10 @@ The detailed work packages are in the implementation plan. This ADR fixes only t
 
 | Metric | Baseline (2026-11-05) | Target |
 |---|---|---|
-| `TargetSqlDialect` values accepted by the core | 8 | 2 (PostgreSql, SqlServer); 3 while SQLite stage 3 is pending |
-| Generator files in `src/TrinoSqlEngine/Ast/Generators` (excluding base/factory) | 6 | 2 (+1 SQLite until stage 3) |
-| TrinoSqlEngine + TrinoSqlEngine.Tests lines | 59,390 | <= 45,000 |
-| Parity cells per supported dialect, against a real engine in CI | SQLite-centric; SQL Server/PostgreSQL baselines open | 100% of matrix cells, 0 `Pending`/`KnownGap` entries for core dialects |
+| `TargetSqlDialect` values accepted by the core | 8 | 4 as data sources (PostgreSql, SqlServer, Oracle, Databricks); 5 while SQLite stage 3 is pending; Ansi and DuckDb stay as non-admitted generator values (OD-14, OD-15); Snowflake removed |
+| Generator files in `src/TrinoSqlEngine/Ast/Generators` (excluding base/factory) | 6 | 5 (PostgreSql, SqlServer, Oracle, Databricks, Analytical with Ansi + DuckDb) (+1 SQLite until stage 3) |
+| TrinoSqlEngine + TrinoSqlEngine.Tests lines | 59,390 | <= 48,500 (previous 45,000 + kept Oracle/Databricks generators 923 and engine tests 1,284 + kept Ansi/DuckDb generators about 360 and DuckDb engine tests 279, rounded up) |
+| Parity cells per supported dialect, in CI | SQLite-centric; SQL Server/PostgreSQL baselines open | 100% of matrix cells, 0 `Pending`/`KnownGap` entries for core dialects; PG/SS on PR, Oracle smoke on PR + full nightly, Databricks contract on PR + real/Spark nightly |
 | `sql-compiler-gate` (G1-G10) | green | green for each core dialect |
 | Engine mutation score (Stryker `break`) | 72 | >= 72; not lowered |
 | Stryker configurations | 3 | <= 2 |

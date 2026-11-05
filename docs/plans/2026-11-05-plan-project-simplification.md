@@ -52,7 +52,7 @@ Design of option A:
 
 ### AD-2 SQL engine: keep, reduce scope (decision; ADR-019, status Proposed, pending owner acceptance: keep and shrink)
 
-Keep the in-house TrinoSqlEngine (ANTLR Trino grammar, own AST, `AstSecurityVisitor`, dialect generators). Core dialects: PostgreSQL and SQL Server; SQLite until OD-2 step 3 (WP-SIMPL-31). The DuckDB-as-target generator is deleted from core when Olap leaves core (WP-SIMPL-26); the Olap module carries any DuckDB SQL it needs. Engine + tests 59,390 -> <= 45,000 lines. Oracle, Databricks, Snowflake and Ansi-as-target generators are deleted in Stage 1. `TargetSqlDialect.Ansi` stays only if it is the internal canonical form (open question Q6). CI gate: a generator without a parity baseline file fails the build. Stryker configs 3 -> 2. TrinoSqlEngine + tests <= 45,000 lines.
+Keep the in-house TrinoSqlEngine (ANTLR Trino grammar, own AST, `AstSecurityVisitor`, dialect generators). Core data-source dialects (OD-12, binding): PostgreSQL, SQL Server, Oracle, Databricks; SQLite until OD-2 step 3 (WP-SIMPL-31). Governance store stays PostgreSQL + SQL Server only (OD-1). The DuckDB-as-target generator leaves core with Olap (WP-SIMPL-26); the Olap module carries any DuckDB SQL it needs. Ansi stays a generator-only dialect, not admitted as data source; the Snowflake generator is deleted in WP-SIMPL-13 (OD-14, binding, revised). Engine + tests 59,390 -> <= 48,000 lines (45,000 + kept Oracle/Databricks generators and engine tests 2,207 + kept Ansi about 70, rounded up). `TargetSqlDialect.Ansi` stays only if it is the internal canonical form (open question Q6). CI gate: a generator without a parity baseline file fails the build. Stryker configs 3 -> 2. TrinoSqlEngine + tests <= 48,000 lines.
 
 ### AD-3 Module mechanism: runtime-loaded first-party modules with a signed manifest (decision, D3 confirmed)
 
@@ -90,19 +90,23 @@ Never delete a SQLite parity cell before the PostgreSQL and SQL Server cells for
 
 | Metric | Baseline | Stage 1 exit | Stage 2 exit | Program exit |
 |---|---|---|---|---|
-| src LOC (src/ only) | 302,461 | <= 275,000 (PRD 250k; measured DELETE footprint about 27k) | <= 255,000 (PRD 230k) | <= 215,000 core (PRD 180k, +19%: modules move out about 52k, deletes 27k, unification 8k; ownerless-module deletions lower it further); modules <= 55,000 |
-| Map* endpoints in src | 275 | <= 240 | <= 230 | <= 140 |
+| src LOC (src/ only) | 302,461 | <= 278,000 (PRD 250k; DELETE footprint about 24k after OD-12 keeps 3,017 Oracle/Databricks lines) | <= 258,000 (PRD 230k) | <= 220,000 core (PRD 180k, +22%: modules move out about 50k, deletes 24k, unification 8k; ownerless-module deletions lower it further); modules <= 53,000 |
+| Map* endpoints in src | 275 | <= 240 | <= 230 | <= 140 (unchanged: Oracle/Databricks own no endpoints) |
 | Application top-level folders | 49 | <= 40 | <= 32 | <= 25, 0 duplicates |
 | Governance repository LOC (AD-1 metric) | ~18,580 (3 families + cores) | ~14,480 | <= 7,000 | <= 6,000 |
 | Governance dialects | 3 | 2 | 2 | 2 |
-| Data-source generators | 6 | 3 (PG, SS, SQLite) + DuckDb pending module | 3, all parity on real engines, none Pending | 2 (PG, SS) |
-| Core image / cold start P50 | 441 MB / 5.58 s (as configured) | measured after R2R removal and package deletions | measured | <= 250 MB / <= 3.0 s; warm P99 <= 3.47 ms |
+| Data-source dialects (generators) | 6 files / 8 enum values | 5 (PG, SS, Oracle, Databricks, SQLite); generator-only Ansi and DuckDb (federation staging); Snowflake deleted | 5, each parity-tested (PG/SS/Oracle real engines; Databricks contract on PR, real or Spark nightly), none Pending | 4 (PG, SS, Oracle, Databricks), each fully parity-tested |
+| Core image / cold start P50 | 441 MB / 5.58 s (as configured) | measured after R2R removal and package deletions | measured | <= 325 MB / <= 3.0 s; warm P99 <= 3.47 ms |
 | Options classes / settable props / `*Enabled` | 173 / ~1,173 / 96 | measured | measured | <= 90 / <= 600 / <= 40 |
 | Unconsumed options baseline | 46 lines | 0 (Stage 0) | 0 | 0, file removed |
 | Tests: container+integration share / Substitute.For / Received / sleeps | 6.3% / 4,159 / 986 / 92 | ratchets active | >= 12% / <= 3,000 / <= 700 / <= 40 | >= 15% / <= 2,000 / <= 400 / <= 20 |
-| Test LOC | 382,125 | follows deletions | <= 300,000 | <= 240,000 |
+| Test LOC | 382,125 | follows deletions | <= 307,000 | <= 247,000 (+6,563 kept Oracle/Databricks test lines, rounded) |
 | CI time (OD-6: PR wall-clock push to last required check, median, queue time included) | measured in WP-SIMPL-10 | not worse than baseline | <= 40 min | < 30 min (OD-6); full/nightly reported, no target |
 | Hosted services / DI registrations | 39 / 549 | measured | measured | <= 20 / <= 330 |
+
+OD-15 recompute (2026-11-05): federation (`FederatedDuckDbExecutionService` 744, `CrossSourcePlanner` 853), DuckDb generator (about 290) and table cache stay core, so about 1,900 lines no longer move to modules (core exit +2,000, modules -2,000); the DuckDB native library (68 MB linux-x64 in `DuckDB.NET.Bindings.Full`) stays in the core image (image target +68 MB, rounded up); cold start unchanged because DuckDB is loaded on the first federated query, verified in WP-SIMPL-10 (a regression makes it lazy). OD-14: Snowflake (about 95 lines) deleted, Ansi kept; net effect within rounding. Core exit is +22% over the PRD because of binding OD-12/OD-15, not a data-driven revision.
+
+OD-12 recompute method (2026-11-05): src LOC = previous target + `wc -l` of the kept Oracle/Databricks src files (3,017, of which generators 923) minus the Snowflake/Ansi generator lines still deleted under D16 (about 165), rounded up to the next thousand; test LOC = previous target + name-matching Oracle (3,759) and Databricks (2,804) test lines. Image: previous target + `Oracle.ManagedDataAccess.dll` (about 5.2 MB, net8.0 lib) rounded up; Databricks adds no package. Cold start unchanged: the Oracle assembly loads only on the first Oracle connection and Databricks registers HTTP clients only when configured (verified in WP-SIMPL-10 with the cold-start protocol; a regression above 3.0 s makes Oracle/Databricks registration lazy). Endpoints unchanged: no `Map*` endpoint is owned by Oracle/Databricks code.
 
 ## 4. Work packages
 
@@ -122,7 +126,7 @@ Summary (order = roadmap order; L-PER = serial persistence/DDL lane):
 | 10 | 0 | #515 | Measurement protocol + baselines | L-RAT | 01 | scripts | M 2 |
 | 11 | 1 | #515 | SQLite governance store removal (OD-1) | L-PER | 10 | -6,900 | L 6 |
 | 12 | 1 | #515 | Delete catalog vendors, Backstage, ITSM | L-PER | 11 | -4,000 | M 3 |
-| 13 | 1 | #515 | Delete Oracle/Databricks/Snowflake/Ansi dialects | L-ENG | - | -3,000 | L 4 |
+| 13 | 1 | #515 | Connection-secret policy, Snowflake generator deletion, dialect admission | L-ENG | - | +100 | M 2 |
 | 14 | 1 | #515 | Delete Casbin | L-DEL | 06 | -3,000 | M 2 |
 | 15 | 1 | #515 | Delete embedded Garnet, traffic shadowing | L-DEL | - | -900 | M 1.5 |
 | 16 | 1 | #515 | Delete Flight-over-HTTP, FinOps, Mesh, dev portal | L-DEL | 04 | -1,800 | M 2 |
@@ -231,21 +235,25 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 - Tests: `DeletedFeaturesArchitectureTests.No_types_in_deleted_namespaces` (list grows per WP), `UnknownGatewayKeyGuardTests` sample for removed sections.
 - AC: no reference to Purview/Collibra/Alation/DataHub/Backstage/Itsm in src, config schema or docs outside docs/plans and the migration guide.
 
-#### WP-SIMPL-13 Delete Oracle, Databricks, Snowflake and Ansi-as-target dialects (ADR-019)
-- Prerequisite step (separate commit, before any Oracle deletion): generalise the Oracle-only plaintext-password check `OracleConnectionSupport.HasPlaintextPassword` into a provider-neutral `ConnectionSecretPolicy.HasPlaintextPassword(provider, connectionString)` covering PostgreSQL (`NpgsqlConnectionStringBuilder.Password`) and SQL Server (`SqlConnectionStringBuilder.Password`), wired into the same startup/connection checks that call the Oracle variant today, with the same fail-closed outcome. Tests: `ConnectionSecretPolicyTests.PostgreSql_plaintext_password_is_rejected`, `.SqlServer_plaintext_password_is_rejected`, `.Secret_reference_is_accepted`. Phase 3 confirms the policy outcome (reject vs warn) matches today's Oracle behaviour.
-- Delete: `OracleDialectGenerator.cs`, `DatabricksDialectGenerator.cs`, Snowflake and Ansi target parts of `AnalyticalDialectGenerators.cs` (DuckDb part stays for WP-SIMPL-26), Oracle connectivity (`OracleConnectionSupport.cs`, `BindByNameOracleConnection.cs`, `Persistence/Catalog/OracleColumnMetadataReader.cs`, Oracle branches in `SqlConnectionFactory`, `SessionPinning`, `DatabaseParameterBudgetProvider`, `Dialects/SqlDialectRegistry`), Databricks connector, enum values in `TargetSqlDialect.cs`; package `Oracle.ManagedDataAccess.Core`; Testcontainers.Oracle in 2 test csproj; `OracleDriverArchitectureTests`, `OracleIntegrationTestArchitectureTests`; Oracle/Databricks parity cells and engine tests (about 7,800 test lines). Config validation rejects the removed dialect names with a clear error.
-- CI `[WF]`: remove the Spark integration job in ci.yml if it only serves Databricks/Spark (verify first, Q18).
-- Deps: none (engine lane). LOC: about -3,000 src (-7,800 tests). Effort: L, 4 pd. Risk: shared helpers in `SqlDialectGeneratorBase` used only by deleted generators (remove dead branches; Stryker governance run confirms no survivors added).
-- Tests: `TargetSqlDialectTests.Only_supported_values_exist`, `DialectConfigurationTests.Removed_dialect_fails_validation`.
-- AC/target: generators 3 + DuckDb (pending module); Oracle package absent.
+#### WP-SIMPL-13 Connection-secret policy and data-source dialect admission (ADR-019, OD-12, OD-14)
+- OD-12 (binding, 2026-11-05): Oracle and Databricks stay as governed core data sources. Kept: `OracleDialectGenerator`, `DatabricksDialectGenerator`, Oracle connectivity (`OracleConnectionSupport`, `BindByNameOracleConnection`, `OracleColumnMetadataReader`, `OracleBindByName`), `Infrastructure/Databricks/*` (incl. `DatabricksOboTokenProvider`, `DatabricksStatementExecutionClient`, `DatabricksDbCommand`), `DatabricksColumnMetadataReader`, package `Oracle.ManagedDataAccess.Core`, Testcontainers.Oracle, `OracleDriverArchitectureTests`, `OracleIntegrationTestArchitectureTests`. About 3,000 src and 6,500 test lines stay.
+- Step 1 (independent of any deletion, separate commit): generalise the Oracle-only plaintext-password check `OracleConnectionSupport.HasPlaintextPassword` into a provider-neutral `ConnectionSecretPolicy.HasPlaintextPassword(provider, connectionString)` covering PostgreSQL (`NpgsqlConnectionStringBuilder.Password`) and SQL Server (`SqlConnectionStringBuilder.Password`), wired into the same startup/connection checks that call the Oracle variant today, with the same fail-closed outcome. Tests: `ConnectionSecretPolicyTests.PostgreSql_plaintext_password_is_rejected`, `.SqlServer_plaintext_password_is_rejected`, `.Secret_reference_is_accepted`. Phase 3 confirms the policy outcome (reject vs warn) matches today's Oracle behaviour.
+- OD-14 (binding, revised 2026-11-05): `AnsiDialectGenerator` stays generator-only (not admitted as a data source, per `SqlDialectMapper`/`DialectAdmissionTests`); the DuckDb generator stays core as federated staging target (OD-15).
+- Step 1b (unconditional): delete `SnowflakeDialectGenerator` (about 95 lines in `AnalyticalDialectGenerators.cs`), the `TargetSqlDialect.Snowflake` value and its capability entries. Snowflake has no consumer outside generator tests (`DatabricksDialectGenerator` derives from `SqlDialectGeneratorBase`): Snowflake cases in `AnalyticalDialectTests`, `DateFunctionTranslationTests`, `CastTypeNameTests`, `RowFilterKeySetStageTests` are deleted; the non-admitted examples in `DialectAdmissionTests`, `SqlDialectRegistryTests` and `GovernedSqlExecutorX1Tests` `InlineData` switch to `Ansi`.
+- Step 2: startup validation admits exactly PostgreSql, SqlServer, Oracle, Databricks (+ Sqlite until WP-SIMPL-31) as data-source dialects; Ansi, DuckDb, the removed Snowflake and unknown names fail closed with a typed configuration error (ADR-019 item 4); compile-time admission stays as second line.
+- CI `[WF]`: the Spark integration job stays (it serves Databricks, Q18); it moves to nightly under WP-SIMPL-21.
+- Deps: none (engine lane). LOC: about +100 src net (policy + validation +200, Snowflake -95); tests about -150. Effort: M, 2 pd.
+- Tests: `ConnectionSecretPolicyTests.*` (Step 1), `TargetSqlDialectTests.No_snowflake_value`, `DialectConfigurationTests.Unsupported_dialect_fails_validation` (Ansi, Snowflake, DuckDb, unknown), `DialectConfigurationTests.Oracle_and_Databricks_are_accepted`, `DialectAdmissionTests` with `Ansi` as non-admitted example.
+- AC/target: data-source dialects PG, SS, Oracle, Databricks (+ SQLite until WP-SIMPL-31); generator-only Ansi and DuckDb (federation staging, OD-15); Snowflake absent; `Oracle.ManagedDataAccess.Core` present in Infrastructure only.
 
 #### WP-SIMPL-14 Delete Casbin
 - Delete: Casbin engine, adapters and options (8 files, 2,667 lines, 58 mention files), `CasbinDecisionBenchmark.cs`, package `Casbin.NET`; policies that used Casbin map to native RBAC/ReBAC (migration guide row).
 - Deps: WP-SIMPL-06 (option already gone). LOC: about -3,000 src. Effort: M, 2 pd. Risk: Casbin hooked into the policy pipeline; mitigate with `NoScopedAccessPolicyEngineTests` and policy simulation tests staying green.
 - Tests: `DeletedFeaturesArchitectureTests` entry; `PackageBoundaryArchitectureTests` forbids `Casbin.*`.
 
-#### WP-SIMPL-15 Delete embedded Garnet server and traffic shadowing
-- Delete: `Infrastructure/Garnet/GarnetServerManager.cs` (260), `Program.cs:106-111`, `Caching:Garnet:EnableEmbeddedServer`, package `Microsoft.Garnet`; traffic shadowing (3 files, 376 lines) with its options and middleware registration. `StackExchange.Redis` stays (external Redis/Garnet optional).
+#### WP-SIMPL-15 Delete embedded Garnet server (conditional, open owner decision) and traffic shadowing
+- Garnet part is conditional on open owner decision D17 (recommendation: delete; alternative: optional module `Autheris.Modules.Garnet` under AD-3). The embedded server runs with password auth (SEC H-01); the reason for deletion is footprint and ownership, not missing authentication. Traffic shadowing is deleted unconditionally.
+- Delete (Garnet only if decided): `Infrastructure/Garnet/GarnetServerManager.cs` (260), `Program.cs:106-111`, `Caching:Garnet:EnableEmbeddedServer`, package `Microsoft.Garnet`; traffic shadowing (3 files, 376 lines) with its options and middleware registration. `StackExchange.Redis` stays (external Redis/Garnet optional).
 - Deps: none. LOC: about -900. Effort: M, 1.5 pd. Risk: tests starting an embedded server for distributed-state tests move to a Redis Testcontainer or in-memory state.
 - Tests: `ProgramStartupTests.No_embedded_cache_server_started`; `PackageBoundaryArchitectureTests` forbids `Microsoft.Garnet`.
 
@@ -268,9 +276,9 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 |---|---|---|---|
 | Analytics (governed aggregation) + differential privacy | **Decided (OD-11):** aggregation with small-group suppression and time buckets KEEP (core); differential-privacy noise DELETE | owner decision 2026-11-05 | #467, #468 obsolete by removal |
 | CDN cache purge | DELETE | C1 false; outbound HTTP (C2) | #474 closed by this WP (R1) |
-| Table cache (DuckDB-backed) | MODULE with Olap (WP-SIMPL-26); core Caching stays | DuckDB leaves core | #475 fixed inside WP-SIMPL-26 or closed by removal |
+| Table cache (DuckDB-backed) | CORE (revised for OD-15): it serves federated staging and DuckDB stays core, so moving it gains no footprint | DuckDB is core | #475 fixed in core (security lane), with an integration test on the real DuckDB engine |
 | Trino client protocol route `/v1/statement` | DELETE (fourth SQL transport, D1); MODULE only with an owner and a client interop test | one SQL entry per transport | #470, #484 |
-| `FederatedDuckDbExecutionService` (744) + `CrossSourcePlanner` (853) in Application/Sql | MODULE `federation-duckdb` with Olap; core `VirtualFilterFederationPlanner` and `SubtreeCompiler` reject cross-source plans fail-closed when the module is absent (seam + test `CrossSourceQuery_without_module_is_denied`) | DuckDB leaves core; RLS must not silently degrade | Phase 3 to confirm the seam |
+| `FederatedDuckDbExecutionService` (744) + `CrossSourcePlanner` (853) in Application/Sql | CORE (binding OD-15: cross-source joins, e.g. Databricks x SQL Server x declarative HTTP source, are core); subtree compiler/partitioner and federated staging stay core; no module seam | RLS/masks must hold per subtree and in staging | Core parity: `FederationParityTests` (PG x SS, Databricks-contract x SS, HTTP x PG) in WP-SIMPL-21 |
 | Catalog semantic search/embeddings (`Application/Catalog/Search`, `LocalOnnxEmbeddingGenerator`) | DELETE (MODULE only with owner) | C1 false; native ONNX weight (C3) | #501, #488 closed by removal if deleted |
 
 - Deps: owner decision. LOC: 0 to -14,000. Effort: S-L, 1-6 pd.
@@ -292,9 +300,12 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 - AC/target: governance repository LOC <= 7,000 (AD-1 metric), exit <= 6,000 after WP-SIMPL-33 cleanups.
 
 #### WP-SIMPL-21 Parity on real engines and dialect gate (ADR-019; OD-2 step 2a) `[WF]`
-- Scope: parity reference engine becomes PostgreSQL (`ParityPostgresHostFixture`); SQL Server cells switched from Pending to executed (`ParitySqlServerHostFixture`); SQLite cells kept until both are green; DuckDB parity moves to the Olap module tests. `parity-nightly.yml`: SQL Server job added, `parity-sqlite` removed in WP-SIMPL-31. Gate: `DialectParityGateTests.Every_generator_has_a_parity_baseline_file`. Stryker configs merged to 2 (`stryker-config.security-guards.json` folded into `stryker-config.json`, Q13).
-- Deps: WP-SIMPL-13. LOC: tests +1,500 / -2,000. Effort: L, 5 pd. Risk: SQL Server cells reveal generator bugs (fix in the same lane; never leave Pending).
-- AC/target: PG + SS 100% parity, none Pending; open master-plan baselines closed (DuckDB N/A for core).
+- Scope: parity reference engine becomes PostgreSQL (`ParityPostgresHostFixture`); SQL Server cells switched from Pending to executed (`ParitySqlServerHostFixture`); SQLite cells kept until both are green; DuckDB federation staging stays core (OD-15) and gets core coverage on PR: `FederationParityTests` (cross-source joins PG x SS, Databricks-contract x SS, declarative HTTP x PG; RLS/mask/consent per subtree and in staging) on Testcontainers plus in-process DuckDB in `Autheris.Tests.Integration`. Oracle and Databricks (OD-12) get full parity matrices too:
+  - PR (required checks): PostgreSQL and SQL Server full parity on Testcontainers; Oracle security-tagged smoke subset (`Category=Parity&Dialect=Oracle&Trait=Security`: RLS, masking, consent, injection-rejection and bind-by-name cells) on `Testcontainers.Oracle` with the image pre-pulled (#521); Databricks contract tests: generated-SQL snapshot per parity case (`DatabricksParitySnapshotTests`) plus executor contract against a fake statement-execution API (`DatabricksStatementExecutionContractTests`: OBO token use, parameter binding, paging, error mapping, fail-closed on 401/403/timeout).
+  - Nightly (`parity-nightly.yml`, #522): full Oracle suite; full Databricks suite against a real workspace when `DATABRICKS_HOST`/credentials secrets exist, otherwise the Spark container suite (`Category=Spark`, moved from ci.yml); SQL Server job added; `parity-sqlite` removed in WP-SIMPL-31.
+  - Gate: `DialectParityGateTests.Every_generator_has_a_parity_baseline_file`, `DialectParityGateTests.Every_core_dialect_has_a_pr_parity_lane` (PG/SS full, Oracle smoke, Databricks contract). Stryker configs merged to 2 (`stryker-config.security-guards.json` folded into `stryker-config.json`, Q13).
+- Deps: WP-SIMPL-13 Step 3. LOC: tests +2,300 / -2,000. Effort: L, 7 pd. Risk: SQL Server or Oracle cells reveal generator bugs (fix in the same lane; never leave Pending); Databricks nightly without credentials covers Spark semantics only (recorded in the results file as `engine=spark`).
+- AC/target: PG + SS + Oracle 100% parity on real engines (Oracle full nightly, smoke on PR), Databricks 100% contract cells on PR and 100% nightly cells (real or Spark), none Pending; open master-plan baselines closed (DuckDB covered by core federation parity).
 
 #### WP-SIMPL-22 Real-database tests out of Unit (OD-2 step 2b; REQ-SIMPL-08.2)
 - Scope: 83 Unit files using real SQLite and the DuckDB files: (i) behaviour that does not depend on DB semantics -> in-memory fakes/stores; (ii) DB semantics -> `Autheris.Tests.Integration` on the shared PostgreSQL fixture; (iii) Olap/DuckDB -> Olap module tests. 11 TestServer/WebApplication.Create files -> Integration. Same for SqlCompilerGate (1), Simulation (4), Sim.ApiHost (2), TrinoSqlEngine.Tests (16, engine semantics via PostgreSQL fixture or in-memory row source).
@@ -321,8 +332,9 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 - AC: core image starts without any module; full image loads all first-party modules; fallback switch documented.
 
 #### WP-SIMPL-26 Pilot module: Olap
-- Scope: `modules/Autheris.Modules.Olap` from `Application/Olap` (3,342), `DuckDbOlapEndpoints`, DuckDb part of `AnalyticalDialectGenerators.cs`, package `DuckDB.NET.Data.Full` (leaves core), `OlapEntryPointArchitectureTests` moved, DuckDB parity into the module tests. Pilot validates DI, endpoints, options, GraphQL (if any) and native library loading through the module ALC.
-- Deps: WP-SIMPL-25. LOC: -3,600 src (+3,600 modules). Effort: M, 3 pd. Exit decision: runtime loading confirmed or fallback (AD-3.10) taken for all modules.
+- Scope (revised for OD-15): `modules/Autheris.Modules.Olap` from `Application/Olap` (3,342) and `DuckDbOlapEndpoints` only. `DuckDB.NET.Data.Full`, the DuckDb generator, the table cache and federation stay core; the module consumes DuckDB through the host (`IModuleHostContext` query pipeline), never a private copy (host-assembly collision rule, AD-3.5). `OlapEntryPointArchitectureTests` moved.
+- Recommendation (architect, default taken unless the owner objects): keep Olap as the pilot module. The footprint argument is gone (DuckDB stays in the image), but Olap is still an optional, self-contained endpoint and options surface (fewer core endpoints and options) and the smallest real pilot for DI, endpoints and options through the loader. The pilot no longer proves native-library loading through the module ALC; that check moves to the first module with a private native dependency. If the owner prefers, Olap stays core and WP-SIMPL-27 (OData) becomes the pilot.
+- Deps: WP-SIMPL-25. LOC: -3,400 src (+3,400 modules). Effort: M, 3 pd. Exit decision: runtime loading confirmed or fallback (AD-3.10) taken for all modules.
 
 #### WP-SIMPL-27 Module wave A: OData, Lakehouse
 - OData: `Extensions/OData` (1,927) + `Application/OData` (768) + `ODataEndpoints` (21 Map*). Lakehouse: `Extensions/Lakehouse` (3,680) + `IcebergRestCatalogEndpoints` (4), package `Parquet.Net` leaves core.
@@ -379,14 +391,15 @@ Total effort: about 131-153 pd (security lane WP-SIMPL-36 about 8-12 included; S
 | Masking, Federation, subgraph masking | KEEP | Application/Federation, GraphQL/Federation | - | - |
 | Audit | KEEP (merged) | Application/Audit (+Auditing), Infrastructure audit stores | - | 17 |
 | RBAC, ReBAC (in-memory), Identity, Security, TokenRevocation, Tenancy | KEEP | Application/Identity, Security, Tenancy | JwtBearer | - |
-| SQL compiler, gate | KEEP (scope reduced) | src/TrinoSqlEngine, Application/Sql (+SqlEndpoints), tests SqlCompilerGate, Fuzz | Antlr4.Runtime | 13, 21, 31 |
+| SQL compiler, gate | KEEP (scope reduced; dialects PG, SS, Oracle, Databricks) | src/TrinoSqlEngine, Application/Sql (+SqlEndpoints), tests SqlCompilerGate, Fuzz | Antlr4.Runtime | 13, 21, 31 |
 | Catalog + classification (internal) | KEEP (merged) | Application/Catalog (+DataCatalog) | - | 17 |
 | Workflows, recertification, HITL | KEEP | Application/Governance, Mcp HITL | - | 24 |
 | Transports REST, GraphQL, MCP, Arrow IPC export | KEEP | Api/Endpoints, Autheris.GraphQL, Application/Mcp | HotChocolate, ModelContextProtocol, Apache.Arrow | - |
 | Governance persistence (PG, SS) | KEEP, unified | Infrastructure/Persistence | Npgsql, Microsoft.Data.SqlClient | 11, 19, 20 |
 | Observability, health, jobs, state/caching | KEEP (slim) | consolidated folders | OpenTelemetry, prometheus-net, StackExchange.Redis | 15, 24 |
 | Plugins/Extensibility | KEEP (module host base) | Application/Plugins, Extensibility, Infrastructure/Plugins | - | 25 |
-| Olap | MODULE (pilot) | modules/Autheris.Modules.Olap | DuckDB.NET.Data.Full | 26 |
+| Olap | MODULE (pilot; endpoints and Application/Olap only) | modules/Autheris.Modules.Olap | - (uses core DuckDB) | 26 |
+| Cross-source federation (DuckDB staging, CrossSourcePlanner, subtree compiler, table cache) | KEEP (OD-15) | Application/Sql, Caching | DuckDB.NET.Data.Full | 21 |
 | OData | MODULE | modules/Autheris.Modules.OData | - | 27 |
 | Lakehouse (Delta/Iceberg) | MODULE | modules/Autheris.Modules.Lakehouse | Parquet.Net | 27 |
 | dbt | MODULE | modules/Autheris.Modules.Dbt | YamlDotNet (verify) | 28 |
@@ -397,9 +410,12 @@ Total effort: about 131-153 pd (security lane WP-SIMPL-36 about 8-12 included; S
 | Procedures, Analytics + differential privacy, SchemaRegistry, Docs ingestion | MODULE if owner named, else DELETE | modules/... or deleted | - | 18, 30 |
 | Purview, Collibra, Alation, DataHub | DELETE | Extensions/DataCatalog vendor clients | - | 12 |
 | Backstage, ITSM (ServiceNow/Jira) | DELETE | Extensions/Backstage, Itsm; Application/Integrations | - | 12 |
-| Oracle, Databricks, Snowflake, Ansi-target dialects | DELETE | TrinoSqlEngine generators, Infrastructure Oracle support | Oracle.ManagedDataAccess.Core, Testcontainers.Oracle | 13 |
+| Oracle and Databricks data sources (OD-12) | KEEP (core, governed data sources; never governance store) | Oracle/Databricks generators, Infrastructure Oracle support, Infrastructure/Databricks (OBO token provider, executor) | Oracle.ManagedDataAccess.Core; tests Testcontainers.Oracle, Spark image | 13 (secret policy), 21 |
+| Ansi generator (OD-14) | KEEP (generator-only, not admitted as data source) | `AnalyticalDialectGenerators.cs` Ansi part | - | 13 (admission) |
+| Snowflake generator (OD-14) | DELETE | `AnalyticalDialectGenerators.cs` Snowflake part, enum value | - | 13 |
 | Casbin | DELETE | Casbin engine/options | Casbin.NET | 14 |
-| Embedded Garnet, traffic shadowing | DELETE | Infrastructure/Garnet, shadowing middleware | Microsoft.Garnet | 15 |
+| Embedded Garnet | OPEN owner decision D17 (recommended DELETE; alternative optional MODULE) | Infrastructure/Garnet | Microsoft.Garnet | 15 |
+| Traffic shadowing | DELETE | shadowing middleware | - | 15 |
 | Arrow Flight SQL over HTTP, FinOps, Mesh, dev portal in release | DELETE | Api/Endpoints/ArrowFlightSql*, Application/FinOps, Mesh | - | 16 |
 | SQLite governance store | DELETE (OD-1) | Persistence Sqlite* governance, Steps/sqlite | - | 11 |
 | SQLite data-source dialect | DELETE last (OD-2) | SqliteDialectGenerator, affinity, zone table | Microsoft.Data.Sqlite | 31 |
@@ -409,7 +425,7 @@ Total effort: about 131-153 pd (security lane WP-SIMPL-36 about 8-12 included; S
 | Stage | Artifacts |
 |---|---|
 | 0 | CHANGELOG created with backfill; release notes from CHANGELOG; README without numbers; `pre-simplification` tag; freeze announced in README "Project status" (system description, no progress tags) and in issue #515 |
-| 1 | Release N (next minor, `### BREAKING`): SQLite governance store removed (OD-1), default provider PostgreSQL, deleted integrations and dialects; `docs/operations/migration-simplification.md` created with one row per DELETE item (feature, removed keys, replacement, last tag containing it); fail-fast messages point to the guide; one GitHub issue per deleted integration with restoration path |
+| 1 | Release N (next minor, `### BREAKING`): SQLite governance store removed (OD-1), default provider PostgreSQL, deleted integrations, Snowflake generator removed (was generator-only, never an admitted data source; OD-14), Oracle and Databricks stay supported data sources (OD-12) and Ansi stays generator-only (release notes state this explicitly), embedded Garnet only if the owner decides deletion (D17), new plaintext-password rejection for PostgreSQL and SQL Server connection strings (WP-SIMPL-13 Step 1); `docs/operations/migration-simplification.md` created with one row per DELETE item (feature, removed keys, replacement, last tag containing it); fail-fast messages point to the guide; one GitHub issue per deleted integration with restoration path |
 | 2 | Release N+1: no user-visible API change expected; CHANGELOG notes governance repository unification and parity engines; orphaned tables dropped by forward-only steps (CHANGELOG "Changed" with table names) |
 | 3 | Release N+2 (`### BREAKING`, `### Moved to modules`): `autheris` vs `autheris-full` images, `Gateway:Modules:Enabled`, module install lines; OD-2 step 3 removal; rewritten README; deprecation policy for the post-production future stated in README |
 
@@ -423,7 +439,8 @@ Roadmap rules:
 - R5: #503 plugin-loader fix (PluginManager is the module host base) merges before WP-SIMPL-25.
 - R6: fixes in code that moves to a module (dbt GHSA item, #476 CDC, #488 webhooks, #490 Lakehouse limit, #503 OpenLineage/OLAP parts) land before or inside the extraction WP (26-30), never after.
 - R7: folded into deletion PRs: the Flight half of #487 (WP-SIMPL-16), most of #491 and the OpenJev part of #503 (the deleting WP named in the assessment section).
-- R8: Oracle deletion (WP-SIMPL-13) precedes any work on #479/#483.
+- R8 (revised for OD-12): Oracle and Databricks stay, so #479 (Oracle dialect semantics) and the Oracle part of #483 (TLS) are fixed in core in the engine/security lanes, after WP-SIMPL-21 has the Oracle parity lane in place so fixes are proven against a real Oracle; no dependency on a deletion.
+- R10 (OD-12): #521 (pre-pull images, incl. Oracle and Spark) and #522 (Oracle/Stress/Spark suites to nightly) are fully in scope and land with WP-SIMPL-21: full Oracle and Spark/Databricks suites nightly, PR keeps the Oracle security smoke subset and the Databricks contract tests.
 - R9: #520 (test host reuse) lands before or with WP-SIMPL-11; #516 and #517 go first in Stage 0.
 
 Lanes (one worktree each; one build at a time per disk budget):
@@ -433,7 +450,7 @@ Lanes (one worktree each; one build at a time per disk budget):
 - **L-RAT**: 07, 10 (10 before and after 01).
 - **L-REL**: 01, 02.
 - **L-PER** (persistence, **serial, owns all governance DDL**): 11 -> 12 -> 19 -> 20a -> 20b -> 20c -> 20d -> 20e -> 29 (store part).
-- **L-ENG** (engine): 13 -> 21 -> 22 -> 31.
+- **L-ENG** (engine): 13 -> 21 (incl. #521/#522 Oracle and Spark parts) -> 22 -> 31; Oracle fixes (#479, #483 Oracle part) after 21.
 - **L-DEL** (deletions without DDL): 14, 15, 16 parallel after 06; 17 after 12; 18 after owner decision.
 - **L-TST**: 23 per domain after the Stage 1 deletions of that domain.
 - **L-MOD**: 25 -> 26 -> {27, 28, 29, 30} (27/28/30 parallel; 29 after 20) -> 32 -> 33 -> 34; 35 after 26.
@@ -456,12 +473,12 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 
 1. **CI first.** #516 (hang regression, BLOCKER) and #517 (job timeouts, hang dumps) land before any WP-SIMPL work, including the CI baseline measurement (WP-SIMPL-10). Measurements taken while CI hangs are invalid.
 2. **Security lane (WP-SIMPL-36) parallel to Stage 0** (freeze exception): first `fix/security-batch-5` (committed, reviewed, merged before WP-SIMPL-12/18/20/28/29/30 touch the same files), then #469 (P0), #505-#508 and the FIX-IN-CORE advisories below. The fail-closed audit fixes of #505 and #507 are one bundle (`RecordRequiredAsync` plus an architecture test that forbids fire-and-forget audit on write and admin paths).
-3. **No fixes in code that a later WP deletes.** OBSOLETE-BY-REMOVAL items and the obsolete parts of PARTLY-OBSOLETE items are closed by the deleting WP, which links the issue in its PR. Examples: Flight half of #487, most of #491, OpenJev part of #503 and the Arrow part of #485 go into the deletion PRs (WP-SIMPL-12..16); the Oracle parts of #479, #483, #521 and #522 go with WP-SIMPL-13, which runs before any work on the remaining parts of #479/#483.
+3. **No fixes in code that a later WP deletes.** OBSOLETE-BY-REMOVAL items and the obsolete parts of PARTLY-OBSOLETE items are closed by the deleting WP, which links the issue in its PR. Examples: Flight half of #487, most of #491, OpenJev part of #503 and the Arrow part of #485 go into the deletion PRs (WP-SIMPL-12..16). Oracle and Databricks are kept (OD-12), so their parts of #479, #483, #521 and #522 are fixed, not closed by removal.
 4. **Security test inventory before deletions.** #504 (Security trait on the #495-#497 tests, missing tests added) merges before the first deletion PR, so every deletion PR can prove with the trait filter that no security test was removed (SEC-SIMPL-03). Branch `fix/security-batch-5` already adds tagged tests; it merges first.
 5. **Module prerequisites.** #503 plugin-loader collision fix precedes module extraction (WP-SIMPL-25+, `PluginManager` becomes the module host base). Fixes in code that moves to a module land before or inside the extraction WP: GHSA-jw88-9j35-3c96 and #459 before the dbt module (WP-SIMPL-28), #476 and #475 with the CDC/Events module (WP-SIMPL-29), #488 webhook items with OpenMetadata/dbt (WP-SIMPL-28), the Lakehouse part of #490 and OpenLineage/OLAP parts of #503 with their modules.
 6. **Test host reuse before the SQLite governance removal.** 70 of the 72 integration-test files that start a host use in-memory SQLite governance. #520 (reuse hosts instead of ~650 per-test host starts) is a hard dependency of WP-SIMPL-11; WP-SIMPL-11 uses one shared PostgreSQL container per test run with a per-test-class database cloned from a migrated template database, so migrations run once.
-7. **Oracle before Oracle-adjacent fixes.** Before the Oracle code is deleted (WP-SIMPL-13), the Oracle-only plaintext-password check is generalised to PostgreSQL and SQL Server connection strings (part of the #507 bundle), so the control is not lost with the dialect.
-8. **CI workflow bundles** (workflow edits need owner approval, `[WF]`): #517 + #518 in one PR; #519 + the remaining part of #521 in a second; both in a fixed merge order with WP-SIMPL-13, -21 and -35. Deletions alone cut only about 10-15 % of integration-test time, so #519 (with a shard-weight regeneration script, rerun after each deletion WP) and #520 stay necessary.
+7. **Plaintext-password guard for all engines.** Oracle stays (OD-12); the Oracle plaintext-password check is kept and generalised to PostgreSQL and SQL Server connection strings (part of the #507 bundle). No ordering dependency on WP-SIMPL-13 remains.
+8. **CI workflow bundles** (workflow edits need owner approval, `[WF]`): #517 + #518 in one PR; #519 + the remaining part of #521 in a second; both in a fixed merge order with WP-SIMPL-21 and -35. With Oracle and Databricks kept (OD-12), the Oracle and Spark/Databricks suites stay: full suites nightly (as #522 proposes), a security-tagged smoke subset on PRs, Oracle and SQL Server images pre-pulled (#521). Deletions alone cut only about 10-15 % of integration-test time, so #519 (with a shard-weight regeneration script, rerun after each deletion WP) and #520 stay necessary.
 9. **Options cleanup.** #477 merges into #514 / WP-SIMPL-06, except the pre-filled security allowlists, which are fixed in the security lane (empty by default, fail closed).
 
 ### Issues (51)
@@ -477,15 +494,15 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #472 | `/health/ready` anonymous, uncached, not rate limited | QUICK-WIN | P2 | Security lane; SQLite lock contention part closed by WP-SIMPL-11 |
 | #473 | Audit batch lost on shutdown; exact-match redaction | PARTLY-OBSOLETE | P1 | Split: redaction now (security lane); shutdown batch loss in the unified repository (WP-SIMPL-20) |
 | #474 | CDN purge reports success without provider | QUICK-WIN | P2 | Depends on the CDN row in WP-SIMPL-18; fix only if kept |
-| #475 | Table cache applies CDC mutations as string literals | PARTLY-OBSOLETE | P2 | Default taken (WP-SIMPL-18 row): the DuckDB table cache moves to the Olap module, so #475 is fixed inside WP-SIMPL-26 or closed by removal |
+| #475 | Table cache applies CDC mutations as string literals | FIX-IN-CORE | P2 | DuckDB stays core (OD-15), so the table cache no longer leaves core because of its dependency; the table cache stays core (WP-SIMPL-18 default); fixed in the security lane with an integration test on a real DuckDB |
 | #476 | CDC custom query poller read-only only on SQLite/PostgreSQL | FIX-IN-CORE | P1 | Before or inside WP-SIMPL-29 (Events module) |
 | #477 | Options with no effect; pre-filled security allowlists | PARTLY-OBSOLETE | P2 | Unconsumed options: WP-SIMPL-06; allowlists: security lane |
 | #478 | Flat AND/OR chains hit AST depth limit | FIX-IN-CORE | P2 | SQL engine lane, bundled with #481 |
-| #479 | Dialect semantics differ from Trino | PARTLY-OBSOLETE | P2 | Oracle parts closed by WP-SIMPL-13; rest after it (SQL engine lane) |
+| #479 | Dialect semantics differ from Trino | FIX-IN-CORE | P2 | SQL engine lane, including the Oracle parts (MOD, integer division; OD-12); proven by the Oracle parity suite |
 | #480 | Data source resolver defaults and swallowed errors | FIX-IN-CORE | P1 | Security lane; bundle with #486 |
 | #481 | SQL function policy denylist-only; unbounded padding | FIX-IN-CORE | P1 | SQL engine lane with #478 |
 | #482 | ForwardAuth tenant-prefixed roles; unregistered IP allowlist middleware | FIX-IN-CORE | P1 | Security lane; delete the dead middleware rather than wire it |
-| #483 | Transport TLS and supply chain | PARTLY-OBSOLETE | P1 | Oracle part closed by WP-SIMPL-13; PostgreSQL/SQL Server TLS with WP-SIMPL-11 (SEC-SIMPL-14) |
+| #483 | Transport TLS and supply chain | FIX-IN-CORE | P1 | Security lane: Oracle TCPS required outside Development (OD-12); PostgreSQL/SQL Server TLS with WP-SIMPL-11 (SEC-SIMPL-14) |
 | #484 | Read-only tokens and `/v1/statement` / cancel | QUICK-WIN | P2 | Security lane |
 | #485 | Hardening backlog (streaming errors, validation, caches) | PARTLY-OBSOLETE | P3 | Arrow part closed by WP-SIMPL-16; ITSM webhook handler part closed by WP-SIMPL-12 (OD-5); dbt part with WP-SIMPL-28; rest P3 |
 | #486 | Required filter column satisfied by any reference | FIX-IN-CORE | P2 | Security lane with #480 |
@@ -502,7 +519,7 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #504 | Tag security tests from #495-#497 | QUICK-WIN | P1 | Before the first deletion PR (rule 4) |
 | #505 | DML hardening | FIX-IN-CORE | P1 | Security lane (OD-3: DML stays core): audit bundle with #507, then the DML bundle with the DML advisories; no Casbin dependency |
 | #506 | Cache/header hardening | FIX-IN-CORE | P2 | Global `no-store`/`Vary` default now; OData part with its module |
-| #507 | Admin plane hardening | FIX-IN-CORE | P1 | Security lane audit bundle with #505; password check generalised before WP-SIMPL-13; break-glass header part OBSOLETE-BY-REMOVAL (OD-5, WP-SIMPL-12) |
+| #507 | Admin plane hardening | FIX-IN-CORE | P1 | Security lane audit bundle with #505; Oracle password check kept and generalised to PostgreSQL/SQL Server; break-glass header part OBSOLETE-BY-REMOVAL (OD-5, WP-SIMPL-12) |
 | #508 | MCP hardening | FIX-IN-CORE | P1 | Security lane |
 | #509 | Remove ReadyToRun | QUICK-WIN | P2 | WP-SIMPL-01 (before the "after" run of WP-SIMPL-10) |
 | #510 | Version from git tag; Helm default; CHANGELOG | FIX-IN-CORE | P1 | WP-SIMPL-02 `[WF]` |
@@ -516,8 +533,8 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #518 | Coalesce main runs, path filters, concurrency | QUICK-WIN | P1 | `[WF]` bundle with #517 |
 | #519 | Rebalance shards from TRX data | QUICK-WIN | P1 | Now; weight regeneration rerun after each deletion WP |
 | #520 | Reuse test hosts | FIX-IN-CORE | P1 | Hard dependency of WP-SIMPL-11 and WP-SIMPL-22 (rule 6) |
-| #521 | Pre-pull Testcontainers images | PARTLY-OBSOLETE | P2 | Oracle part closed by WP-SIMPL-13; rest bundled with #519 |
-| #522 | Oracle/Stress/Spark suites to nightly | PARTLY-OBSOLETE | P2 | Oracle part closed by WP-SIMPL-13; rest after #519 |
+| #521 | Pre-pull Testcontainers images | QUICK-WIN | P2 | Bundled with #519; Oracle image pre-pull stays (OD-12) |
+| #522 | Oracle/Stress/Spark suites to nightly | QUICK-WIN | P1 | Oracle and Spark/Databricks suites stay (OD-12): full suites nightly, security-tagged smoke subset on PRs; after #519; aligned with WP-SIMPL-21 parity split |
 | #523 | CI under 30 min (umbrella) | FIX-IN-CORE | P1 | Umbrella for #516-#522; target definition decided (OD-6) |
 
 ### Draft security advisories (29)
@@ -526,8 +543,8 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 
 | Advisory | Component (neutral title) | Verdict | Prio | Work package / sequencing |
 |---|---|---|---|---|
-| GHSA-7ccv-hfgq-5qwm | Federation column access checks | FIX-IN-CORE | **P0** | Security lane |
-| GHSA-7pjw-hcrc-hvff | Federation masking catalog | FIX-IN-CORE | **P0** | Security lane |
+| GHSA-7ccv-hfgq-5qwm | Federation column access checks | FIX-IN-CORE | **P0** | Security lane; cross-source federation is core (OD-15), proven by core federation parity/integration tests |
+| GHSA-7pjw-hcrc-hvff | Federation masking catalog | FIX-IN-CORE | **P0** | Security lane; core federation (OD-15) |
 | GHSA-v5c2-29pv-cc86 | Data source registration | FIX-IN-CORE | **P0** | Security lane on the OD-9 role model, before WP-SIMPL-17 (Catalog folder merge) |
 | GHSA-9229-wx6j-wvm9 | Admin catalog operations | PARTLY-OBSOLETE | **P0** | Security lane on the OD-9 role model; Backstage part closed by WP-SIMPL-12 |
 | GHSA-qx32-576x-5cq2 | GDPR disclosure report | FIX-IN-CORE | **P0** | Batch 5; stays core (OD-10), not moved with Lineage in WP-SIMPL-29 |
@@ -535,7 +552,7 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | GHSA-3prq-qxg7-92qf | WebSQL DML scoping | FIX-IN-CORE | P1 | Security lane, DML bundle |
 | GHSA-83g2-c2jr-c8vq | WebSQL DML write scope | FIX-IN-CORE | P1 | Security lane, DML bundle |
 | GHSA-v75c-28mx-7wm7 | WebSQL DML statement tickets | FIX-IN-CORE | P2 | Security lane, DML bundle (OD-3); any Flight-only part closed by WP-SIMPL-16 |
-| GHSA-66xj-4459-x8gx | Row-filter evaluation | FIX-IN-CORE | P1 | Security lane (SQL engine); per-dialect proof on PostgreSQL and SQL Server only |
+| GHSA-66xj-4459-x8gx | Row-filter evaluation | FIX-IN-CORE | P1 | Security lane (SQL engine); per-dialect proof on PostgreSQL, SQL Server, Oracle and Databricks (OD-12) |
 | GHSA-jw88-9j35-3c96 | dbt semantic manifest import | FIX-IN-CORE | P1 | Before WP-SIMPL-28 (dbt module) |
 | GHSA-547h-29x4-m4ch | dbt privacy metadata | FIX-IN-CORE | P1 | Batch 5; before WP-SIMPL-28 |
 | GHSA-92vp-663x-pp52 | Transport gate | FIX-IN-CORE | P1 | Security lane; module parts before WP-SIMPL-29 and the Lakehouse extraction |
@@ -562,7 +579,9 @@ Decided by the owner on 2026-11-05 (binding, recorded in the PRD section 2.0): *
 
 Also decided by the owner on 2026-11-05 (binding, PRD section 2.0): **OD-6** the CI target counts queue time (#523 definition: PR wall-clock from push to the last required check, median, < 30 min); **OD-7** ReBAC enforced on all paths once a tenant has tuples, one switch, fail-closed startup check (GHSA-78j7-3gh6-7cqx); **OD-8** unwired WORM archive export deleted, startup fails on `Audit:Worm:Enabled`, retention purge keeps signed checkpoints and anchors (GHSA-4qx8-fv2p-q8r2); **OD-9** global operations only for canonical `ClusterAdmin`, `GovernanceAdmin` always tenant-bound, no-tenant tokens fall back to the default tenant (GHSA-mgv5-4r69-mwww; batch 5 is adjusted before merge); **OD-10** the GDPR disclosure report stays core (GHSA-qx32-576x-5cq2); **OD-11** governed aggregation with small-group suppression and time buckets stays core, differential-privacy noise is deleted (#467, #468 obsolete; GHSA-rxr4-mf28-p2hv solved by suppression alone).
 
-No owner decision from the assessment remains open. The remaining defaults of the PRD (D1-D15) and of section 8 stay as recorded there.
+Later on 2026-11-05 (binding): **OD-12** Oracle and Databricks stay in core as governed data sources (dialect generators, Oracle connection support, Databricks OBO token provider and executor); the Oracle/Databricks parts of #479, #483, #521 and #522 are therefore FIX-IN-CORE or QUICK-WIN instead of closed by removal, and none of the advisories changes verdict (GHSA-v75c-28mx-7wm7 and GHSA-3prq-qxg7-92qf were already FIX-IN-CORE; GHSA-66xj-4459-x8gx now needs proof on all four dialects). **OD-13** the PostgreSQL wire protocol proposal is dropped.
+
+No owner decision from the assessment remains open. **OD-14** deletes the Snowflake generator and keeps Ansi as a generator-only dialect (D16 closed). **OD-15** keeps cross-source federation (DuckDB staging, `CrossSourcePlanner`, subtree compiler) and DuckDB.NET in core. The embedded Garnet server is an open owner decision (D17 in the PRD; recommendation: delete, alternative: optional module); GHSA-x8g9-cm3h-p6jq is coordinated with that decision. The remaining defaults of the PRD (D1-D15) and of section 8 stay as recorded there.
 
 ## 8. Open architecture questions (default taken)
 
@@ -573,19 +592,22 @@ No owner decision from the assessment remains open. The remaining defaults of th
 | Q3 | Third-party/custom modules | Not supported; only first-party signed modules; custom code uses the existing plugin interfaces |
 | Q4 | Neutral-model generation of migration steps | No; hand-written per-engine steps plus step-parity test (deviation from REQ-SIMPL-05.3, justified by about 130 lines of steps) |
 | Q5 | Orphaned tables and module-owned stores | One forward-only drop step per engine in WP-20e; the events module uses the governance connection factory, its schema stays in the core migration tree |
-| Q6 | `TargetSqlDialect.Ansi` | Kept only as internal canonical form if used so; never selectable as a data-source target |
+| Q6 | `TargetSqlDialect.Ansi` | Kept as generator-only dialect (OD-14); never selectable as a data-source target |
 | Q7 | Procedures (ADR-018) | MODULE (SQL Server only, enforcement via SESSION_CONTEXT, outside the AST gate); delete if no owner by Stage 1 |
 | Q8 | Analytics (governed aggregation) and differential privacy | **Decided (OD-11):** aggregation core, differential-privacy noise deleted |
-| Q9 | DuckDB in tests | Only inside the Olap module tests |
+| Q9 | DuckDB in tests | Core federation integration and parity tests (OD-15) plus Olap module tests; never in Unit (WP-SIMPL-22 rule) |
 | Q10 | Manifest signature algorithm | ECDSA P-256 from the BCL; private key in a GitHub secret; rotation by host release |
 | Q11 | Versioning tool | No MinVer; release.yml passes `-p:Version` from the tag; local builds `0.0.0-dev` |
 | Q12 | CHANGELOG generation | Hand-maintained `[Unreleased]` section; release notes extracted from it |
 | Q13 | Stryker configs | Merge security-guards into the main config: 2 configs (main, governance) |
-| Q14 | src LOC metric and exit target | `src/` only, modules counted separately; core exit target revised to <= 215,000 |
+| Q14 | src LOC metric and exit target | `src/` only, modules counted separately; core exit target revised to <= 218,000 (+21% vs PRD; the 1 point above the 20% revision cap is caused by binding OD-12, not by a data-driven revision) |
 | Q15 | Docs checks on docs/plans | Links rewritten, not gated |
 | Q16 | `McpOptions.RequirePiiMasking` | Deleted (masking unconditional); Phase 3 confirms |
 | Q17 | `ScimOptions.AllowedIpRanges` | Deleted in Stage 0; SCIM module re-adds only with enforcement and tests |
-| Q18 | Spark CI job | Removed with Databricks if it serves only Databricks/Spark (verify in WP-13) |
+| Q18 | Spark CI job | Kept (Databricks stays, OD-12); moves from ci.yml to `parity-nightly.yml` as the nightly Databricks fallback when no real-workspace credentials exist (WP-SIMPL-21, #522) |
+| Q20 | Snowflake and Ansi generators | Decided (OD-14, revised): Snowflake deleted in WP-SIMPL-13; Ansi kept generator-only, not admitted as data source |
+| Q22 | Embedded Garnet server | Open owner decision D17; recommendation delete (WP-SIMPL-15), alternative optional module; WP-15 Garnet part waits for it |
+| Q21 | Databricks real-workspace parity | Nightly only when repository secrets for a test workspace exist; otherwise Spark container; results file records `engine=databricks|spark` |
 | Q19 | SQL Server as governance DB (D4) | Kept; revisit after Stage 2 with the AD-1 design making removal cheap |
 
 ## 9. Risks (architecture)
@@ -597,6 +619,8 @@ No owner decision from the assessment remains open. The remaining defaults of th
 | Parallel deletion PRs conflict in DI registration files | Merge order in section 7; small PRs; rebase before merge |
 | Stage targets missed | Measured per stage by checked-in scripts; revisions only with data (max 20%) |
 | Test reshuffle hides lost coverage | Stryker score on KEEP code must not drop; security tests are moved, never deleted, unless the feature is deleted |
+| Oracle/Databricks kept (OD-12): PR CI time grows with an Oracle container | PR runs only the security-tagged Oracle smoke subset on a pre-pulled image (#521); full suite nightly (#522); Oracle smoke duration reported against the section 3 CI budget |
+| Databricks parity without a real workspace covers Spark semantics only | Contract tests on PR pin generated SQL and executor behaviour; nightly real-workspace run when credentials exist; Spark gaps recorded per cell, never as silent pass |
 
 ## Phase 3 security review (csharp-security-expert)
 

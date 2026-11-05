@@ -46,6 +46,10 @@ A critical whole-project review (10 findings) concluded that Autheris is an AI-g
 - **OD-9 (binding, owner, 2026-11-05; GHSA-mgv5-4r69-mwww, admin scoping):** global operations only for the canonical `ClusterAdmin`; `GovernanceAdmin` is always tenant-bound; a token without a tenant claim falls back to the default tenant and is never global. This differs from the model in the in-progress `fix/security-batch-5`, which must be adjusted before merge. It also settles the role model behind GHSA-9229-wx6j-wvm9 and GHSA-v5c2-29pv-cc86.
 - **OD-10 (binding, owner, 2026-11-05; GHSA-qx32-576x-5cq2, GDPR report):** the GDPR disclosure report stays in core (with its authorization fix); the rest of Lineage may become a module.
 - **OD-11 (binding, owner, 2026-11-05):** governed aggregation with small-group suppression and time buckets stays in core; differential-privacy noise is deleted. #467 and #468 are OBSOLETE-BY-REMOVAL; GHSA-rxr4-mf28-p2hv is solved by small-group suppression alone.
+- **OD-12 (binding, owner, 2026-11-05):** Oracle database support MUST be kept and Databricks is an important data source and MUST be kept. The Oracle and Databricks SQL dialect generators stay in core as governed data sources (incl. DatabricksOboTokenProvider / Databricks executor and Oracle connection support; Oracle.ManagedDataAccess.Core stays a core dependency). The governance store remains PostgreSQL + SQL Server only (OD-1). Overrides earlier DELETE classifications and D5/ADR-019 where they conflict.
+- **OD-13 (binding, owner, 2026-11-05):** the PostgreSQL wire protocol endpoint proposal (REQ-PG-WIRE-01, backlog rank 5) is dropped (REJECTED).
+- **OD-14 (binding, owner, 2026-11-05, revised):** the Snowflake dialect generator is deleted (no value for Databricks or the integration tests; only generator unit tests and "non-admitted dialect" examples use it, which switch to another non-admitted value). The ANSI generator is kept as a generator-only dialect (not admitted as a data source per `SqlDialectMapper` / `DialectAdmissionTests`). Supersedes the open D16.
+- **OD-15 (binding, owner, 2026-11-05):** cross-source joins in the engine are core functionality (for example a Databricks table joined with a SQL Server table or with a declarative HTTP source). `FederatedDuckDbExecutionService`, `CrossSourcePlanner`, the subtree compiler/partitioner and federated staging stay in core; DuckDB.NET and the DuckDB dialect generator (federated staging SQL) stay core dependencies. Federation paths need parity and integration coverage in core.
 
 ### 2.1 Positioning (one sentence)
 
@@ -79,7 +83,7 @@ Core transports: **REST, GraphQL, MCP** (three; each needs parity tests against 
 | SQL endpoints (SqlEndpoints/, tenant SQL routes) | KEEP if they are the REST Web SQL path; otherwise merge into it | One SQL entry per transport |
 | CDC/streaming (SSE, Cdc extension) | MODULE | Event delivery is not enforcement; heavy (Application Streaming 4,440 + Cdc 2,296) |
 | Webhooks | MODULE (bundled with CDC/Events delivery module) | Delivery block already unconsumed (WebhooksOptions); SSRF/security surface |
-| PG wire proposal | REJECT (do not build) | A PG wire proxy needs a second SQL front end, auth mapping and result masking in a binary protocol; large security surface; contradicts the "fewer transports" goal. Revisit only after core targets are met |
+| PG wire proposal (REQ-PG-WIRE-01) | REJECTED (OD-13, binding; do not build) | A PG wire proxy needs a second SQL front end, auth mapping and result masking in a binary protocol; large security surface; contradicts the "fewer transports" goal. Revisit only after core targets are met |
 | Envoy ext-authz | MODULE | Authorization-decision endpoint; small, but a separate deployment pattern |
 
 ## 3. Feature Inventory and Classification (REQ-SIMPL-02)
@@ -122,19 +126,20 @@ Sizes are verified 2026-11-05 line counts of the owning folders (Application / E
 | Backstage (604) | DELETE | C1 false, C5 none, UI-portal concern | use REST API directly |
 | ServiceNow / Jira (Itsm 1,062) | DELETE | C2 outbound HTTP + credentials, C5 none | use Webhooks module to push to ITSM |
 | dbt (Extensions 5,692 + Application 2,342) | MODULE | metadata ingest feeds sensitivity; big, but real value | module `autheris-module-dbt`; duplicate Application copy removed |
-| Databricks (connector + dialect) | DELETE (dialect and connector) | C4 no parity, C3 | not supported as a target; cleanly rejected at config validation |
+| Databricks (connector, executor, DatabricksOboTokenProvider, dialect) | KEEP (core; OD-12, overrides earlier DELETE) | important governed data source; must reach full parity (C4) | none; parity suite required |
+| Oracle (dialect, connection support, Oracle.ManagedDataAccess.Core) | KEEP (core; OD-12, overrides earlier DELETE) | Oracle support is mandatory | none; parity suite required |
 | Delta/Iceberg Lakehouse (3,680, Iceberg REST catalog endpoints, Parquet.Net) | MODULE | C3 heavy, C1 false | module `autheris-module-lakehouse`; core drops Parquet.Net |
 | Casbin | DELETE | C1 duplicates RBAC/ReBAC; CasbinOptions.EnforceInQueryPipeline is silently ignored (ARCH-MNT 2.4) which is a fail-open smell | use native RBAC/ReBAC policy |
 | Envoy ext-authz | MODULE | see 2.3 | install module if used as mesh authorizer |
 | SCIM | MODULE | provisioning, own surface; ScimOptions.AllowedIpRanges ignored (ARCH-MNT 2.4) | module must enforce its own allow-list or ship without the option |
 | TOTP | MODULE (local-auth module) | C1 false; core relies on OIDC | deployments using local TOTP install module |
 | Kerberos/NTLM (Negotiate) | MODULE | enterprise Windows only; platform deps | module; default image has no Negotiate |
-| Embedded Garnet server (GarnetServerManager) | DELETE | C3 heavy (Microsoft.Garnet in every image), C2 embedded unauthenticated cache; use external Redis/Garnet. Keep `StackExchange.Redis` client as optional distributed cache/state | operators must run an external Redis-compatible server; `EnableEmbeddedServer` removed |
+| Embedded Garnet server (GarnetServerManager) | DELETE recommended (OPEN, D17; alternative: optional module) | C3 heavy (Microsoft.Garnet in every image); the in-process server shares memory and lifecycle with the gateway; useless for multi-replica cluster state. (It does run with password authentication and optional TLS, SEC H-01.) Use external Redis/Garnet. Keep `StackExchange.Redis` client as optional distributed cache/state | operators must run an external Redis-compatible server; `EnableEmbeddedServer` removed |
 | Traffic shadowing | DELETE | C1 false, C5 none, replays user traffic (privacy risk) | none |
 | OData (1,927 + 768) | MODULE | see 2.3 | install module |
 | Arrow Flight SQL over HTTP | DELETE | misnamed, see 2.3 | switch to REST + Arrow IPC export |
 | Arrow IPC export (ArrowExport) | KEEP (as REST format) | C1 via normal pipeline | none |
-| Olap (3,342, DuckDbOlapEndpoints) | MODULE | analytical engine, DuckDB.NET.Data.Full heavy | module `autheris-module-olap`; core drops DuckDB package |
+| Olap (3,342, DuckDbOlapEndpoints) | MODULE candidate, re-evaluated in PLAN-SIMPL after OD-15 | DuckDB.NET stays core (OD-15), so the module no longer removes the dependency; only the endpoint surface would move | if moved: Olap endpoints require the module; DuckDB package stays in core |
 | FinOps (278) | DELETE | C1 false, C5 none | none |
 | Mesh (542) | DELETE | C1 false, C5 none | none |
 | Analytics (4,464, AnalyticsEndpoints) | MODULE or DELETE per item | keep only audit/usage analytics fed by audit; rest DELETE. Phase 2 triages file by file | endpoints removed or moved |
@@ -149,7 +154,10 @@ Sizes are verified 2026-11-05 line counts of the owning folders (Application / E
 | Dialects: SQL Server, PostgreSQL | KEEP | see 3.3 | none |
 | SQLite as governance store (SqliteGovernanceRepository*, Sqlite migrations, connection provider, lint source, execution guards) | DELETE (OD-1) | binding owner decision; see REQ-SIMPL-12 | default provider changes to PostgreSQL; `Provider=Sqlite` fails closed at startup |
 | SQLite as data-source dialect (SqliteDialectGenerator etc.) | OPEN (D14) | not part of OD-1 | unchanged until decided |
-| Dialects: Oracle, DuckDB (as data source), Snowflake, Databricks, Ansi | see 3.3 | | |
+| Dialects: Oracle, Databricks | KEEP (OD-12) | see 3.3 | none |
+| Dialect: Ansi (generator-only) | KEEP (OD-14): generator-only as today, not admitted as a data source (SqlDialectMapper, DialectAdmissionTests) | owner decision | none |
+| Dialect: Snowflake generator | DELETE (OD-14) | no use outside generator unit tests | none (never admitted as a data source) |
+| Cross-source federation (FederatedDuckDbExecutionService, CrossSourcePlanner, subtree compiler/partitioner, federated staging) and the DuckDB generator | KEEP core (OD-15) | cross-source joins (e.g. Databricks with SQL Server or a declarative HTTP source) are core functionality | none; DuckDB.NET stays a core dependency |
 | Differential privacy | MODULE (default DELETE if no owner) | C1 adjacent (masking technique) but no evidence; keep only if an owner and tests exist | operators lose DP noise functions |
 | Dev portal assets / DevEndpoints | DELETE from release builds | dev-only | none |
 
@@ -157,7 +165,7 @@ Feature docs map to the classification: DELETE items lose their docs; MODULE ite
 
 ### 3.3 Dialect scope (REQ-SIMPL-07 default taken)
 
-Supported set = **PostgreSQL and SQL Server** as data-source dialects (final). **SQLite as a data source: removal is the default taken (D14/OD-2, REQ-SIMPL-13), executed last. Every supported dialect must have a parity baseline in CI against a real engine (Testcontainers for PostgreSQL/SQL Server). Oracle, Snowflake, Databricks, DuckDB-as-target and Ansi-as-target generators are removed or become modules that ship only with their own parity suite. DuckDB stays only inside the Olap module and tests. OD-1 does not affect this section.
+Supported set = **PostgreSQL, SQL Server, Oracle and Databricks** as governed data-source dialects (OD-12; PostgreSQL + SQL Server remain the only governance-store engines per OD-1). **SQLite as a data source: removal is the default taken (D14/OD-2, REQ-SIMPL-13), executed last. Every supported dialect (including Oracle and Databricks) must have a parity baseline in CI against a real engine (Testcontainers for PostgreSQL/SQL Server/Oracle; Databricks via the strategy chosen in PLAN-SIMPL, never Pending). Snowflake, DuckDB-as-target and Ansi-as-target generators are removed (recommendation; Snowflake/Ansi open as D16). DuckDB stays only inside the Olap module and tests. OD-1 does not affect this section.
 
 ## 4. Requirements per Finding
 
@@ -227,8 +235,8 @@ Scope: governance/metadata catalog store only. SQLite as a data source stays out
 
 1. Dialect scope per 3.3; remove unsupported generators and their tests; `TargetSqlDialect` shrinks to the supported set.
 2. Write an ADR (supersedes the open part of ADR-017) with an honest build-vs-buy evaluation (e.g. ANTLR/Trino grammar reuse, existing SQL parsers, SQL rewriting proxies). Outcome may confirm the compiler; the evaluation must be documented with criteria (security verifiability, dialect coverage, maintenance cost).
-3. Parity suite becomes engine-real: PostgreSQL and SQL Server via Testcontainers, SQLite only as a data-source parity engine if D14 keeps it; DuckDB parity only inside the Olap module. Close the master-plan open baselines for SQL Server/PostgreSQL/DuckDB (DuckDB becomes N/A for core).
-4. Targets: supported data-source dialects = 2 (PostgreSQL, SQL Server; SQLite only per D14), each 100% parity-tested with a baseline gate; TrinoSqlEngine + tests <= 45,000 lines combined (from 59,390); Stryker configs <= 2.
+3. Parity suite becomes engine-real: PostgreSQL and SQL Server via Testcontainers, SQLite only as a data-source parity engine if D14 keeps it; Federation/DuckDB staging paths get parity and integration coverage in core (OD-15). Close the master-plan open baselines for SQL Server/PostgreSQL/DuckDB (DuckDB becomes N/A for core).
+4. Targets: supported data-source dialects = 4 (PostgreSQL, SQL Server, Oracle, Databricks; SQLite only per D14 staging), each 100% parity-tested with a baseline gate; Oracle and Databricks generators, executor and token provider are not deleted (OD-12); TrinoSqlEngine + tests <= 45,000 lines combined (from 59,390); Stryker configs <= 2.
 5. AC: CI fails if a dialect generator exists without a parity baseline file.
 
 ### REQ-SIMPL-08 Test suite (finding 8)
@@ -244,7 +252,7 @@ Scope: governance/metadata catalog store only. SQLite as a data source stays out
 ### REQ-SIMPL-09 Footprint and modularity (finding 9; issue #509)
 
 1. Remove `PublishReadyToRun=true` (issue #509); enforce the R2R spike NO-GO: add a CI assertion that the Api csproj contains no PublishReadyToRun.
-2. Core image excludes: embedded Garnet, Oracle.ManagedDataAccess, DuckDB.NET.Data.Full, Parquet.Net, Casbin.NET and any module dependency (module packages carry their own).
+2. Core image excludes: embedded Garnet (if D17 confirms deletion or a module), Parquet.Net (if it is not needed by core federation), Casbin.NET and any module dependency (module packages carry their own).
 3. Merge duplicate folders (Audit/Auditing, Catalog/DataCatalog) and remove duplicated Dbt/OpenMetadata copies between Application and Extensions.
 4. Targets (measured by the checked-in protocol in REQ-SIMPL-03): core image <= 250 MB uncompressed (baseline 373 MB non-R2R; 441 MB as configured); cold start P50 <= 3.0 s (baseline 4.52 s non-R2R, 5.58 s as configured); warm P99 not worse than 3.47 ms; Api project package references <= 35% of today's count in the core flavor; DI registrations <= 330; hosted services <= 20.
 5. AC: image-size and cold-start measurements are produced by a CI job and compared against the budget (fail at +10%).
@@ -341,7 +349,7 @@ Exit: all Stage 0 ACs met; freeze active.
 
 ### Stage 1 - Delete (issue #515, stage 1)
 
-First: REQ-SIMPL-12 (SQLite governance store, new PostgreSQL defaults, Testcontainers governance tests). Then delete the DELETE items of 3.2 (Purview, Collibra, Alation, DataHub, Backstage, Itsm, Databricks, Casbin, embedded Garnet, traffic shadowing, Arrow Flight SQL endpoints, FinOps, Mesh, dev portal assets), unsupported dialect generators, their options, docs and tests. Merge duplicate folders. Exit: src LOC <= 250,000; endpoints <= 200; Application folders <= 35.
+First: REQ-SIMPL-12 (SQLite governance store, new PostgreSQL defaults, Testcontainers governance tests). Then delete the DELETE items of 3.2 (Purview, Collibra, Alation, DataHub, Backstage, Itsm, Casbin, embedded Garnet (per D17), traffic shadowing, Arrow Flight SQL endpoints, FinOps, Mesh, dev portal assets), unsupported dialect generators, their options, docs and tests. Merge duplicate folders. Exit: src LOC <= 250,000; endpoints <= 200; Application folders <= 35.
 
 ### Stage 2 - Structure
 
@@ -371,18 +379,20 @@ Stage order rationale: truth first (cheap, restores credibility), delete before 
 | CI time (PR / full) | to be measured at Stage 0 | <= 15 / <= 30 min |
 | Governance repository LOC | ~15,760 (3 families) | <= 5,500 |
 | Governance persistence dialects (OD-1) | 3 (SQL Server, PostgreSQL, SQLite) | 2; default provider PostgreSQL; `Provider=Sqlite` fails closed |
-| Supported data-source dialects (all parity-tested) | 8 enum values / 6 generators, parity SQLite-centric | 2 (PostgreSQL, SQL Server; SQLite removed per D14 default), each 100% parity, none Pending |
+| Supported data-source dialects (all parity-tested) | 8 enum values / 6 generators, parity SQLite-centric | 4 (PostgreSQL, SQL Server, Oracle, Databricks; SQLite removed per D14 default), each 100% parity, none Pending |
 | Release consistency | 56 tags; version 1.2.1 vs chart 1.0.0; no CHANGELOG | tag == assembly == chart == image; CHANGELOG complete |
 | Unsupported perf claims | 3 headline numbers | 0 |
 | Plan-id comments in src | ~1,860 lines | 0 |
 | Hosted services / DI registrations | 39 / 549 | <= 20 / <= 330 |
+
+Image size, src LOC and test LOC targets above predate OD-12: keeping Oracle (Oracle.ManagedDataAccess.Core stays in core) and Databricks raises them qualitatively; the architect recomputes the numbers, see PLAN-SIMPL section 3.
 
 Targets are proposals sized from the deletion plan; the Phase 2 architect may revise each by up to 20% with justification, but never weaken the unconsumed-options, broken-links, status-tag and release-consistency targets (all zero).
 
 ## 9. Non-Goals
 
 1. No new features, transports or integrations during the freeze.
-2. No Flight SQL gRPC server, no PG wire protocol, no JDBC/ODBC drivers.
+2. No Flight SQL gRPC server, no PG wire protocol (REQ-PG-WIRE-01 rejected, OD-13), no JDBC/ODBC drivers.
 3. No rewrite of the SQL compiler; only scope reduction and an ADR.
 4. No rewrite or renumbering of the frozen v1.5.0 migration base; no support for upgrades from versions older than v1.5.0.
 5. No frontend/UI work; no marketing copy.
@@ -400,7 +410,8 @@ Targets are proposals sized from the deletion plan; the Phase 2 architect may re
 | 5 | Bus factor stays 1 even with CODEOWNERS | Declare vacant backups; owner decision D6 on staffing |
 | 6 | Owner disagrees with classification of a feature | Classification is a table with criteria; items can move class by owner decision before Stage 1 starts |
 | 7 | Freeze blocks urgent work | Security exception; owner exception path |
-| 8 | Cold-start/size targets not reachable after R2R removal and module extraction | Measure at Stage 0/1; targets revised only with measured data (up to 20%) |
+| 8 | Cold-start/size targets not reachable after R2R removal and module extraction (worsened by keeping Oracle driver in core, OD-12) | Measure at Stage 0/1; targets revised only with measured data (up to 20%); see PLAN-SIMPL section 3 |
+| 9 | Oracle and Databricks parity needs real engines/workspace in CI (cost, licensing, secrets, flakiness) | Parity strategy per dialect decided in PLAN-SIMPL; no Pending cells; nightly job acceptable if PR gate uses contract fixtures |
 
 ## 11. Open Owner Decisions (each with recommended default)
 
@@ -410,7 +421,9 @@ Targets are proposals sized from the deletion plan; the Phase 2 architect may re
 | D2 | Classification of borderline areas (Analytics, Procedures, SchemaRegistry, Docs, Differential privacy, Envoy, TOTP, Lineage) | As in 3.2; items without a named module owner by Stage 1 are DELETED (default taken) |
 | D3 | Module mechanism | Runtime-loaded signed assemblies; fallback: compile-time optional packages per image flavor (default taken; Phase 2 confirms) |
 | D4 | Governance DB engines beyond OD-1 | Keep PostgreSQL and SQL Server behind one repository; revisit dropping SQL Server after Stage 2 |
-| D5 | Supported data-source dialects | PostgreSQL, SQL Server (default taken); SQLite per D14 |
+| D5 | Supported data-source dialects | **Decided (OD-12):** PostgreSQL, SQL Server, Oracle, Databricks; SQLite per D14 staging. Overrides the earlier "PostgreSQL, SQL Server only" default and conflicting parts of ADR-019 |
+| D16 | Snowflake and Ansi generators | **Decided (OD-14):** Snowflake deleted, Ansi kept as generator-only |
+| D17 | Embedded Garnet server: delete, keep, or optional module? | **Open (owner).** Recommendation: delete (operators run an external Redis-compatible server); alternative: optional module. Not because of authentication (password auth, SEC H-01) but image weight, in-process memory/lifecycle coupling and no value for multi-replica state. |
 | D14 (OD-2) | SQLite as governed DATA SOURCE, parity engine and test engine (full removal; separate from OD-1) | Full removal, staged (governance store, then tests/parity to PostgreSQL Testcontainers and fakes, then dialect and package); default taken; owner may stop after any step |
 | D15 | Data migration tool for SQLite governance stores | None (default taken); document API export in the migration guide |
 | D6 | Staffing for ownership | One primary owner with declared "vacant" backups; recruit or assign a second human before Stage 3 |
@@ -419,5 +432,5 @@ Targets are proposals sized from the deletion plan; the Phase 2 architect may re
 | D9 | PR net-LOC ceiling | 400 net added src lines with `size-exception` escape hatch (default taken) |
 | D10 | Agent definitions | Delete the five without product match plus readme-copywriter skill; keep the rest (default taken) |
 | D11 | Version bump for the simplification release | Next minor with BREAKING header, no major while unreleased to production (default taken) |
-| D12 | Delete vs keep Casbin, Garnet embedded, traffic shadowing, Backstage, Itsm | Delete (default taken; reversible via the `pre-simplification` tag) |
+| D12 | Delete vs keep Casbin, traffic shadowing, Backstage, Itsm | Delete (default taken; Itsm confirmed by OD-5; reversible via the `pre-simplification` tag). Embedded Garnet moved to D17 (open). |
 | D13 | Master plan link | The PM adds the link to 00-master-plan-overview.md after owner acceptance (not edited by this PRD) |
