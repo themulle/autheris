@@ -93,8 +93,7 @@ internal static class EndpointSecurity
 
         // If the tenant claim was default-assigned by the ingress/gateway rather than explicitly bound by caller or realm,
         // it is not a tenant-scoped restricted token.
-        return principal.FindFirst(Autheris.Domain.Tenancy.TenantSourceClaim.ClaimType)?.Value == Autheris.Domain.Tenancy.TenantSourceClaim.Default
-            || principal.FindFirst("autheris:tenant_status")?.Value == "default";
+        return principal.FindFirst("autheris:tenant_status")?.Value == "default";
     }
 
     /// <summary>SEC C-05: Approver roles (DataSteward, DataOwner, GovernanceAdmin) or ClusterAdmin.</summary>

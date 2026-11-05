@@ -96,29 +96,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
     public async Task ODataServiceDocument_WhenAuthenticated_Returns200WithEntitySets()
     {
         var userSid = new Sid("S-1-5-21-USER-1");
-        var tableId = new TableIdentifier("finance", "dbo", "finance_table_1");
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var consentRepo = scope.ServiceProvider.GetRequiredService<IConsentRepository>();
-            var metaRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-
-            var meta = await metaRepo.GetTableMetadataAsync(tableId);
-            if (meta != null)
-            {
-                await consentRepo.CreateConsentAsync(new Consent
-                {
-                    TenantId = Autheris.Tests.Common.TestTenants.Default,
-                    TableId = meta.Table.Id,
-                    TableIdentifier = tableId,
-                    Effect = ConsentEffect.Allow,
-                    GranteeType = GranteeType.User,
-                    GranteeSid = userSid,
-                    ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
-                    ValidTo = DateTimeOffset.UtcNow.AddHours(24)
-                });
-            }
-        }
+        await GrantRowsTableAsync(userSid);
 
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid.Value);

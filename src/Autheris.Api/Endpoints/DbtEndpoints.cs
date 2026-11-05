@@ -404,7 +404,8 @@ public static class DbtEndpoints
     {
         // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
         // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
-        var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+        var isPrivileged = GatewayPolicies.HasRole(context.User, GatewayRole.GovernanceAdmin) ||
+                           EndpointSecurity.IsCanonicalClusterAdmin(context.User) ||
                            context.User.IsInRole("DbtAdmin");
         if (!isPrivileged)
         {

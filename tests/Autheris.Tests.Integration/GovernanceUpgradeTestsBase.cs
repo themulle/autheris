@@ -394,7 +394,7 @@ public abstract class GovernanceUpgradeTestsBase
         await Task.WhenAll(runs);
 
         applied.ShouldBe(1);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(5);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(6);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
     });
 
@@ -504,7 +504,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Pending);
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(4);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(5);
     });
 
     [Fact]

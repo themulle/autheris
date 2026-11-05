@@ -618,7 +618,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             matchedTerms = hit.MatchedTerms
                 .Where(t => !string.IsNullOrWhiteSpace(t) && text.Contains(t))
                 .ToList();
-            if (matchedTerms.Count == 0 || hit.MatchedTerms.Any(t => !text.Contains(t)))
+            if (matchedTerms.Count == 0)
             {
                 return null;
             }
