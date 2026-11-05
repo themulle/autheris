@@ -595,7 +595,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
                 }
 
-                if (!dryRun && existingMeta != null)
+                if (existingMeta != null)
                 {
                     // EXT-05: Ratchet governance properties rather than overwrite
                     var reqCols = DbtManifestRatchet.MergeRequiredFilterColumns(
@@ -632,7 +632,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         hasStanding,
                         warnings,
                         _logger,
-                        ct).ConfigureAwait(false);
+                        ct,
+                        dryRun: dryRun).ConfigureAwait(false);
 
                     var updatedTableObj = new Table
                     {
@@ -724,14 +725,17 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     // Issue #427: Reconcile physical key directions for SQL tables
                     updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
 
-                    if (mergedSamples != null)
+                    if (!dryRun)
                     {
-                        _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, mergedSamples);
-                    }
+                        if (mergedSamples != null)
+                        {
+                            _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, mergedSamples);
+                        }
 
-                    await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-                    await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
-                    await ImportModelTagsAsync(updatedMetadata.Identifier, model.Tags, warnings, ct).ConfigureAwait(false);
+                        await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
+                        await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
+                        await ImportModelTagsAsync(updatedMetadata.Identifier, model.Tags, warnings, ct).ConfigureAwait(false);
+                    }
                 }
             }
 

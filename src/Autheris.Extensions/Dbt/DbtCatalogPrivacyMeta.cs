@@ -31,7 +31,8 @@ internal static class DbtCatalogPrivacyMeta
         bool hasStanding,
         List<string> warnings,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool dryRun = false)
     {
         // 1. Extract raw keys (flat or nested)
         var (rawMinGroup, rawNonPersonal, hasMinGroupKey, hasNonPersonalKey) = ExtractRaw(model.Meta);
@@ -136,6 +137,11 @@ internal static class DbtCatalogPrivacyMeta
         if (!changed)
         {
             return (storedMinGroupSize, storedNonPersonal);
+        }
+
+        if (dryRun)
+        {
+            return (targetMinGroupSize, targetNonPersonal);
         }
 
         // 6. Fail-closed audit check
