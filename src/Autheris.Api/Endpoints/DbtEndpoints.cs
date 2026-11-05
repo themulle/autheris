@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
+using Autheris.Api.Security;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Dbt.Services;
 using Autheris.Application.VirtualFilters;
@@ -15,6 +16,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -402,7 +404,8 @@ public static class DbtEndpoints
     {
         // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
         // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
-        var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+        var isPrivileged = GatewayPolicies.HasRole(context.User, GatewayRole.GovernanceAdmin) ||
+                           EndpointSecurity.IsCanonicalClusterAdmin(context.User) ||
                            context.User.IsInRole("DbtAdmin");
         if (!isPrivileged)
         {
@@ -457,7 +460,8 @@ public static class DbtEndpoints
         IDbtSemanticManifestIngestionService ingestionService,
         SemanticTenancy semanticTenancy)
     {
-        var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+        var isPrivileged = GatewayPolicies.HasRole(context.User, GatewayRole.GovernanceAdmin) ||
+                           EndpointSecurity.IsCanonicalClusterAdmin(context.User) ||
                            context.User.IsInRole("DbtAdmin");
         if (!isPrivileged)
         {

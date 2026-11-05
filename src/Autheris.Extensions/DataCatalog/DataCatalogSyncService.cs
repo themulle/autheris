@@ -104,6 +104,17 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     continue;
                 }
             }
+            else if (existing != null && !string.IsNullOrEmpty(existing.OwnerTenantId))
+            {
+                // GHSA-jfrx-2mgc-pfh5: In a global run, prevent cross-tenant overwrite if the external asset declares a different tenant
+                if (tableAsset.CustomProperties.TryGetValue("tenant_id", out var assetTenant) &&
+                    !string.IsNullOrWhiteSpace(assetTenant) &&
+                    !string.Equals(existing.OwnerTenantId, assetTenant, StringComparison.OrdinalIgnoreCase))
+                {
+                    warnings.Add($"Table '{tableAsset.Identifier}': skipped, existing table owned by '{existing.OwnerTenantId}' but asset belongs to '{assetTenant}'. Cross-tenant overwrite prevented.");
+                    continue;
+                }
+            }
 
             syncedTables++;
             affectedTables.Add(tableAsset.Identifier);

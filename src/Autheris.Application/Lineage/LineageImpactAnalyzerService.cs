@@ -463,6 +463,18 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             throw new GdprSubjectScopeUnresolvedException();
         }
 
+        // GHSA-qx32-576x-5cq2: Access and impact analyses require table owner, delegate, GovernanceAdmin or PrivacyAdmin standing.
+        bool isAuthorized = callerContext == null ||
+            await IsAuthorizedForAccessAnalysisAsync(table.Value, callerContext, ct).ConfigureAwait(false);
+
+        if (callerContext != null && !isAuthorized)
+        {
+            if (!subjectSid.HasValue || !subjectSid.Value.Equals(callerContext.UserSid))
+            {
+                throw new UnauthorizedAccessException($"Caller '{callerContext.UserSid}' is not authorized to view audit disclosure reports for table '{table.Value}'.");
+            }
+        }
+
         var window = Math.Clamp(timeWindowDays, 1, 3650);
         var since = DateTimeOffset.UtcNow.AddDays(-window);
         var targetTableStr = table.Value.ToString();
@@ -491,10 +503,20 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             incompletenessReasons.Add("The audit log is not available.");
         }
 
-        var allowedLogs = auditLogs
-            .Where(a => string.Equals(a.Decision, "ALLOW", StringComparison.OrdinalIgnoreCase))
-            .Where(a => subjectSid is not { } subject || !string.Equals(a.ActorSid.Value, subject.Value, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var allowedQuery = auditLogs
+            .Where(a => string.Equals(a.Decision, "ALLOW", StringComparison.OrdinalIgnoreCase));
+
+        if (callerContext != null && !isAuthorized)
+        {
+            // GHSA-qx32-576x-5cq2: Non-owners / non-admins can only ever see their own accesses, never other actors.
+            allowedQuery = allowedQuery.Where(a => string.Equals(a.ActorSid.Value, callerContext.UserSid.Value, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            allowedQuery = allowedQuery.Where(a => subjectSid is not { } subject || !string.Equals(a.ActorSid.Value, subject.Value, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var allowedLogs = allowedQuery.ToList();
 
         // 2. Determine Data Sensitivity Categories
         var sensitivityCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

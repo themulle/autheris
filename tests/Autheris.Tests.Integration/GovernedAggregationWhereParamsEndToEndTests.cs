@@ -100,6 +100,8 @@ public abstract class GovernedAggregationWhereParamsBase : IDisposable
 
         _host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Analytics:Privacy:AllowDisabled", "true");
+            builder.UseSetting("Analytics:Privacy:DefaultMinGroupSize", "1");
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");

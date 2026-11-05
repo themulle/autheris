@@ -58,15 +58,21 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
 
     private IAuditWriter Audit() => AuditWriterTestServices.Over(_auditRepo);
 
-    private static DefaultHttpContext Ctx(params string[] roles)
+    private static DefaultHttpContext Ctx(params string[] roles) => Ctx(roles.Contains("TenantAdmin"), roles);
+
+    private static DefaultHttpContext Ctx(bool includeTenant, params string[] roles)
     {
-        var claims = new List<Claim> { new("sub", "S-1-5-21-ADMIN1"), new("tenant_id", "home") };
+        var claims = new List<Claim> { new("sub", "S-1-5-21-ADMIN1") };
+        if (includeTenant)
+        {
+            claims.Add(new("tenant_id", "home"));
+        }
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
         var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")) };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-ADMIN1"),
-            TenantId = new TenantId("home"),
+            ResolvedTenant = includeTenant ? new TenantId("home") : (TenantId?)null,
             GroupSids = new HashSet<Sid>(),
             TenantRoles = new HashSet<string>(roles.Where(r => r == "TenantAdmin")),
             ClusterRoles = new HashSet<string>(roles.Where(r => r is "GovernanceAdmin" or "ClusterAdmin")),

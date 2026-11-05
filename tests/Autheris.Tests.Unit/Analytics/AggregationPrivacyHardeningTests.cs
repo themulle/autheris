@@ -417,8 +417,8 @@ public sealed class AggregationPrivacyHardeningTests
         result.Suppressed.ShouldBeTrue();
         result.SuppressedGroupsCount.ShouldBe(0);
         result.SuppressedRowsCount.ShouldBe(0);
-        // The true values stay available for the audit trail.
-        audit.Entries.Last().DetailsJson.ShouldContain("\"suppressed_rows_count\":1");
+        // The true values stay available for the audit trail (Tiny 1 + complementary Big 6 = 7).
+        audit.Entries.Last().DetailsJson.ShouldContain("\"suppressed_rows_count\":7");
     }
 
     [Fact]
@@ -443,7 +443,7 @@ public sealed class AggregationPrivacyHardeningTests
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
-        result.SuppressedRowsCount.ShouldBe(2);
+        result.SuppressedRowsCount.ShouldBe(8);
     }
 
     // ---------------------------------------------------------------- W0-6 / SEC-112-07 / T-S-05
@@ -586,7 +586,7 @@ public sealed class AggregationPrivacyHardeningTests
     [Fact]
     public async Task ExecuteAggregationAsync_NoiseOff_AllowsDuplicatePairsAndMinMax()
     {
-        var (service, _, _) = CreateService(DepartmentRows(("A", 6, 1m)), new AnalyticsOptions());
+        var (service, _, _) = CreateService(DepartmentRows(("A", 6, 1m)), new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } });
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId,

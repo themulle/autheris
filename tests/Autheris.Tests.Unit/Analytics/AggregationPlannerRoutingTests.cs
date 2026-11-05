@@ -234,7 +234,7 @@ public sealed class AggregationPlannerRoutingTests
         // A (max) text key goes through the same min-group-size suppression as any key; the groups below k are never returned singly.
         var executor = new CountingExecutor(0, DataSourceType.Sql);
         var (service, _, requests) = Create(
-            [SqlRow("big", 50), SqlRow("tiny-1", 1), SqlRow("tiny-2", 2)], executor,
+            [SqlRow("big", 50), SqlRow("medium", 20), SqlRow("tiny-1", 1), SqlRow("tiny-2", 2)], executor,
             sourceType: "sqlserver", deptType: "nvarchar(max)", minGroupSize: 5);
 
         var result = await service.ExecuteAggregationAsync(Principal(), Query());

@@ -470,7 +470,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
     public async Task Submit_WhenChannelIsFull_IsRejectedAndLeavesNothingBehind()
     {
         var manager = new AsyncQueryJobManager(_audit, environment: _env,
-            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 10_000 }));
+            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 10_000, MaxActiveJobsPerUser = 10_000 }));
         for (var i = 0; i < 1000; i++)
         {
             await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User("alice", "t" + (i % 50)), new TenantId("t" + (i % 50)));
@@ -571,7 +571,7 @@ public sealed class AsyncJobWorkerConcurrencyTests : IDisposable
     public async Task Submit_WhenChannelIsFull_WritesDenyAudit()
     {
         var manager = new AsyncQueryJobManager(_audit, environment: _env,
-            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 10_000 }));
+            jobOptions: Options.Create(new AsyncJobOptions { MaxQueuedJobsPerTenant = 10_000, MaxActiveJobsPerUser = 10_000 }));
         for (var i = 0; i < 1000; i++)
         {
             await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), User("alice", "t" + (i % 50)), new TenantId("t" + (i % 50)));

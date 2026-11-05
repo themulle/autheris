@@ -102,20 +102,31 @@ public sealed class Issue270CrossChannelParityTests
         var webSqlOutput = (string)_maskingProvider.MaskValue("ssn", rawSsn, baseRule)!;
 
         // 2. Tree query service returns the masked row (as gateway produces for masked callers)
-        _treeService.ExecuteAsync(
-                Arg.Any<ClaimsPrincipal>(),
-                Arg.Any<TreeQueryNode>(),
-                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string>(),
-                Arg.Any<CancellationToken>())
-            .Returns(_ => JsonDocument.Parse($$"""
+        JsonDocument ResponseDoc() => JsonDocument.Parse($$"""
             [
                 {
                     "id": 1,
                     "ssn": "{{webSqlOutput}}"
                 }
             ]
-            """));
+            """);
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => ResponseDoc());
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string>(),
+                Arg.Any<ITreeExecutionObserver?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => ResponseDoc());
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "analyst")], "TestAuth"));
         var executor = await CreateExecutorAsync(metadata, principal);
@@ -183,19 +194,30 @@ public sealed class Issue270CrossChannelParityTests
             }
         };
 
+        JsonDocument ResponseDocA() => JsonDocument.Parse($$"""
+            [
+                {
+                    "account_id": "{{webSqlHashA}}"
+                }
+            ]
+            """);
+
         _treeService.ExecuteAsync(
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
                 Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
-            .Returns(_ => JsonDocument.Parse($$"""
-            [
-                {
-                    "account_id": "{{webSqlHashA}}"
-                }
-            ]
-            """));
+            .Returns(_ => ResponseDocA());
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string>(),
+                Arg.Any<ITreeExecutionObserver?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => ResponseDocA());
 
         var principalA = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", tenantA.Value)], "TestAuth"));
         var executorA = await CreateExecutorAsync(metaTenantA, principalA);

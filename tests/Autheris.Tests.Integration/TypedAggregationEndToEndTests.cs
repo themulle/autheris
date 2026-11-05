@@ -65,7 +65,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
         var region = insert.CreateParameter();
         region.ParameterName = "$r";
         insert.Parameters.Add(region);
-        foreach (var (name, count) in new[] { ("A", 99_991), ("B", 5), ("C", 4), ("D", 1) })
+        foreach (var (name, count) in new[] { ("A", 99_981), ("B", 10), ("E", 5), ("C", 4), ("D", 1) })
         {
             region.Value = name;
             for (var i = 0; i < count; i++)
@@ -170,12 +170,12 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
         var data = Data(doc, Field);
         var groups = data.GetProperty("groups").EnumerateArray().ToList();
         groups.Select(g => g.GetProperty("key").GetProperty("region").GetString()).ShouldBe(["A", "B"]);
-        groups.Select(g => g.GetProperty("rowCount").GetInt64()).ShouldBe([99_991, 5]);
-        groups[0].GetProperty("aggregates")[0].GetProperty("intValue").GetInt64().ShouldBe(2 * 99_991);
+        groups.Select(g => g.GetProperty("rowCount").GetInt64()).ShouldBe([99_981, 10]);
+        groups[0].GetProperty("aggregates")[0].GetProperty("intValue").GetInt64().ShouldBe(2 * 99_981);
         data.GetProperty("suppressed").GetBoolean().ShouldBeTrue();
-        data.GetProperty("suppressedGroupsCount").GetInt32().ShouldBe(2);
+        data.GetProperty("suppressedGroupsCount").GetInt32().ShouldBe(3);
         data.GetProperty("minimumGroupSize").GetInt32().ShouldBe(5);
-        data.GetProperty("count").GetInt64().ShouldBe(99_996);
+        data.GetProperty("count").GetInt64().ShouldBe(99_991);
         data.ToString().ShouldNotContain("suppressedRowsCount");
     }
 

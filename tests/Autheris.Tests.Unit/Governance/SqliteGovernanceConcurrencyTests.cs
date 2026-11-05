@@ -349,6 +349,7 @@ public sealed class SqliteGovernanceConcurrencyTests : IDisposable
             DataSourceType = DataSourceType.Sql
         };
         await _repository.UpsertTableMetadataAsync(new TableMetadata { Identifier = table, Table = Entity("old"), Columns = [] });
+        _repository.InvalidateMetadataCacheForTesting();
 
         // Make the next metadata read stall after it loaded its snapshot and before it is cached.
         var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

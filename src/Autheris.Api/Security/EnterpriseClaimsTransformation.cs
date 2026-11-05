@@ -67,7 +67,9 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
 
         // 2. Resolve authoritative realm deterministically from scheme or issuer (CRIT-01)
         var issuer = identity.FindFirst("iss")?.Value;
-        IdentityRealm? realm = _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType);
+        IdentityRealm? realm = (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
+            ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType)
+            ?? _realmRegistry?.GetDefaultRealm();
 
         var realmId = realm?.RealmId ?? "workforce-entra";
 
@@ -84,10 +86,24 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
 
+        // GHSA-hw85-rqjh-cwxx: Enforce realm-level client ID allowlist if configured
+        if (realm?.AllowedClientIds is { Count: > 0 } allowedClients)
+        {
+            var clientId = identity.FindFirst("azp")?.Value
+                ?? identity.FindFirst("appid")?.Value
+                ?? identity.FindFirst("client_id")?.Value;
+
+            if (string.IsNullOrWhiteSpace(clientId) ||
+                !allowedClients.Contains(clientId, StringComparer.OrdinalIgnoreCase))
+            {
+                MarkDegraded(identity, realmId, $"client '{clientId}' not in realm allowed clients");
+                return normalizedPrincipal;
+            }
+        }
+
         // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
         // Inbound tenant_source claims are removed, the resolved tenant is stamped.
-        // realmBound is only true when the realm has an explicit binding (Fixed or ClaimMapped), not Unbound.
-        var isRealmBound = realm != null && !tenantByClaims && realm.TenantBinding.Kind != TenantBindingKind.Unbound;
+        var isRealmBound = realm != null && !tenantByClaims;
         var resolution = TenantStamping.Apply(identity, _tenantResolver, isRealmBound);
         if (realm == null || tenantByClaims)
         {

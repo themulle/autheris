@@ -47,7 +47,8 @@ public class RestMcpHitlAndWebhookSecurityTests
                 Enabled = true,
                 ApprovalTimeoutSeconds = timeoutSeconds,
                 RequireDifferentApprover = true,
-                AutoCreateItsmTicket = false
+                AutoCreateItsmTicket = false,
+                RequireTotp2Fa = false
             }
         });
 
@@ -582,7 +583,9 @@ public class RestMcpHitlAndWebhookSecurityTests
     {
         EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["DataOwner"]).User).ShouldBeFalse();
         EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["SchemaAdmin"]).User).ShouldBeFalse();
-        EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["GovernanceAdmin"]).User).ShouldBeTrue();
+        // SEC M-11 / GHSA-mgv5-4r69-mwww: Tenant-scoped GovernanceAdmin is not global; global GovernanceAdmin has no tenant claim
+        EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["GovernanceAdmin"]).User).ShouldBeFalse();
+        EndpointSecurity.IsGlobalGovernanceAdmin(new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.Role, "GovernanceAdmin")], "Test"))).ShouldBeTrue();
         EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["ClusterAdmin"]).User).ShouldBeTrue();
     }
 

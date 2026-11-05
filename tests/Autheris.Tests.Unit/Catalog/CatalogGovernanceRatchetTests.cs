@@ -96,6 +96,7 @@ public sealed class CatalogGovernanceRatchetTests
             RlsExpression = "region = 'EU'",
             MinGroupSize = 11,
             SmallGroupStrategy = SmallGroupStrategy.MergeIntoOther,
+            NonPersonal = true,
             RequiredFilterColumns = ImmutableArray.Create("a"),
             RequiredFilterColumnGroups = ImmutableArray.Create(ImmutableArray.Create("a", "b")),
             ExpectedRows = 1_000_000
@@ -132,6 +133,7 @@ public sealed class CatalogGovernanceRatchetTests
         ExpectedRows = 43,
         MinGroupSize = 7,
         SmallGroupStrategy = SmallGroupStrategy.Suppress,
+        NonPersonal = true,
         DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys
     };
 

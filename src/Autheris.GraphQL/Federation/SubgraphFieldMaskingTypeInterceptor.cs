@@ -71,11 +71,8 @@ public sealed class SubgraphFieldMaskingTypeInterceptor : TypeInterceptor
                 return;
             }
 
-            var masker = context.Services.GetService<ISubgraphResultMasker>();
-            if (masker == null)
-            {
-                return;
-            }
+            var masker = context.Services.GetService<ISubgraphResultMasker>()
+                ?? throw new InvalidOperationException("Security violation: Federation result masking is enabled (Federation:EnableResultMasking = true), but no ISubgraphResultMasker is registered in the service provider.");
 
             if (!context.ContextData.TryGetValue(MaskAdminKey, out var isAdminObj))
             {

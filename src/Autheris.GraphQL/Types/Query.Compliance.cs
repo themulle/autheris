@@ -65,6 +65,13 @@ public sealed partial class Query
                 .SetMessage(ex.Message)
                 .Build());
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage(ex.Message)
+                .Build());
+        }
     }
 
     public async Task<string> ExportGdprDataDisclosureReportPdfBase64Async(

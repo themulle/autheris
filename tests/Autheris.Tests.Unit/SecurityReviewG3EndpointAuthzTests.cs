@@ -22,10 +22,13 @@ using Xunit;
 /// <summary>Security review G3: HTTP endpoint authorization fixes.</summary>
 public class SecurityReviewG3EndpointAuthzTests
 {
-    private static DefaultHttpContext Ctx(string tenant, string[] roles, IDataOwnershipRepository? repo = null)
+    private static DefaultHttpContext Ctx(string? tenant, string[] roles, IDataOwnershipRepository? repo = null)
     {
         var claims = roles.Select(r => new Claim(ClaimTypes.Role, r)).ToList();
-        claims.Add(new Claim("tenant_id", tenant));
+        if (!string.IsNullOrEmpty(tenant))
+        {
+            claims.Add(new Claim("tenant_id", tenant));
+        }
         claims.Add(new Claim(ClaimTypes.PrimarySid, "S-1-5-21-OWNER"));
         var services = new ServiceCollection();
         if (repo != null) services.AddSingleton(repo);
@@ -92,19 +95,20 @@ public class SecurityReviewG3EndpointAuthzTests
         json.ShouldNotContain("\"ds\"");
 
         SqlEndpointRoutes.IsListAdmin(Ctx("t", ["Reader"]).User).ShouldBeFalse();
-        SqlEndpointRoutes.IsListAdmin(Ctx("t", ["GovernanceAdmin"]).User).ShouldBeTrue();
+        SqlEndpointRoutes.IsListAdmin(Ctx("t", ["GovernanceAdmin"]).User).ShouldBeFalse();
+        SqlEndpointRoutes.IsListAdmin(Ctx(null, ["GovernanceAdmin"]).User).ShouldBeTrue();
     }
 
     [Fact]
     public void OpenApi_TenantScopedRolesAreNotAdmins()
     {
-        foreach (var r in new[] { "DataOwner", "SchemaAdmin", "CatalogReader", "PlatformAdmin" })
+        foreach (var r in new[] { "DataOwner", "SchemaAdmin", "CatalogReader", "PlatformAdmin", "GovernanceAdmin" })
         {
             ODataEndpoints.IsOpenApiAdmin(Ctx("t", [r]).User).ShouldBeFalse(r);
         }
 
         ODataEndpoints.IsOpenApiAdmin(Ctx("t", ["ClusterAdmin"]).User).ShouldBeTrue();
-        ODataEndpoints.IsOpenApiAdmin(Ctx("t", ["GovernanceAdmin"]).User).ShouldBeTrue();
+        ODataEndpoints.IsOpenApiAdmin(Ctx(null, ["GovernanceAdmin"]).User).ShouldBeTrue();
     }
 
     [Fact]

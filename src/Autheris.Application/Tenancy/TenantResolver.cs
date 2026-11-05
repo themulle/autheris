@@ -91,15 +91,8 @@ public sealed class TenantResolver : ITenantResolver
                     return new TenantResolution(TenantResolutionOutcome.Invalid, null);
                 }
 
-                if (realm.TenantBinding.Kind == TenantBindingKind.Unbound)
-                {
-                    claim = TenantClaimReader.Read(principal);
-                }
-                else
-                {
-                    claim = realm.TenantBinding.ResolveClaim(principal);
-                    fromRealm = true;
-                }
+                claim = realm.TenantBinding.ResolveClaim(principal);
+                fromRealm = true;
             }
             else
             {
