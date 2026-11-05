@@ -1,0 +1,85 @@
+# WP-SIMPL-11 Drop SQLite as governance store
+Status: Ready for implementation
+Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-11-drop-sqlite-as-governance-store-od-1-req-simpl-12---persistence-lane-serial) | Issues: #515 (stage 1), #520 (hard dependency) | Owner decisions: OD-1 (binding), OD-2 (default taken), OD-12 | Security conditions: SEC-SIMPL-05, SEC-SIMPL-10..18
+
+## 1. Goal and outcome
+SQLite is no longer a governance/metadata store. After this WP: 0 `SqliteGovernanceRepository*` files (today 26), governance migration dialects 3 -> 2, `Governance:Provider=Sqlite` (or a SQLite-shaped connection string) fails host start before any repository is resolved, every shipped config defaults to PostgreSQL, and all governance tests that used in-memory SQLite run on one shared PostgreSQL Testcontainer per test assembly with a per-test-class database cloned from a migrated template.
+
+## 2. Preconditions and dependencies
+- Merged first: WP-SIMPL-10 (baselines), **#520 test-host reuse** (rule 6, R9): 70 of 72 host-starting integration files use in-memory SQLite governance; without host reuse a PostgreSQL migration per host start is unaffordable.
+- Must complete before WP-SIMPL-12, WP-SIMPL-19, WP-SIMPL-20 (SEC-SIMPL-05). Persistence lane is serial; nothing else in `Infrastructure/Persistence` may merge in parallel.
+- May run in parallel: Stage 0 docs/WF WPs, WP-SIMPL-36 security lane (no Persistence files).
+
+## 3. Scope
+### In scope
+- Delete SQLite governance family, runner, baseline, steps, shape reader/shape JSON, connection provider, lint source, execution guards, SQLite anchor store branch.
+- New `GovernanceProviderGuard`; TLS validator hardening (SEC-SIMPL-14); PostgreSQL default in all shipped configs/deploy files with no literal passwords.
+- `GovernancePostgresFixture` + template-database cloning; migration of SQLite-backed governance tests.
+- CHANGELOG entry + new `docs/operations/migration-simplification.md` (section "Governance store").
+### Out of scope
+- SQLite as data source: `Persistence/Catalog/SqliteColumnMetadataReader.cs`, `Persistence/Catalog/SqliteTypeAffinity.cs`, `SqliteDialectGenerator`, `Ast/Security` SQLite type map, `SqliteZoneOffsetTable`, `Microsoft.Data.Sqlite` package, `AstCompilerSqlite*ExecutionTests` (WP-SIMPL-31).
+- Repository unification (WP-SIMPL-20), SQL Server contract suite (WP-SIMPL-19), data-migration tool from SQLite (none; REQ-SIMPL-12.6 default).
+
+## 4. Current state (verified on docs/plans-project-simplification @ 63cbb893)
+- `src/Autheris.Infrastructure/Persistence/`: 26 `SqliteGovernanceRepository*.cs` (26 PG, 26 SQL Server); `SqliteGovernanceConnectionProvider.cs`, `SqliteGovernanceLintSource.cs`, `SqliteExecutionGuard.cs`, `SqliteProviderExecutionGuard.cs`.
+- `Persistence/Migrations/`: `SqliteBaselineSchema.cs`, `SqliteGovernanceMigrationRunner.cs`, `Steps/sqlite/` (8 files), `Shape/SqliteSchemaCatalogReader.cs`, `Shape/governance-shape.sqlite.v0001.json`.
+- `src/Autheris.Api/Extensions/DependencyInjection/GatewayGovernanceServiceExtensions.cs:100` `RegisterGovernanceAggregateStores<SqliteGovernanceRepository, SqliteGovernanceMigrationRunner>`.
+- `src/Autheris.Api/Extensions/DependencyInjection/StartupChecks/StorageStartupChecks.cs:47-70` in-memory SQLite and `/app` path checks (`GatewayStartupValidator.IsInMemorySqlite`).
+- `AuditChainAnchorStores.cs:810-880` `CreateSqliteDefaultStore` (Development/Test default anchor).
+- `src/Autheris.Api/appsettings.json:39` and `appsettings.Development.json:42` `"Provider": "Sqlite"`.
+- `src/Autheris.Api/Configuration/LegacySwitchGuard.cs` (`FindViolations`, `ThrowIfLegacyKeysSet`) = pattern to follow. `FederationMaskingStartupCheck` does NOT exist on this branch (only uncommitted elsewhere); use the `LegacySwitchGuard` call site instead.
+- Tests matching SQLite-governance markers (`Provider.*Sqlite|SqliteGovernance|Mode=Memory`): Unit 145 files, Integration 72, plus `Autheris.Sim.ApiHost/SimApiHostMain.cs` and `Autheris.Tests.Architecture/ArchitectureTests.cs` (+ baselines). Plan heuristic (24/10) undercounts; developer triages each hit (data-source tests stay).
+- SQLite contract tests to delete: `Sqlite{AccessProfileRepository,CdcStreamStore,ConsentDecisionStatusGuard,CatalogKeyDefinition,CatalogSettingsRepository,ConsentDescriptionRepository,DataOwnerAssignmentRepository,GovernanceStores,RelationRepository,RowFilterEvaluationRepository,CloudEventSubscriptionStore,WebhookOutbox}ContractTests.cs` (PG/SQL Server twins exist).
+- Testcontainers.PostgreSql/MsSql 4.16.0 already referenced in `Autheris.Tests.Integration.csproj:20-21`; `tests/Autheris.Tests.Parity/Dialects/ParityPostgresHostFixture.cs` = reference for container setup.
+- `deploy/podman-compose.yaml` exists; `deploy/scripts/smoke-compose.sh` and `docs/operations/migration-simplification.md` do NOT exist (created here).
+
+## 5. Implementation steps (TDD)
+1. Red: `GovernanceProviderGuardTests` (Unit, `tests/Autheris.Tests.Unit/Configuration/`). Green: `src/Autheris.Api/Configuration/GovernanceProviderGuard.cs`: `public static void ThrowIfUnsupported(IConfiguration cfg, IHostEnvironment env)`; reads `GovernanceDb:Provider` (trim, ordinal-ignore-case); allowed `PostgreSql`, `SqlServer`; absent provider -> PostgreSql only if `GovernanceDb:ConnectionString` non-empty, else throw; connection string with `Data Source=` ending `.db`/`.sqlite`, `:memory:`, `Mode=Memory`, `Filename=` -> throw regardless of provider. Message: "Governance provider unsupported (OD-1). See docs/operations/migration-simplification.md." Never include the value. No environment exemption. Call it next to `LegacySwitchGuard.ThrowIfLegacyKeysSet` in `Program`/host builder before `AddGatewayGovernance` (grep the call site).
+2. Red: `NoSqliteGovernanceArchitectureTests`. Green: delete all files listed in section 4 (repositories, guards, runner, baseline, `Steps/sqlite/`, shape reader + `governance-shape.sqlite.v0001.json`, lint source); remove line 100 branch in `GatewayGovernanceServiceExtensions.cs`; remove `StorageStartupChecks.cs:47-70` SQLite blocks and `GatewayStartupValidator.IsInMemorySqlite` if unused; remove SQLite from `GovernanceSchemaShapeLoader`/`StepSqlLint` switches; `DatabaseDialect.Sqlite` stays (data source). Unknown provider in DI switch throws `InvalidOperationException` (no default arm).
+3. SEC-SIMPL-12: delete `CreateSqliteDefaultStore`; resolver throws when no anchor store maps to the provider; startup check asserts `IAuditChainAnchorStore` resolvable. Delete the SQLite `_lock` audit serialization.
+4. SEC-SIMPL-14: extend `ConnectionTlsPolicy` validator: outside Development, PostgreSQL requires `SSL Mode=VerifyFull|VerifyCA`, SQL Server `Encrypt=True;TrustServerCertificate=False`; message names the setting only.
+5. Test infrastructure: `tests/Autheris.Tests.Common/Governance/GovernancePostgresFixture.cs` (`IAsyncLifetime`; one `PostgreSqlContainer` `postgres:17-alpine` pinned by digest; runs `PostgreSqlGovernanceMigrationRunner` once into `autheris_template`; `Task<string> CreateDatabaseAsync(string name)` executes `CREATE DATABASE "<sanitized>" TEMPLATE autheris_template`, returns connection string) + `GovernancePostgresCollection` (`[CollectionDefinition]`, `ICollectionFixture<>`). Reuse the podman host override (memory note). The #520 shared host factory takes the connection string from this fixture.
+6. Migrate tests: for each triaged file replace in-memory SQLite config with fixture DB; Unit tests that only need a repository move to `tests/Autheris.Tests.Integration/Governance/`; delete SQLite twins whose PG/SS twins exist; `SimApiHostMain.cs` gets PostgreSQL via env. Security-tagged tests move, never delete (SEC-SIMPL-52 spirit; T3).
+7. Config/deploy: `appsettings.json:39`, `appsettings.Development.json:42` -> `"PostgreSql"` with empty connection string (fails per SEC-SIMPL-11 unless supplied); `deploy/podman-compose.yaml` adds `postgres` service (pinned tag, healthcheck `pg_isready`, `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}`, gateway `depends_on: condition: service_healthy`, `ASPNETCORE_ENVIRONMENT=Development` with TLS-relax comment); Helm `values.yaml` + `templates/governance-migration-job.yaml` use `required` on `governanceDb.existingSecret`; `deploy/containers/gqlgateway-api/{Containerfile,appsettings.Benchmark.json}`, `deploy/containers/governance-seed/{Containerfile,seed_governance.py}` (psycopg), `load-generator/k6-benchmark.js`, `deploy/run-benchmark.{sh,ps1}`, `deploy/scripts/generate_report.py`, `deploy/README.md`, README quickstart. New `deploy/scripts/smoke-compose.sh` (generates random password, `podman-compose up -d`, polls `/health/ready` 120 s).
+8. Docs: replace SQLite-governance mentions in `docs/` (grep list in PR); create `docs/operations/migration-simplification.md`; CHANGELOG "unsupported provider fails startup" + link (SEC-SIMPL-18).
+
+## 6. Tests
+- Unit `GovernanceProviderGuardTests` [Security]: `Sqlite_provider_fails_startup_with_od1_message` (theory: `Sqlite`, ` sqlite `, `SQLITE`), `Sqlite_connection_string_with_other_provider_fails_startup` (theory: `Data Source=x.db`, `:memory:`, `Mode=Memory`, `Filename=a`), `Missing_provider_and_connection_string_fails_closed`, `Unknown_provider_fails_startup`, `Error_message_never_contains_connection_string_value`, `PostgreSql_and_SqlServer_pass`, `Development_environment_has_no_exemption`.
+- Unit `AuditChainSecurityTests.Anchor_store_without_registration_fails_startup` [Security].
+- Integration (Testcontainers) `AuditChainSecurityTests.Chain_verification_detects_tampering_on_postgres_and_sqlserver`, `.Audit_rows_reject_update_and_delete` [Security]; `MigrationRunnerTests.Changed_checksum_of_applied_step_blocks_start` [Security, both engines]; `GovernancePostgresFixtureTests.Cloned_database_is_isolated_and_migrated`.
+- Unit `ConnectionPolicyTests.Weak_tls_settings_rejected_outside_development` [Security].
+- Architecture: `TenantIsolationTests.Every_governance_query_has_tenant_predicate_both_families` [Security]; `NoSqliteGovernanceArchitectureTests.No_Sqlite_governance_types` (no type in Infrastructure/Api named `Sqlite*Governance*|SqliteExecutionGuard|SqliteProviderExecutionGuard`), `.No_sqlite_step_folder`; `ShippedConfigTests.Default_governance_provider_is_PostgreSql` (appsettings*.json, values.yaml, podman-compose.yaml); `DeployHygieneTests.Deploy_files_contain_no_default_database_password` [Security].
+- Delete: the 12 `Sqlite*ContractTests.cs` listed in section 4 and SQLite shape tests; record each deleted security-tagged test with its replacement in the PR body.
+
+## 7. Verification commands
+- `dotnet build Autheris.sln -c Release -warnaserror` (one build at a time; `df -h` before).
+- `dotnet test tests/Autheris.Tests.Unit -c Release --no-build`; `dotnet test tests/Autheris.Tests.Architecture --no-build`; `dotnet test tests/Autheris.Tests.Integration --no-build --filter "FullyQualifiedName~Governance|Category=Security"`.
+- `git ls-files src | grep -ci 'SqliteGovernance\|steps/sqlite\|SqliteExecutionGuard'` = 0.
+- `git diff --stat origin/main -- src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlserver` empty (SEC-SIMPL-16).
+- `git grep -n -i '"Provider": "Sqlite"' -- src deploy` empty; `deploy/scripts/smoke-compose.sh` green (output in PR).
+
+## 8. Acceptance criteria
+- [ ] 0 SQLite governance types/steps/shape files; data-source SQLite types untouched.
+- [ ] All SEC-SIMPL-10..18 tests above exist and pass; no security test lost (PR table).
+- [ ] 100% of shipped configs default to PostgreSQL; no literal DB password in deploy files.
+- [ ] `podman-compose up` + `/health/ready` passes via `smoke-compose.sh`.
+- [ ] Unit + Architecture + Integration governance suites green; integration wall time not above the post-#520 baseline + 20%.
+
+## 9. PR slicing (deletion PRs exempt from the 400 net-added limit; added src lines counted)
+1. PR-A: guard + TLS validator + anchor-store fail-closed + tests (steps 1, 3, 4) - SQLite still compiles but is rejected.
+2. PR-B: `GovernancePostgresFixture` + test migration (steps 5-6), split per test folder if > 60 files.
+3. PR-C: src deletion + DI/startup cleanup + arch tests (step 2).
+4. PR-D: config/deploy/compose/Helm/docs/CHANGELOG (steps 7-8).
+
+## 10. Risks, rollback, must NOT
+- Risks: hidden SQLite fallback in DI (arch test), compose regression (smoke script), CI time (template cloning, #520).
+- Rollback: revert PR-C/D; PR-A alone is safe to keep.
+- Must NOT: add any env var/flag re-enabling SQLite governance; default unknown provider to anything; touch `Steps/postgresql|sqlserver`; delete `Microsoft.Data.Sqlite` or data-source SQLite code; skip/`[Fact(Skip)]` migrated tests; print connection strings in errors.
+
+## 11. Estimate
+src about -6,900 / +400; tests about -3,000 net (+600 fixture/new tests); 6 person-days (+1 if test triage exceeds 150 files).
+
+## Decisions taken in this spec
+1. Guard hooks at the `LegacySwitchGuard` call site because `FederationMaskingStartupCheck` is not on main.
+2. Fixture lives in `Autheris.Tests.Common` so Unit-moved and Integration tests share it; per-test-class database (not per-test) to bound clone cost.
+3. `governance-shape.sqlite.v0001.json` and `GatewayStartupValidator.IsInMemorySqlite` are deleted with the family (only governance consumers).

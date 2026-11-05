@@ -635,3 +635,7 @@ No owner decision from the assessment remains open. **OD-14** deletes the Snowfl
 ## Phase 3 security review (csharp-security-expert)
 
 See [2026-11-05-sec-project-simplification.md](2026-11-05-sec-project-simplification.md).
+
+## Work package specifications
+
+Developer-ready specifications for WP-SIMPL-01..37 (steps, tests, acceptance, PR slicing), execution order, corrections found while writing them and pending owner confirmations: [`simplification/README.md`](simplification/README.md).
