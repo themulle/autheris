@@ -38,8 +38,8 @@ public static partial class ODataEndpoints
         // DT-A-7: the default tenant (catalog owner) may address every table by its flat name; every other tenant only its own domain and the
         // shared "default" domain. An unresolved tenant addresses nothing.
         var tenantResolver = context.RequestServices?.GetService<Autheris.Application.Tenancy.ITenantResolver>();
-        var resolution = tenantResolver?.Resolve(context.User)
-            ?? Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(context.User, null);
+        var resolution = Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(
+            context.User, tenantResolver?.DefaultTenant);
         var candidateTables = new List<Autheris.Domain.Model.TableMetadata>();
         if (resolution.Outcome is Autheris.Domain.Tenancy.TenantResolutionOutcome.FromClaim
                 or Autheris.Domain.Tenancy.TenantResolutionOutcome.FromRealm

@@ -13,10 +13,12 @@ using ModelContextProtocol.Protocol;
 internal static class McpTestClient
 {
     public static Task<McpClient> ConnectAsync(HttpClient http, string path = "/mcp") =>
-        McpClient.CreateAsync(new HttpClientTransport(
-            new HttpClientTransportOptions { Endpoint = new Uri(http.BaseAddress!, path), TransportMode = HttpTransportMode.StreamableHttp },
-            http,
-            ownsHttpClient: false));
+        McpClient.CreateAsync(
+            new HttpClientTransport(
+                new HttpClientTransportOptions { Endpoint = new Uri(http.BaseAddress!, path), TransportMode = HttpTransportMode.StreamableHttp },
+                http,
+                ownsHttpClient: false),
+            new McpClientOptions { InitializationTimeout = TimeSpan.FromMinutes(2) });
 
     /// <summary>Calls a tool; returns whether it reported an error and the text of its result.</summary>
     public static async Task<(bool IsError, string Text)> CallAsync(McpClient client, string tool, object arguments)

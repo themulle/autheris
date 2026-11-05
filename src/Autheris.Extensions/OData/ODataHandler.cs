@@ -60,8 +60,8 @@ public sealed partial class ODataHandler(
     private List<Autheris.Domain.Model.TableMetadata> CandidateTablesFor(
         ClaimsPrincipal principal, IEnumerable<Autheris.Domain.Model.TableMetadata> allTables)
     {
-        var resolution = _tenantResolver?.Resolve(principal)
-            ?? Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(principal, null);
+        var resolution = Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(
+            principal, _tenantResolver?.DefaultTenant);
         if (resolution.Tenant is not { } tenant || tenant.Value is null ||
             resolution.Outcome is Autheris.Domain.Tenancy.TenantResolutionOutcome.Invalid or Autheris.Domain.Tenancy.TenantResolutionOutcome.Unresolved)
         {
