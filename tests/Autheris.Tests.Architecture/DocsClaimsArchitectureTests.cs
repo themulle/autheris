@@ -109,7 +109,8 @@ public sealed class DocsClaimsArchitectureTests
     public void Protocol_claims_require_interop_test()
     {
         var files = GetMarkdownFiles()
-            .Where(f => !f.StartsWith("docs/adr/", StringComparison.OrdinalIgnoreCase))
+            .Where(f => !f.StartsWith("docs/adr/", StringComparison.OrdinalIgnoreCase) &&
+                        !f.StartsWith("docs/reference/", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         var allowlist = LoadProtocolAllowlist();

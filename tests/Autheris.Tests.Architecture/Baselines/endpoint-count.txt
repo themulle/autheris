@@ -1,0 +1,2 @@
+# WP-SIMPL-07: Endpoint count ratchet. Format: total|<n>. May only fall; raising requires freeze-exception.
+total|306

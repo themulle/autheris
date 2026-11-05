@@ -424,7 +424,11 @@ public sealed partial class ParityIsolationArchitectureTests
         foreach (var name in new[] { "release.yml", "docker-publish.yml" })
         {
             workflows[name].ShouldNotContain(ParityProject);
-            workflows[name].ShouldNotContain("parity-nightly");
+            // SEC-SIMPL-92: release.yml queries parity-nightly.yml workflow status as a nightly gate check
+            if (name != "release.yml")
+            {
+                workflows[name].ShouldNotContain("parity-nightly");
+            }
         }
 
         var dockerfiles = Directory.GetFiles(root, "Dockerfile*", SearchOption.TopDirectoryOnly);

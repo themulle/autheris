@@ -1,6 +1,159 @@
 # Code Owners for Autheris
-# Security-sensitive components require reviews from security leads
+# Fallback global owner
+# subsystem: default | primary: @themulle | backup: vacant
+* @themulle
 
+# Subsystem 1: Consent
+# subsystem: consent | primary: @themulle | backup: vacant
+src/Autheris.Application/ConsentRequests/  @themulle
+
+# Subsystem 2: RLS / Virtual Filters
+# subsystem: virtual-filters | primary: @themulle | backup: vacant
+src/Autheris.Application/VirtualFilters/  @themulle
+
+# Subsystem 3: Masking
+# subsystem: masking | primary: @themulle | backup: vacant
+src/Autheris.Application/Data/  @themulle
+
+# Subsystem 4: Audit
+# subsystem: audit | primary: @themulle | backup: vacant
+src/Autheris.Application/Audit/  @themulle
+src/Autheris.Application/Auditing/  @themulle
+src/Autheris.Domain/Audit/  @themulle
+
+# Subsystem 5: Policy & Authorization
+# subsystem: policy | primary: @themulle | backup: vacant
+src/Autheris.Application/Policy/  @themulle
+src/Autheris.Application/Procedures/  @themulle
+src/Autheris.Application/Security/  @themulle
+src/Autheris.Domain/Security/  @themulle
+
+# Subsystem 6: Identity & Tenancy
+# subsystem: identity-tenancy | primary: @themulle | backup: vacant
+src/Autheris.Application/Identity/  @themulle
+src/Autheris.Application/Tenancy/  @themulle
+src/Autheris.Domain/Identity/  @themulle
+src/Autheris.Domain/Tenancy/  @themulle
+
+# Subsystem 7: SQL compiler / gate
+# subsystem: sql-engine | primary: @themulle | backup: vacant
+src/TrinoSqlEngine/  @themulle
+tests/Autheris.Tests.SqlCompilerGate/  @themulle
+src/Autheris.Application/Sql/  @themulle
+src/Autheris.Application/SqlEndpoints/  @themulle
+
+# Subsystem 8: Catalog & Classification
+# subsystem: catalog | primary: @themulle | backup: vacant
+src/Autheris.Application/Catalog/  @themulle
+src/Autheris.Application/DataCatalog/  @themulle
+src/Autheris.Application/OpenMetadata/  @themulle
+src/Autheris.Application/SchemaRegistry/  @themulle
+src/Autheris.Application/Lineage/  @themulle
+src/Autheris.Application/Dbt/  @themulle
+src/Autheris.Extensions/DataCatalog/  @themulle
+src/Autheris.Extensions/OpenMetadata/  @themulle
+src/Autheris.Extensions/Dbt/  @themulle
+src/Autheris.Extensions/Lineage/  @themulle
+
+# Subsystem 9: Governance persistence
+# subsystem: governance | primary: @themulle | backup: vacant
+src/Autheris.Infrastructure/Persistence/  @themulle
+src/Autheris.Application/Governance/  @themulle
+src/Autheris.Domain/Governance/  @themulle
+src/Autheris.Extensions/Governance/  @themulle
+
+# Subsystem 10: GraphQL
+# subsystem: graphql | primary: @themulle | backup: vacant
+src/Autheris.GraphQL/  @themulle
+
+# Subsystem 11: MCP
+# subsystem: mcp | primary: @themulle | backup: vacant
+src/Autheris.Application/Mcp/  @themulle
+src/Autheris.Api/Mcp/  @themulle
+
+# Subsystem 12: Api / REST
+# subsystem: api | primary: @themulle | backup: vacant
+src/Autheris.Api/  @themulle
+src/Autheris.Api/Assets/  @themulle
+src/Autheris.Api/Configuration/  @themulle
+src/Autheris.Api/Endpoints/  @themulle
+src/Autheris.Api/Errors/  @themulle
+src/Autheris.Api/Extensions/  @themulle
+src/Autheris.Api/Hosting/  @themulle
+src/Autheris.Api/Middleware/  @themulle
+src/Autheris.Api/Security/  @themulle
+src/Autheris.Api/Serialization/  @themulle
+src/Autheris.Api/Telemetry/  @themulle
+src/Autheris.Api/UI/  @themulle
+
+# Subsystem 13: Infrastructure / ops / CI
+# subsystem: infrastructure | primary: @themulle | backup: vacant
+src/Autheris.Infrastructure/  @themulle
+src/Autheris.Application/  @themulle
+src/Autheris.Domain/  @themulle
+src/Autheris.Extensions/  @themulle
+deploy/  @themulle
+.github/  @themulle
+Dockerfile*  @themulle
+Directory.Build.props  @themulle
+NuGet.config  @themulle
+**/packages.lock.json  @themulle
+src/Autheris.Application/Analytics/  @themulle
+src/Autheris.Application/Caching/  @themulle
+src/Autheris.Application/Common/  @themulle
+src/Autheris.Application/Connectors/  @themulle
+src/Autheris.Application/DataSources/  @themulle
+src/Autheris.Application/Diagnostics/  @themulle
+src/Autheris.Application/Events/  @themulle
+src/Autheris.Application/Extensibility/  @themulle
+src/Autheris.Application/Federation/  @themulle
+src/Autheris.Application/FinOps/  @themulle
+src/Autheris.Application/Hosting/  @themulle
+src/Autheris.Application/Integrations/  @themulle
+src/Autheris.Application/Interfaces/  @themulle
+src/Autheris.Application/Jobs/  @themulle
+src/Autheris.Application/Mesh/  @themulle
+src/Autheris.Application/OData/  @themulle
+src/Autheris.Application/Observability/  @themulle
+src/Autheris.Application/Olap/  @themulle
+src/Autheris.Application/Performance/  @themulle
+src/Autheris.Application/Plugins/  @themulle
+src/Autheris.Application/ResourceGroups/  @themulle
+src/Autheris.Application/Serialization/  @themulle
+src/Autheris.Application/Services/  @themulle
+src/Autheris.Application/State/  @themulle
+src/Autheris.Application/Streaming/  @themulle
+src/Autheris.Application/Telemetry/  @themulle
+src/Autheris.Application/Webhooks/  @themulle
+src/Autheris.Application/Workflows/  @themulle
+src/Autheris.Domain/Caching/  @themulle
+src/Autheris.Domain/Common/  @themulle
+src/Autheris.Domain/Connectors/  @themulle
+src/Autheris.Domain/Diagnostics/  @themulle
+src/Autheris.Domain/Events/  @themulle
+src/Autheris.Domain/Exceptions/  @themulle
+src/Autheris.Domain/Interfaces/  @themulle
+src/Autheris.Domain/Model/  @themulle
+src/Autheris.Domain/Options/  @themulle
+src/Autheris.Domain/Plugins/  @themulle
+src/Autheris.Extensions/Backstage/  @themulle
+src/Autheris.Extensions/Cdc/  @themulle
+src/Autheris.Extensions/Itsm/  @themulle
+src/Autheris.Extensions/Lakehouse/  @themulle
+src/Autheris.Extensions/OData/  @themulle
+
+# Subsystem 14: Docs
+# subsystem: docs | primary: @themulle | backup: vacant
+docs/  @themulle
+*.md  @themulle
+src/Autheris.Application/Docs/  @themulle
+
+# Modules
+# subsystem: modules | primary: @themulle | backup: vacant
+# modules/<Name>/ @themulle
+
+# Security (SEC-SIMPL-71)
+# security: SEC-SIMPL-71 | primary: @themulle | backup: vacant
 src/Autheris.Api/Security/**       @themulle
 .github/**                         @themulle
 deploy/**                          @themulle
@@ -9,14 +162,19 @@ Directory.Build.props              @themulle
 NuGet.config                       @themulle
 **/packages.lock.json              @themulle
 tests/Autheris.Tests.SqlCompilerGate/Corpus/accepted-differences*.json  @themulle
-# WP-X1.3 (SEC-X1-14): a tier flip in the capability table admits a dialect to WebSQL
 src/TrinoSqlEngine/Ast/Capabilities/DialectCapabilityTable.cs  @themulle
-# REQ-SQL-130 (BC-130-6c): the closed time zone set and its hash constant cannot change without security review
 src/TrinoSqlEngine/TimeZones/**  @themulle
 tests/TrinoSqlEngine.Tests/TimeZones/Cldr/**  @themulle
 tests/TrinoSqlEngine.Tests/TimeZones/IanaWindowsZonesGenerator.cs  @themulle
-
-# Issue #388 (I388-SC-02): released governance schema artefacts are append-only and need the security owner
 src/Autheris.Infrastructure/Persistence/Migrations/**                        @themulle
 tests/Autheris.Tests.Architecture/Golden/GovernanceBaseline/**               @themulle
 tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/**                  @themulle
+src/Autheris.Infrastructure/Persistence/**  @themulle
+src/Autheris.Application/**/Security*/**  @themulle
+src/Autheris.Application/**/*Security*.cs  @themulle
+src/TrinoSqlEngine/Ast/Security/**  @themulle
+tests/Autheris.Tests.Fuzz/**  @themulle
+src/Autheris.Api/Hosting/**  @themulle
+.github/workflows/**  @themulle
+tests/**/Security/**  @themulle
+docs/adr/**  @themulle
