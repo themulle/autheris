@@ -3,10 +3,10 @@
 **Feature-ID:** F-AI-16  
 **Authors:** Principal .NET & AI Infrastructure Architect  
 **Components:**
-- Domain: [`DocAppModels.cs`](file:///root/autheris/src/Autheris.Domain/Model/DocAppModels.cs), [`DocChunkModels.cs`](file:///root/autheris/src/Autheris.Domain/Model/DocChunkModels.cs)
-- Application: [`IUniversalDocStore.cs`](file:///root/autheris/src/Autheris.Application/Docs/Interfaces/IUniversalDocStore.cs), [`FileSystemUniversalDocStore.cs`](file:///root/autheris/src/Autheris.Application/Docs/Services/FileSystemUniversalDocStore.cs), [`McpDocTools.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/McpDocTools.cs)
-- API: [`DocIngestionEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs)
-- Search & Indexing: [`IDocSearchService.cs`](file:///root/autheris/src/Autheris.Application/Docs/Interfaces/IDocSearchService.cs), [`MarkdownDocIngestor.cs`](file:///root/autheris/src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs)
+- Domain: [`DocAppModels.cs`](../../src/Autheris.Domain/Model/DocAppModels.cs), [`DocChunkModels.cs`](../../src/Autheris.Domain/Model/DocChunkModels.cs)
+- Application: [`IUniversalDocStore.cs`](../../src/Autheris.Application/Docs/Interfaces/IUniversalDocStore.cs), [`FileSystemUniversalDocStore.cs`](../../src/Autheris.Infrastructure/Docs/FileSystemUniversalDocStore.cs), [`McpDocTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDocTools.cs)
+- API: [`DocIngestionEndpoints.cs`](../../src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs)
+- Search & Indexing: [`IDocSearchService.cs`](../../src/Autheris.Application/Docs/Interfaces/IDocSearchService.cs), [`MarkdownDocIngestor.cs`](../../src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs)
 
 ---
 
@@ -19,7 +19,7 @@ When AI agents (Claude, Cursor, Antigravity, or automated incident triage bots) 
 - **Shared Volume Storage Foundation:** Transparent directory layout on standard persistent storage (Kubernetes RWX PVC, NFS, local disk).
 - **Headless Ingestion REST API:** Automated documentation publishing for CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins) supporting ZIP bundles and individual markdown/spec assets.
 - **Agent-as-a-Documenter (MCP Deposit):** AI agents can persist newly created runbooks or error remediations directly via MCP tools (`deposit_documentation`).
-- **Sub-100ms In-Memory Discovery:** Ingested documentation is immediately chunked and indexed into the local Okapi BM25 and keyword search engine without server restarts.
+- **Fast In-Memory Discovery:** Ingested documentation is immediately chunked and indexed into the local Okapi BM25 and keyword search engine without server restarts.
 
 ---
 

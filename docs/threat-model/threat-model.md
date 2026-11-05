@@ -1,6 +1,5 @@
 # STRIDE Threat Model & Security Architecture: Autheris Enterprise Gateway
 
-**Status:** Normative / Production Standard (corrected 2026-10-06 after security review recheck 4: statements now describe the implemented behaviour; open gaps are listed per threat as *Known limitation*)  
 **Classification:** Public Architecture Documentation  
 **Applicability:** Autheris Gateway Engine  
 

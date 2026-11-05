@@ -1,7 +1,6 @@
 # F-GOV-08: Dynamic Schema Contracts & Tag-Based Projection (@tag)
 
-**Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`SchemaContractMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/SchemaContractMiddleware.cs), [`DynamicTagProjectionService.cs`](file:///root/autheris/src/Autheris.Application/Catalog/DynamicTagProjectionService.cs)
+**Components:** [`SchemaContractMiddleware.cs`](../../src/Autheris.Api/Middleware/SchemaContractMiddleware.cs), `DynamicTagProjectionService.cs`
 
 ---
 

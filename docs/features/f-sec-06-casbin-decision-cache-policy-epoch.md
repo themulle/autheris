@@ -1,6 +1,6 @@
 # F-SEC-06: Casbin Decision Cache & Cluster Policy Epoch
 
-**Components:** [`CasbinEnforcementService.cs`](file:///root/autheris/src/Autheris.Application/Governance/CasbinEnforcementService.cs), [`CasbinDecisionCache.cs`](file:///root/autheris/src/Autheris.Application/Governance/Caching/CasbinDecisionCache.cs), [`DecisionKey.cs`](file:///root/autheris/src/Autheris.Application/Governance/Caching/DecisionKey.cs), [`PolicyEpochGuard.cs`](file:///root/autheris/src/Autheris.Application/Governance/Caching/PolicyEpochGuard.cs), [`CasbinDecisionCacheOptions.cs`](file:///root/autheris/src/Autheris.Domain/Options/CasbinDecisionCacheOptions.cs), [`CasbinDecisionCacheOptionsValidator.cs`](file:///root/autheris/src/Autheris.Api/Extensions/DependencyInjection/CasbinDecisionCacheOptionsValidator.cs)
+**Components:** [`CasbinEnforcementService.cs`](../../src/Autheris.Application/Governance/CasbinEnforcementService.cs), [`CasbinDecisionCache.cs`](../../src/Autheris.Application/Governance/Caching/CasbinDecisionCache.cs), [`DecisionKey.cs`](../../src/Autheris.Application/Governance/Caching/DecisionKey.cs), [`PolicyEpochGuard.cs`](../../src/Autheris.Application/Governance/Caching/PolicyEpochGuard.cs), [`CasbinDecisionCacheOptions.cs`](../../src/Autheris.Domain/Options/CasbinDecisionCacheOptions.cs), [`CasbinDecisionCacheOptionsValidator.cs`](../../src/Autheris.Api/Extensions/DependencyInjection/CasbinDecisionCacheOptionsValidator.cs)
 
 ---
 

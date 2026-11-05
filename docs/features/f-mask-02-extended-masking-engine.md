@@ -54,7 +54,7 @@ A decision whose filter text no longer equals the projection of its typed policy
 The extended masking engine operates in two execution modes:
 
 1. **SQL AST Pushdown Mode:**
-   - [`AstSecurityVisitor`](../../src/TrinoSqlEngine/AstSecurityVisitor.cs) transforms AST projection expressions directly into dialect-specific SQL functions:
+   - [`AstSecurityVisitor`](../../src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.cs) transforms AST projection expressions directly into dialect-specific SQL functions:
      - **T-SQL:** `ROUND(...) + ((CHECKSUM(...) % 100) / 10000.0)` for `GEO_JITTER`; `LEFT(col, 4) + REPLICATE('*', LEN(col) - 8) + RIGHT(col, 4)` for `PARTIAL_MASK`.
      - **PostgreSQL:** `ROUND(...) + ...` and `overlay(...)` or `substr(...)`.
      - **DuckDB & SQLite:** Native mathematical and string concatenation functions.

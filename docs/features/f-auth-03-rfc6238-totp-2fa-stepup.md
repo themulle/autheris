@@ -42,5 +42,5 @@ Content-Type: application/json
 
 ## 3. Implementation Details
 
-- **Service:** `TotpVerificationService` in `src/Autheris.Application/Security/TotpVerificationService.cs`.
-- **Endpoints:** Mapped in `src/Autheris.Api/Endpoints/TwoFactorAuthEndpoints.cs`.
+- **Service:** `TotpVerificationService` in `src/Autheris.Application/Security/Totp/Services/TotpVerificationService.cs`.
+- **Endpoints:** Mapped in `src/Autheris.Api/Endpoints/TotpFirstEnrollmentGuard.cs`.

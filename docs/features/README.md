@@ -1,6 +1,6 @@
 # Autheris Enterprise Features Catalog
 
-Overview of all production-ready, Generally Available (GA) enterprise features in **Autheris**.
+Overview of all enterprise features in **Autheris**.
 
 Every feature document includes an architectural overview, explanation of business value, concrete usage examples, and configuration specifications.
 
@@ -8,7 +8,7 @@ Every feature document includes an architectural overview, explanation of busine
 > **Documentation Standard for AI Agents & Contributors:**
 > - All individual feature documentation **must be placed here in `docs/features/`** using the naming scheme `f-<category>-<number>-<slug>.md`.
 > - Always register new feature documents in the index table below.
-> - Feature documents must describe the **working state, architecture, and usage** (pure documentation). Do not include transient development progress, WIP notes, or task checklists (those belong in [`docs/plans/`](file:///root/autheris/docs/plans/)). See [`AGENTS.md`](file:///root/autheris/AGENTS.md).
+> - Feature documents must describe the **working state, architecture, and usage** (pure documentation). Do not include transient development progress, WIP notes, or task checklists (those belong in [`docs/plans/`](../plans/)). See [`AGENTS.md`](../../AGENTS.md).
 
 | Feature ID | Title | Documentation |
 | :--- | :--- | :--- |
@@ -19,8 +19,6 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-AI-06** | Explainable AI & Provenance Footnotes | [f-ai-06-provenance-footnoting.md](f-ai-06-provenance-footnoting.md) |
 | **F-AI-07** | Dynamic Semantic Schema Pruning & Just-in-Time MCP Tools | [f-ai-07-dynamic-semantic-schema-pruning.md](f-ai-07-dynamic-semantic-schema-pruning.md) |
 | **F-AI-08** | FOCUS FinOps Accounting for Token & Compute | [f-ai-08-focus-finops-accounting.md](f-ai-08-focus-finops-accounting.md) |
-| **F-AI-09** | Native Vector Database & RAG Egress (pgvector, Qdrant, Milvus) (not implemented) | [f-ai-09-native-vector-database-rag-egress.md](f-ai-09-native-vector-database-rag-egress.md) |
-| **F-AI-10** | Semantic Query Cache & Autonomous Policy Recommendation (not implemented) | [f-ai-10-semantic-cache-policy-recommendation.md](f-ai-10-semantic-cache-policy-recommendation.md) |
 | **F-AI-11** | MCP Dataset Tools (Catalog Discovery and GraphQL Queries for AI Agents) | [f-ai-11-mcp-dataset-tools.md](f-ai-11-mcp-dataset-tools.md) |
 | **F-AI-12** | Official Hybrid MCP Gateway (Query Tools, Native Resources & Prompts) | [f-ai-12-hybrid-mcp-gateway.md](f-ai-12-hybrid-mcp-gateway.md) |
 | **F-AI-13** | Admin MCP Tools & Two-Phase Access Planning (HitL) | [f-ai-13-admin-mcp-tools-two-phase-hitl.md](f-ai-13-admin-mcp-tools-two-phase-hitl.md) |
@@ -47,7 +45,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DATA-01** | Hierarchical Parquet Egress & Nested Query Serialization | [f-data-01-parquet-egress.md](f-data-01-parquet-egress.md) |
 | **F-DATA-02** | Governed WebSQL Engine | [f-data-02-governed-websql.md](f-data-02-governed-websql.md) |
 | **F-DATA-03** | Embedded In-Memory OLAP via DuckDB.NET | [f-data-03-duckdb-olap.md](f-data-03-duckdb-olap.md) |
-| **F-DATA-04** | Native Apache Arrow Flight SQL Egress & Zero-Copy Analytics Pipeline | [f-data-04-arrow-flight-sql.md](f-data-04-arrow-flight-sql.md) |
+| **F-DATA-04** | HTTP endpoints returning Arrow IPC | [f-data-04-arrow-flight-sql.md](f-data-04-arrow-flight-sql.md) |
 | **F-DATA-05** | Apache Iceberg REST Catalog (IRC) & Dynamic STS Credential Vending | [f-data-05-iceberg-rest-catalog.md](f-data-05-iceberg-rest-catalog.md) |
 | **F-DATA-06** | Governed REST Data API & System Virtual Tables (`governance.system.*`) | [f-data-06-governed-rest-data-api.md](f-data-06-governed-rest-data-api.md) |
 | **F-DATA-07** | Asynchronous Query Job Engine & Sandbox Storage | [f-data-07-async-query-jobs.md](f-data-07-async-query-jobs.md) |
@@ -67,7 +65,6 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
 | **F-EXT-01** | Generic C# DLL Plugin & Event/Webhook Subsystem | [f-ext-01-generic-plugin-events-and-webhooks.md](f-ext-01-generic-plugin-events-and-webhooks.md) |
-| **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins (not implemented) | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
 | **F-GOV-08** | Dynamic Schema Contracts & Tag-Based Projection (@tag) | [f-gov-08-schema-contracts-tag-projection.md](f-gov-08-schema-contracts-tag-projection.md) |
 | **F-GOV-09** | Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering) | [f-gov-09-virtual-filters.md](f-gov-09-virtual-filters.md) |
 | **F-GOV-11** | Declarative Access Profiles & Person-Based Plaintext Exceptions (R-52) | [f-gov-11-declarative-access-profiles.md](f-gov-11-declarative-access-profiles.md) |
@@ -91,11 +88,9 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-OPS-02** | Enterprise High Availability, Kubernetes Helm & Distributed Concurrency | [f-ops-02-high-availability-kubernetes-helm.md](f-ops-02-high-availability-kubernetes-helm.md) |
 | **F-PERF-08** | Hierarchical Resource Groups & Workload Queuing | [f-perf-08-hierarchical-resource-groups.md](f-perf-08-hierarchical-resource-groups.md) |
 | **F-PERF-09** | GraphQL-to-SQL AST Single-Query Compiler | [f-perf-09-single-query-pushdown.md](f-perf-09-single-query-pushdown.md) |
-| **F-PERF-10** | Split-Engine & Zero-LOH Streaming Result Pipelining (not implemented) | [f-perf-10-streaming-pipelining.md](f-perf-10-streaming-pipelining.md) |
 | **F-PERF-11** | Query Plan Cache & Kestrel Tuning (plan cache superseded by the engine template cache of F-DIALECT-02) | [f-perf-11-query-plan-cache.md](f-perf-11-query-plan-cache.md) |
 | **F-PERF-12** | Incremental Delivery via @defer & @stream | [f-perf-12-incremental-delivery.md](f-perf-12-incremental-delivery.md) |
 | **F-PERF-13** | GraphQL Cost & Client-Tier Quota Rate Limiting (CostAndQuotaMiddleware) | [f-perf-13-cost-and-quota-rate-limiting.md](f-perf-13-cost-and-quota-rate-limiting.md) |
-| **F-SEC-04** | Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar) | [f-sec-04-rebac-openfga.md](f-sec-04-rebac-openfga.md) |
 | **F-SEC-05** | Gateway Hardening & Adaptive Defense Suite | [f-sec-05-gateway-hardening-defense.md](f-sec-05-gateway-hardening-defense.md) |
 | **F-SEC-06** | Casbin Decision Cache & Cluster Policy Epoch | [f-sec-06-casbin-decision-cache-policy-epoch.md](f-sec-06-casbin-decision-cache-policy-epoch.md) |
 | **F-SQL-01** | Declarative SQL-to-API Engine & Auto-OpenAPI | [f-sql-01-declarative-sql-endpoints.md](f-sql-01-declarative-sql-endpoints.md) |

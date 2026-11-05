@@ -1,6 +1,6 @@
 # F-CDC-03: Zero-Kafka PostgreSQL CDC via Logical Streaming Replication
 
-**Components:** [`PostgreSqlLogicalReplicationService.cs`](file:///root/autheris/src/Autheris.Infrastructure/Streaming/PostgreSqlLogicalReplicationService.cs), [`IStreamRlsPolicyEnforcer.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Interfaces/IStreamRlsPolicyEnforcer.cs)
+**Components:** [`PostgreSqlLogicalReplicationService.cs`](../../src/Autheris.Infrastructure/Streaming/PostgreSqlLogicalReplicationService.cs), [`IStreamRlsPolicyEnforcer.cs`](../../src/Autheris.Application/Streaming/Interfaces/IStreamRlsPolicyEnforcer.cs)
 
 ---
 
@@ -13,7 +13,7 @@ Streaming change events from PostgreSQL usually requires setting up Kafka Connec
 ## 2. Business Value
 
 - **Massive TCO Reduction**: Completely eliminates the licensing, hardware, and operational costs of managing a Kafka cluster.
-- **Sub-10ms End-to-End Event Latency**: Consumes WAL changes as they commit and pushes them directly to active GraphQL/SSE client streams.
+- **Real-Time End-to-End Event Streaming**: Consumes WAL changes as they commit and pushes them directly to active GraphQL/SSE client streams.
 - **Built-in Tenant and PII Protection**: Decoded WAL events are passed through Casbin ABAC and column masking filters before dispatch.
 
 ---

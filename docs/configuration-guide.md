@@ -450,7 +450,7 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
 
 #### `RateLimiting.ClientTiers` (GraphQL Pre-Execution Cost & Quota Defense)
 
-Steuert die [`CostAndQuotaMiddleware`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
+Steuert die [`CostAndQuotaMiddleware`](../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
 
 | Eigenschaft | Typ | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- |
@@ -1056,7 +1056,7 @@ Alle SQL-Transporte laufen durch dieselbe WebSQL-Pipeline. Ohne eigene Werte gel
 | `RowLimits:Parquet:...` | WebSQL mit `Accept: application/vnd.apache.parquet` | `ParquetEgress:MaxRowsPerFile` |
 | `RowLimits:SqlEndpoints:...` | Deklarierte SQL-Endpunkte (`/api/v1/queries/...`) | – |
 | `RowLimits:ArrowExport:...` | Arrow-Export (`POST /api/v1/export/arrow`) | `Arrow:MaxExportRows` |
-| `RowLimits:FlightSql:...` | Arrow Flight SQL (`/api/v1/flight/sql/*`) | `Arrow:MaxExportRows` |
+| `RowLimits:FlightSql:...` | Arrow IPC over HTTP (`/api/v1/flight/sql/*`) | `Arrow:MaxExportRows` |
 
 Ergebnisse, die das Limit erreichen, werden als gekürzt gemeldet (`truncated`, `X-Autheris-Truncated`, bei Parquet zusätzlich `X-Export-Truncated`).
 
@@ -1097,7 +1097,7 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 | :--- | :--- | :--- | :--- |
 | `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
 | `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
-| `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow/Flight SQL, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
+| `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow IPC over HTTP, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
 | `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
 
 ```json

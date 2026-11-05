@@ -13,7 +13,7 @@ On enterprise-scale operational databases, naive full-table staging exhibits cri
 
 `F-DATA-10` resolves these challenges through a suite of native AST optimizations and pushdown mechanisms:
 - **AST Predicate Pushdown:** Decomposes top-level `WHERE` and `INNER`/`LEFT JOIN` `ON` conjuncts, pushes dialect-safe single-table predicates directly to source SQL engines, and evaluates residual expressions in DuckDB.
-- **Same-Source Subtree Pushdown:** Partitions the query AST into maximal contiguous subgraphs belonging to the same native source, compiles them via [`ISqlEngine.Compile`](file:///root/autheris/src/TrinoSqlEngine/Ast/Compile/ISqlEngine.cs) with embedded Row-Level Security (RLS) and column masks, and stages only the filtered join results.
+- **Same-Source Subtree Pushdown:** Partitions the query AST into maximal contiguous subgraphs belonging to the same native source, compiles them via [`ISqlEngine.Compile`](../../src/TrinoSqlEngine/ISqlEngine.cs) with embedded Row-Level Security (RLS) and column masks, and stages only the filtered join results.
 - **Dynamic Key-Set Filters in Cross-Source Equi-Joins:** Executes asymmetric joins in two phases by extracting distinct join keys from the smaller/selective side and injecting bounded `IN (...)` key-set filters into the larger probe table's source query.
 - **Unified Federated Parameter Binding:** Binds client-named parameters (`ParameterOrigin.ClientNamed`) and expands list parameters (`IN (:list)`) across both remote source statements and DuckDB staging queries under parameter bind budgets.
 - **Co-Located SQL Server Execution:** Groups co-located SQL Server databases into administrative `CoLocationGroup` clusters, executing multi-database queries in a single native statement using three-part naming (`[Database].[Schema].[Table]`) without DuckDB staging.
@@ -73,16 +73,16 @@ flowchart TD
 
 | Component | Responsibility |
 |---|---|
-| [`CrossSourcePlanner`](file:///root/autheris/src/Autheris.Application/Sql/Services/CrossSourcePlanner.cs) | Central planner orchestrating table discovery, co-location verification, subtree partitioning, predicate pushdown analysis, and key-set planning. |
-| [`SqlConjunctSplitter`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Conjuncts/SqlConjunctSplitter.cs) | Decomposes boolean `AND` trees from `WHERE` and `JOIN ON` clauses into discrete AST conjuncts and attributes columns to source tables. |
-| [`PushabilityEvaluator`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Pushdown/PushabilityEvaluator.cs) & [`PushabilityMatrix`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Pushdown/PushabilityMatrix.cs) | Evaluates whether a conjunct is pushable to the target SQL dialect (PostgreSQL, SQL Server, SQLite, DuckDB), verifying operator support, nullability semantics, and column clearance. |
-| [`PushedClauseBuilder`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Pushdown/PushedClauseBuilder.cs) | Generates parameterized `TableFilterClause` AST representations with isolated parameter names (`@p_pd_<n>`) for safe remote query binding. |
-| [`SubtreeGraphPartitioner`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Subtrees/SubtreeGraphPartitioner.cs) & [`SubtreeCompiler`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Subtrees/SubtreeCompiler.cs) | Identifies maximal subtrees of tables from the same data source, compiles them via native [`ISqlEngine`](file:///root/autheris/src/TrinoSqlEngine/Ast/Compile/ISqlEngine.cs), and emits synthetic staging aliases (`__subtree_<n>`). |
-| [`DynamicKeySetPlanner`](file:///root/autheris/src/Autheris.Application/Sql/Federation/KeySet/DynamicKeySetPlanner.cs) & [`KeyBatcher`](file:///root/autheris/src/Autheris.Application/Sql/Federation/KeySet/KeyBatcher.cs) | Plans two-phase cross-source equi-join execution, extracts distinct key values from the primary relation, and bounds batch chunks to dialect parameter limits. |
-| [`KeySetGovernanceGuard`](file:///root/autheris/src/Autheris.Application/Sql/Federation/KeySet/KeySetGovernanceGuard.cs) | Enforces fail-closed security for dynamic key-set pushdown: requires cleartext keys (`ColumnAccessLevel.Clear`) and prohibits masked or HMAC columns from participating in pushdown. |
-| [`FederatedParameterContract`](file:///root/autheris/src/Autheris.Application/Sql/Federation/Parameters/FederatedParameterContract.cs) | Manages parameter validation, authorization precedence, positional `$n` DuckDB binding, and remote `DbParameter` propagation. |
-| [`CoLocationVerificationService`](file:///root/autheris/src/Autheris.Application/Sql/Federation/CoLocation/CoLocationVerificationService.cs) | Validates physical server identity (`@@SERVERNAME`) and topology across configured co-located data sources before allowing single-statement execution. |
-| [`PostCompileTableTargetAssertionVisitor`](file:///root/autheris/src/TrinoSqlEngine/Ast/Visitors/PostCompileTableTargetAssertionVisitor.cs) | AST security validator asserting that every table reference in compiled co-located SQL maps strictly to an authorized catalog target. |
+| [`CrossSourcePlanner`](../../src/Autheris.Application/Sql/Services/CrossSourcePlanner.cs) | Central planner orchestrating table discovery, co-location verification, subtree partitioning, predicate pushdown analysis, and key-set planning. |
+| [`SqlConjunctSplitter`](../../src/Autheris.Application/Sql/Federation/Conjuncts/SqlConjunctSplitter.cs) | Decomposes boolean `AND` trees from `WHERE` and `JOIN ON` clauses into discrete AST conjuncts and attributes columns to source tables. |
+| [`PushabilityEvaluator`](../../src/Autheris.Application/Sql/Federation/Pushdown/PushabilityEvaluator.cs) & [`PushabilityMatrix`](../../src/Autheris.Application/Sql/Federation/Pushdown/PushabilityMatrix.cs) | Evaluates whether a conjunct is pushable to the target SQL dialect (PostgreSQL, SQL Server, SQLite, DuckDB), verifying operator support, nullability semantics, and column clearance. |
+| [`PushedClauseBuilder`](../../src/Autheris.Application/Sql/Federation/Pushdown/PushedClauseBuilder.cs) | Generates parameterized `TableFilterClause` AST representations with isolated parameter names (`@p_pd_<n>`) for safe remote query binding. |
+| [`SubtreeGraphPartitioner`](../../src/Autheris.Application/Sql/Federation/Subtrees/SubtreeGraphPartitioner.cs) & [`SubtreeCompiler`](../../src/Autheris.Application/Sql/Federation/Subtrees/SubtreeCompiler.cs) | Identifies maximal subtrees of tables from the same data source, compiles them via native [`ISqlEngine`](../../src/TrinoSqlEngine/ISqlEngine.cs), and emits synthetic staging aliases (`__subtree_<n>`). |
+| [`DynamicKeySetPlanner`](../../src/Autheris.Application/Sql/Federation/KeySet/DynamicKeySetPlanner.cs) & [`KeyBatcher`](../../src/Autheris.Application/Sql/Federation/KeySet/KeyBatcher.cs) | Plans two-phase cross-source equi-join execution, extracts distinct key values from the primary relation, and bounds batch chunks to dialect parameter limits. |
+| [`KeySetGovernanceGuard`](../../src/Autheris.Application/Sql/Federation/KeySet/KeySetGovernanceGuard.cs) | Enforces fail-closed security for dynamic key-set pushdown: requires cleartext keys (`ColumnAccessLevel.Clear`) and prohibits masked or HMAC columns from participating in pushdown. |
+| [`FederatedParameterContract`](../../src/Autheris.Application/Sql/Federation/Parameters/FederatedParameterContract.cs) | Manages parameter validation, authorization precedence, positional `$n` DuckDB binding, and remote `DbParameter` propagation. |
+| `CoLocationVerificationService` | Validates physical server identity (`@@SERVERNAME`) and topology across configured co-located data sources before allowing single-statement execution. |
+| [`PostCompileTableTargetAssertionVisitor`](../../src/TrinoSqlEngine/Ast/Security/PostCompileTableTargetAssertionVisitor.cs) | AST security validator asserting that every table reference in compiled co-located SQL maps strictly to an authorized catalog target. |
 
 ---
 
@@ -103,7 +103,7 @@ When a federated query includes filter predicates, `SqlConjunctSplitter` flatten
 
 When a query joins multiple tables that belong to the same data source (or co-located group):
 1. `SubtreeGraphPartitioner` traverses the query join tree and identifies maximal connected subgraphs of tables residing in the same physical database engine.
-2. `SubtreeCompiler` compiles each subgraph into a single native SQL statement using [`ISqlEngine.Compile`](file:///root/autheris/src/TrinoSqlEngine/Ast/Compile/ISqlEngine.cs), embedding all table-specific RLS predicates, column masking transforms, and mandatory virtual filters.
+2. `SubtreeCompiler` compiles each subgraph into a single native SQL statement using [`ISqlEngine.Compile`](../../src/TrinoSqlEngine/ISqlEngine.cs), embedding all table-specific RLS predicates, column masking transforms, and mandatory virtual filters.
 3. The compiled statement is executed on the source engine, and the resulting rowset is staged into DuckDB as a virtual staging view under a synthetic alias (`__subtree_0`).
 4. Joins and filters across disparate sources are evaluated by DuckDB over the staged subtree results.
 
@@ -121,7 +121,7 @@ When a query performs an equi-join across two disparate data sources (e.g. `pg.o
 Client-named parameters (`ParameterOrigin.ClientNamed`) and list parameters (`IN (:ids)`) are managed through a unified `FederatedParameterContract`:
 - Parameter names and types are normalized before query analysis.
 - Pushed predicate parameters are assigned isolated namespace prefixes (`@p_pd_<n>`) to eliminate collisions with client parameters or RLS parameters.
-- DuckDB query text compiles with positional `$1, $2, ...` parameter placeholders via [`DuckDbCompiledSqlBinder`](file:///root/autheris/src/TrinoSqlEngine/Ast/Emit/ICompiledSqlBinder.cs).
+- DuckDB query text compiles with positional `$1, $2, ...` parameter placeholders via [`DuckDbCompiledSqlBinder`](../../src/TrinoSqlEngine/Ast/Emit/ICompiledSqlBinder.cs).
 - Client list parameters are expanded into discrete positional bindings up to dialect limits, preserving SQL injection immutability.
 - Parameter values are excluded from audit logs and exception messages to prevent credential and PII leakage.
 

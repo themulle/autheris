@@ -50,16 +50,16 @@ sequenceDiagram
 ## 2. Gatekeeper Quality Checklist per Phase
 
 ### Gate 1: Product Management Gate (`product-manager`)
-- [ ] Checked against existing catalog in [`docs/features/README.md`](file:///root/autheris/docs/features/README.md).
+- [ ] Checked against existing catalog in [`docs/features/README.md`](../../../docs/features/README.md).
 - [ ] Validated fit for Autheris (Zero-Trust, High-Perf .NET 10, Hot Chocolate GraphQL, Casbin ABAC).
 - [ ] Benchmarked against industry standards (OWASP API Top 10, RFCs, GraphQL Foundation).
 - [ ] If anti-pattern detected: **Blocked with explicit warning & safe architectural alternative**.
-- [ ] PRD authored in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](file:///root/autheris/docs/plans/) and registered in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
+- [ ] PRD authored in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](../../../docs/plans/) and registered in [`docs/plans/00-master-plan-overview.md`](../../../docs/plans/00-master-plan-overview.md).
 
 ### Gate 2: Architecture Planning Gate (`csharp-architect`)
 - [ ] Clean Architecture layers respected: Domain (pure) -> Application -> Infrastructure -> Api/GraphQL.
 - [ ] Zero-allocation patterns considered for hot query execution paths (`ReadOnlySpan<T>`, memory pooling).
-- [ ] Concrete implementation steps drafted in [`docs/plans/YYYY-MM-DD-plan-<topic>.md`](file:///root/autheris/docs/plans/).
+- [ ] Concrete implementation steps drafted in [`docs/plans/YYYY-MM-DD-plan-<topic>.md`](../../../docs/plans/).
 - [ ] Decomposed into parallel subtasks if suitable for multiple developers.
 
 ### Gate 3: Security & Compliance Gate (`csharp-security-expert`)
@@ -101,4 +101,4 @@ The Project Manager ensures interface contracts from Phase 2 are established bef
 ## 4. Language & Repository Governance
 
 - **English Standard:** All plans, code, tests, reviews, and documentation must be in **English**.
-- **No Progress in `docs/`:** Progress tracking resides strictly in [`docs/plans/`](file:///root/autheris/docs/plans/).
+- **No Progress in `docs/`:** Progress tracking resides strictly in [`docs/plans/`](../../../docs/plans/).

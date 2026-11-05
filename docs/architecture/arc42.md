@@ -286,9 +286,14 @@ sequenceDiagram
 - **Data Health Circuit Breaker**: Tables with failing upstream `dbt test` executions are quarantined (`CircuitBreaker: Open`) to prevent serving dirty data.
 - **Model Contract Breaking-Change CI Gate**: Validates dbt model contracts against active schemas before deployment.
 
-### 8.11 Dual-Mode Enterprise Extensibility Framework
-- **In-Process C# Middlewares**: High-performance `.dll` / NuGet middlewares plugged into ASP.NET Core DI pipeline with direct AST access, zero IPC latency (< 0.1ms), and zero-copy `ReadOnlySpan<T>`.
-- **Out-of-Process gRPC Coprocess**: Polyglot gRPC interceptors for isolated microservice lifecycles.
+### 8.11 Enterprise Extensibility Framework
+- **In-Process C# Middlewares**: High-performance `.dll` / NuGet middlewares plugged into ASP.NET Core DI pipeline with direct AST access, zero IPC latency, and zero-copy `ReadOnlySpan<T>`.
+
+### 8.12 Data Governance and MCP
+- **Zero-Assumption Ingestion & Dynamic Sensitivity Classification**: Incoming schemas and documentation are ingested with fail-closed sensitivity tagging. Sensitive classifications (e.g. GDPR Art. 9, PII) trigger automated masking rules and four-eyes approval workflows.
+- **Enterprise Model Context Protocol (MCP)**: AI agents access catalog metadata, schema definitions, and governed datasets exclusively through typed MCP tools (`catalog_search`, `query_dataset`, `get_dataset_schema`). All agent tool invocations are checked against row-level security and column masking before query compilation.
+- **Offline & Air-Gapped Operation**: In-memory catalog discovery and local rule evaluation operate without outbound internet access, ensuring sensitive schema metadata never leaves the perimeter.
+- **Tamper-Evident Audit Trails**: All agent interactions, governance changes, and schema discovery operations are recorded in HMAC-SHA256 hash-chained WORM audit logs.
 
 ---
 

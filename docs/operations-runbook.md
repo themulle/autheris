@@ -487,7 +487,7 @@ Based on production load tests (Hetzner Dedicated AX-series, AMD EPYC / Ryzen 9,
 * **L1 Cache Hit (In-Memory Policy):** P50 < 0.2 ms, P99 < 1.0 ms
 * **L2 Cache Hit (Redis Roundtrip):** P50 < 1.5 ms, P99 < 4.0 ms
 * **End-to-End GraphQL Request (with RLS Pushdown):** P50 < 4.0 ms, P95 < 9.0 ms, P99 < 15.0 ms
-* **Arrow Flight SQL Stream (Chunk Egress):** 250 MB/s per core sustained zero-copy throughput
+* **Arrow IPC Stream (Chunk Egress):** 250 MB/s per core sustained zero-copy throughput
 
 ### 9.3 Runtime & Kestrel Concurrency Configuration
 

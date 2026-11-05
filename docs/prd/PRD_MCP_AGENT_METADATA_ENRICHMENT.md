@@ -1,7 +1,6 @@
 # PRD: Context-Aware MCP AI Agent Gateway (dbt + OpenMetadata Metadata Bridge)
 
 **Feature-ID:** F-AI-02  
-**Status:** In Review / Strategic Roadmap (P0)  
 **Author:** Principal Enterprise Product Manager & Platform Strategist  
 **Target Release:** Autheris v2.4  
 **Impact Level:** High Strategic Moat (Competitive Advantage vs. Apollo/Hasura)

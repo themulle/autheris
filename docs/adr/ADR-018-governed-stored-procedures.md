@@ -1,6 +1,5 @@
 # ADR-018: Stored Procedures als Governed Endpoints mit datenbankseitiger RLS über SESSION_CONTEXT
 
-**Status:** Vorgeschlagen (Implementierung Phase 1, lesend)
 **Datum:** 2026-10-05
 **Bezug:** F-SQL-02, ADR-001 (Trusted Subsystem)
 

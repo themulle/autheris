@@ -69,6 +69,6 @@ Startup validation fails when the cluster state is external and `SigningKeyRef` 
 
 ## 2. Implementation Details
 
-- **Service:** `AccessPlanningService` in `src/Autheris.Application/AccessPlanning/AccessPlanningService.cs`.
-- **Admin Tools:** `AdminMcpTools` in `src/Autheris.Application/Mcp/Tools/AdminMcpTools.cs`.
+- **Service:** `AccessPlanningService` in `src/Autheris.Application/Governance/Services/AccessPlanningService.cs`.
+- **Admin Tools:** `McpAdminTools` in `src/Autheris.Application/Mcp/Tools/McpAdminTools.cs`.
 - **Audit Verification:** All plan executions are sealed in `AuditLogEntry` with HMAC-SHA256 chaining.

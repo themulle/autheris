@@ -1,7 +1,7 @@
 # Autheris - Enterprise GraphQL Gateway with Data-Owner-Consent
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![Hot Chocolate](https://img.shields.io/badge/GraphQL-Hot%20Chocolate%2016-F00E2B?logo=graphql&logoColor=white)](https://chillicream.com/)
+[![Hot Chocolate](https://img.shields.io/badge/GraphQL-Hot%20Chocolate-F00E2B?logo=graphql&logoColor=white)](https://chillicream.com/)
 [![MCP Ready](https://img.shields.io/badge/AI-Model%20Context%20Protocol-8A2BE2?logo=anthropic&logoColor=white)](#-agentic-ai--model-context-protocol-mcp-gateway)
 [![Iceberg](https://img.shields.io/badge/Lakehouse-Apache%20Iceberg%20v2-4B8BBE?logo=apache&logoColor=white)](#)
 [![OData](https://img.shields.io/badge/Protocol-OData%20v4-0078D4)](#)
@@ -16,13 +16,13 @@
 [![Features](https://img.shields.io/badge/Features-57%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1%20%2F%20Commercial-blue)](#-license)
 
-Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate 16.6.7**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
+Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
 
 Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners. Autheris encompasses over **415,000 Source Lines of Code (SLOC)** and 11,700+ automated tests — representing an estimated **~95 person-years (~€13–15M)** of engineering effort under standard COCOMO II estimation models.
 
 > 📚 **Product & Architecture Documentation**:
 > - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 57+ enterprise features.
-> - [📊 Competitive Battle Cards & Benchmarks (docs/comparisons/README.md)](docs/comparisons/README.md) — Head-to-head comparisons (Apollo, Hasura, Cosmo, Immuta) and 64,500+ req/s BenchmarkDotNet reports.
+> - [📊 Competitive Battle Cards (docs/comparisons/README.md)](docs/comparisons/README.md) — Head-to-head feature comparisons (Apollo, Hasura, Cosmo, Immuta).
 > - [🏛️ Architecture Documentation (arc42.md)](docs/architecture/arc42.md) — System context, building blocks, runtime view, and quality goals.
 > - [🔒 Threat Model & Security Whitepaper](docs/threat-model/threat-model.md) — STRIDE analysis, attack surface, mitigation matrices, and cryptographic guarantees.
 > - [⚙️ Configuration Guide](docs/configuration-guide.md) — Comprehensive reference of all `appsettings.json` sections and environment variables.
@@ -45,35 +45,32 @@ Autheris is a **Zero-Trust Enterprise Data Access Gateway** that securely expose
 | **⚡ Performance & Scalability** | N+1 roundtrips in REST/GraphQL, slow full-table scans, high latency from post-retrieval in-memory filtering. | **Deep AST Pushdown & Compile Cache:** RLS predicates injected directly into the SQL `WHERE` tree; value-free compiled SQL template cache & L1/L2 Redis caching. |
 | **🤖 Agentic AI & LLMs** | AI agents hallucinate schemas, execute destructive queries, and risk prompt injection attacks. | **Enterprise MCP Gateway:** Semantic schema grounding, golden queries, OWASP LLM01 guardrails, FOCUS FinOps token budgets, and HITL approvals. |
 | **📜 Compliance & Audit** | Incomplete logs, high audit friction, and labor-intensive GDPR Art. 15 disclosure requests. | **Cryptographic WORM Audit:** HMAC-SHA256 tamper-evident hash chaining, SEC Rule 17a-4 S3 export, and one-click GDPR Art. 15 disclosure reports. |
-| **🔌 Multi-Protocol Flexibility** | Data silos split between app developers (GraphQL/REST), BI analysts (Power BI/Excel), and data scientists (Python/Spark). | **Universal Data Access:** Identical governed data exposed as GraphQL, REST, WebSQL, OData v4, Apache Parquet, or Apache Arrow Flight. |
+| **🔌 Multi-Protocol Flexibility** | Data silos split between app developers (GraphQL/REST), BI analysts (Power BI/Excel), and data scientists (Python/Spark). | **Universal Data Access:** Identical governed data exposed as GraphQL, REST, WebSQL, OData v4, Apache Parquet, or Arrow IPC over HTTP. |
 
 ---
 
-### ⚡ Unrivaled Performance & Competitive Advantage
+### ⚡ Architectural & Competitive Advantage
 
-| Benchmark / Capability | 🚀 Autheris (.NET 10) | 🔶 Apollo Router | 🔷 Hasura Enterprise | Detailed Battle Card |
+| Capability | 🚀 Autheris (.NET 10) | 🔶 Apollo Router | 🔷 Hasura Enterprise | Detailed Battle Card |
 |---|---|---|---|---|
-| **Peak Throughput** | **64,500+ req/sec** | 38,200 req/sec | 24,000 req/sec | [Performance Benchmarks](docs/comparisons/performance-benchmarks.md) |
-| **P99 Latency Overhead** | **1.82 ms** | 4.20 ms | 6.50 ms | [Sub-Millisecond Engine](docs/comparisons/performance-benchmarks.md) |
-| **Hot-Path Allocations** | **0 B (Zero-Alloc)** | Low (Rust Arena) | Moderate (Go GC) | [Span & MemoryPool](docs/comparisons/performance-benchmarks.md) |
 | **Zero-Trust RLS Injection** | **Native AST Pushdown** | Subgraph Filter (N+1) | DB Metadata Triggers | [Autheris vs. Apollo](docs/comparisons/autheris-vs-apollo.md) |
 | **Enterprise Governance** | **4-Eyes SoD & Catalogs** | None (Delegated) | Proprietary Lock-in | [Autheris vs. Hasura](docs/comparisons/autheris-vs-hasura.md) |
 
-👉 *Exhaustive technical analyses and charts: [Competitive Battle Cards & Benchmarks Hub](docs/comparisons/README.md).*
+👉 *Exhaustive technical analyses: [Competitive Battle Cards Hub](docs/comparisons/README.md).*
 
 ---
 
 ## 🌟 Complete Enterprise Feature Inventory
 
-Autheris encompasses **57+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
+Autheris encompasses **57+ enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
 
 ### Pillar 1: Multi-Protocol Data Access & Execution Engines
 
-- **Enterprise GraphQL Gateway with Hot Chocolate 16.6.7**:
+- **Enterprise GraphQL Gateway with Hot Chocolate**:
   - Dynamic schema generation and type projection driven by the active governance catalog.
   - Incremental data delivery via `@defer` and `@stream` ([`F-PERF-12`](docs/features/f-perf-12-incremental-delivery.md)) to dramatically reduce Time-to-First-Byte (TTFB) for large payloads.
   - GraphQL-to-SQL AST Single-Query Compiler ([`F-PERF-09`](docs/features/f-perf-09-single-query-pushdown.md)): Compiles deeply nested GraphQL selections directly into a single optimized SQL statement with relational `JOIN`s, eliminating N+1 roundtrips.
-  - Cross-source joins run through the DuckDB OLAP endpoint; the multi-stage pushdown design ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)) is not implemented.
+  - Cross-source joins run through the DuckDB OLAP endpoint.
   - Dynamic Schema Contracts & Tag-Based Projection via `@tag` ([`F-GOV-08`](docs/features/f-gov-08-schema-contracts-tag-projection.md)).
   - OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing ([`F-OPEN-01`](docs/features/f-open-01-openschema-catalog-slicing.md)).
 - **Multi-Engine Governance Database Storage ([`F-GOV-12`](docs/features/f-gov-12-multi-engine-governance-storage.md))**:
@@ -103,8 +100,8 @@ Autheris encompasses **57+ production-ready enterprise features**, documented in
   - Native support for standard OData query options: `$select`, `$filter`, `$orderby` multi-column sorting, `$top`, `$skip`, and `$count` (`?$count=true` or `/table/$count`).
   - Mandatory `OData-Version: 4.0` response header for seamless Excel, PowerQuery, and Power BI compatibility.
   - Dynamic OpenAPI 3.1 specification (`/odata/v4/$openapi`) with integrated offline-capable Swagger UI (`/docs`, `/ui/swagger`).
-- **Apache Arrow Flight SQL & Arrow Binary Egress ([`F-DATA-04`](docs/features/f-data-04-arrow-flight-sql.md))**:
-  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Apache Arrow Flight SQL (`/api/v1/flight/sql/*`) and Arrow Binary Export (`/api/v1/export/arrow`).
+- **Arrow IPC over HTTP & Binary Egress ([`F-DATA-04`](docs/features/f-data-04-arrow-flight-sql.md))**:
+  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Arrow IPC over HTTP (`/api/v1/flight/sql/*`) and Arrow Binary Export (`/api/v1/export/arrow`).
 - **Hierarchical Apache Parquet Binary Egress ([`F-DATA-01`](docs/features/f-data-01-parquet-egress.md))**:
   - On-the-fly serialization to authentic, Snappy-compressed Parquet files across all data channels (GraphQL, WebSQL, SQL endpoints, OData) when requested via `Accept: application/vnd.apache.parquet`.
   - Strict Zero-Trust guarantee: Parquet serialization occurs post-RLS, post-masking, and post-consent — files contain only authorized, sanitized data.
@@ -155,15 +152,12 @@ Autheris encompasses **57+ production-ready enterprise features**, documented in
   - Format-preserving redaction (`Mask`), HMAC-SHA256 pseudonymization (`Hash`), Laplace noise injection (`Noise`), and SQL `NULL` (`Nulling`).
   - Side-Channel Inference Defense (Rule 5): GraphQL and SQL filters (`WHERE` clauses) on masked or denied columns are blocked with a `SecurityException` to prevent bisection and inference attacks.
 - **Virtual Filters (Cross-Channel Relation-Scoped Mandatory Row Filtering, [`F-GOV-09`](docs/features/f-gov-09-virtual-filters.md))**:
-  - Declarative, relation-scoped mandatory row filtering enforced across all egress channels (WebSQL, GraphQL, OData, Arrow Flight, Stored Procedures).
+  - Declarative, relation-scoped mandatory row filtering enforced across all egress channels (WebSQL, GraphQL, OData, Arrow IPC, Stored Procedures).
   - Reusable filter definitions (structured joins or Trino SQL expressions translated per target database dialect).
   - Role- and identity-bound `AccessProfile`s with object pattern matching (`domain.schema.table[.column]`), time column windows, and fail-closed uncovered policies (`Deny` or `Skip`).
   - GitOps-ready atomic synchronization (`/api/v1/governance/virtual-filters/sync/apply`) with `MaxRemovals` safety threshold and `force` gating for `FilterAdmin`.
   - Live filter explanation endpoint (`/api/v1/governance/effective-filters`) simulating effective SQL and decision trees for auditors.
   - Fail-closed transport safety: In-memory/Lakehouse endpoints return `403 Forbidden` if restricted by virtual filters; Envoy `ext_authz` and streaming subscriptions deny restricted callers.
-- **Relationship-Based Access Control / ReBAC ([`F-SEC-04`](docs/features/f-sec-04-rebac-openfga.md))**:
-  - Fine-grained authorization following the Google Zanzibar / OpenFGA model (`/api/v1/rebac/tuples`, `/check`, `/batch-check`).
-  - Graph-based relation evaluation (e.g., `user:alice` is `editor` of `folder:finance` -> inherits `viewer` of `report:q4`).
 - **Casbin ABAC / RBAC Engine**:
   - Dynamic attribute-based access control with sub-rule evaluation and standalone policy linter (`tools/casbin-policy-lint`).
 - **Unified RBAC & Claims Normalizer (`ADR-017 Pillar 3`)**:
@@ -214,7 +208,7 @@ Autheris encompasses **57+ production-ready enterprise features**, documented in
 
 ### Pillar 4: AST Target Dialect Compiler Pipeline ([`F-DIALECT-02`](docs/features/f-dialect-02-ast-sql-compiler.md), `ADR-017` / `TrinoSqlEngine`)
 
-- **One governed SQL path**: every governed statement (WebSQL, SQL endpoints, async jobs, Arrow export and Flight SQL, MCP SQL and dataset tools, REST datasets) is compiled by `ISqlEngine.Compile`, bound by a dialect binder and, for DML, executed by the checked DML executor. There is no alternative engine and no runtime switch.
+- **One governed SQL path**: every governed statement (WebSQL, SQL endpoints, async jobs, Arrow export and Arrow IPC, MCP SQL and dataset tools, REST datasets) is compiled by `ISqlEngine.Compile`, bound by a dialect binder and, for DML, executed by the checked DML executor. There is no alternative engine and no runtime switch.
 - **Multi-pass compiler**:
   1. Token guards and ANTLR4 parse (Trino grammar) with size, depth and time budgets.
   2. Strongly typed, dialect-neutral AST via `SqlAstBuilder`; closed function and CAST allowlists.
@@ -378,7 +372,7 @@ Additional Security Invariants (Audit E-01 through E-04):
 | [`Autheris.Domain`](src/Autheris.Domain) | `net10.0` | Value Objects (`Sid`, `TableIdentifier`, `CompositeKey`), Models, Options, Enums, `GatewayRole` |
 | [`Autheris.Application`](src/Autheris.Application) | `net10.0` | Central execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), streaming RLS (`StreamRlsPolicyEnforcer`), MCP services, procedures (`ProcedureRegistrationService`), governed SQL pipeline (`GovernedSqlRewriter`, `GovernedSqlExecutor`) |
 | [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`), Cluster State (`RedisClusterStateProvider`) |
-| [`Autheris.GraphQL`](src/Autheris.GraphQL) | `net10.0` | Hot Chocolate 16.6.7 GraphQL engine, dynamic schemas, Subscriptions, Fusion Router (`FusionGatewayExtensions`), MCP Server, queries & mutations |
+| [`Autheris.GraphQL`](src/Autheris.GraphQL) | `net10.0` | Hot Chocolate GraphQL engine, dynamic schemas, Subscriptions, Fusion Router (`FusionGatewayExtensions`), MCP Server, queries & mutations |
 | [`Autheris.Api`](src/Autheris.Api) | `net10.0` | ASP.NET Core Host, Basic Auth Login (`/api/auth/login`), ForwardAuth header security, rate limiting, anti-CSRF, health probes, ITSM webhooks, MCP endpoints, WebSQL, Declarative SQL & Stored Procedure endpoints, FinOps, ReBAC |
 | [`Autheris.Extensions`](src/Autheris.Extensions) | `net10.0` | All connectors to foreign systems: Data Catalogs (Purview, Collibra, Alation, OpenMetadata), ITSM (ServiceNow, Jira, webhooks), OpenMetadata sync, dbt, OData, Iceberg Lakehouse, OpenLineage/OpenJEV, Backstage export, CDC sources (MSSQL Change Tracking, Debezium) |
 | [`TrinoSqlEngine`](src/TrinoSqlEngine) | `net10.0` | High-performance ANTLR4 SQL Parser, AST Rewriter, WebSQL engine, multi-dialect AST generators (PostgreSQL, T-SQL, SQLite, Oracle, DuckDB, Databricks, Snowflake), and parameter extractor (1,072 tests) |
@@ -450,7 +444,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 - **OData v4 Data Access (REST / Excel / Power BI)**: `GET http://localhost:8080/odata/v4/{domain}/{schema}/{table}`
 - **OpenAPI 3.1 Specification (OData)**: [`http://localhost:8080/odata/v4/$openapi`](http://localhost:8080/odata/v4/$openapi)
 - **Model Context Protocol (MCP for AI Agents)**: `http://localhost:8080/mcp` (Streamable HTTP)
-- **Apache Arrow Flight SQL & Export**: `POST http://localhost:8080/api/v1/flight/sql/*`, `POST http://localhost:8080/api/v1/export/arrow`
+- **Arrow IPC over HTTP & Export**: `POST http://localhost:8080/api/v1/flight/sql/*`, `POST http://localhost:8080/api/v1/export/arrow`
 - **DuckDB In-Memory OLAP**: `POST http://localhost:8080/api/v1/olap/query`
 - **ReBAC Relationship Tuples & Check**: `POST http://localhost:8080/api/v1/rebac/tuples`, `/check`
 - **FinOps Token & Compute Accounting**: `GET/POST http://localhost:8080/api/v1/finops/focus`, `/budget/{tenant}`

@@ -3,7 +3,7 @@
 **Feature-ID:** F-GOV-20  
 **Category:** Governance Pre-Flight, Consent Workflows & Lifecycle Management  
 **Components:**
-- Domain: [`McpDatasetModels.cs`](../../src/Autheris.Domain/Model/McpDatasetModels.cs) (`FieldDeprecationInfo`), [`FieldSunsettingOptions.cs`](../../src/Autheris.Domain/Options/Security/FieldSunsettingOptions.cs)
+- Domain: [`McpDatasetModels.cs`](../../src/Autheris.Domain/Model/McpDatasetModels.cs) (`FieldDeprecationInfo`), [`SchemaSunsettingModels.cs`](../../src/Autheris.Domain/Model/SchemaSunsettingModels.cs)
 - Application: [`QueryAnalysisModels.cs`](../../src/Autheris.Application/Governance/Analysis/QueryAnalysisModels.cs), [`IQueryAnalysisService.cs`](../../src/Autheris.Application/Governance/Analysis/IQueryAnalysisService.cs), [`QueryAnalysisService.cs`](../../src/Autheris.Application/Governance/Analysis/QueryAnalysisService.cs), [`BundledConsentRequestService.cs`](../../src/Autheris.Application/Governance/Analysis/BundledConsentRequestService.cs), [`McpDatasetCatalog.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs)
 - API: [`QueryAnalysisAndProfilingEndpoints.cs`](../../src/Autheris.Api/Endpoints/QueryAnalysisAndProfilingEndpoints.cs)
 

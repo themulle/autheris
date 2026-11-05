@@ -1,6 +1,6 @@
 # F-API-04: Upstream Web API & Microservice Ingestion via OpenAPI
 
-**Components:** [`GovernanceEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/GovernanceEndpoints.cs), [`IOpenApiIngestionUseCase.cs`](file:///root/autheris/src/Autheris.Application/Governance/IOpenApiIngestionUseCase.cs), [`OpenApiIngestionUseCase.cs`](file:///root/autheris/src/Autheris.Application/Governance/OpenApiIngestionUseCase.cs), [`IOpenApiIngestionService.cs`](file:///root/autheris/src/Autheris.Application/DataCatalog/Interfaces/IOpenApiIngestionService.cs), [`OpenApiIngestionService.cs`](file:///root/autheris/src/Autheris.Application/DataCatalog/Services/OpenApiIngestionService.cs)
+**Components:** [`GovernanceEndpoints.cs`](../../src/Autheris.Api/Endpoints/GovernanceEndpoints.cs), [`IOpenApiIngestionUseCase.cs`](../../src/Autheris.Application/Governance/IOpenApiIngestionUseCase.cs), [`OpenApiIngestionUseCase.cs`](../../src/Autheris.Application/Governance/OpenApiIngestionUseCase.cs), [`IOpenApiIngestionService.cs`](../../src/Autheris.Application/DataCatalog/Interfaces/IOpenApiIngestionService.cs), [`OpenApiIngestionService.cs`](../../src/Autheris.Application/DataCatalog/Services/OpenApiIngestionService.cs)
 
 ---
 
