@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;

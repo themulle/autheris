@@ -442,13 +442,13 @@ public sealed partial class AiDataGuardrailService
         }
 
         var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-        if (Autheris.Application.Dbt.Services.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is not { } tenant)
+        if (Autheris.Application.Catalog.Semantic.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is not { } tenant)
         {
             return null;
         }
 
         var models = await _semanticCatalog.ListSemanticModelsAsync(tenant, ct).ConfigureAwait(false);
-        var resolver = new Autheris.Application.Dbt.Services.SemanticBaseTableResolver(_tableMetadataRepository);
+        var resolver = new Autheris.Application.Catalog.Semantic.SemanticBaseTableResolver(_tableMetadataRepository);
         var tables = new List<TableIdentifier>();
         foreach (var metricName in metricNames)
         {

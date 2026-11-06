@@ -1,7 +1,7 @@
 namespace Autheris.Extensions.DataCatalog;
 
 using System;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

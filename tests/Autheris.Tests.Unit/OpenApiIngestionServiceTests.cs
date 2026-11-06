@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

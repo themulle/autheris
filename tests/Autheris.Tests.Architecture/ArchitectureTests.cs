@@ -118,14 +118,14 @@ public class ArchitectureTests
         // Backstage export, CDC sources) are implemented exclusively in Autheris.Extensions.
         var connectorInterfaces = new[]
         {
-            typeof(Autheris.Application.DataCatalog.Interfaces.IDataCatalogClient),
-            typeof(Autheris.Application.DataCatalog.Interfaces.IDataCatalogClientFactory),
-            typeof(Autheris.Application.DataCatalog.Interfaces.IDataCatalogSyncService),
+            typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogClient),
+            typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogClientFactory),
+            typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService),
             typeof(Autheris.Application.Interfaces.IItsmWorkflowClient),
             typeof(Autheris.Application.Interfaces.IItsmWebhookHandler),
             typeof(Autheris.Application.Interfaces.IOpenLineageClient),
             typeof(Autheris.Application.Interfaces.IOpenJevClient),
-            typeof(Autheris.Application.OpenMetadata.Interfaces.IOpenMetadataClient),
+            typeof(Autheris.Extensions.OpenMetadata.IOpenMetadataClient),
             typeof(Autheris.Application.Integrations.Backstage.IBackstageCatalogExportService),
             typeof(Autheris.Application.Streaming.Interfaces.IMssqlChangeTrackingPoller)
         };
@@ -224,5 +224,29 @@ public class ArchitectureTests
 
         result.IsSuccessful.ShouldBeTrue(
             $"Migrated endpoints must go through their use case, not a repository: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
+    }
+
+    [Fact]
+    public void Application_has_no_vendor_named_namespaces()
+    {
+        var forbiddenPrefixes = new[]
+        {
+            $"{ApplicationNamespace}.Auditing",
+            $"{ApplicationNamespace}.DataCatalog",
+            $"{ApplicationNamespace}.Dbt",
+            $"{ApplicationNamespace}.OpenMetadata"
+        };
+
+        var violations = typeof(Autheris.Application.Services.ConsentResolutionService).Assembly
+            .GetTypes()
+            .Where(t => t.Namespace is not null && forbiddenPrefixes.Any(prefix =>
+                t.Namespace.Equals(prefix, StringComparison.Ordinal) ||
+                t.Namespace.StartsWith(prefix + ".", StringComparison.Ordinal)))
+            .Select(t => t.FullName!)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        violations.ShouldBeEmpty(
+            $"Autheris.Application must not contain types in duplicate or vendor-named namespaces: {string.Join(", ", violations)}");
     }
 }

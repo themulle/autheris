@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 using System.Security;
 using System.Security.Claims;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -42,7 +42,7 @@ public sealed class Issue341SyncCatalogErrorTests
     {
         var sync = Substitute.For<IDataCatalogSyncService>();
         sync.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<Autheris.Application.DataCatalog.Models.CatalogSyncResult>>(_ => throw new SecurityException("egress to host internal.example refused"));
+            .Returns<Task<Autheris.Application.Catalog.Models.CatalogSyncResult>>(_ => throw new SecurityException("egress to host internal.example refused"));
         var audit = Substitute.For<IAuditWriter>();
         var (accessor, logger) = Accessor();
 
@@ -62,7 +62,7 @@ public sealed class Issue341SyncCatalogErrorTests
     {
         var sync = Substitute.For<IDataCatalogSyncService>();
         sync.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<Autheris.Application.DataCatalog.Models.CatalogSyncResult>>(_ => throw new GatewayForbiddenException("detail with table hr.salaries"));
+            .Returns<Task<Autheris.Application.Catalog.Models.CatalogSyncResult>>(_ => throw new GatewayForbiddenException("detail with table hr.salaries"));
         var (accessor, _) = Accessor();
 
         var ex = await Should.ThrowAsync<GraphQLException>(() => new Mutation().SyncDataCatalogAsync(false, sync, accessor, Substitute.For<IAuditWriter>()));
@@ -76,7 +76,7 @@ public sealed class Issue341SyncCatalogErrorTests
     {
         var sync = Substitute.For<IDataCatalogSyncService>();
         sync.SyncCatalogAsync(Arg.Any<bool>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<Autheris.Application.DataCatalog.Models.CatalogSyncResult>>(_ => throw new InvalidOperationException("boom"));
+            .Returns<Task<Autheris.Application.Catalog.Models.CatalogSyncResult>>(_ => throw new InvalidOperationException("boom"));
         var audit = Substitute.For<IAuditWriter>();
         var calls = 0;
         audit.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())

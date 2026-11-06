@@ -32,7 +32,6 @@ src/Autheris.Application/Catalog/Services/CatalogDiscoveryService.cs|1
 src/Autheris.Application/Catalog/Services/DatasourceTestingService.cs|1
 src/Autheris.Application/ConsentRequests/ConsentRequestService.cs|1
 src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.Cursors.cs|2
-src/Autheris.Application/Dbt/Services/DbtHealthCircuitBreaker.cs|3
 src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs|1
 src/Autheris.Application/Extensibility/Interceptors/JustificationAndBreakGlassInterceptor.cs|1
 src/Autheris.Application/Federation/Services/SubgraphContextPropagationService.cs|1
@@ -100,6 +99,7 @@ src/Autheris.Extensions/Backstage/BackstageCatalogExportService.cs|1
 src/Autheris.Extensions/Cdc/CustomQuery/CustomQueryPollerService.cs|5
 src/Autheris.Extensions/Cdc/DebeziumCdcParser.cs|1
 src/Autheris.Extensions/DataCatalog/CatalogWebhookHandler.cs|2
+src/Autheris.Extensions/Dbt/DbtHealthCircuitBreaker.cs|3
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|4
 src/Autheris.Extensions/Dbt/DbtWebhookReceiver.cs|3
 src/Autheris.Extensions/Itsm/ItsmWebhookHandler.cs|2

@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.Connectors;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance.Analysis;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Interfaces;

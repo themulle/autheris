@@ -3,7 +3,7 @@ namespace Autheris.Extensions.DataCatalog;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Hosting;
 using Autheris.Application.State;
 using Autheris.Domain.Options;

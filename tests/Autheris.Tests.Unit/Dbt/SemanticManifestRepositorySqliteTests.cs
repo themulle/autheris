@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Dbt;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -146,7 +146,7 @@ public sealed class SemanticManifestRepositorySqliteTests : IDisposable
     public async Task UserSchemaNamedLikeTenantHash_CannotBeCreated_AndTheSemanticDomainIsReserved()
     {
         using var repository = NewRepository();
-        var hash = Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(TenantA);
+        var hash = Autheris.Application.Catalog.Semantic.SemanticVirtualTables.TenantSchema(TenantA);
 
         // A real table with a tenant-hash schema name, and a semantic-domain table without the server-set marker, are refused.
         await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(() =>

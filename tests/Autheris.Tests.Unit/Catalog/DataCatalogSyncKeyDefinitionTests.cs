@@ -2,8 +2,8 @@ namespace Autheris.Tests.Unit.Catalog;
 
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

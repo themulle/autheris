@@ -1,4 +1,4 @@
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 

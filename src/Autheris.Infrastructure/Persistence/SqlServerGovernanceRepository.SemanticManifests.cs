@@ -4,7 +4,7 @@ using System;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Domain.Common;
 
 /// <summary>#112 A-9: <see cref="ISemanticManifestStore"/> on the SQL Server governance store (one row per tenant, single-statement upsert).</summary>

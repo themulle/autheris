@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Interfaces;
 using Autheris.Application.ResourceGroups;
 using Autheris.Domain.Model;

@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance;
 using Autheris.Application.Interfaces;
 using Autheris.Application.VirtualFilters;
@@ -87,7 +86,6 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
     private void SeedOwnerRow(string sid, string account, string email, string name = "Existing")
     {
         var conn = _repo.RawConnection();
-        using var cmd = conn.CreateCommand();
         cmd.CommandText = "INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES (@id, @s, @a, @n, @e, 1)";
         foreach (var (k, v) in new[] { ("@id", Guid.NewGuid().ToString()), ("@s", sid), ("@a", account), ("@n", name), ("@e", email) })
         {

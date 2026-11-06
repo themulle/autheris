@@ -1,5 +1,5 @@
 using Autheris.Application.Catalog.Profiling;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Common;
 namespace Autheris.Extensions.Dbt;
 

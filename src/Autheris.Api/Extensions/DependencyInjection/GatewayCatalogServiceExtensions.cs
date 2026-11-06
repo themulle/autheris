@@ -6,8 +6,6 @@ using Autheris.Application.Catalog.Localization;
 using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Governance.Analysis;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Interfaces;

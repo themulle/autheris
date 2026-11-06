@@ -52,7 +52,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IReadPathSwitches? _switches;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
-    private readonly Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? _semanticCatalog;
+    private readonly Autheris.Application.Catalog.Semantic.ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
@@ -83,7 +83,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IReadPathSwitches? switches = null,
         Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null,
+        Autheris.Application.Catalog.Semantic.ISemanticCatalogService? semanticCatalog = null,
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));

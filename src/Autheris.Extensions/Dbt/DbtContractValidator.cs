@@ -6,7 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

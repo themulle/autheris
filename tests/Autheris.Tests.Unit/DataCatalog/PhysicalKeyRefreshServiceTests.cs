@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Audit;

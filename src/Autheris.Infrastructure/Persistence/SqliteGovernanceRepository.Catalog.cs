@@ -394,7 +394,7 @@ RETURNING structure_version, content_version;";
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
         metadata.ValidateRequiredFilterColumns();
-        Autheris.Application.Dbt.Services.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
+        Autheris.Application.Catalog.Semantic.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
         if (metadata.ReplaceKeyDefinition)
         {
             metadata = TableKeyDefinitionValidator.Validate(metadata);

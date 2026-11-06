@@ -3,7 +3,7 @@ namespace Autheris.Extensions.OpenMetadata;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -123,7 +123,7 @@ public sealed partial class OpenMetadataSyncService
         // Issue #94 (D-8): PRIMARY_KEY and UNIQUE table constraints are the declared definition; replaced only when present and valid.
         if (omTable.TableConstraints is { Count: > 0 } constraints)
         {
-            var collector = new Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Collector();
+            var collector = new Autheris.Application.Catalog.Services.CatalogKeyDefinitionImport.Collector();
             foreach (var constraint in constraints)
             {
                 if (constraint is null)
@@ -141,7 +141,7 @@ public sealed partial class OpenMetadataSyncService
                 }
             }
 
-            metadata = Autheris.Application.DataCatalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "OpenMetadata");
+            metadata = Autheris.Application.Catalog.Services.CatalogKeyDefinitionImport.Apply(metadata, collector, _logger, "OpenMetadata");
         }
 
         return (metadata, maskingRules.Count);

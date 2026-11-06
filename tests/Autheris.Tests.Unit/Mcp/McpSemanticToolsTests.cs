@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
 using Shouldly;

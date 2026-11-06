@@ -1,6 +1,6 @@
 namespace Autheris.Extensions.OpenMetadata;
 
-using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;

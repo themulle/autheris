@@ -1,5 +1,5 @@
 using Autheris.Application.Analytics;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.GraphQL.Catalog;

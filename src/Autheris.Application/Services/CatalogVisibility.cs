@@ -1,6 +1,6 @@
 namespace Autheris.Application.Services;
 
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using System;
 using System.Collections.Generic;
 using System.Linq;

@@ -1,8 +1,8 @@
 # WP-SIMPL-07: Plan-id comments per src project. Format: project|<n>. May only fall; raising requires freeze-exception.
 Autheris.Api|294
-Autheris.Application|866
+Autheris.Application|863
 Autheris.Domain|175
-Autheris.Extensions|62
+Autheris.Extensions|65
 Autheris.GraphQL|75
 Autheris.Infrastructure|225
 TrinoSqlEngine|204

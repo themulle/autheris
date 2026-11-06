@@ -3,7 +3,7 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;

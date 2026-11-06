@@ -2,8 +2,7 @@ namespace Autheris.Tests.Unit.Dbt;
 
 using Autheris.Tests.Common;
 using System;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;

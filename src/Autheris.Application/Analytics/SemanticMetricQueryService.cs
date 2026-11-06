@@ -8,8 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Data;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Policy.Lint;
 using Autheris.Application.Sql.Tree;
 using Autheris.Application.Interfaces;
@@ -615,8 +614,8 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
 
     private async Task<TableMetadata> ResolveTableMetadataAsync(DbtSemanticModel model, CancellationToken ct)
     {
-        var resolver = new Autheris.Application.Dbt.Services.SemanticBaseTableResolver(_metadataRepository);
+        var resolver = new Autheris.Application.Catalog.Semantic.SemanticBaseTableResolver(_metadataRepository);
         return await resolver.TryResolveAsync(model, isVisible: null, ct).ConfigureAwait(false)
-            ?? throw new TableNotFoundException(Autheris.Application.Dbt.Services.SemanticBaseTableResolver.Candidates(model).FirstOrDefault());
+            ?? throw new TableNotFoundException(Autheris.Application.Catalog.Semantic.SemanticBaseTableResolver.Candidates(model).FirstOrDefault());
     }
 }

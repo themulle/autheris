@@ -1,7 +1,8 @@
 namespace Autheris.Tests.Integration;
 
 using System.Text;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Extensions.Dbt;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;

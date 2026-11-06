@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
