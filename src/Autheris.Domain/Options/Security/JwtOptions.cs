@@ -96,7 +96,7 @@ public sealed class BasicAuthOptions
     public string? MarkerKeyRef { get; init; }
 
     /// <summary>DoS protection: Maximum concurrent password hash computations (Argon2id/PBKDF2).</summary>
-    public int MaxConcurrentPasswordHashes { get; init; } = Environment.ProcessorCount;
+    public int MaxConcurrentPasswordHashes { get; init; } = 16;
 
     /// <summary>
     /// F-AUTH-DX: Optional cookie session issued after a successful Basic login (developer experience).

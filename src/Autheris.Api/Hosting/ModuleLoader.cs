@@ -662,10 +662,17 @@ public sealed class ModuleLoader
 
             if (moduleBinDir is not null && Directory.Exists(moduleBinDir))
             {
+                var hostAssemblyNames = AssemblyLoadContext.Default.Assemblies
+                    .Select(a => a.GetName().Name)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
                 foreach (var peerDll in Directory.EnumerateFiles(moduleBinDir, "*.dll", SearchOption.TopDirectoryOnly))
                 {
                     var peerName = Path.GetFileName(peerDll);
-                    if (!string.Equals(peerName, assemblyFileName, StringComparison.OrdinalIgnoreCase))
+                    var peerSimple = Path.GetFileNameWithoutExtension(peerDll);
+                    if (!string.Equals(peerName, assemblyFileName, StringComparison.OrdinalIgnoreCase)
+                        && !hostAssemblyNames.Contains(peerSimple))
                     {
                         filesDict[peerName] = File.ReadAllBytes(peerDll);
                     }
