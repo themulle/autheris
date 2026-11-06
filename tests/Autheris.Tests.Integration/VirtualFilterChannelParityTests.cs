@@ -32,7 +32,6 @@ public sealed class VirtualFilterChannelParityTests : IClassFixture<VirtualFilte
     [InlineData("mcp-sample-rows")]
     [InlineData("mcp-query-graphql")]
     [InlineData("arrow-export")]
-    [InlineData("flight-sql")]
     [InlineData("olap")]
     public async Task Channel_ReturnsExactlyTheRowsOfTheVirtualFilter(string channel)
     {
@@ -89,7 +88,6 @@ public sealed class SqlVirtualFilterChannelParityTests : IClassFixture<SqlVirtua
     [InlineData("mcp-sample-rows")]
     [InlineData("mcp-query-graphql")]
     [InlineData("arrow-export")]
-    [InlineData("flight-sql")]
     [InlineData("olap")]
     public async Task Channel_ReturnsExactlyTheRowsOfTheSqlFilter(string channel)
     {

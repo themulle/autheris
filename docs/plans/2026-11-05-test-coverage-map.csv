@@ -85,3 +85,4 @@ Autheris.Tests.Unit.MessageCapturingLogger.Ext17_BadEntity_LogDoesNotContainQual
 Autheris.Tests.Unit.MessageCapturingLogger.Ext17_OneBadEntity_DoesNotDropPage,feature deleted (WP-SIMPL-12),Security
 Autheris.Tests.Unit.Webhooks.WebhookErrorLeakageTests.Webhook_HandlerThrows_ReturnsFixedMessageWithoutExceptionText,feature deleted (WP-SIMPL-12),Security
 Autheris.Tests.Unit.Webhooks.WebhookErrorLeakageTests.Webhook_MalformedJson_ReturnsFixedMessage,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Integration.TypedAggregationEndToEndTests.Aggregate_MinUnderNoise_ReturnsPrivacyRestrictedCode,feature deleted (WP-SIMPL-18),Security

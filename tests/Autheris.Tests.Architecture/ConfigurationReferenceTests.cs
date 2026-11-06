@@ -25,6 +25,24 @@ public sealed class ConfigurationReferenceTests
         var checkedIn = File.ReadAllText(ReferenceFilePath).Replace("\r\n", "\n");
         var normalizedGenerated = generated.Replace("\r\n", "\n");
 
+        if (!string.Equals(normalizedGenerated, checkedIn, StringComparison.Ordinal))
+        {
+            var genLines = normalizedGenerated.Split('\n');
+            var chkLines = checkedIn.Split('\n');
+            var max = Math.Min(genLines.Length, chkLines.Length);
+            for (var i = 0; i < max; i++)
+            {
+                if (genLines[i] != chkLines[i])
+                {
+                    Assert.Fail($"docs/reference/configuration.md diff at line {i + 1}:\nGenerated: '{genLines[i]}'\nCheckedIn: '{chkLines[i]}'\nSet AUTHERIS_UPDATE_CONFIG_REFERENCE=1 to regenerate.");
+                }
+            }
+            if (genLines.Length != chkLines.Length)
+            {
+                Assert.Fail($"docs/reference/configuration.md line count mismatch: generated {genLines.Length}, checkedIn {chkLines.Length}. Set AUTHERIS_UPDATE_CONFIG_REFERENCE=1 to regenerate.");
+            }
+        }
+
         normalizedGenerated.ShouldBe(
             checkedIn,
             "Checked-in configuration reference docs/reference/configuration.md is out of date. Set AUTHERIS_UPDATE_CONFIG_REFERENCE=1 to regenerate.");

@@ -415,7 +415,22 @@ internal static class ConfigurationReferenceGenerator
 
     private static string GetDescription(PropertyInfo prop)
     {
-        // 1. Try reading from assembly XML doc
+        // 1. Try parsing source file directly
+        if (prop.DeclaringType != null)
+        {
+            var sourceFile = FindSourceFileRaw(prop.DeclaringType);
+            if (sourceFile != null && File.Exists(Path.Combine(RepositoryScan.RepoRoot, sourceFile)))
+            {
+                var text = RepositoryScan.ReadText(sourceFile);
+                var summary = ExtractPropertySummaryFromSource(text, prop.Name);
+                if (!string.IsNullOrWhiteSpace(summary))
+                {
+                    return CleanSummary(summary);
+                }
+            }
+        }
+
+        // 2. Fallback: Try reading from assembly XML doc
         var xmlDoc = GetOrLoadXmlDoc(prop.DeclaringType?.Assembly);
         if (xmlDoc != null && prop.DeclaringType != null)
         {
@@ -425,21 +440,6 @@ internal static class ConfigurationReferenceGenerator
             if (memberElem != null)
             {
                 var summary = memberElem.Element("summary")?.Value;
-                if (!string.IsNullOrWhiteSpace(summary))
-                {
-                    return CleanSummary(summary);
-                }
-            }
-        }
-
-        // 2. Try parsing source file directly
-        if (prop.DeclaringType != null)
-        {
-            var sourceFile = FindSourceFileRaw(prop.DeclaringType);
-            if (sourceFile != null && File.Exists(Path.Combine(RepositoryScan.RepoRoot, sourceFile)))
-            {
-                var text = RepositoryScan.ReadText(sourceFile);
-                var summary = ExtractPropertySummaryFromSource(text, prop.Name);
                 if (!string.IsNullOrWhiteSpace(summary))
                 {
                     return CleanSummary(summary);
@@ -533,6 +533,22 @@ internal static class ConfigurationReferenceGenerator
                 var rel = file.RelativePath.Replace('\\', '/');
                 SourceFileCache[type] = rel;
                 return rel;
+            }
+        }
+
+        var modulesDir = Path.Combine(RepositoryScan.RepoRoot, "modules");
+        if (Directory.Exists(modulesDir))
+        {
+            foreach (var file in Directory.EnumerateFiles(modulesDir, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains("/bin/") || file.Contains("/obj/")) continue;
+                var text = File.ReadAllText(file);
+                if (Regex.IsMatch(text, pattern))
+                {
+                    var rel = Path.GetRelativePath(RepositoryScan.RepoRoot, file).Replace('\\', '/');
+                    SourceFileCache[type] = rel;
+                    return rel;
+                }
             }
         }
 

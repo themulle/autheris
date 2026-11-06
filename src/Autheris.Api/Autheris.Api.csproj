@@ -25,8 +25,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <!-- Benchmark & High-Throughput Performance Tuning (F-PERF / graphql-bench) -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <GCDynamicAdaptationMode>1</GCDynamicAdaptationMode>

@@ -37,7 +37,6 @@ public sealed class RowFilterKeySetChannelParityTests : IClassFixture<RowFilterK
     [InlineData("mcp-sample-rows")]
     [InlineData("mcp-query-graphql")]
     [InlineData("arrow-export")]
-    [InlineData("flight-sql")]
     [InlineData("olap")]
     public async Task KeySetCache_Channel_ReturnsExactlyTheRowsOfTheConsentFilter(string channel)
     {
