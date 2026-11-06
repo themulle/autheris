@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// WP-ARC-C-02: Validates storage and cluster state options (GovernanceDb provider, SQLite in multi-node, Garnet embedded vs Redis).
+/// WP-ARC-C-02 / WP-SIMPL-15: Validates storage and cluster state options (GovernanceDb provider, SQLite in multi-node, Redis in multi-node).
 /// </summary>
 public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOptions>
 {
@@ -38,14 +38,9 @@ public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOpt
             failures.Add("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
         }
 
-        if (isMultiNode && opts.Caching.Garnet.EnableEmbeddedServer)
-        {
-            failures.Add("NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet; the embedded Garnet server is local to one process and cannot provide cluster-wide state.");
-        }
-
         if (!_environment.IsDevelopment() && isMultiNode && !opts.Caching.Redis.Enabled)
         {
-            failures.Add("NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.");
+            failures.Add("NF-HA-02 / SEC-SIMPL-34 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide shared state requires Caching.Redis.Enabled = true. Per-process fallbacks weaken security in multi-node deployments. Affected consumers: token revocation, replay cache, rate limit, subject lockout cache, and identity/policy invalidation event bus (OD-27 deprovisioning).");
         }
 
         // Nested data annotations are not evaluated; the read concurrency limit (stored procedure and SQL leases) must stay in range.

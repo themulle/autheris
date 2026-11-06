@@ -48,7 +48,6 @@ using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Domain.Diagnostics;
 using Autheris.Application.Caching.Interfaces;
-using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Serialization;
 using Autheris.Application.Caching.Services;
 using Autheris.Application.Streaming.Interfaces;

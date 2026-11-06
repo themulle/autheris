@@ -73,25 +73,6 @@ public static class RedisConnectionSecurity
     }
 
     /// <summary>
-    /// SEC H-01: Client-side TLS for the embedded Garnet server (only if <see cref="GarnetOptions.EnableTls"/>).
-    /// </summary>
-    public static ConfigurationOptions ApplyGarnetClientTls(ConfigurationOptions configuration, GarnetOptions garnetOptions)
-    {
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(garnetOptions);
-
-        if (!garnetOptions.EnableTls)
-        {
-            return configuration;
-        }
-
-        configuration.Ssl = true;
-        configuration.SslHost = string.IsNullOrWhiteSpace(garnetOptions.TlsSslHost) ? garnetOptions.Host : garnetOptions.TlsSslHost;
-        ApplyCertificatePinning(configuration, garnetOptions.TlsAllowedServerCertificateThumbprints, "Caching.Garnet.TlsAllowedServerCertificateThumbprints");
-        return configuration;
-    }
-
-    /// <summary>
     /// SEC H-01: Normalizes certificate thumbprints (hex, separators removed, upper case). Invalid entries cause an error.
     /// </summary>
     public static IReadOnlyList<string> NormalizeThumbprints(IEnumerable<string>? thumbprints, string settingName)

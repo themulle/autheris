@@ -1,6 +1,6 @@
 # ==============================================================================
 # Autheris - Getting Started Container
-# Multi-protocol Enterprise GraphQL Gateway with Embedded Microsoft Garnet Cache
+# Multi-protocol Enterprise GraphQL Gateway
 # ==============================================================================
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.14@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee AS runtime
@@ -17,9 +17,6 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     DOTNET_RUNNING_IN_CONTAINER=true \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0 \
     DOTNET_System_Net_Security_UseManagedNtlm=true \
-    Gateway__Caching__Garnet__EnableEmbeddedServer=true \
-    Gateway__Caching__Garnet__Host=127.0.0.1 \
-    Gateway__Caching__Garnet__Port=3278 \
     Gateway__State__StateDirectory=/app/data \
     Gateway__GovernanceDb__ConnectionString="Data Source=/app/data/governance.db"
 

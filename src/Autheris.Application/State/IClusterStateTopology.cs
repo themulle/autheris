@@ -6,10 +6,7 @@ public enum ClusterStateMode
     /// <summary>Process-local state (single node, development, tests).</summary>
     InMemory,
 
-    /// <summary>Embedded Garnet server running inside this process: shared with nobody, not a cluster.</summary>
-    Embedded,
-
-    /// <summary>External Redis/Garnet reachable by every replica.</summary>
+    /// <summary>External Redis reachable by every replica.</summary>
     External
 }
 

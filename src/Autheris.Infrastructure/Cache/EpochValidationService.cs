@@ -75,7 +75,7 @@ end";
     // epoch it has observed per table; a lower value (Redis restart without persistence, or a tampered key that
     // tries to re-validate an older, still-signed L2 entry) is treated as a rollback and forces a fresh epoch
     // above the highest observed one. Residual risk: a node that never observed the higher epoch cannot detect
-    // the rollback, therefore Redis/Garnet must additionally be protected by authentication (see GarnetServerManager).
+    // the rollback, therefore Redis must additionally be protected by authentication.
     public EpochValidationService(
         IOptions<GatewayOptions>? options = null,
         IEventBus? eventBus = null,

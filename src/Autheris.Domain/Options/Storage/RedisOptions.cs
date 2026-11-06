@@ -6,74 +6,8 @@ public sealed class CachingOptions
 {
     [Required] public L1MemoryCacheOptions L1MemoryCache { get; init; } = new();
     [Required] public RedisOptions Redis { get; init; } = new();
-    [Required] public GarnetOptions Garnet { get; init; } = new();
     [Required] public EpochValidationOptions EpochValidation { get; init; } = new();
     [Required] public CdnOptions Cdn { get; init; } = new();
-}
-
-public sealed class GarnetOptions
-{
-    /// <summary>
-    /// When true, the gateway starts an embedded Microsoft Garnet cache server (RESP-compatible, Tsavorite engine).
-    /// </summary>
-    public bool EnableEmbeddedServer { get; init; } = false;
-
-    /// <summary>
-    /// Explicit memory limit in megabytes for the embedded Garnet cache (--memory).
-    /// If null, derives automatically from container cgroups (25% of cgroup limit, clamped 64MB-4096MB)
-    /// or defaults to 512MB outside containers.
-    /// </summary>
-    [Range(64, 65536)]
-    public int? MemorySizeMb { get; init; }
-
-    /// <summary>
-    /// Bind address for the embedded Garnet server (default: 127.0.0.1).
-    /// </summary>
-    public string Host { get; init; } = "127.0.0.1";
-
-    /// <summary>
-    /// Port for the embedded Garnet server (default: 3278).
-    /// </summary>
-    [Range(1024, 65535)] public int Port { get; init; } = 3278;
-
-    /// <summary>
-    /// Directory for persistence checkpoints (optional).
-    /// </summary>
-    public string? CheckpointDir { get; init; }
-
-    /// <summary>
-    /// SEC H-01: Secret reference for the Garnet password (--auth Password). Without it a random per-process password
-    /// is generated that only the in-process client knows.
-    /// </summary>
-    public string? PasswordSecretRef { get; init; }
-
-    /// <summary>
-    /// SEC H-01: Optional TLS for the embedded Garnet server (--tls). Garnet is bound to loopback outside
-    /// Development, so TLS is defense in depth only. Requires <see cref="TlsCertFile"/> (PFX).
-    /// </summary>
-    public bool EnableTls { get; init; } = false;
-
-    /// <summary>
-    /// SEC H-01: Path to the PFX certificate for Garnet TLS (--cert-file-name).
-    /// </summary>
-    public string? TlsCertFile { get; init; }
-
-    /// <summary>
-    /// SEC H-01: Secret reference for the PFX password (--cert-password); resolved via IKeyVaultSecretProvider
-    /// or environment variable.
-    /// </summary>
-    public string? TlsCertPasswordSecretRef { get; init; }
-
-    /// <summary>
-    /// SEC H-01: Host name the in-process client expects in the Garnet server certificate (default: Host).
-    /// </summary>
-    public string? TlsSslHost { get; init; }
-
-    /// <summary>
-    /// SEC H-01: Optional SHA-256 or SHA-1 thumbprints (hex) of accepted Garnet server certificates
-    /// (pinning, e.g. for self-signed certificates). Empty = regular chain validation.
-    /// </summary>
-    public List<string> TlsAllowedServerCertificateThumbprints { get; init; } = [];
 }
 
 public sealed class L1MemoryCacheOptions

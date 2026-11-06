@@ -1,0 +1,44 @@
+namespace Autheris.Tests.Architecture;
+
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using Shouldly;
+using Xunit;
+
+public sealed class DeletedFeaturesArchitectureTests
+{
+    private static readonly Assembly[] ProductionAssemblies =
+    [
+        typeof(Autheris.Domain.Options.GatewayOptions).Assembly,
+        typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+        typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly,
+        typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
+        typeof(Program).Assembly
+    ];
+
+    [Theory]
+    [InlineData("Autheris.Infrastructure.Garnet")]
+    [InlineData("Autheris.Application.Diagnostics.Shadowing")]
+    public void Deleted_feature_namespaces_have_no_types(string deletedNamespace)
+    {
+        var typesInNamespace = ProductionAssemblies
+            .SelectMany(a => a.GetTypes())
+            .Where(t => t.Namespace != null && (t.Namespace == deletedNamespace || t.Namespace.StartsWith(deletedNamespace + ".", StringComparison.Ordinal)))
+            .Select(t => t.FullName)
+            .ToList();
+
+        typesInNamespace.ShouldBeEmpty($"Types in deleted namespace '{deletedNamespace}' must not exist.");
+    }
+
+    [Theory]
+    [InlineData("Autheris.Infrastructure.Garnet", "src/Autheris.Infrastructure/Garnet")]
+    [InlineData("Autheris.Application.Diagnostics.Shadowing", "src/Autheris.Application/Diagnostics/Shadowing")]
+    public void Deleted_feature_directories_do_not_exist(string featureName, string relativeDirectory)
+    {
+        var fullPath = Path.Combine(RepositoryScan.RepoRoot, relativeDirectory);
+        Directory.Exists(fullPath).ShouldBeFalse($"Deleted feature directory '{relativeDirectory}' ({featureName}) must not exist.");
+    }
+}

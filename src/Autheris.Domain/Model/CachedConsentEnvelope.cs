@@ -8,7 +8,7 @@ using MemoryPack;
 namespace Autheris.Domain.Model;
 
 /// <summary>
-/// High-speed binary DTO serialized with MemoryPack for Redis and Microsoft Garnet L2 caching.
+/// High-speed binary DTO serialized with MemoryPack for Redis L2 caching.
 /// Zero-allocation, blitting-optimized binary layout.
 /// </summary>
 [MemoryPackable]

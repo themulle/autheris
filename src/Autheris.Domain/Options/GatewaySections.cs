@@ -49,7 +49,6 @@ public static class GatewaySections
     public const string ResourceGroups = "Gateway:ResourceGroups";
     public const string RowLimits = "Gateway:RowLimits";
     public const string SystemMetrics = "Gateway:SystemMetrics";
-    public const string TrafficShadowing = "Gateway:TrafficShadowing";
     public const string FinOps = "Gateway:FinOps";
     public const string Governance = "Gateway:Governance";
     public const string QueryAnalysis = "Gateway:Governance:QueryAnalysis";
@@ -61,7 +60,6 @@ public static class GatewaySections
     public const string Caching = "Gateway:Caching";
     public const string L1MemoryCache = "Gateway:Caching:L1MemoryCache";
     public const string Redis = "Gateway:Caching:Redis";
-    public const string Garnet = "Gateway:Caching:Garnet";
     public const string EpochValidation = "Gateway:Caching:EpochValidation";
     public const string Cdn = "Gateway:Caching:Cdn";
     public const string DataSources = "Gateway:DataSources";

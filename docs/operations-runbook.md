@@ -138,8 +138,8 @@ The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key
 - Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
 - Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
 - Cluster singletons (catalog sync, OpenMetadata sync, MSSQL change tracking) run under renewed, fenced leases (`TryAcquireLeaseAsync`). A replica that cannot confirm its lease for two thirds of the TTL cancels its job. Watch `autheris_scheduled_job_last_success_timestamp_seconds{job}`, `autheris_scheduled_job_skipped_total{job,reason}` and `autheris_cluster_lease_lost_total{reason}` (see F-OPS-02).
-- Multi-replica deployments require an external Redis/Garnet with AOF persistence; without it a store restart drops leases and fence counters. An external Garnet must have Lua scripting enabled (the embedded server starts with `--lua`).
-- The embedded Garnet server is process-local. Startup fails when `HighAvailability:MultiNodeClusterMode` is set or `HighAvailability:Replicas` is greater than 1 while `Caching:Garnet:EnableEmbeddedServer` is true (also when `Caching:Redis:Enabled` is true as well, because the embedded server takes precedence). Use an external Redis/Garnet for multi-replica deployments.
+- Multi-replica deployments require an external Redis with AOF persistence; without it a store restart drops leases and fence counters.
+- Multi-replica deployments require `Caching:Redis:Enabled = true`. Outside Development, startup fails closed if multi-node mode or more than 1 replica is configured without external Redis.
 
 ### 3.2 Recovery
 Once Redis connectivity is restored:

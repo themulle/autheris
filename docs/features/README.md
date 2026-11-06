@@ -84,7 +84,6 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
-| **F-OPS-01** | AST-Aware Production Traffic Shadowing & Dark Replay | [f-ops-01-traffic-shadowing-dark-replay.md](f-ops-01-traffic-shadowing-dark-replay.md) |
 | **F-OPS-02** | Enterprise High Availability, Kubernetes Helm & Distributed Concurrency | [f-ops-02-high-availability-kubernetes-helm.md](f-ops-02-high-availability-kubernetes-helm.md) |
 | **F-PERF-08** | Hierarchical Resource Groups & Workload Queuing | [f-perf-08-hierarchical-resource-groups.md](f-perf-08-hierarchical-resource-groups.md) |
 | **F-PERF-09** | GraphQL-to-SQL AST Single-Query Compiler | [f-perf-09-single-query-pushdown.md](f-perf-09-single-query-pushdown.md) |

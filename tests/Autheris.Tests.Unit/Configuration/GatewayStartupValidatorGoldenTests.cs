@@ -176,7 +176,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 
             // 20 ClusterState
             Prod("ClusterState_SqliteWithReplicas", ("HighAvailability:Replicas", "2"), ("Caching:Redis:Enabled", "true")),
-            Prod("ClusterState_EmbeddedGarnetWithReplicas", ("HighAvailability:Replicas", "2"), ("Caching:Redis:Enabled", "true"), ("GovernanceDb:Provider", "PostgreSql"), ("Caching:Garnet:EnableEmbeddedServer", "true")),
         ];
     }
 
