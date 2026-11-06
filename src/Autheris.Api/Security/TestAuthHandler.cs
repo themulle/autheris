@@ -105,7 +105,7 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
 
         if (headers.TryGetValue("X-Test-Scope", out var scopeHeader) && !string.IsNullOrWhiteSpace(scopeHeader))
         {
-            // Delegated token scopes (space separated 'scp'), e.g. the restricted scope of REQ-GOV-143.
+            // Delegated token scopes (space separated 'scp'), e.g. the restricted scope of 143.
             claims.Add(new Claim("scp", scopeHeader.ToString().Trim()));
         }
 

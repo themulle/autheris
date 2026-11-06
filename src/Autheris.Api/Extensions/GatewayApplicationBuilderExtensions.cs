@@ -47,7 +47,7 @@ public static class GatewayApplicationBuilderExtensions
         // SEC C-1 Edge Stripping: Strip any client-supplied x-autheris-* headers from untrusted clients
         app.UseMiddleware<EdgeHeaderStrippingMiddleware>();
 
-        // WP-ARC-C-04 / ARC-A-10: Rewrite /graphql/{domain} to /graphql and set DomainScope + X-Autheris-Domain
+        // 04 / ARC-A-10: Rewrite /graphql/{domain} to /graphql and set DomainScope + X-Autheris-Domain
         // BEFORE CSRF, authentication, authorization, rate limiting, and audit middlewares run.
         app.UseMiddleware<DomainScopeRewriteMiddleware>(gatewayOptions);
 
@@ -88,7 +88,7 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<BasicAuthSessionMiddleware>();
         // ADR-017 / K-K10: Canonicalize AD Windows SIDs, OIDC claims, client certs, and GatewayRoles before authorization
         app.UseMiddleware<ClaimsNormalizationMiddleware>();
-        // PLAN-SEC-115 A-9: only while the REST data family is switched off (no pipeline element otherwise).
+        // 115 A-9: only while the REST data family is switched off (no pipeline element otherwise).
         if (!ResolveReadPathSwitches(app.Services, gatewayOptions).RestDataEndpointEnabled)
         {
             app.UseMiddleware<DisabledReadPathObserverMiddleware>();
@@ -98,7 +98,7 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<ReadOnlyTokenMiddleware>(
             new PathString(ResolveGraphQlPath(gatewayOptions)),
             new PathString(ResolveMcpBasePath(gatewayOptions)));
-        // Issue #447 (SEC-ATR-02): stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
+        // Issue #447: stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
         app.UseMiddleware<IngressTransportMiddleware>();
         // Unmapped/removed routes return 404 NotFound for both authenticated and anonymous callers
         // before AuthorizationMiddleware's FallbackPolicy challenges unmatched endpoints with 401.
@@ -149,7 +149,7 @@ public static class GatewayApplicationBuilderExtensions
 
     public static WebApplication MapGatewayEndpoints(this WebApplication app, GatewayOptions gatewayOptions)
     {
-        // PLAN-SEC-115 C-115-8: the route mapping, the MCP registry and the startup line all read the one startup snapshot.
+        // 115 C-115-8: the route mapping, the MCP registry and the startup line all read the one startup snapshot.
         var switches = ResolveReadPathSwitches(app.Services, gatewayOptions);
         var effectiveOptions = app.Services.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value ?? gatewayOptions;
         LogReadPathInventory(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Autheris.ReadPaths"), effectiveOptions);
@@ -179,7 +179,7 @@ public static class GatewayApplicationBuilderExtensions
         // a headless, deterministic machine-to-machine API without HTML multiplexing.
         var gqlEndpoint = app.MapGraphQL(endpoint)
             .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
-            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447 (SEC-ATR-02)
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)

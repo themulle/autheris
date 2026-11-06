@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// Issue #111 (PLAN-111 A-1, A-2, A-6, A-10): shared read/write of the persisted dataset catalog tags and visibility tier for all governance
+/// Issue #111 ( A-1, A-2, A-6, A-10): shared read/write of the persisted dataset catalog tags and visibility tier for all governance
 /// engines. Tags (<c>TABLE_TAGS</c>) and the tier (<c>TABLE_CATALOG_SETTINGS</c>) are separate from <c>TABLES</c> because ingestion upserts
 /// rewrite it. They are never stored in the metadata cache: the repositories overlay a fresh read on every call.
 /// Read side (catalog mode): every failure degrades to the secure value (Hidden, no tags) and is counted, never thrown; strict mode (admin reads)

@@ -108,7 +108,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         return (status, title, null);
     }
 
-    /// <summary>SEC-PG-14: every problem carries a stable code derived from its status only, never from exception data.</summary>
+    /// <summary>every problem carries a stable code derived from its status only, never from exception data.</summary>
     private static string CodeForStatus(int status) => status switch
     {
         StatusCodes.Status400BadRequest => ApiErrorCodes.BadRequest,
@@ -127,7 +127,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
 
     private static (int Status, string Title, int? RetryAfter) Map(Exception exception) => exception switch
     {
-        // SEC-PG-14: the framework message names the binding parameter; only the status survives, with a fixed text.
+        // the framework message names the binding parameter; only the status survives, with a fixed text.
         BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge } => (StatusCodes.Status413PayloadTooLarge, "The request is too large.", null),
         BadHttpRequestException { StatusCode: StatusCodes.Status408RequestTimeout } => (StatusCodes.Status408RequestTimeout, "The request timed out.", null),
         BadHttpRequestException { StatusCode: StatusCodes.Status414UriTooLong } => (StatusCodes.Status414UriTooLong, "The request URI is too long.", null),
@@ -136,7 +136,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         GatewayInvalidQueryException => (StatusCodes.Status400BadRequest, "The query is invalid.", null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
         Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
-        // API-06: migrations still pending: fail closed with a retryable 503 instead of a 500 plus error log.
+        // migrations still pending: fail closed with a retryable 503 instead of a 500 plus error log.
         Autheris.Infrastructure.Persistence.Migrations.GovernanceStoreNotReadyException => (StatusCodes.Status503ServiceUnavailable, "The governance store is not ready yet. Retry later.", UnavailableRetryAfterSeconds),
         GatewayNotImplementedException => (StatusCodes.Status501NotImplemented, "The requested feature or data source capability is not implemented.", null),
         GatewayUnsupportedColumnTypeException => (StatusCodes.Status501NotImplemented, "The requested column type is not supported.", null),

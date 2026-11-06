@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 
 /// <summary>
-/// Loads the embedded expected shape of an engine (<c>governance-shape.&lt;engine&gt;.v0001.json</c>, the frozen v1.5.0 shape). Fail closed (SEC-94-08a):
+/// Loads the embedded expected shape of an engine (<c>governance-shape.&lt;engine&gt;.v0001.json</c>the frozen v1.5.0 shape). Fail closed (08a):
 /// a missing, empty or unparseable snapshot throws, an empty expected shape must never pass verification.
 /// </summary>
 internal static class GovernanceSchemaShapeLoader

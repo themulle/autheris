@@ -16,7 +16,7 @@ internal static class GatewayDenialStatusMapper
     {
         GatewayUnauthorizedException => (StatusCodes.Status401Unauthorized, "Authentication required."),
         { ErrorCode: "RESPONSE_TOO_LARGE" } => (StatusCodes.Status400BadRequest, "The response exceeds the size limit."),
-        // Issue #107 (SEC-RF107-08): a failed key-set load is an availability problem, not a policy denial; fixed message, no table or rule.
+        // Issue #107: a failed key-set load is an availability problem, not a policy denial; fixed message, no table or rule.
         { ErrorCode: Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetErrorCodes.KeySetUnavailable } =>
             (StatusCodes.Status503ServiceUnavailable, Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetErrorCodes.UnavailableMessage),
         _ => (StatusCodes.Status403Forbidden, "Access denied.")
@@ -24,7 +24,7 @@ internal static class GatewayDenialStatusMapper
 
     /// <summary>
     /// DT-A-2: the governed code of the two tenant-resolution denials, chosen by exception type only (never from exception data,
-    /// SEC-PG-14). <c>null</c> for every other denial, which keeps the status-derived code.
+    /// 14).<c>null</c> for every other denial, which keeps the status-derived code.
     /// </summary>
     internal static string? SpecificCode(GatewaySecurityException exception) => exception switch
     {
@@ -37,7 +37,7 @@ internal static class GatewayDenialStatusMapper
     /// <summary>
     /// The WebSQL response of a denial: the status and fixed title of <see cref="Map"/> in the same problem body the global handler writes
     /// (<see cref="GatewayProblemWriter"/>, NL-T-30). Only the code and the exception type are logged, never the exception object: the
-    /// inner exception of a key source failure may quote data values (C-8, SEC-11).
+    /// inner exception of a key source failure may quote data values (C-8).
     /// </summary>
     internal static Task WriteWebSqlResponseAsync(
         HttpContext httpContext, GatewaySecurityException denial, ILogger logger, CancellationToken ct)

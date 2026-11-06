@@ -17,7 +17,7 @@ public sealed class WebhookSecretUnavailableException : Exception
 }
 
 /// <summary>
-/// Protects subscription HMAC secrets at rest with an operator-provisioned key (WP-ARC-A-03). The protected value is bound to the
+/// Protects subscription HMAC secrets at rest with an operator-provisioned key. The protected value is bound to the
 /// owning tenant and subscription, so a ciphertext copied to another row never decrypts.
 /// </summary>
 public interface IWebhookSecretProtector

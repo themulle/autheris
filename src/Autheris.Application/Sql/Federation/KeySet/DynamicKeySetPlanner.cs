@@ -25,7 +25,7 @@ public sealed record KeySetJoinPlan(
 }
 
 /// <summary>
-/// WP-124-1: Dynamic Key-Set Planner & Sizing Heuristics.
+/// Dynamic Key-Set Planner & Sizing Heuristics.
 /// Detects cross-source equi-joins, determines driving vs driven dependencies using pushed predicates and catalog hints,
 /// and guards against non-equi joins and circular dependencies.
 /// </summary>
@@ -185,7 +185,7 @@ public static class DynamicKeySetPlanner
                     continue;
                 }
 
-                // Check join keys clear (SEC-DATA124-01 / SEC-FED-19)
+                // Check join keys clear
                 if (decisions.TryGetValue(driving.ResolvedIdentifier, out var drivingDec) &&
                     decisions.TryGetValue(driven.ResolvedIdentifier, out var drivenDec))
                 {

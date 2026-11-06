@@ -8,7 +8,7 @@ namespace Autheris.Infrastructure.Persistence;
 public partial class SqlServerGovernanceRepository
 {
     /// <summary>
-    /// WP-SC-10: one keyset page (ordered by consent id) of the consents of ONE tenant. The tenant predicate is mandatory (an empty tenant
+    /// one keyset page (ordered by consent id) of the consents of ONE tenant. The tenant predicate is mandatory (an empty tenant
     /// is refused, fail closed). Activity is not decided here; the caller applies <see cref="Consent.IsActive"/> at read time.
     /// </summary>
     public async Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default)

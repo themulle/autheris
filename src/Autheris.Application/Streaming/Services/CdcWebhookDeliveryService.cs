@@ -24,7 +24,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// WP-ARC-A-03: turns the CDC event stream into durable webhook outbox rows. For every event and every matching tenant subscription the
+/// turns the CDC event stream into durable webhook outbox rows. For every event and every matching tenant subscription the
 /// event is authorised as the subscription creator's principal snapshot against the CURRENT policies (<see cref="IStreamRlsPolicyEnforcer"/>:
 /// tenant, consent, Casbin, ReBAC, row filter, column masking) and only the masked result is enqueued. The raw event never reaches the
 /// outbox or the logs. Network delivery is not done here (see <see cref="WebhookDeliveryHostedService"/>); the channel is at-most-once, so

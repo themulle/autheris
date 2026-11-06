@@ -28,7 +28,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         ["strpos"] = "INSTR", ["approx_distinct"] = "APPROX_COUNT_DISTINCT", ["arbitrary"] = "ANY_VALUE"
     };
 
-    // INSERT, UPDATE, DELETE and MERGE, compiled with the typed DML security of WP-A7. A dialect lists a class only when its
+    // INSERT, UPDATE, DELETE and MERGE, compiled with the typed DML security of. A dialect lists a class only when its
     // generator and its execution evidence exist; the default (ReadOnly) rejects DML fail closed.
     private const StatementPermissions AllDml =
         StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
@@ -62,7 +62,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "MSSQL-CAP",
         DmlStatements: AllDml,
         SupportsTimeZoneConversion: true,
-        IntersectBindsTighter: true);   // REQ-SQL-130: convert_timezone has a generator rule
+        IntersectBindsTighter: true);   // convert_timezone has a generator rule
 
     private static readonly DialectCapabilities DuckDb = new(
         Dialect: TargetSqlDialect.DuckDb,
@@ -93,7 +93,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "DUCK-PREP",
         DmlStatements: AllDml,
         SupportsTimeZoneConversion: true,
-        IntersectBindsTighter: true);   // REQ-SQL-130: convert_timezone has a generator rule
+        IntersectBindsTighter: true);   // convert_timezone has a generator rule
 
     private static readonly DialectCapabilities PostgreSql = new(
         Dialect: TargetSqlDialect.PostgreSql,
@@ -124,7 +124,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "PG-PROTO",
         DmlStatements: AllDml,
         SupportsTimeZoneConversion: true,
-        IntersectBindsTighter: true);   // REQ-SQL-130: convert_timezone has a generator rule
+        IntersectBindsTighter: true);   // convert_timezone has a generator rule
 
     private static readonly DialectCapabilities Oracle = new(
         Dialect: TargetSqlDialect.Oracle,
@@ -147,7 +147,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         SupportsFilterClause: false,
         SupportsTryCast: false,
         LimitGuaranteed: true,
-        InDbHmac: false,                                           // true only after a DBMS_CRYPTO grant probe (WP-F6)
+        InDbHmac: false,                                           // true only after a DBMS_CRYPTO grant probe
         TenantComparison: TenantComparisonStyle.RawCast,
         BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Oracle, OracleRewrites),
@@ -159,7 +159,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
     private static readonly DialectCapabilities Databricks = new(
         Dialect: TargetSqlDialect.Databricks,
         Tier: DialectSupportTier.Experimental,
-        MaxBindParameters: 1000,                                   // provisional fail-closed budget until the live probe (WP-C5)
+        MaxBindParameters: 1000,                                   // provisional fail-closed budget until the live probe
         MaxInListItems: null,
         MaxIdentifierLength: 255,
         IdentifierLengthUnit: IdentifierLengthUnit.Characters,
@@ -190,7 +190,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
 
     private static readonly IReadOnlyDictionary<string, string> SqliteRewrites = new Dictionary<string, string> { ["strpos"] = "INSTR" };
 
-    // WP-X0h (SEC-X1-10). The closed function allowlist is SqlFunctionAllowlists.Sqlite (no load_extension, randomblob, zeroblob,
+    // WP-X0h. The closed function allowlist is SqlFunctionAllowlists.Sqlite (no load_extension, randomblob, zeroblob,
     // printf, format, json_each, pragma_*, sqlite_*, gateway_hmac_sha256 from user SQL). The limits are the bundled library defaults.
     private static readonly DialectCapabilities Sqlite = new(
         Dialect: TargetSqlDialect.Sqlite,
@@ -222,7 +222,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         DmlStatements: StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete,
         MaxCompoundSelectTerms: 500,                               // SQLITE_MAX_COMPOUND_SELECT (the check-option UNION ALL chain, CR-ADG-44)
         MaxExpressionDepth: 1000,                                  // SQLITE_MAX_EXPR_DEPTH
-        LikeIsCaseInsensitive: true);                              // ASCII case-insensitive LIKE (SEC-ADG-18)
+        LikeIsCaseInsensitive: true);                              // ASCII case-insensitive LIKE
 
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();

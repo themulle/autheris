@@ -32,7 +32,7 @@ public sealed record TenantBinding(string ParameterName, object Value, SqlParame
 /// <param name="Expression">Predicate over the secured table. Contains parameter nodes, never raw values (INV-5).</param>
 /// <param name="Parameters">Values by parameter name; they are bound, never inlined.</param>
 /// <param name="Fingerprint">SHA-256 hex of the predicate shape (nodes, parameter names and types). Values are not part of it.</param>
-/// <param name="ReferencedColumns">Lower-case names of target-table columns the predicate references (SEC-ADG-06).</param>
+/// <param name="ReferencedColumns">Lower-case names of target-table columns the predicate references.</param>
 public sealed record PolicyPredicate(
     Expression Expression,
     FrozenDictionary<string, PolicyValue> Parameters,

@@ -24,7 +24,7 @@ using Microsoft.Extensions.Options;
 
 public static partial class WebSqlEndpoints
 {
-    /// <summary>#293 (SEC-PG-11): fixed texts; never the JSON parser message, a property path or a .NET type name.</summary>
+    /// <summary>#293: fixed texts; never the JSON parser message, a property path or a.NET type name.</summary>
     internal const string InvalidRequestBodyMessage = "The request body must be a JSON object with a string 'sql' and an optional 'parameters' object of scalar values.";
     internal const string MissingSqlMessage = "A non-empty SQL statement is required.";
 
@@ -33,7 +33,7 @@ public static partial class WebSqlEndpoints
         await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, code, message, ct);
     }
 
-    /// <summary>SEC-12H-06: unknown and not-owned statements answer the same fixed bytes (NL-SC-22/28); the statement id is not echoed.</summary>
+    /// <summary>unknown and not-owned statements answer the same fixed bytes (NL-SC-22/28); the statement id is not echoed.</summary>
     private static Task StatementNotFoundAsync(HttpContext httpContext) =>
         ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Statement not found or expired.").ExecuteAsync(httpContext);
 
@@ -405,7 +405,7 @@ public static partial class WebSqlEndpoints
         }
         catch (SecurityException ex)
         {
-            // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
+            // Uniform 404 response to eliminate the enumeration oracle
             logger.Warning(ex, "Unauthorized statement access attempt for {StatementId}", statementId);
             await StatementNotFoundAsync(httpContext);
         }
@@ -456,7 +456,7 @@ public static partial class WebSqlEndpoints
         }
         catch (SecurityException)
         {
-            // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
+            // Uniform 404 response to eliminate the enumeration oracle
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
         }
     }

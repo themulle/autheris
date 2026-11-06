@@ -6,7 +6,7 @@ namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 /// <summary>
 /// PostgreSQL catalog reader on <c>pg_catalog</c> (visible to every login, unlike <c>information_schema</c>). Tables resolve the way the
 /// runtime resolves unqualified names, through the <c>search_path</c> (<c>to_regclass</c>); a table of the same name in another schema
-/// neither satisfies nor hides the check (SEC-94-08d).
+/// neither satisfies nor hides the check (08d).
 /// </summary>
 internal sealed class PostgreSqlSchemaCatalogReader : IGovernanceSchemaCatalogReader
 {

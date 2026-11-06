@@ -323,7 +323,7 @@ public sealed partial class GovernedChangeDetectionService
             return false;
         }
 
-        // REQ-GOV-129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
+        // 129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
         return InMemoryRowFilterEvaluator.RowPassesDecision(row, decision, metadata);
     }
 

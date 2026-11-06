@@ -18,7 +18,7 @@ using Autheris.Infrastructure.Persistence.Catalog;
 
 /// <summary>
 /// Engine-neutral statement execution, parameter binding, row hydration, and catalog helpers
-/// across PostgreSQL, SQL Server, and SQLite (ARCH-MNT-22 Step 3).
+/// across PostgreSQL, SQL Server, and SQLite ( Step 3).
 /// This class operates over <see cref="DbConnection"/> and <see cref="DbCommand"/>, and never opens,
 /// commits, rolls back, or disposes connections or transactions.
 /// </summary>

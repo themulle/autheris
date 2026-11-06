@@ -152,7 +152,7 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
 
         var newValidTo = consent.ValidTo.Add(extensionDuration);
 
-        // WP-SC-16 rule 3: an extension of an individual grant is a new approval by someone other than the grantee, capped by the
+        // 16 rule 3: an extension of an individual grant is a new approval by someone other than the grantee, capped by the
         // class maximum (now + max), with a role-conversion hint after repeated renewals and a campaign decision from the 4th.
         var sensitivity = GrantSensitivity.Sensitive; // fail closed when the table cannot be classified
         if (_metadataRepo != null)

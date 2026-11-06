@@ -82,7 +82,7 @@ public static class GatewaySecurityServiceExtensions
             return service;
         });
 
-        // ReBAC / OpenFGA Relationship-Based Access Control (F-SEC-04)
+        // ReBAC / OpenFGA Relationship-Based Access Control (F-)
         // RR-L4-04: cluster-wide persistent tuple store whenever Redis/Garnet is configured; in-memory only for single-node.
         services.AddSingleton<IRebacStore>(sp =>
         {

@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Central RFC 7807 <c>application/problem+json</c> error factory (WP-ARC-C-05).
+/// Central RFC 7807 <c>application/problem+json</c>error factory.
 /// Produces standardized <see cref="ProblemDetails"/> responses with <c>urn:autheris:error:{code}</c> type URIs,
 /// correlation/trace identifiers, and the Decision G-9 compatibility <c>error</c> extension property.
 /// </summary>

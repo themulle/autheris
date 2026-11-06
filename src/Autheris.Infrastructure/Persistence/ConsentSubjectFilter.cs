@@ -3,7 +3,7 @@ using Autheris.Domain.Common;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// WP-SC-01: helpers shared by the three governance repositories for the indexed consent query. The SQL filter is only a
+/// helpers shared by the three governance repositories for the indexed consent query. The SQL filter is only a
 /// prefilter: the C# filter on the loaded rows stays authoritative, so the result is identical to the former in-memory filter.
 /// </summary>
 internal static class ConsentSubjectFilter
@@ -16,7 +16,7 @@ internal static class ConsentSubjectFilter
     /// <see cref="StringComparison.OrdinalIgnoreCase"/> implies equal here, so the prefilter never drops a consent that the C# filter keeps.
     /// </summary>
     /// <summary>
-    /// WP-SC-16: start of the read-time clamp period after a renewal. The clamp is <c>min(valid_to, valid_from + max)</c>, so a renewal
+    /// start of the read-time clamp period after a renewal. The clamp is<c>min(valid_to, valid_from + max)</c>, so a renewal
     /// restarts the period at <paramref name="now"/> by moving <c>valid_from</c> forward (as access-profile renewals do with <c>assigned_at</c>);
     /// a grant that has not started yet keeps its later start. No extra column is needed, so the 0001 baselines stay unchanged.
     /// </summary>

@@ -21,7 +21,7 @@ public interface IVirtualFilterFederationPlanner
     /// <param name="tables">The resolved tables of the query (a table may occur several times).</param>
     /// <param name="decisions">The access decision of every table, keyed by source-qualified identifier.</param>
     /// <param name="tenant">The caller's tenant.</param>
-    /// <param name="ct">Cancellation; the request timeout covers key loading (SEC-12).</param>
+    /// <param name="ct">Cancellation; the request timeout covers key loading.</param>
     /// <param name="keySourceReads">
     /// Receives every key set read as soon as it completes, so a later denial of the plan still leaves the reads on record
     /// (AC-9.1, CR-04). Optional.

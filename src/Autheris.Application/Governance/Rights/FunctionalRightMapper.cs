@@ -96,7 +96,7 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         var rights = new HashSet<FunctionalRight>();
         foreach (var mapping in mappings)
         {
-            // SEC-SC-22: Four-Eyes Principle: privileged rights require approved_by != created_by (both non-null)
+            // Four-Eyes Principle: privileged rights require approved_by != created_by (both non-null)
             if (mapping.FunctionalRight.IsPrivileged)
             {
                 if (string.IsNullOrWhiteSpace(mapping.ApprovedBy) ||
@@ -115,7 +115,7 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
                 }
             }
 
-            // SEC-SC-22: Customer Realm Ceiling: barred from admin, approve, and unmask rights
+            // Customer Realm Ceiling: barred from admin, approve, and unmask rights
             if (isCustomerRealm)
             {
                 if (mapping.FunctionalRight.IsPrivileged ||
@@ -151,7 +151,7 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
 
         FunctionalRightMappingValidator.ValidateCreation(mapping, realm);
 
-        // SEC-SC-22: If Privileged and creator attempts self-approval in the creation payload, clear approval
+        // If Privileged and creator attempts self-approval in the creation payload, clear approval
         var sanitized = mapping;
         if (mapping.FunctionalRight.IsPrivileged &&
             !string.IsNullOrWhiteSpace(mapping.ApprovedBy) &&

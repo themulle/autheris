@@ -226,6 +226,15 @@ public sealed partial class ProgramRatchetTests(ITestOutputHelper output)
         actual.ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("// see #123")]
+    [InlineData("/// <summary>Known limitation (#515).</summary>")]
+    [InlineData("/* Issue #447: transport gate */")]
+    public void Plan_id_regex_allows_github_issue_refs(string commentLine)
+    {
+        CountPlanIdsInLine(commentLine).ShouldBe(0);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public void Pr_template_declares_freeze_and_size_labels()

@@ -193,7 +193,7 @@ public sealed class RecertificationService : IRecertificationService
 
         var reviewer = reviewerId.Trim();
 
-        // SEC-SC-15: Anti-Self-Review Rule
+        // Anti-Self-Review Rule
         if (string.Equals(reviewer, item.AssignedTo.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             throw new SecurityException($"Self-certification prohibited: Reviewer '{reviewerId}' cannot certify their own assignment (SEC-SC-15: self_certification_prohibited).");

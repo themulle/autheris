@@ -25,7 +25,7 @@ using OpenTelemetry.Trace;
 public static class GatewayCoreServiceExtensions
 {
     /// <summary>
-    /// Allowed request headers of the developer CORS policy. The app identity header (Issue #281, SEC-281-10) is added only while app-scoped
+    /// Allowed request headers of the developer CORS policy. The app identity header (Issue #281) is added only while app-scoped
     /// trusted documents are enabled; CORS never replaces the Origin check of the middleware.
     /// </summary>
     internal static string[] DeveloperCorsHeaders(GatewayOptions options)
@@ -58,7 +58,7 @@ public static class GatewayCoreServiceExtensions
         services.AddSingleton(sp => new PersistentConnectionLimiter(
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.ResourceGroups));
 
-        // Canonical System Metadata & Monitoring (F-API-07)
+        // Canonical System Metadata & Monitoring (F-)
         services.AddSingleton<IGatewaySystemMetricsService, GatewaySystemMetricsService>();
 
         // Explicit CORS policy configuration

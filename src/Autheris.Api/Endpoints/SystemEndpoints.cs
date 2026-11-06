@@ -24,7 +24,7 @@ public static class SystemEndpoints
 {
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        // F-API-07: Canonical System Metadata & Monitoring Schema ($system / __gateway)
+        // F-Canonical System Metadata & Monitoring Schema ($system / __gateway)
         app.MapGet("/api/governance/system/metrics", async (
             HttpContext context,
             IGatewaySystemMetricsService metricsService,
@@ -102,13 +102,13 @@ public static class SystemEndpoints
         return app;
     }
 
-    /// <summary>Cap on the table names listed in the health payload (BUG #157, SEC-BUG157-03).</summary>
+    /// <summary>Cap on the table names listed in the health payload (BUG #157).</summary>
     internal const int MaxListedOmittedTables = 100;
 
     /// <summary>
     /// BUG #157: GraphQL catalog omissions for the health payload. Table names are catalog metadata and are listed only for
-    /// GovernanceAdmin; every other authorised caller gets the count (SEC-BUG157-02). Null when no diagnostics are registered, which
-    /// omits the property. Entries carry only the qualified table name and the reason (SEC-BUG157-03). Never influences the status.
+    /// GovernanceAdmin; every other authorised caller gets the count. Null when no diagnostics are registered, which
+    /// omits the property. Entries carry only the qualified table name and the reason. Never influences the status.
     /// </summary>
     private static object? BuildCatalogDiagnostics(ICatalogSchemaDiagnostics? diagnostics, ClaimsPrincipal user)
     {

@@ -165,7 +165,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
             return;
         }
 
-        // #112 SEC-112-19: every aliased aggregate or metric field counts; decided before any resolver runs, text without schema details.
+        // #112 every aliased aggregate or metric field counts; decided before any resolver runs, text without schema details.
         if (CountAggregateRootFields(document, context.Schema, _maxAggregateFieldsPerOperation) > _maxAggregateFieldsPerOperation)
         {
             _onQueryTooComplex?.Invoke();
@@ -312,7 +312,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     _ => schema.QueryType
                 };
 
-                // Issue #279 (SEC-279-6): no root type (e.g. subscriptions disabled) -> skip costing; the standard
+                // Issue #279: no root type (e.g. subscriptions disabled) -> skip costing; the standard
                 // unknown-root validation error rejects the document.
                 if (rootType is null)
                 {
@@ -524,14 +524,14 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                                 limitIsVariable = true;
                                 var varName = varNode.Name.Value;
 
-                                // SEC-RG-05: a supplied value (even an explicit null) always wins over the declared default; the default
+                                // a supplied value (even an explicit null) always wins over the declared default; the default
                                 // applies only to a variable that is absent from the variable values (GraphQL spec 6.1.2).
                                 if (variableValues != null && variableValues.TryGetValue(varName, out var runtimeValue))
                                 {
                                     switch (ClassifyRuntimeLimit(runtimeValue, out var runtimeNumber))
                                     {
                                         case RuntimeLimit.Number when runtimeNumber == 0:
-                                            // SEC-PG-07: a runtime value of 0 is a bounded query, never the worst case and never free.
+                                            // a runtime value of 0 is a bounded query, never the worst case and never free.
                                             zeroLimit = true;
                                             break;
                                         case RuntimeLimit.Number when treeField && (runtimeNumber < 0 || runtimeNumber > treeBound):
@@ -544,7 +544,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                                             rejectedAtExecution = true;
                                             break;
                                         case RuntimeLimit.Null when treeField:
-                                            // An explicit null executes the field's default page (SEC-RG-06), never the declared variable default.
+                                            // An explicit null executes the field's default page, never the declared variable default.
                                             requestedLimit = treeDefault;
                                             break;
                                         default:
@@ -598,7 +598,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     int effectiveRows;
                     if (zeroLimit)
                     {
-                        // SEC-PG-07 (#302): first: 0 is priced as the minimum bounded query (one row), never as zero cost or unbounded.
+                        // 07 (#302): first: 0 is priced as the minimum bounded query (one row), never as zero cost or unbounded.
                         effectiveRows = 1;
                     }
                     else if (requestedLimit > 0)
@@ -627,7 +627,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                     bool isRootField = currentDepth <= 1 || (currentType != null && currentType == schema.QueryType);
 
-                    // Issue #421 (WP-D of #417) / CRIT-02: Apply surcharge multiplier if root list plan has no usable index
+                    // Issue #421 ( of #417) / CRIT-02: Apply surcharge multiplier if root list plan has no usable index
                     if (isRootField && isPagedList && effectiveRows > 1 && _costOptions is not null && _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
                     {
                         var tableMeta = _tableMetadataLookup?.Invoke(field.Name.Value)
@@ -695,7 +695,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                         }
                         else
                         {
-                            // SEC-GOV177-05: Single object selection (1:1 / N:1 vs uncataloged/ambiguous)
+                            // Single object selection (1:1 / N:1 vs uncataloged/ambiguous)
                             bool isRootField = currentDepth <= 1 ||
                                                (currentType != null && (currentType == schema.QueryType ||
                                                                         currentType == schema.MutationType ||

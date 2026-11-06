@@ -8,7 +8,7 @@ using HotChocolate.Resolvers;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Issue #447 (SEC-ATR-05): the service scope a resolver receives can differ from the request scope that carries the stamped ingress.
+/// Issue #447: the service scope a resolver receives can differ from the request scope that carries the stamped ingress.
 /// Before every field the ingress of the request (put into the request's context data by <see cref="TransportGateMiddleware"/>) is copied
 /// into the resolver scope, so the choke points behind the resolver (aggregation, metrics, table reads) see the same transport. The copy
 /// is set-once: a scope that already carries the same value is untouched, and a scope that carries another value fails the request.

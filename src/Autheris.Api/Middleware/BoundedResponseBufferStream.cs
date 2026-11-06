@@ -37,7 +37,7 @@ internal sealed class BoundedResponseBufferStream : Stream
     public long BufferedLength => _buffer.Length;
 
     /// <summary>
-    /// WP-ARC-C-14: Zero-copy view over the underlying buffer via <see cref="MemoryStream.TryGetBuffer"/>.
+    /// Zero-copy view over the underlying buffer via<see cref="MemoryStream.TryGetBuffer"/>.
     /// Avoids allocating a second <c>byte[]</c> when no egress interceptor mutates the response body.
     /// </summary>
     public ReadOnlyMemory<byte> WrittenMemory =>

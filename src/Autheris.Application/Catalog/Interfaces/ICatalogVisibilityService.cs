@@ -24,7 +24,7 @@ public sealed record CatalogCaller(ClaimsPrincipal? Principal, TenantId Tenant, 
 
 /// <summary>
 /// A visible catalog row together with the output shape the channel must apply. <see cref="CatalogOutputShape.NotFound"/> is
-/// unrepresentable: the constructor rejects it, so a channel can never receive a "hidden" row (issue #138 INC-1, SEC-CAT138-15).
+/// unrepresentable: the constructor rejects it, so a channel can never receive a "hidden" row (issue #138 INC-1).
 /// </summary>
 public readonly record struct CatalogVisibleRow
 {

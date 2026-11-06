@@ -158,7 +158,7 @@ public sealed class CallerAttributeSet
     public override string ToString() => $"CallerAttributeSet {{ Count = {_results.Count} }}";
 }
 
-/// <summary>A source of attribute values. Registered through DI (<c>IEnumerable&lt;ICallerAttributeProvider&gt;</c>); WP-SC-05/07 add kinds later.</summary>
+/// <summary>A source of attribute values. Registered through DI (<c>IEnumerable&lt;ICallerAttributeProvider&gt;</c>); 05/07 add kinds later.</summary>
 public interface ICallerAttributeProvider
 {
     string Kind { get; }
@@ -221,7 +221,7 @@ public interface ICallerAttributeRegistry
     void Invalidate();
 }
 
-/// <summary>Hook for admin refresh and (later) the SCIM lock/deprovision event of WP-SC-07 (BC-129-14).</summary>
+/// <summary>Hook for admin refresh and (later) the SCIM lock/deprovision event of 07 (BC-129-14).</summary>
 public interface ICallerAttributeCacheInvalidator
 {
     void InvalidateSubject(TenantId tenant, string subjectKey);

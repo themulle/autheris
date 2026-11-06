@@ -956,7 +956,7 @@ RETURNING structure_version, content_version;";
         return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
     }
 
-    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (SEC-REL151-07, no LIMIT 1).</summary>
+    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (no LIMIT 1).</summary>
     private static Task<string> ResolveActiveTableIdAsync(SqliteConnection conn, SqliteTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
         => CatalogSqlCore.ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
 

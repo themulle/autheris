@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Autheris.Infrastructure.Persistence.Migrations;
 
-/// <summary>Runs the ordered governance schema migrations (WP-ARC-B-12).</summary>
+/// <summary>Runs the ordered governance schema migrations.</summary>
 public interface IGovernanceMigrationRunner
 {
     /// <summary>Applies, verifies or skips the pending migrations according to <c>GovernanceDb:Migrations:Mode</c>. Throws when they cannot be satisfied.</summary>
@@ -115,7 +115,7 @@ public sealed class GovernanceSchemaDriftException : InvalidOperationException
 
 /// <summary>
 /// A governance store was used before schema migration and initialization completed. Fail closed: no read or write is served
-/// from a store whose schema, audit chain tail and chain anchor have not been established (WP-ARC-B-12).
+/// from a store whose schema, audit chain tail and chain anchor have not been established.
 /// </summary>
 public sealed class GovernanceStoreNotReadyException(string store) : InvalidOperationException(
     $"The governance store '{store}' was used before schema migration and initialization completed (fail closed).")

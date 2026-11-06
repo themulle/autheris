@@ -38,7 +38,7 @@ public static class McpAdminTools
         WriteIndented = false
     };
 
-    // Issue #107 (SEC-RF107-14b): the row filter evaluation tools reject unknown properties; the strategy is a string, so numbers fail to bind.
+    // Issue #107 (14b): the row filter evaluation tools reject unknown properties; the strategy is a string, so numbers fail to bind.
     private static readonly JsonSerializerOptions StrictJsonOptions = new(JsonOptions)
     {
         UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow

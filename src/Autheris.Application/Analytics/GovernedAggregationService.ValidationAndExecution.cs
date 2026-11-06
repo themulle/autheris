@@ -229,7 +229,7 @@ public sealed partial class GovernedAggregationService
             return;
         }
 
-        // WP-0 (SEC-112-01): the referenced-column set is a union, never a replacement. The text of the predicate is always scanned as well
+        // the referenced-column set is a union, never a replacement. The text of the predicate is always scanned as well
         // (defence in depth), so a clause that arrives with a partial set (for example a metric filter combined with a request predicate)
         // is checked against every identifier of its text. Placeholders of bound parameters (@gq1) are not identifiers and are removed first; an @name without a bound parameter is still checked.
         // A clause that carries both a column set and bound parameters is generated text: there only identifiers that resolve to a table
@@ -336,11 +336,11 @@ public sealed partial class GovernedAggregationService
         IReadOnlyList<AggregateSelection> resolvedAggregates,
         CancellationToken ct)
     {
-        // Issue #447 C4 (SEC-ATR-07/08): after the access decision the caller resolved, before the planner, executor or any read.
+        // Issue #447 C4 (08): after the access decision the caller resolved, before the planner, executor or any read.
         await _transportGate.EnsureCatalogSourceAsync(
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 
-        // WP-2 (F-1): a SQL table is aggregated in the database by the governed planner, so no row cap applies. The in-memory branches
+        //  (F-1): a SQL table is aggregated in the database by the governed planner, so no row cap applies. The in-memory branches
         // below serve the other source types and deployments without a SQL execution service.
         bool usePlanner = UsesPlanner(metadata);
         var executor = usePlanner ? null : _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
@@ -369,7 +369,7 @@ public sealed partial class GovernedAggregationService
 
             var rawRows = await executor.ExecuteAsync(execContext, ct).ConfigureAwait(false);
 
-            // WP-0 (F-1a): a read that fills the page cannot be told apart from a truncated read, and an aggregate over a truncated prefix is wrong.
+            //  (F-1a): a read that fills the page cannot be told apart from a truncated read, and an aggregate over a truncated prefix is wrong.
             if (rawRows.Count >= InMemoryAggregationRowCap)
             {
                 throw new AggregationRowCapExceededException();
@@ -446,7 +446,7 @@ public sealed partial class GovernedAggregationService
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(sqlRequest, principal, tenantId, ct).ConfigureAwait(false);
             if (sqlResult.Rows.Count > 0 && sqlResult.Rows[0].ContainsKey(planned.CountColumnAlias))
             {
-                // WP-2 (F-2): the planner was asked for one group more than the limit; a surplus group means the SQL cut groups off.
+                //  (F-2): the planner was asked for one group more than the limit; a surplus group means the SQL cut groups off.
                 bool sourceTruncated = sqlResult.Rows.Count > sqlLimit;
                 var plannedRows = sourceTruncated ? sqlResult.Rows.Take(sqlLimit).ToList() : sqlResult.Rows;
                 return new BucketRead(

@@ -102,7 +102,7 @@ public class GatewayInvalidQueryException : Exception
 }
 
 /// <summary>
-/// #330 (SEC-RG-07): a page size or offset outside its allowed range. The message is a server constant without caller text; it is the only
+/// #330: a page size or offset outside its allowed range. The message is a server constant without caller text; it is the only
 /// message the GraphQL error shield passes through outside Development.
 /// </summary>
 public sealed class GatewayPageRangeException : GatewayInvalidQueryException
@@ -154,7 +154,7 @@ public sealed class GatewayUnsupportedColumnTypeException : Exception
 }
 
 /// <summary>
-/// Issue #447 (SEC-ATR-08): the data source does not allow the ingress transport of the request. An unknown source and a denied transport
+/// Issue #447: the data source does not allow the ingress transport of the request. An unknown source and a denied transport
 /// produce the same exception, so a caller cannot tell them apart. The echoed logical name is length-capped and stripped of control characters.
 /// </summary>
 public sealed class TransportNotAllowedException : GatewaySecurityException
@@ -167,7 +167,7 @@ public sealed class TransportNotAllowedException : GatewaySecurityException
     {
     }
 
-    /// <summary>Strips control characters and caps the length of a caller-supplied name before it is echoed, audited or logged (SEC-ATR-08/09).</summary>
+    /// <summary>Strips control characters and caps the length of a caller-supplied name before it is echoed, audited or logged (09).</summary>
     public static string SanitizeName(string? name)
     {
         if (string.IsNullOrEmpty(name))

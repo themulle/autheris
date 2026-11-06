@@ -40,7 +40,7 @@ public sealed record NamedBindMarkerExpression : Expression
 /// A value bound by the gateway (tenant, policy, mask argument). It never originates from request text; the value comes from
 /// the <see cref="ParameterSource"/> at emission time, so the AST (and a cached template) stays value-free.
 /// <paramref name="IsLikePattern"/> marks an admin-authored LIKE pattern whose wildcards are intentional; any other policy
-/// value used as a LIKE pattern is escaped (SEC-ADG-18). <paramref name="ColumnType"/> is the catalog data type of the column the
+/// value used as a LIKE pattern is escaped.<paramref name="ColumnType"/> is the catalog data type of the column the
 /// value is compared with (CR-ADG-09); the binder follows it.
 /// </summary>
 public sealed record PolicyParameterExpression(
@@ -70,7 +70,7 @@ public sealed record ParameterReference(
 
 /// <summary>
 /// A literal of the user's query. <paramref name="ColumnType"/> is the catalog data type of the column the literal is compared with
-/// (SEC-ADG-16 item 2); the generator and the binder follow it. <paramref name="ColumnTypeUnknown"/> marks a comparison with a
+/// (16 item 2); the generator and the binder follow it.<paramref name="ColumnTypeUnknown"/> marks a comparison with a
 /// catalog column whose type is missing or not understood. Both are set only by the governed compiler, never by the AST builder.
 /// </summary>
 public sealed record LiteralExpression(

@@ -326,7 +326,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 }
                 catch (TableMetadataUnavailableException)
                 {
-                    // SEC-94-01: an unavailable table is never ingested as a new one (its stored masking rules would be lost).
+                    // an unavailable table is never ingested as a new one (its stored masking rules would be lost).
                     warnings.Add($"Schema '{schemaName}': skipped, the stored metadata of table '{tableId}' is unavailable (invalid key or index definition).");
                     continue;
                 }

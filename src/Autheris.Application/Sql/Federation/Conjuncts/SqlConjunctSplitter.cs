@@ -19,7 +19,7 @@ public sealed record ExtractedConjunct(
     IReadOnlySet<TableSource>? AllowedTableSources = null);
 
 /// <summary>
-/// WP-122-1: Splits WHERE and join ON clauses into boolean AND conjuncts using an AST visitor.
+/// Splits WHERE and join ON clauses into boolean AND conjuncts using an AST visitor.
 /// Preserves outer join semantics and Three-Valued Logic safety boundaries.
 /// </summary>
 public static class SqlConjunctSplitter
@@ -40,7 +40,7 @@ public static class SqlConjunctSplitter
 
         if (querySpec.From != null)
         {
-            // SEC-DATA122-03: Full outer joins invalidate all pushdown (fail closed).
+            // Full outer joins invalidate all pushdown (fail closed).
             if (HasFullOuterJoin(querySpec.From))
             {
                 return Array.Empty<ExtractedConjunct>();

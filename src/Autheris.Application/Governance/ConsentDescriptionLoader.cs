@@ -7,7 +7,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// PLAN-GOV-158-INC1: the explicit opt-in load of <c>CONSENTS.description</c>. The read methods of <see cref="IConsentRepository"/> never load it (the access
+/// the explicit opt-in load of<c>CONSENTS.description</c>. The read methods of <see cref="IConsentRepository"/> never load it (the access
 /// decision hot path does not need it); explain, consent listings, myActiveConsents and the manifest compare call this once for the consents they present.
 /// A repository without description support leaves the consents as they are (descriptions stay unset, never an error).
 /// </summary>

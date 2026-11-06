@@ -31,7 +31,7 @@ public class ParserPooledObjectPolicy : IPooledObjectPolicy<SqlBaseParser>
 
     /// <summary>
     /// Called after a parser was taken from the pool: a parser bound to an older generation is rebuilt on the current one, with the same
-    /// SLL mode, error strategy and listeners as <see cref="Create"/> (ARCH-MNT-15-SC-08).
+    /// SLL mode, error strategy and listeners as <see cref="Create"/>(SC-08).
     /// </summary>
     public void PrepareForUse(SqlBaseParser parser)
     {

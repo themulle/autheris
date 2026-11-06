@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Stable, machine-readable error codes for RFC 7807 <c>application/problem+json</c> responses (WP-ARC-C-05).
+/// Stable, machine-readable error codes for RFC 7807 <c>application/problem+json</c>responses.
 /// </summary>
 public static class ApiErrorCodes
 {
@@ -27,7 +27,7 @@ public static class ApiErrorCodes
     public const string CrossTenantAccessForbidden = "CROSS_TENANT_ACCESS_FORBIDDEN";
     public const string TenantUnresolved = "TENANT_UNRESOLVED";
 
-    /// <summary>Issue #447: the data source does not allow the ingress transport (also for an unknown source, SEC-ATR-08).</summary>
+    /// <summary>Issue #447: the data source does not allow the ingress transport (also for an unknown source).</summary>
     public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
     public const string TenantClaimInvalid = "TENANT_CLAIM_INVALID";
     public const string ConsentTenantInvalid = "CONSENT_TENANT_INVALID";
@@ -70,7 +70,7 @@ public static class ApiErrorCodes
     public const string ResourceLocked = "RESOURCE_LOCKED";
     public const string VirtualFilterInvalid = "VIRTUAL_FILTER_INVALID";
 
-    // O-5b step 2 (WP-0): codes of the migrated bare error bodies. Registered here once so no later work package touches this file.
+    // O-5b step 2: codes of the migrated bare error bodies. Registered here once so no later work package touches this file.
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
     public const string InvalidTag = "INVALID_TAG";
     public const string InvalidVisibility = "INVALID_VISIBILITY";
@@ -102,7 +102,7 @@ public static class ApiErrorCodes
     public const string OlapFailed = "OLAP_FAILED";
     public const string OlapCapacity = "OLAP_CAPACITY";
 
-    // O-5b step 2 (WP-5): codes of the middleware that used to write raw JSON; each is a fixed code, never derived from input.
+    // O-5b step 2: codes of the middleware that used to write raw JSON; each is a fixed code, never derived from input.
     public const string AuthPluginFailed = "AUTH_PLUGIN_FAILED";
     public const string AuthPluginTimeout = "AUTH_PLUGIN_TIMEOUT";
     public const string TenantRegistryUnavailable = "TENANT_REGISTRY_UNAVAILABLE";

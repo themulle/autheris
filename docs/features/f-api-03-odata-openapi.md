@@ -1,6 +1,6 @@
 # F-API-03: Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1)
 
-**Components:** [`ODataEndpoints.cs`](../../src/Autheris.Api/Endpoints/ODataEndpoints.cs), [`IODataHandler.cs`](../../src/Autheris.Extensions/OData/IODataHandler.cs), [`ODataCsdlGenerator.cs`](../../src/Autheris.Extensions/OData/ODataCsdlGenerator.cs), [`DynamicOpenApiGenerator.cs`](../../src/Autheris.Application/OData/Services/DynamicOpenApiGenerator.cs)
+**Components:** [`ODataEndpoints.cs`](../../src/Autheris.Api/Endpoints/ODataEndpoints.cs), [`IODataHandler.cs`](../../src/Autheris.Application/OData/IODataHandler.cs), [`ODataCsdlGenerator.cs`](../../src/Autheris.Application/OData/ODataCsdlGenerator.cs), [`DynamicOpenApiGenerator.cs`](../../src/Autheris.Application/OData/Services/DynamicOpenApiGenerator.cs)
 
 ---
 

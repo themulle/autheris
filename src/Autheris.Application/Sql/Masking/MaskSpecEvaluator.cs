@@ -6,7 +6,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// WP-ARC-B-04: evaluates a typed <see cref="MaskSpec"/> on an in-memory value, so a column masked in memory (HTTP and other non-SQL
+/// evaluates a typed<see cref="MaskSpec"/> on an in-memory value, so a column masked in memory (HTTP and other non-SQL
 /// sources) and a column masked by the dialect generator in SQL share one definition of the mask kind, its arguments and its null
 /// handling. Covers the kinds that need no key: <see cref="MaskKind.Nullify"/>, <see cref="MaskKind.Redact"/>,
 /// <see cref="MaskKind.Constant"/> and <see cref="MaskKind.PartialMask"/>. Keyed or numeric kinds (<see cref="MaskKind.Hmac"/>,

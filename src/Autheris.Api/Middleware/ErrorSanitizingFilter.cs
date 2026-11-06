@@ -46,9 +46,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "INVALID_QUERY_OPTION",
         "COST_LIMIT",
         "ROW_LIMIT",
-        // Issue #107: fixed message without table or rule names (SEC-RF107-08).
+        // Issue #107: fixed message without table or rule names.
         "ROW_FILTER_KEY_SET_UNAVAILABLE",
-        // WP-0 (PLAN-GOV-113): fixed messages without ids or names; expected business outcomes, not server faults.
+        // fixed messages without ids or names; expected business outcomes, not server faults.
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",
         "READ_ONLY_TOKEN",
@@ -56,10 +56,10 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "RELATION_KEY_MASKED",
         "CROSS_SOURCE_KEY_MASKED",
         "CROSS_SOURCE_RELATION_NOT_ENABLED",
-        // #306 (SEC-PG-13): stable column-scoped code for a missing required filter column.
+        // #306: stable column-scoped code for a missing required filter column.
         "REQUIRED_FILTER_COLUMN_MISSING",
         "AGGREGATION_ON_MASKED_COLUMN",
-        // #294/#314 (SEC-PG-12): fixed-message codes for engine validation, coercion and request-body errors.
+        // #294/#314: fixed-message codes for engine validation, coercion and request-body errors.
         "GRAPHQL_VALIDATION_FAILED",
         "GRAPHQL_VARIABLE_INVALID",
         "GRAPHQL_PARSE_FAILED",
@@ -83,7 +83,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
         "PRIVACY_BUDGET_EXHAUSTED",
-        // WP-D: ConsentRequestException codes the removed Development passthrough used to expose; fixed messages only.
+        // ConsentRequestException codes the removed Development passthrough used to expose; fixed messages only.
         "ITSM_UNAVAILABLE",
         "INVALID_STATE",
         "CONSENT_ON_ATTRIBUTE_SOURCE",
@@ -102,12 +102,12 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "GDPR_SUBJECT_SCOPE_UNRESOLVED",
         // Relay keyset pagination
         "KEYSET_PAGINATION_UNAVAILABLE",
-        // Issue #447 (SEC-ATR-08): fixed text without the data source name.
+        // Issue #447: fixed text without the data source name.
         "TRANSPORT_NOT_ALLOWED"
     };
 
     /// <summary>
-    /// SEC-PG-12: the client text of every typed code is fixed here, never taken from the thrower, so a changed or
+    /// the client text of every typed code is fixed here, never taken from the thrower, so a changed or
     /// verbose exception message (policy names, column names, privacy wording) cannot reach a client.
     /// </summary>
     private static readonly Dictionary<string, string> FixedClientMessages = new(StringComparer.OrdinalIgnoreCase)
@@ -199,7 +199,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             var code = secEx.ErrorCode;
             var message = secEx.Message;
 
-            // Anti-enumeration oracle defense (SEC-PG-12): a missing table is indistinguishable from a forbidden one in every environment.
+            // Anti-enumeration oracle defense: a missing table is indistinguishable from a forbidden one in every environment.
             if (secEx is Autheris.Domain.Exceptions.TableNotFoundException)
             {
                 code = "FORBIDDEN";
@@ -315,7 +315,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             // catalog cannot be enumerated (same text as GraphQlEnumerationShieldMiddleware).
             if (string.Equals(cleanError.Code, GraphQlEnumerationShieldMiddleware.Code, StringComparison.OrdinalIgnoreCase))
             {
-                // #330 (SEC-RG-08): the page-range message is a server constant without table or column names; it is kept as is.
+                // #330: the page-range message is a server constant without table or column names; it is kept as is.
                 if (GraphQlEnumerationShieldMiddleware.IsPageRangeError(cleanError))
                 {
                     return cleanError;
@@ -339,7 +339,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     }
 
     /// <summary>
-    /// SEC-PG-12: classifies a code-less or engine-coded error by exception/error type into a stable code with a fixed message.
+    /// classifies a code-less or engine-coded error by exception/error type into a stable code with a fixed message.
     /// The engine text, extensions (type, field and argument names, HCnnnn) are dropped. Returns null when nothing matches
     /// (the caller then fails closed to the generic internal error).
     /// </summary>

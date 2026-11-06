@@ -54,7 +54,7 @@ public sealed partial class CasbinEnforcementService
             return null;
         }
 
-        // WP-PF-03: compiled once per distinct sub_rule; null (unknown) is handled fail-closed by the callers.
+        // compiled once per distinct sub_rule; null (unknown) is handled fail-closed by the callers.
         return CompiledSubRuleCache.Evaluate(subRule, context, subject, tableStr, act);
     }
 

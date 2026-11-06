@@ -333,7 +333,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
             catch (ArgumentException)
             {
-                // REQ-282-10: a name the identifier type refuses (dot, control character) skips this item, never the whole sync.
+                // a name the identifier type refuses (dot, control character) skips this item, never the whole sync.
                 var badName = DbtIdentifierSanitizer.ForLog($"{m.Database}.{m.Schema}.{m.Name}");
                 var badKind = string.Equals(m.Materialization, "source", StringComparison.OrdinalIgnoreCase) ? "source" : "model";
                 creation.SkippedTotal++;
@@ -417,7 +417,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 ? []
                 : await _proposalRepository.GetPendingProposalsAsync(tableId, ct).ConfigureAwait(false);
 
-            // 1. Zero-Trust Proposal Evaluation (SEC-DBT-01)
+            // 1. Zero-Trust Proposal Evaluation
             foreach (var (colName, colDef) in model.Columns)
             {
                 var isPii = false;
@@ -581,7 +581,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 }
                 catch (TableMetadataUnavailableException)
                 {
-                    // SEC-94-01: no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
+                    // no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
                     if (!dryRun)
                     {
                         warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
@@ -814,7 +814,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         };
     }
 
-    /// <summary>SEC-282-8: bounds per run so that a hostile manifest cannot flood the governance database or the response.</summary>
+    /// <summary>bounds per run so that a hostile manifest cannot flood the governance database or the response.</summary>
     private const int MaxCreatedTablesPerRun = 5000;
     private const int MaxSkippedItemsReported = 500;
 
@@ -829,7 +829,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     /// <summary>
     /// Issue #282: registers a manifest model or source that has no catalog entry. Returns the new entry (live) so that the update step
     /// applies descriptions, keys, tags and the ReBAC seed in the same run; null when nothing was created (skip, dry run, failure).
-    /// An entry that appears between the read and the write is returned as is and never overwritten (SEC-282-5).
+    /// An entry that appears between the read and the write is returned as is and never overwritten.
     /// </summary>
     private async Task<TableMetadata?> TryRegisterMissingTableAsync(
         DbtModelDefinition model,
@@ -886,7 +886,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
         try
         {
-            // SEC-282-5: last read before the write; an entry that appeared meanwhile keeps its governance fields.
+            // last read before the write; an entry that appeared meanwhile keeps its governance fields.
             var current = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (current != null)
             {
@@ -947,7 +947,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
-        // 2. Natural-key grouping (SEC-REL151-01): a group whose key sets differ is skipped as a whole, never last-wins and
+        // 2. Natural-key grouping: a group whose key sets differ is skipped as a whole, never last-wins and
         // independent of manifest order. Entries with identical ordered pairs are the same relation and collapse to one.
         var groups = resolved
             .GroupBy(r => $"{r.ParentId}\u0001{r.ChildId}\u0001{r.Definition.Name}", StringComparer.OrdinalIgnoreCase)
@@ -993,7 +993,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 JoinKeysParent = parentColumns,
                 JoinKeysChild = childColumns,
                 Cardinality = RelationCardinality.OneToMany
-                // AllowCrossDataSource is never set by the importer (SEC-REL151-04).
+                // AllowCrossDataSource is never set by the importer.
             };
 
             if (!dryRun)
@@ -1261,7 +1261,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 }
                 catch (TableMetadataUnavailableException)
                 {
-                    // SEC-94-01: governance import never touches (or recreates) a table whose metadata is unavailable.
+                    // governance import never touches (or recreates) a table whose metadata is unavailable.
                     warnings.Add($"Table '{tableId}': skipped governance update, its stored metadata is unavailable (invalid key or index definition).");
                     continue;
                 }

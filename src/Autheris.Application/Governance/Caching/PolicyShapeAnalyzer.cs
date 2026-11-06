@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using Autheris.Application.State.Caching;
 
 /// <summary>
-/// WP-PF-09 / SEC-SC-09: decides, from the text of a rule, whether its outcome can depend on the user, the user's aliases or groups,
+/// decides, from the text of a rule, whether its outcome can depend on the user, the user's aliases or groups,
 /// the client IP or the clock. Only a rule whose conditions and row filter read nothing but the tenant, the object, the action and
 /// the (keyed) attributes and purpose may take part in a decision shared between users. The analysis is conservative: every
 /// identifier it does not positively recognise makes the rule user dependent.
@@ -50,7 +50,7 @@ internal static partial class PolicyShapeAnalyzer
 
     private static RuleShape Compute(string? subRule, string? rlsFilter)
     {
-        // REQ-GOV-129: a rule that mentions a caller attribute placeholder can never be shared between users (it is refused at publication anyway).
+        // a rule that mentions a caller attribute placeholder can never be shared between users (it is refused at publication anyway).
         if (Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(subRule) || Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(rlsFilter))
         {
             return new RuleShape(false, false);

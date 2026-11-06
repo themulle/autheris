@@ -83,7 +83,7 @@ public static class AggregateTypeClasses
 }
 
 /// <summary>
-/// #310 (SEC-PG-09): an aggregate function was applied to a column of a type it does not accept. The message is the fixed text of the
+/// #310: an aggregate function was applied to a column of a type it does not accept. The message is the fixed text of the
 /// code: it names neither the function arguments nor the column type.
 /// </summary>
 public sealed class AggregateTypeInvalidException()

@@ -3,7 +3,7 @@ namespace TrinoSqlEngine;
 using Antlr4.Runtime.Atn;
 using TrinoSqlEngine.Parsing;
 
-// ARCH-MNT-15: binds a generated recognizer to an ANTLR cache generation. The simulator setter is protected, so this has to live in the class.
+// binds a generated recognizer to an ANTLR cache generation. The simulator setter is protected, so this has to live in the class.
 // Called by AntlrCacheGenerations only.
 #pragma warning disable CA1708 // a member in the generated partial makes the analyzer compare the generated names (case-only differences)
 public partial class SqlBaseLexer

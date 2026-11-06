@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Issue #94 (D-8, SEC-94-11): the one place where ingestion paths (data catalog sync, OpenMetadata, dbt, OpenAPI) turn a declared
+/// Issue #94 (D-8): the one place where ingestion paths (data catalog sync, OpenMetadata, dbt, OpenAPI) turn a declared
 /// primary key / unique constraint of an untrusted source into a table definition. The definition is validated with the
 /// <see cref="TableKeyDefinitionValidator"/> and requested for replacement only when the source actually declares keys; an invalid
 /// definition is dropped as a whole while the table itself is still ingested (stored definition kept, flag false).

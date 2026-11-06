@@ -39,7 +39,7 @@ public sealed record TableCacheCallerContext(
 /// Enforces Zero-Trust governance on all table cache query operations.
 /// Strictly executes Casbin ABAC, Consents, Mandatory Tenant Isolation, RLS Filter Pushdown,
 /// Dynamic Column Masking, and WORM Audit Logging.
-/// Conforms to SEC-BL04-01, SEC-BL04-02, SEC-BL04-03, SEC-BL04-04, SEC-BL04-09, SEC-BL04-10, and SEC-BL04-13.
+/// Conforms to 09, and 13.
 /// </summary>
 public sealed class GovernedTableCacheExecutionService
 {
@@ -95,7 +95,7 @@ public sealed class GovernedTableCacheExecutionService
             : null;
 
         // -------------------------------------------------------------------
-        // SEC-BL04-01: Zero-Trust Governance Precedence (Casbin ABAC / ReBAC)
+        // Zero-Trust Governance Precedence (Casbin ABAC / ReBAC)
         // -------------------------------------------------------------------
         if (caller.Roles != null && caller.Roles.Contains("DENY_ALL"))
         {
@@ -104,7 +104,7 @@ public sealed class GovernedTableCacheExecutionService
         }
 
         // -------------------------------------------------------------------
-        // SEC-BL04-01 & SEC-BL04-09: Consent Resolution (Fail-Closed)
+        // Consent Resolution (Fail-Closed)
         // -------------------------------------------------------------------
         var userSidNullable = caller.Principal.GetUserSid();
         if (userSidNullable == null)
@@ -132,7 +132,7 @@ public sealed class GovernedTableCacheExecutionService
         }
 
         // -------------------------------------------------------------------
-        // SEC-BL04-02: Mandatory Tenant Isolation & Empty Tenant Fencing
+        // Mandatory Tenant Isolation & Empty Tenant Fencing
         // -------------------------------------------------------------------
         if (string.IsNullOrWhiteSpace(caller.TenantId.Value))
         {
@@ -150,7 +150,7 @@ public sealed class GovernedTableCacheExecutionService
         bool isStale = metadata.ExpiresAt.HasValue && metadata.ExpiresAt.Value <= now;
 
         // -------------------------------------------------------------------
-        // SEC-BL04-10: Max Stale Survival Boundary Ceiling
+        // Max Stale Survival Boundary Ceiling
         // -------------------------------------------------------------------
         if (isStale)
         {
@@ -169,7 +169,7 @@ public sealed class GovernedTableCacheExecutionService
         }
 
         // -------------------------------------------------------------------
-        // SEC-BL04-02 & SEC-BL04-04: Tenant Isolation & RLS Predicate Injection
+        // Tenant Isolation & RLS Predicate Injection
         // -------------------------------------------------------------------
         var injectedFilters = new List<string>
         {
@@ -228,7 +228,7 @@ public sealed class GovernedTableCacheExecutionService
                     var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
 
                     // -------------------------------------------------------
-                    // SEC-BL04-03: Dynamic Column Masking Parity
+                    // Dynamic Column Masking Parity
                     // -------------------------------------------------------
                     if (effectiveMasks != null && effectiveMasks.TryGetValue(colName, out var rule))
                     {
@@ -273,7 +273,7 @@ public sealed class GovernedTableCacheExecutionService
         stopwatch.Stop();
 
         // -------------------------------------------------------------------
-        // SEC-BL04-13: Comprehensive WORM Audit Trail Parity
+        // Comprehensive WORM Audit Trail Parity
         // -------------------------------------------------------------------
         var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sql)));
         var auditDetails = new Dictionary<string, object?>

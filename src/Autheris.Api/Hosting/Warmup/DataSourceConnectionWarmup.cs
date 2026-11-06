@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// SEC-PERF254-02 / WP-5: Pre-warms configured SQL data sources by establishing connections
+/// Pre-warms configured SQL data sources by establishing connections
 /// and executing read-only probe (SELECT 1). Strictly forbidden from executing DDL/DML or writing audit/consent data.
 /// </summary>
 public sealed class DataSourceConnectionWarmup : IStartupWarmup

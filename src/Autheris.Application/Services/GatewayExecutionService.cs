@@ -64,7 +64,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IConsumerUsageRecorder? usageRecorder = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _usageRecorder = usageRecorder;
         _typedPolicies = typedPolicies;
@@ -74,7 +74,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _mandatoryFilters = mandatoryFilters;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
-        // WP-ARC-A-06: all audit writes go through the writer; direct construction (tests) wraps the repository.
+        // all audit writes go through the writer; direct construction (tests) wraps the repository.
         _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(auditLogRepository, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
         _resolutionService = resolutionService;
         _cacheService = cacheService;
@@ -189,7 +189,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
 
-        // Issue #447 C3 (SEC-ATR-07/08): after the principal and access decision, before any executor, connector, cache or ALLOW audit record.
+        // Issue #447 C3 (08): after the principal and access decision, before any executor, connector, cache or ALLOW audit record.
         await _transportGate.EnsureCatalogSourceAsync(
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 
@@ -305,7 +305,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Offset: after ?? 0,
                 RequestHeaders: requestHeaders,
                 Items: pageItems);
-            // SEC-ATR-05: a connector that opens its own scope copies the caller's ingress from here.
+            // a connector that opens its own scope copies the caller's ingress from here.
             session.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
 
             rawRows = await Autheris.Application.DataSources.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
@@ -658,7 +658,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyDictionary<string, object?>? parameters = null) =>
         InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata, parameters);
 
-    /// <summary>WP-ARC-B-04: filters by the decision's typed row policy (text only for a decision without one).</summary>
+    /// <summary>filters by the decision's typed row policy (text only for a decision without one).</summary>
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
         TableAccessDecision decision,

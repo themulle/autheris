@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Exceptions;
 
 /// <summary>
-/// F-GOV-14 (WI-20, SEC-17): caps the response body of the declarative HTTP client. A declared <c>Content-Length</c>
+/// F-GOV-14 (WI-20): caps the response body of the declarative HTTP client. A declared<c>Content-Length</c>
 /// above the cap aborts before anything is read; otherwise the body stream aborts as soon as more than the cap was
 /// handed out (at most the cap plus one read buffer), so a hostile or broken upstream cannot make the gateway buffer a
 /// multi-gigabyte document. The overflow is a <see cref="GatewaySecurityException"/> (<c>ROW_LIMIT_EXCEEDED</c>);

@@ -10,7 +10,7 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class SqlServerGovernanceRepository
 {
-    /// <summary>Dialect SQL of the consent grant statements (ARCH-MNT-22). Literals are moved verbatim; binding and mapping live in <see cref="ConsentGrantSqlCore"/>.</summary>
+    /// <summary>Dialect SQL of the consent grant statements. Literals are moved verbatim; binding and mapping live in<see cref="ConsentGrantSqlCore"/>.</summary>
     internal static class ConsentGrantSql
     {
         public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
@@ -94,7 +94,7 @@ public partial class SqlServerGovernanceRepository
                 tables[consent.TableIdentifier.ToString()] = consent.TableIdentifier;
             }
 
-            // PLAN-GOV-158-INC1 (SEC-GOV158I1-05/07): description-only updates of non-revoked consents; no epoch effect, no table is added to the bump set.
+            // INC1 (07): description-only updates of non-revoked consents; no epoch effect, no table is added to the bump set.
             foreach (var update in descriptionUpdates ?? [])
             {
                 await UpdateConsentDescriptionInTransactionAsync(conn, tx, update, ct).ConfigureAwait(false);
@@ -137,7 +137,7 @@ public partial class SqlServerGovernanceRepository
 
     /// <summary>
     /// Sets <c>CONSENTS.description</c> of one non-revoked, unexpired consent of the tenant inside <paramref name="tx"/>; touches no other column.
-    /// Returns false (no row changed) for an unknown, foreign-tenant, revoked or expired consent (SEC-GOV158I1-05).
+    /// Returns false (no row changed) for an unknown, foreign-tenant, revoked or expired consent.
     /// </summary>
     private Task<bool> UpdateConsentDescriptionInTransactionAsync(SqlConnection conn, SqlTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct) =>
         ConsentGrantSqlCore.UpdateDescriptionAsync(conn, tx, update, TimeProvider.System, ct);

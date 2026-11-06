@@ -17,7 +17,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Dynamic OpenAPI 3.1 specification generator engine for OData v4 endpoints (F-API-03).
+/// Dynamic OpenAPI 3.1 specification generator engine for OData v4 endpoints (F-).
 /// </summary>
 public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
 {
@@ -45,7 +45,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
     }
 
     /// <summary>
-    /// Issue #447 REQ-ATR-08, SEC-ATR-07: the OpenAPI documents describe the OData surface, so a table whose source does not allow OData is
+    /// Issue #447 the OpenAPI documents describe the OData surface, so a table whose source does not allow OData is
     /// left out before any document or cache key is built (the index hash and the documents are derived from the filtered list).
     /// </summary>
     private async Task<IReadOnlyList<TableMetadata>> GetOpenApiTablesAsync(CancellationToken ct)

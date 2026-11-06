@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
-/// REQ-CDC-99 I1-C registrations: stream crypto over the key vault, the wake-up signal, the shared tail hub, retention, the I1
+/// 99 I1-C registrations: stream crypto over the key vault, the wake-up signal, the shared tail hub, retention, the I1
 /// compatibility feed and the stream admin service. The persistence (<c>ICdcStreamStore</c>, <c>ICdcStreamKeyStore</c>) is registered with the
 /// governance repositories and the producer/restarter with the CDC source integration.
 /// </summary>

@@ -31,7 +31,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class CatalogVisibilityService : ICatalogVisibilityService
 {
-    // SEC-CAT138-06: hard bounds, no per-request override.
+    // hard bounds, no per-request override.
     private const int ChunkSize = 32;
     private const int MaxParallelChunks = 8;
     private const int MaxCandidates = 256;
@@ -47,7 +47,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
-    /// <summary>A null dependency is allowed at construction and answers empty (SEC-CAT138-01), so a mis-wired host never widens.</summary>
+    /// <summary>A null dependency is allowed at construction and answers empty, so a mis-wired host never widens.</summary>
     public CatalogVisibilityService(
         ITableMetadataRepository? metadataRepository,
         IConsentRepository? consentRepository,
@@ -66,7 +66,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         _logger = logger ?? NullLogger<CatalogVisibilityService>.Instance;
     }
 
-    /// <summary>Test seam; null in DI and never assigned by production code (SEC-CAT138-17).</summary>
+    /// <summary>Test seam; null in DI and never assigned by production code.</summary>
     internal Func<IReadOnlyList<TableMetadata>, CallerScope, CancellationToken, Task<IReadOnlyList<TableMetadata>>>? EngineOutputForTesting { get; set; }
 
     private readonly record struct MemoKey(string Subject, string Claims, string Tenant, string Contract, string Surface);
@@ -136,7 +136,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
 
-        // The repository does not filter is_active on a single read (SEC-CAT138-07).
+        // The repository does not filter is_active on a single read.
         if (row is not { Table.IsActive: true } || row.Identifier != table)
         {
             return null;
@@ -167,7 +167,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return new HashSet<TableIdentifier>();
         }
 
-        // De-duplicated and capped: the excess is denied, never evaluated (SEC-CAT138-06).
+        // De-duplicated and capped: the excess is denied, never evaluated.
         var wanted = new HashSet<TableIdentifier>(Math.Min(candidates.Count, MaxCandidates));
         foreach (var candidate in candidates)
         {
@@ -220,7 +220,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         var rows = new List<TableMetadata>(ordered.Length);
         for (var i = 0; i < ordered.Length; i++)
         {
-            // The repository does not filter is_active on a single read, and the row must be the one asked for (SEC-CAT138-07).
+            // The repository does not filter is_active on a single read, and the row must be the one asked for.
             if (loaded[i] is { Table.IsActive: true } row && row.Identifier == ordered[i])
             {
                 rows.Add(row);
@@ -280,7 +280,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
 
-        // SEC-ATR-07: the memo is per scope, but the key still carries the ingress so a listing never crosses transports.
+        // the memo is per scope, but the key still carries the ingress so a listing never crosses transports.
         baseKey = baseKey with { Claims = $"{baseKey.Claims}|i:{(_ingress?.Current ?? DataSourceTransportFlags.None)}" };
         return new Context(principal, sid.Value, scope, caller.Tenant, catalogOwner, _options.Catalog.SharedTables ?? [], baseKey);
     }
@@ -303,13 +303,13 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
                     CatalogSurface.Discovery, ct).ConfigureAwait(false);
             }
 
-            // F-C11 / SEC-CAT138-15: a row that does not exist for this caller class never reaches the evaluator or the memo.
+            // F-C11 / a row that does not exist for this caller class never reaches the evaluator or the memo.
             var isAdminView = context.IsAdminView;
             var shaped = engineOutput
                 .Where(t => CatalogViewShaping.Resolve(isAdminView, t.CatalogView) != CatalogOutputShape.NotFound)
                 .ToList();
 
-            // Issue #447 REQ-ATR-08: a table whose source does not allow the ingress transport is hidden, never an error. No ingress
+            // Issue #447 a table whose source does not allow the ingress transport is hidden, never an error. No ingress
             // (an admin context) leaves the list unfiltered.
             var transport = _ingress?.Current ?? DataSourceTransportFlags.None;
             if (transport != DataSourceTransportFlags.None && _transportResolver is not null)
@@ -331,7 +331,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         var evaluator = _rebacEvaluator;
         if (evaluator is not { IsEnabled: true })
         {
-            // Configured but not resolvable: deny instead of treating it as "off" (SEC-CAT138-02).
+            // Configured but not resolvable: deny instead of treating it as "off".
             return evaluator == null && _options?.Rebac?.Enabled == true ? [] : rows;
         }
 
@@ -411,7 +411,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     }
 
     /// <summary>
-    /// SEC-CAT138-05: subject SID, everything the consent engine reads from the principal (groups, roles, token scopes, caller class),
+    /// subject SID, everything the consent engine reads from the principal (groups, roles, token scopes, caller class),
     /// the channel-supplied tenant, the contract and the surface. Never the principal reference alone.
     /// </summary>
     private static MemoKey BaseKeyOf(ClaimsPrincipal principal, Sid sid, CallerScope scope, TenantId resolvedTenant, TenantId tenant)
@@ -436,7 +436,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             string.Join(',', contract.ExcludedTags.OrderBy(x => x, StringComparer.Ordinal)),
             string.Join(',', contract.AllowedTables.OrderBy(x => x, StringComparer.Ordinal)));
 
-    /// <summary>SEC-CAT138-09: type name only; an exception message may carry a SID or a table name.</summary>
+    /// <summary>type name only; an exception message may carry a SID or a table name.</summary>
     private void LogFailure(Exception ex) =>
         _logger.LogError("Catalog visibility could not be evaluated ({FailureType}); answering empty (fail-closed).", ex.GetType().Name);
 }

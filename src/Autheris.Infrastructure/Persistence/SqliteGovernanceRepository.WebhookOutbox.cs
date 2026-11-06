@@ -10,12 +10,12 @@ using Autheris.Domain.Model;
 using Microsoft.Data.Sqlite;
 
 /// <summary>
-/// SQLite <see cref="IWebhookOutbox"/> (WP-ARC-A-02). Every statement runs on a per-operation connection: claim, complete, reschedule,
+/// SQLite <see cref="IWebhookOutbox"/>. Every statement runs on a per-operation connection: claim, complete, reschedule,
 /// dead-letter, defer, enqueue and purge are writes under the single write gate; list and count are reads.
 /// </summary>
 public partial class SqliteGovernanceRepository : IWebhookOutbox
 {
-    /// <summary>Dialect SQL of the webhook outbox (ARCH-MNT-22). Literals are moved verbatim; binding and mapping live in <see cref="WebhookOutboxSqlCore"/>.</summary>
+    /// <summary>Dialect SQL of the webhook outbox. Literals are moved verbatim; binding and mapping live in<see cref="WebhookOutboxSqlCore"/>.</summary>
     internal static class WebhookOutboxSql
     {
         // ON CONFLICT DO NOTHING (not INSERT OR IGNORE, which would also swallow NOT NULL violations).
@@ -87,7 +87,7 @@ public partial class SqliteGovernanceRepository : IWebhookOutbox
             ct);
     }
 
-    // D5 (ARCH-MNT-22): SQLite binds @status, @error and @next unconditionally; PostgreSQL and SQL Server bind only what the set clause uses.
+    // D5: SQLite binds @status, @error and @next unconditionally; PostgreSQL and SQL Server bind only what the set clause uses.
     internal static void BindFencedUpdate(DbCommand cmd, WebhookFencedValues v)
     {
         cmd.AddBound("@status", (object?)v.StatusCode ?? DBNull.Value);

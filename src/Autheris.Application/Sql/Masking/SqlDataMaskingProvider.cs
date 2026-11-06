@@ -209,7 +209,7 @@ public sealed class SqlDataMaskingProvider
             return null;
         }
 
-        // SEC-ADG-15: no in-database HMAC on Oracle without a DBMS_CRYPTO grant; other dialects have no in-database HMAC either.
+        // no in-database HMAC on Oracle without a DBMS_CRYPTO grant; other dialects have no in-database HMAC either.
         if (dialect is not (DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite))
         {
             return null;
@@ -403,7 +403,7 @@ public sealed class SqlDataMaskingProvider
 
         if (dialect == DatabaseDialect.Oracle)
         {
-            // SEC-ADG-15: no in-database HMAC on Oracle without a DBMS_CRYPTO grant; the column is redacted (fail closed), never
+            // no in-database HMAC on Oracle without a DBMS_CRYPTO grant; the column is redacted (fail closed), never
             // rendered through the SQLite UDF.
             return null;
         }

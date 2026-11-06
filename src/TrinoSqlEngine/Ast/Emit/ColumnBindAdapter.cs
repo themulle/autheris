@@ -17,7 +17,7 @@ public enum ColumnTypeClass
     Other
 }
 
-/// <summary>How a binder follows the catalog column type of a compared column (SEC-ADG-16 item 2, CR-ADG-09).</summary>
+/// <summary>How a binder follows the catalog column type of a compared column (16 item 2, CR-ADG-09).</summary>
 public enum ColumnBindStyle
 {
     /// <summary>The bind type follows the value only.</summary>

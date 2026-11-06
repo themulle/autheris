@@ -9,7 +9,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Caller attribute registry and service sets (PLAN-GOV-129 C-3, C-5): storage shared by the three governance repositories (portable SQL,
+/// Caller attribute registry and service sets (129 C-3, C-5): storage shared by the three governance repositories (portable SQL,
 /// named parameters). Every four-eyes step is one transaction that reads the row, compares the hash the approver reviewed and refuses an
 /// approver equal to the creator, so the store itself never activates an unapproved definition (BC-129-10). Each successful write
 /// increments the generation once.

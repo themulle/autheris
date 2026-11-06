@@ -25,7 +25,7 @@ public sealed class UnorderedPagingException : ArgumentException
 }
 
 /// <summary>
-/// WP-ARC-B-01: the shared table-read planner extracted from <c>GovernedDataQueryService</c> (column authorization,
+/// the shared table-read planner extracted from<c>GovernedDataQueryService</c> (column authorization,
 /// oracle-inference guard on filter and order columns, SQL formulation). Stateless and thread-safe.
 /// <para>
 /// No policy text is spliced here: the decision authorizes the request and drives column access; the row policy and the
@@ -69,7 +69,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
           .Append(" FROM ")
           .Append(intent.Table.ToString());
 
-        // SEC-PG-07 (#302/#301): a zero-row read keeps the full authorization, mask and filter path above, then is made unsatisfiable and
+        // 07 (#302/#301): a zero-row read keeps the full authorization, mask and filter path above, then is made unsatisfiable and
         // fetches at most one row. The text never carries LIMIT 0 (SQL Server rejects FETCH NEXT 0 ROWS).
         var zeroRows = intent.Limit == 0;
         if (zeroRows)
@@ -600,7 +600,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         if (!TrinoSqlEngine.TimeZoneRegistry.Contains(timeZone))
         {
-            // SEC-PGP-03: fixed message, no request text. The registry matches ordinally, so an accepted value is the canonical id (SEC-PGP-01).
+            // fixed message, no request text. The registry matches ordinally, so an accepted value is the canonical id.
             throw new ArgumentException("The time zone is not a recognized IANA zone id.");
         }
 
@@ -631,7 +631,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
                 if (spec.Interval == TimeBucketInterval.Hour)
                 {
-                    // REQ-TBZ-15 (D2): HOUR buckets group by the zone-aligned UTC instant.
+                    // 15 (D2): HOUR buckets group by the zone-aligned UTC instant.
                     // The bucket instant is date_add('minute', -m, date_trunc('hour', date_add('minute', m, U))).
                     // U is the UTC plain timestamp.
                     string u = isZoned ? $"convert_timezone('UTC', {quoted})" : quoted;

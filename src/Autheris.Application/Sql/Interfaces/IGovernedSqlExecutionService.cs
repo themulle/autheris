@@ -27,7 +27,7 @@ public static class SqlTransports
     public const string Olap = "Olap";
 
     /// <summary>
-    /// Issue #447 (SEC-ATR-03): the federation transport name of a server-stamped ingress; <c>null</c> for an unset ingress.
+    /// Issue #447: the federation transport name of a server-stamped ingress;<c>null</c> for an unset ingress.
     /// GraphQL and OData read through the planner like REST, so they are judged as <see cref="Rest"/>.
     /// </summary>
     public static string? ForIngress(Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress) => ingress switch
@@ -98,7 +98,7 @@ public interface IGovernedSqlExecutionService
         CancellationToken ct = default);
 
     /// <summary>
-    /// WP-ARC-C-13: Streams governed query rows asynchronously via <c>yield return</c> without buffering the entire result set in memory.
+    /// Streams governed query rows asynchronously via<c>yield return</c> without buffering the entire result set in memory.
     /// Governance evaluation, AST compilation, and audit recording complete before rows are yielded.
     /// </summary>
     async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(

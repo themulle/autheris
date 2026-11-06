@@ -159,7 +159,7 @@ public sealed class DeltaMetadataReader : IDeltaMetadataReader
                 {
                     var path = addEl.TryGetProperty("path", out var pEl) ? pEl.GetString() ?? "" : "";
                     
-                    // SEC-DL-01: Path traversal validation
+                    // Path traversal validation
                     LakehouseLocationGuard.EnsureNoTraversal(path, tableLocation);
 
                     var size = addEl.TryGetProperty("size", out var sEl) ? sEl.GetInt64() : 0;
@@ -228,7 +228,7 @@ public sealed class DeltaMetadataReader : IDeltaMetadataReader
                 {
                     var path = remEl.TryGetProperty("path", out var pEl) ? pEl.GetString() ?? "" : "";
                     
-                    // SEC-DL-01: Path traversal validation
+                    // Path traversal validation
                     LakehouseLocationGuard.EnsureNoTraversal(path, tableLocation);
 
                     activeFiles.Remove(path);

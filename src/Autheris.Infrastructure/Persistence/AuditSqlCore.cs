@@ -30,7 +30,7 @@ internal readonly record struct AuditChainVerificationResult(
 
 /// <summary>
 /// Engine-neutral statement execution, parameter binding, row hydration, and cryptographic verification
-/// for audit operations across PostgreSQL, SQL Server, and SQLite (ARCH-MNT-22 Step 2).
+/// for audit operations across PostgreSQL, SQL Server, and SQLite ( Step 2).
 /// This class operates over <see cref="DbConnection"/> and <see cref="DbCommand"/>, and never opens,
 /// commits, rolls back, or disposes connections or transactions.
 /// </summary>

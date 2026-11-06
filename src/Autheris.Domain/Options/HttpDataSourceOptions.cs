@@ -10,7 +10,7 @@ public sealed class HttpDataSourceOptions
 {
     /// <summary>
     /// Largest response body (bytes) the client accepts from an upstream; a larger body aborts while it is read with
-    /// <c>ROW_LIMIT_EXCEEDED</c> (F-GOV-14, SEC-17). Applies to every request of the client, not only to WebSQL
+    /// <c>ROW_LIMIT_EXCEEDED</c>(F-GOV-14). Applies to every request of the client, not only to WebSQL
     /// cross-source reads; the per-table staging budget (<c>WebSql:CrossSource:MaxStagedBytesPerTable</c>) is separate.
     /// </summary>
     [Range(1048576, 1073741824)] public long MaxResponseBytes { get; init; } = 32L * 1024 * 1024;

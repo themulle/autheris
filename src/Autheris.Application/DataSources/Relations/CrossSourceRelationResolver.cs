@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 /// Issue #75: Resolves explicit cross-data-source <see cref="TableRelation"/> navigations via gateway-level
 /// batched key lookup (<c>DataLoader</c> pattern).
 /// </summary>
-/// <remarks>Not used by the GraphQL path; replaced by WP-FED-06.</remarks>
+/// <remarks>Not used by the GraphQL path; replaced by 06.</remarks>
 public sealed partial class CrossSourceRelationResolver : ICrossSourceRelationResolver
 {
     private static readonly MaskingRule DefaultRedactRule = new() { RuleType = "REDACT", Replacement = "[REDACTED]" };

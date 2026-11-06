@@ -506,7 +506,7 @@ public sealed class StoredProcedureCatalogValidator
         }
     }
 
-    /// <summary>SEC-PROC152I2-08: a catalog procedure with a parameter named 'limit' is never registered (fixed message).</summary>
+    /// <summary>a catalog procedure with a parameter named 'limit' is never registered (fixed message).</summary>
     internal static IReadOnlyList<string> ReservedParameterErrors(IEnumerable<string> dbParameterNames)
         => dbParameterNames.Any(ProcedureDefinitionParser.IsReservedName)
             ? ["Procedure parameter '@limit' uses the reserved name 'limit'."]

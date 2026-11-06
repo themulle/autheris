@@ -3,7 +3,7 @@ namespace Autheris.Application.Governance.TrustedDocuments;
 using System.Diagnostics.CodeAnalysis;
 
 /// <summary>
-/// Normal form of a browser Origin (Issue #281, SEC-281-3): <c>scheme://host[:port]</c>, lower case, default port elided. The same function
+/// Normal form of a browser Origin (Issue #281):<c>scheme://host[:port]</c>, lower case, default port elided. The same function
 /// normalises registered origins and the request header, so the comparison is an ordinal equality of normal forms.
 /// </summary>
 public static class AllowedOrigin

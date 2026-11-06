@@ -30,7 +30,7 @@ public sealed record SqlSlot(
     bool EscapeLikePattern = false);
 
 /// <summary>
-/// Value-free cached compile output (SEC-ADG-01, INV-12). It holds the SQL text and slot descriptors; tenant, policy and
+/// Value-free cached compile output (INV-12). It holds the SQL text and slot descriptors; tenant, policy and
 /// mask values are rebound from the current request on every hit. It is only created from verified output.
 /// </summary>
 public sealed record CompiledSqlTemplate(
@@ -257,7 +257,7 @@ public sealed class CompiledSqlTemplateCache
 }
 
 /// <summary>
-/// Canonical serialization of the entire <see cref="CompileRequest"/> (SEC-ADG-01). Every property takes part, so a new
+/// Canonical serialization of the entire <see cref="CompileRequest"/>. Every property takes part, so a new
 /// property can never be forgotten: an unknown property type throws. Providers, catalog and the tenant value are excluded; they
 /// are validated per table on a hit (policy shape fingerprints) or rebound (values).
 /// </summary>
@@ -371,7 +371,7 @@ public static class CompileCacheKey
 }
 
 /// <summary>
-/// SEC-ADG-23: <c>HMAC-SHA256(auditKey, CompilerVersion || Dialect || Sql || parameter shape)</c>. The shape is
+/// <c>HMAC-SHA256(auditKey, CompilerVersion || Dialect || Sql || parameter shape)</c>. The shape is
 /// (ordinal, type, origin) only: no values and no value hashes (a hash of a low-entropy value can be brute-forced).
 /// </summary>
 public static class CompiledSqlDigest

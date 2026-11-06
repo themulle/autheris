@@ -162,13 +162,20 @@ Contains domain models (`Table`, `Consent`, `AuditLogEntry`, `PolicyEpoch`, `Dat
 Implements high-performance multi-target SQL AST compiler pipeline:
 - `SqlAstBuilder`: ANTLR4-based parser with FAIL-LOUD validation on advanced SQL constructs (`TABLESAMPLE`, `PIVOT`, `MATCH_RECOGNIZE`).
 - `AstSecurityVisitor`: Deep tree injection of RLS predicates and column masking rules.
-- `ISqlDialectGenerator`: Native dialect emitters (T-SQL, PostgreSQL, SQLite, DuckDB, Oracle, Snowflake).
+- `ISqlDialectGenerator`: Native dialect emitters for governed data sources (SQL Server, PostgreSQL, Oracle, Databricks) and federated staging (DuckDB).
 
 ### 5.4 Autheris.Infrastructure
-Implements persistence using ADO.NET (`SqliteGovernanceRepository`, `SqlServerGovernanceRepository`, `PostgreSqlGovernanceRepository`), in-memory and Redis caching (`ConsentCacheService`), pub/sub event channels (`InProcessChannelEventBus`), policy epoch validation (`EpochValidationService`), and secret storage (`KeyVaultSecretProvider`).
+Implements governance persistence using ADO.NET (`PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`), in-memory and Redis caching (`ConsentCacheService`), pub/sub event channels (`InProcessChannelEventBus`), policy epoch validation (`EpochValidationService`), and secret storage (`KeyVaultSecretProvider`).
 
 ### 5.5 Autheris.GraphQL, Autheris.Api & WebHost
-Configures Hot Chocolate schema, dynamic query resolvers, mutations, REST Data API (`/api/v1/data/*`), Catalog endpoints (`/api/v1/catalog/*`), TOTP endpoints (`/api/v1/auth/2fa/*`), MCP server (`/mcp`), rate-limiting middlewares, error sanitization, and traffic drain lifecycle.
+Configures Hot Chocolate schema, dynamic query resolvers, mutations, REST Data API (`/api/v1/data/*`), OData v4 (`/odata/v4/*`), Trino client protocol (`/v1/statement`), Catalog endpoints (`/api/v1/catalog/*`), TOTP endpoints (`/api/v1/auth/2fa/*`), MCP server (`/mcp`), rate-limiting middlewares, error sanitization, and traffic drain lifecycle.
+
+### 5.6 Optional Modules (`Autheris.Extensions` / Module Packages)
+Capabilities outside the core access-enforcement pipeline are packaged as optional modules enabled via `Gateway:Modules:Enabled` (or shipped in the `autheris-full` image):
+- **Lakehouse (`Lakehouse`)**: Delta Lake and Apache Iceberg v2 connectors and metadata pruning.
+- **dbt & OpenMetadata (`Dbt`, `OpenMetadata`)**: Streaming dbt artifact ingestion, model contracts, and OpenMetadata catalog synchronization.
+- **CDC & Event Webhooks (`Cdc`)**: Change Data Capture streaming (SQL Server Change Tracking, PostgreSQL logical replication) and outbound event webhooks (consent workflow webhooks remain in core).
+- **Lineage (`Lineage`)**: Downstream impact analysis and OpenLineage export (GDPR Art. 15 disclosure reporting remains in core).
 
 ---
 

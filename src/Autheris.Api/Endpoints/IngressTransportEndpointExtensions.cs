@@ -6,7 +6,7 @@ using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Builder;
 
 /// <summary>
-/// Issue #447 (SEC-ATR-02): endpoint metadata that declares the ingress transport of a route. It is the only source of the ingress
+/// Issue #447: endpoint metadata that declares the ingress transport of a route. It is the only source of the ingress
 /// stamped by <see cref="Autheris.Api.Middleware.IngressTransportMiddleware"/>; headers, query and body never influence it.
 /// </summary>
 public sealed record IngressTransportMetadata

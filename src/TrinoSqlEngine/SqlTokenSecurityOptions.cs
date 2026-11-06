@@ -65,7 +65,7 @@ public sealed record SqlTokenSecurityOptions
     public bool RejectTimeTravelQueries { get; init; }
 
     /// <summary>
-    /// SEC-ADG-10: Reject <c>${</c> in any token. Spark and Databricks may substitute <c>${...}</c> variables in statement text
+    /// Reject<c>${</c> in any token. Spark and Databricks may substitute <c>${...}</c> variables in statement text
     /// before parsing, which could change a statement after the gateway checked it.
     /// </summary>
     public bool RejectVariableSubstitutionSequences { get; init; }

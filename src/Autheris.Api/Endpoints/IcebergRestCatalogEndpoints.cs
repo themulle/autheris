@@ -106,7 +106,7 @@ public static class IcebergRestCatalogEndpoints
         return app;
     }
 
-    /// <summary>Iceberg REST <c>ErrorModel</c> with a fixed message per status; the exception is logged, never returned (ARCH-MNT-08).</summary>
+    /// <summary>Iceberg REST <c>ErrorModel</c>with a fixed message per status; the exception is logged, never returned.</summary>
     internal static IResult HandleIcebergError(HttpContext context, Exception ex)
     {
         var (status, code, message) = ex switch

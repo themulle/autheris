@@ -49,7 +49,7 @@ public static class WebSqlParameterValues
     }
 
     /// <summary>
-    /// Converts one client parameter: a scalar through <see cref="Normalize"/>, a JSON array or collection (REQ-SQL-128) to a
+    /// Converts one client parameter: a scalar through <see cref="Normalize"/>a JSON array or collection to a
     /// <see cref="TrinoSqlEngine.Ast.Emit.ClientListValue"/>. <see cref="Normalize"/> itself stays scalar-only.
     /// </summary>
     public static object? NormalizeParameter(object? value, ListParameters.ListParameterLimits limits) =>

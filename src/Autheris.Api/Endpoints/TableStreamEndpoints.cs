@@ -39,7 +39,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PLAN-DATA-178: Dedicated Governed Single-Table Bulk Keyset Streaming Endpoint.
+/// Dedicated Governed Single-Table Bulk Keyset Streaming Endpoint.
 /// Strictly scoped to a single table, authorized for read-only callers, with monotonic keyset cursor seek,
 /// bounded zero-allocation chunked streaming, and two-phase token bucket FinOps metering.
 /// </summary>
@@ -53,7 +53,7 @@ public static class TableStreamEndpoints
 
     public static IEndpointRouteBuilder MapTableStreamEndpoints(this IEndpointRouteBuilder app)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ArgumentNullException.ThrowIfNull(app);
 
@@ -72,7 +72,7 @@ public static class TableStreamEndpoints
         return app;
     }
 
-    /// <summary>One byte-identical body for every table that is missing, hidden or not authorized (SEC-DATA178-04, NL-SC-22).</summary>
+    /// <summary>One byte-identical body for every table that is missing, hidden or not authorized (NL-SC-22).</summary>
     private static IResult TableNotFound() =>
         ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The table was not found.");
 
@@ -110,7 +110,7 @@ public static class TableStreamEndpoints
             return;
         }
 
-        // SEC-DATA178-05: Reject OFFSET pagination
+        // Reject OFFSET pagination
         if (httpContext.Request.Query.ContainsKey("offset"))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.OffsetNotSupported, "OFFSET pagination is not supported on the bulk keyset streaming endpoint. Use cursor-based keyset pagination instead.", ct).ConfigureAwait(false);
@@ -160,7 +160,7 @@ public static class TableStreamEndpoints
             metadata = null;
         }
 
-        // SEC-DATA178-04: Non-existent or hidden tables return 404 anti-enumeration parity
+        // Non-existent or hidden tables return 404 anti-enumeration parity
         if (metadata == null || (!metadata.Table.IsActive && !httpContext.User.IsInRole("admin")))
         {
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
@@ -208,7 +208,7 @@ public static class TableStreamEndpoints
             return;
         }
 
-        // 5. Enforce Primary Key & Masking Gating (SEC-DATA178-04, SEC-DATA178-07)
+        // 5. Enforce Primary Key & Masking Gating
         var streamKey = BulkStreamKey.TryResolve(metadata);
         if (streamKey is null)
         {

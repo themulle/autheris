@@ -9,17 +9,17 @@ public static class GatewayAuthSchemes
     public const string RejectScheme = "RejectScheme";
     public const string Scim = "Scim";
 
-    /// <summary>API-07: SCIM provisioning routes (<c>/scim/...</c>) authenticate with the SCIM secret, not with a JWT.</summary>
+    /// <summary>SCIM provisioning routes (<c>/scim/...</c>) authenticate with the SCIM secret, not with a JWT.</summary>
     public static bool IsScimPath(Microsoft.AspNetCore.Http.PathString path) =>
         path.StartsWithSegments("/scim", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>API-14: separate scheme for AD FS when Entra ID is enabled as well.</summary>
+    /// <summary>separate scheme for AD FS when Entra ID is enabled as well.</summary>
     public const string JwtBearerAdfs = "BearerAdfs";
 
     public static string RealmJwt(string realmId) => $"BearerRealm_{realmId}";
 
     /// <summary>
-    /// API-14: chooses the JWT scheme for a bearer token. Only routing: the issuer is read without validation, the selected
+    /// chooses the JWT scheme for a bearer token. Only routing: the issuer is read without validation, the selected
     /// scheme validates issuer, audience and signature. Without both IdPs enabled there is a single scheme.
     /// </summary>
     public static string SelectJwtScheme(string token, Autheris.Domain.Options.GatewayOptions options)

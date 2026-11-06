@@ -85,7 +85,7 @@ public static class PushedClauseBuilder
         int conjunctIdx = 0;
         foreach (var c in candidates)
         {
-            // SEC-FED-19: Zero-Trust Masked Column Gate
+            // Zero-Trust Masked Column Gate
             var effectiveAccess = decision.GetEffectiveColumnAccess(c.ColumnName, metadata);
             if (effectiveAccess is ColumnAccessLevel.Mask or ColumnAccessLevel.Deny)
             {
@@ -124,7 +124,7 @@ public static class PushedClauseBuilder
                 for (int i = 0; i < listValues.Count; i++)
                 {
                     var paramName = $"@p_pd_{conjunctIdx}_{i}";
-                    // SEC-ADG-02: Fail-closed on parameter name collision
+                    // Fail-closed on parameter name collision
                     if (!pushedParameters.TryAdd(paramName, listValues[i]))
                     {
                         throw new SecurityException("A statement parameter name is bound twice (fail-closed).");
@@ -147,7 +147,7 @@ public static class PushedClauseBuilder
                 }
 
                 var paramName = $"@p_pd_{conjunctIdx}_0";
-                // SEC-ADG-02: Fail-closed on parameter name collision
+                // Fail-closed on parameter name collision
                 if (!pushedParameters.TryAdd(paramName, scalarVal))
                 {
                     throw new SecurityException("A statement parameter name is bound twice (fail-closed).");

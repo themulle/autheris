@@ -246,7 +246,7 @@ internal static class ConsumerAggregationStore
         DateTimeOffset asOfUtc,
         CancellationToken ct = default)
     {
-        // SEC-AUD114-05: Bound retention window to max 400 days
+        // Bound retention window to max 400 days
         int boundedDays = Math.Clamp(retentionDays, 1, 400);
         string cutoff = asOfUtc.AddDays(-boundedDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 

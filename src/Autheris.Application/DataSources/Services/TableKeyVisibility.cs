@@ -6,7 +6,7 @@ using System.Linq;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Issue #94 (SD-4, SEC-94-03): a metadata copy that lists only the columns a caller may see must not carry a key or an index
+/// Issue #94 (SD-4): a metadata copy that lists only the columns a caller may see must not carry a key or an index
 /// that touches another column. Each declared key, each index and the Meta marker key survive only as a whole; a partial one is
 /// dropped (never emitted as a subset), so a response cannot reveal that a hidden column is part of a key.
 /// </summary>

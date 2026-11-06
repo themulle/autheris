@@ -9,7 +9,7 @@ using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// CR-ADG-09 / SEC-ADG-16 item 2: records the catalog data type of the target table's column on every policy parameter that is
+/// CR-ADG-09 / 16 item 2: records the catalog data type of the target table's column on every policy parameter that is
 /// compared with it (<c>col = :p</c>, <c>:p &lt;&gt; col</c>, <c>col IN (:p, ...)</c>), so the binder can follow the column type
 /// (varchar versus nvarchar on SQL Server, NUMBER versus VARCHAR2 on Oracle). Subqueries are not entered: their columns belong
 /// to other tables, whose types the target entry does not know (those binds keep the value type). It only annotates; it never

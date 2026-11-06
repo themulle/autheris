@@ -31,7 +31,7 @@ public sealed record PushdownEvaluationResult(
 }
 
 /// <summary>
-/// WP-122-2: Evaluates pushdown eligibility against dialect capability matrices and Zero-Trust security invariants.
+/// Evaluates pushdown eligibility against dialect capability matrices and Zero-Trust security invariants.
 /// </summary>
 public static class PushabilityEvaluator
 {
@@ -49,19 +49,19 @@ public static class PushabilityEvaluator
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(options);
 
-        // SEC-DATA122-05: Only relational SQL sources support pushdown. Declarative HTTP sources fail closed.
+        // Only relational SQL sources support pushdown. Declarative HTTP sources fail closed.
         if (metadata.Table.DataSourceType != DataSourceType.Sql)
         {
             return PushdownEvaluationResult.Rejected(RejectionReason.NotSqlSource);
         }
 
-        // SEC-FED-23: Tables undergoing gateway-side virtual filter row removal are exempted to avoid count oracles.
+        // Tables undergoing gateway-side virtual filter row removal are exempted to avoid count oracles.
         if (vfPlan is { Enforcement: not null, SkipUpstream: false })
         {
             return PushdownEvaluationResult.Rejected(RejectionReason.GatewayEnforcedTable);
         }
 
-        // SEC-DATA122-02 (SEC-FED-19): Every referenced column must have Clear access.
+        // Every referenced column must have Clear access.
         // Columns with Mask, MaskWithHmac, or Deny must NEVER be pushed down.
         foreach (var colName in conjunct.Columns)
         {

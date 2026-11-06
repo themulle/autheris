@@ -10,10 +10,10 @@ using Autheris.Application.Webhooks;
 using Autheris.Domain.Model;
 using Npgsql;
 
-/// <summary>PostgreSQL <see cref="IWebhookOutbox"/> (WP-ARC-A-02): claims with <c>FOR UPDATE SKIP LOCKED</c>, so workers on any node get disjoint batches.</summary>
+/// <summary>PostgreSQL <see cref="IWebhookOutbox"/>claims with<c>FOR UPDATE SKIP LOCKED</c>, so workers on any node get disjoint batches.</summary>
 public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
 {
-    /// <summary>Dialect SQL of the webhook outbox (ARCH-MNT-22). Literals are moved verbatim; binding and mapping live in <see cref="WebhookOutboxSqlCore"/>.</summary>
+    /// <summary>Dialect SQL of the webhook outbox. Literals are moved verbatim; binding and mapping live in<see cref="WebhookOutboxSqlCore"/>.</summary>
     internal static class WebhookOutboxSql
     {
         public const string Enqueue = $@"
@@ -92,7 +92,7 @@ public partial class PostgreSqlGovernanceRepository : IWebhookOutbox
             conn, WebhookOutboxSql.FencedUpdate(setClause), id, leaseOwner, new WebhookFencedValues(setClause, statusCode, errorCode, next, now), BindFencedUpdate, ct).ConfigureAwait(false);
     }
 
-    // D5 (ARCH-MNT-22): PostgreSQL types @status as Integer and binds only the parameters the set clause uses (SQLite binds all unconditionally).
+    // D5: PostgreSQL types @status as Integer and binds only the parameters the set clause uses (SQLite binds all unconditionally).
     internal static void BindFencedUpdate(DbCommand cmd, WebhookFencedValues v)
     {
         if (v.SetClause.Contains("@status", StringComparison.Ordinal))

@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
-/// <summary>Persistence of wrapped per-stream data-encryption keys (PLAN-CDC-99 D-A8). Only wrapped keys are stored.</summary>
+/// <summary>Persistence of wrapped per-stream data-encryption keys (99 D-A8). Only wrapped keys are stored.</summary>
 public interface ICdcStreamKeyStore
 {
     Task<IReadOnlyList<CdcWrappedKey>> GetKeysAsync(CdcStreamId id, CancellationToken ct = default);

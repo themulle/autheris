@@ -8,9 +8,9 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// Everything that determines the result of a key query (PLAN-GOV-107 A-6, SEC-RF107-03). The compiled key SQL carries canonical table names,
+/// Everything that determines the result of a key query (107 A-6). The compiled key SQL carries canonical table names,
 /// the projected catalog columns and every predicate shape; the binds carry the tenant and the policy values and the row limit of SQLite
-/// (D-WPC-8). The statement's text budget is deliberately not an input (SEC-RF107-18): entries stay statement independent.
+/// (D-WPC-8). The statement's text budget is deliberately not an input: entries stay statement independent.
 /// </summary>
 /// <param name="Provider">Provider name of the governed read connection.</param>
 /// <param name="ConnectionString">Hashed, never retained: a reconfigured connection never reuses entries.</param>
@@ -30,7 +30,7 @@ public sealed record RowFilterKeySetCacheKeyInput(
 }
 
 /// <summary>
-/// SEC-RF107-03: SHA-256 over a length-prefixed (<c>&lt;byte length&gt;:&lt;bytes&gt;</c>, UTF-8) encoding of every input, full 64 lower-case hex digits,
+/// SHA-256 over a length-prefixed (<c>&lt;byte length&gt;:&lt;bytes&gt;</c>, UTF-8) encoding of every input, full 64 lower-case hex digits,
 /// no truncation anywhere, culture invariant. Bind values carry a type tag and an invariant canonical form.
 /// </summary>
 public static class RowFilterKeySetCacheKey
@@ -84,7 +84,7 @@ public static class RowFilterKeySetCacheKey
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
-    /// <summary>The only hash that may appear in diagnostics: the first 12 hex digits of the cache key (SEC-RF107-09 b).</summary>
+    /// <summary>The only hash that may appear in diagnostics: the first 12 hex digits of the cache key (09 b).</summary>
     public static string DiagnosticId(string cacheKey)
     {
         ArgumentNullException.ThrowIfNull(cacheKey);

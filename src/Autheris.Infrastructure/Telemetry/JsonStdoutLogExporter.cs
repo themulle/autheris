@@ -12,7 +12,7 @@ using OpenTelemetry.Logs;
 
 /// <summary>
 /// Safe JSON stdout exporter writing OpenTelemetry log records as structured, escaped NDJSON lines.
-/// Enforces SEC-OT06-15: only safe attribute value types are serialised (everything else becomes a fixed
+/// Enforces only safe attribute value types are serialised (everything else becomes a fixed
 /// <c>&lt;unsupported:TypeName&gt;</c> marker without calling <c>ToString()</c> on the value), and
 /// <see cref="Export"/> never throws because it runs on the OpenTelemetry exporter thread where an unhandled
 /// exception terminates the process.

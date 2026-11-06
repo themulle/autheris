@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Issue #447 (REQ-ATR-06, SEC-ATR-02): stamps the scoped <see cref="IIngressTransportContext"/> from the matched endpoint's
+/// Issue #447: stamps the scoped<see cref="IIngressTransportContext"/> from the matched endpoint's
 /// <see cref="IngressTransportMetadata"/>. An endpoint without metadata leaves the ingress <c>None</c>, which the transport gate denies.
 /// Nothing from the request (headers, query, body, path text) is read. A conflicting second stamp throws and fails the request.
 /// </summary>

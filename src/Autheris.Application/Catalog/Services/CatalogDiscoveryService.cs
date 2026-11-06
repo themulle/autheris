@@ -505,7 +505,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// Issue #447 (REQ-ATR-11): the effective <c>AllowedTransports</c> of the table's source (a source without a profile inherits
+    /// Issue #447: the effective<c>AllowedTransports</c> of the table's source (a source without a profile inherits
     /// <c>Defaults</c>). Administrator-only data; null when no resolver is wired or the profile cannot be read.
     /// </summary>
     private IReadOnlyList<string>? EffectiveTransportsOf(TableMetadata table)
@@ -530,7 +530,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// The channel caller. The REST subject (<c>context.SubjectId</c>) and the principal SID must agree (SEC-CAT138-03: the stricter of
+    /// The channel caller. The REST subject (<c>context.SubjectId</c>) and the principal SID must agree (the stricter of
     /// both applies); a mismatch answers as no caller, so the service returns the empty set.
     /// </summary>
     private static CatalogCaller CallerOf(RequestContext context)

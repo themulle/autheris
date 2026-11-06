@@ -8,7 +8,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Storage of the runtime-managed, app-scoped trusted GraphQL documents (Issue #281). Every mutation changes the data and increments the
-/// generation in one transaction (SEC-281-7), so another instance that reads a new generation always finds the matching data.
+/// generation in one transaction, so another instance that reads a new generation always finds the matching data.
 /// </summary>
 public interface ITrustedDocumentRepository
 {

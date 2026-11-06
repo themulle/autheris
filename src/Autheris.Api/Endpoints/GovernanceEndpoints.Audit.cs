@@ -56,7 +56,7 @@ public static partial class GovernanceEndpoints
     private static TenantId ResolveRequestTenant(HttpContext context) => EndpointSecurity.GetRequestTenant(context);
 
     /// <summary>
-    /// WP-SC-10 / SEC-SC-16: keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
+    /// keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
     /// audit of one table they own. A foreign tenant is honoured for ClusterAdmin only. A malformed cursor is a 400, never a silent restart.
     /// </summary>
     internal static async Task<IResult> ListAuditPageAsync(
@@ -127,7 +127,7 @@ public static partial class GovernanceEndpoints
     }
 
     /// <summary>
-    /// WP-SC-10: keyset-paged consent / grant listing (also the <c>clamped=true</c> report of legacy individual grants, WP-SC-16 rule 5).
+    /// keyset-paged consent / grant listing (also the<c>clamped=true</c>report of legacy individual grants, 16 rule 5).
     /// Same authorization as the audit listing: tenant administrators and auditors for the tenant, a data owner for one owned table.
     /// </summary>
     internal static async Task<IResult> ListGrantsPageAsync(

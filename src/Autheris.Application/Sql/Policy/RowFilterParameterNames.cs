@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Security;
 
 /// <summary>
-/// SEC-ADG-02 item 2: the string consumers of a row filter fail closed on a duplicate parameter name. The producers key their values by the
+/// 02 item 2: the string consumers of a row filter fail closed on a duplicate parameter name. The producers key their values by the
 /// marker (<c>@__gql_rls_0</c>) and the providers match the name case-insensitively and without the marker prefix, so two keys that differ only
 /// in the prefix or the case, or a key that names a parameter the consumer binds itself (the tenant, a pagination value), would let the provider
 /// pick one of two values silently.

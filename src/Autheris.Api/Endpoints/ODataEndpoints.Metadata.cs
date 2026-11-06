@@ -10,11 +10,11 @@ using Microsoft.Extensions.Hosting;
 
 public static partial class ODataEndpoints
 {
-    /// <summary>API-15: Swagger UI outside Development needs an authenticated caller unless OpenSchema is enabled.</summary>
+    /// <summary>Swagger UI outside Development needs an authenticated caller unless OpenSchema is enabled.</summary>
     internal static bool RequiresSwaggerChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
         !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
 
-    /// <summary>API-15: Evaluates Swagger UI authorization: challenge if unauthenticated outside Dev, forbid if authenticated non-admin.</summary>
+    /// <summary>Evaluates Swagger UI authorization: challenge if unauthenticated outside Dev, forbid if authenticated non-admin.</summary>
     internal static IResult? CheckSwaggerAuth(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context)
     {
         if (gatewayOptions.IsOpenSchemaAllowed || env.IsDevelopment())
@@ -32,7 +32,7 @@ public static partial class ODataEndpoints
         return null;
     }
 
-    /// <summary>API-15: Metadata and service document outside Development require an authenticated caller (challenge).</summary>
+    /// <summary>Metadata and service document outside Development require an authenticated caller (challenge).</summary>
     internal static bool RequiresMetadataChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
         !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
 

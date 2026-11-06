@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// SEC M-05: Enforces <c>Content-Type: application/json</c> on MCP JSON-RPC POST requests so browsers cannot submit
-/// cross-site simple requests (<c>text/plain</c> or form-urlencoded) carrying ambient credentials (WP-ARC-C-04).
+/// cross-site simple requests (<c>text/plain</c>or form-urlencoded) carrying ambient credentials.
 /// </summary>
 public sealed class StrictMcpGuardMiddleware
 {

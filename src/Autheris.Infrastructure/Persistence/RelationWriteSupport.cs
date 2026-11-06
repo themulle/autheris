@@ -9,7 +9,7 @@ internal static class RelationWriteSupport
 {
     private const int MaxIdentifierInMessage = 128;
 
-    /// <summary>Runs <see cref="RelationKeyRules"/> before any connection is opened (SEC-REL151-03).</summary>
+    /// <summary>Runs <see cref="RelationKeyRules"/>before any connection is opened.</summary>
     public static void ValidateKeysOrThrow(TableRelation relation)
     {
         ArgumentNullException.ThrowIfNull(relation);
@@ -83,7 +83,7 @@ internal static class RelationWriteSupport
         return true;
     }
 
-    /// <summary>Truncates to 128 characters and replaces control characters so identifiers cannot forge log lines (SEC-REL151-02 style).</summary>
+    /// <summary>Truncates to 128 characters and replaces control characters so identifiers cannot forge log lines (02 style).</summary>
     public static string Safe(string? value)
     {
         if (string.IsNullOrEmpty(value))

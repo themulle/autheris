@@ -25,7 +25,7 @@ public sealed class SqlEndpointLoader : IDisposable
         RegexOptions.Compiled | RegexOptions.Multiline,
         TimeSpan.FromSeconds(2));
 
-    // REQ-SQL-128 (A-8, SEC-128-14): the colon form "name: type[][!] [= default]". Anchored, no nested quantifiers.
+    // 128 (A-8): the colon form "name: type[!] [= default]". Anchored, no nested quantifiers.
     private static readonly Regex ParamHeaderRegex = new(
         @"\A([A-Za-z0-9_]+)\s*:\s*([A-Za-z0-9_]+)(\[\])?(\!)?(?:\s*=\s*(.+))?\z",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
@@ -557,7 +557,7 @@ public sealed class SqlEndpointLoader : IDisposable
         }
 
         // From here the line is a colon declaration and must parse completely. The diagnostic names the file and the parameter (the
-        // name is limited to [A-Za-z0-9_]) and never any other text of the line (SEC-128-07).
+        // name is limited to [A-Za-z0-9_]) and never any other text of the line.
         string name = colonForm.Groups[1].Value;
         string Invalid(string reason) =>
             $"SQL endpoint '{SanitizeHeaderValue(endpointName)}': the declaration of parameter '{name}' is invalid ({reason}). Expected '-- @param name: type[[]][!] [= default]'.";

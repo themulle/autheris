@@ -62,7 +62,7 @@ public static class SqlFunctionPolicy
         "decryptbypassphrase", "decryptbycert", "decryptbyasymkey", "decryptbykeyautocert",
         // SEC P-02 SQLite: extension loading, file access (fileio extension), memory DoS
         "load_extension", "readfile", "writefile", "edit", "zeroblob", "randomblob", "fts3_tokenizer",
-        // WP-X0h (SEC-X1-10) SQLite: table-valued JSON expanders and the gateway HMAC UDF, which only the mask emitter may produce
+        // WP-X0h SQLite: table-valued JSON expanders and the gateway HMAC UDF, which only the mask emitter may produce
         "json_each", "json_tree", "gateway_hmac_sha256",
         // CR-ADG-02 Databricks / Spark: JVM reflection (code execution), secret access, identity and environment disclosure
         "reflect", "java_method", "try_reflect", "secret", "current_user", "session_user", "current_catalog", "current_metastore",

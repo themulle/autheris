@@ -12,9 +12,9 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// I1 compatibility source of GraphQL table subscriptions (PLAN-CDC-99 D-A13): the events of MSSQL-tracked tables come from the durable
+/// I1 compatibility source of GraphQL table subscriptions (99 D-A13): the events of MSSQL-tracked tables come from the durable
 /// stream through <see cref="ICdcStreamTailHub"/>, every other source keeps using the channel. The merged events still pass the subscriber's
-/// own authorisation and masking before they leave the subscription (SEC-CDC99-05).
+/// own authorisation and masking before they leave the subscription.
 /// </summary>
 public static class CdcStreamEventSource
 {

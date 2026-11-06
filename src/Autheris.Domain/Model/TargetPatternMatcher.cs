@@ -5,7 +5,7 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 /// <summary>
-/// F-GOV-14 (SEC-7, SEC-8): regex target patterns of Virtual Filter bindings (<c>^...</c> or <c>regex:...</c>).
+/// F-GOV-14: regex target patterns of Virtual Filter bindings (<c>^...</c> or <c>regex:...</c>).
 /// <list type="bullet">
 /// <item>A pattern matches the full, source-qualified name <c>domain.schema.table</c>
 /// (<see cref="TableIdentifier.ToString"/>) and nothing else; it is anchored at both ends (<c>^(?:pattern)$</c>).</item>

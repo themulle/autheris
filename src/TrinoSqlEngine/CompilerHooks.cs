@@ -187,16 +187,16 @@ internal enum SecurityControl
     /// <summary>A catalog load failure yields an empty catalog entry instead of a denied table (X0c).</summary>
     CatalogLoadFailureDenies,
 
-    /// <summary>The residual position check of the client list pass is skipped: a list in a scalar position is not refused (SEC-128-10).</summary>
+    /// <summary>The residual position check of the client list pass is skipped: a list in a scalar position is not refused.</summary>
     ClientListPosition,
 
-    /// <summary>The binder does not compare the compiled element count with the supplied list (SEC-128-10).</summary>
+    /// <summary>The binder does not compare the compiled element count with the supplied list.</summary>
     ClientListCount,
 
-    /// <summary>The client list pass runs after the typed security visitor instead of before it (SEC-128-01).</summary>
+    /// <summary>The client list pass runs after the typed security visitor instead of before it.</summary>
     ClientListExpandsBeforeGuards,
 
-    /// <summary>The per-statement cap of expanded list items is not enforced (SEC-128-02).</summary>
+    /// <summary>The per-statement cap of expanded list items is not enforced.</summary>
     ClientListMaxExpanded,
 
     /// <summary>A cache hit binds the raw value of an escaped LIKE pattern slot (SQLE-10).</summary>

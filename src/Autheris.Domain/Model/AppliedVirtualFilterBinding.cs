@@ -1,7 +1,7 @@
 namespace Autheris.Domain.Model;
 
 /// <summary>
-/// Value identity of an applied (filter, binding) pair (F-GOV-14 SEC-20): tenant, filter id, definition hash, binding
+/// Value identity of an applied (filter, binding) pair (F-GOV-14 ): tenant, filter id, definition hash, binding
 /// hash and the snapshot generation the pair was resolved from. Two pairs with the same identity enforce the same rule.
 /// </summary>
 public readonly record struct AppliedVirtualFilterBindingKey(

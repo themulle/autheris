@@ -38,7 +38,7 @@ public static class ArrowExportEndpoints
 
     public static IEndpointRouteBuilder MapArrowExportEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = endpoints.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ArgumentNullException.ThrowIfNull(endpoints);
 

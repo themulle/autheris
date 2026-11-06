@@ -22,7 +22,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Polls SQL Server Change Tracking (CHANGETABLE) of one tracked table and appends the changes to the durable, encrypted CDC stream
-/// (F-CDC-02, PLAN-CDC-99 D-A4/D-A5). The source is read in ONE snapshot transaction (min valid version, current version and the batch
+/// (F-CDC-02, 99 D-A4/D-A5). The source is read in ONE snapshot transaction (min valid version, current version and the batch
 /// are consistent) with an explicit column list; the append is ONE governance transaction (fenced watermark upsert, head offset CAS,
 /// events, row images) so a crash re-reads the same versions and nothing is ever produced twice. MSSQL changes are never published on
 /// the <see cref="ICdcEventChannel"/> (AC-14); consumers are woken by the data-free <see cref="ICdcStreamSignal"/>.

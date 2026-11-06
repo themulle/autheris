@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// HotChocolate execution listener producing the graphql.execute span per GraphQL operation.
-/// Enforces SEC-OT06-03 (safe operation names, no variables/documents).
+/// Enforces 03 (safe operation names, no variables/documents).
 /// </summary>
 public sealed class GraphQlTelemetryListener : ExecutionDiagnosticEventListener
 {

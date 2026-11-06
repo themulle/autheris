@@ -12,7 +12,7 @@ using Autheris.Domain.Model;
 /// and data source routing fields (DataSourceType, HttpEndpoint, PluginName, SourceType, SourceName) unknown to catalogs
 /// are preserved.
 /// Columns missing from the incoming snapshot keep their persisted protection.
-/// SEC-RATCHET-01: the result is derived from the persisted table, columns and metadata, so properties a catalog does not
+/// the result is derived from the persisted table, columns and metadata, so properties a catalog does not
 /// own (e.g. required filter columns, enforcement mode, physical database name, localized texts) are never wiped by a sync.
 /// </summary>
 public static class CatalogGovernanceRatchet
@@ -33,7 +33,7 @@ public static class CatalogGovernanceRatchet
             ? Math.Max(exTable.MinGroupSize.Value, inTable.MinGroupSize.Value)
             : exTable.MinGroupSize ?? inTable.MinGroupSize;
 
-        // SEC-RATCHET-01: the merge starts from the persisted table so every property a catalog does not own (required filter
+        // the merge starts from the persisted table so every property a catalog does not own (required filter
         // columns / groups, enforcement mode, physical database, location, row filter, group size, tags, visibility, expected
         // rows, routing fields) survives the sync. Only catalog-owned descriptive fields and the ratcheted governance flags are
         // overridden. Routing fields (DataSourceType, HttpEndpoint, PluginName) are never overridden.
@@ -86,7 +86,7 @@ public static class CatalogGovernanceRatchet
 
             existingColumns.TryGetValue(col.ColumnName, out var exCol);
 
-            // SEC-RATCHET-01: TableColumn is a class (no `with`), so every property is listed; persisted values that the
+            // TableColumn is a class (no `with`), so every property is listed; persisted values that the
             // catalog does not deliver (display name, localized texts, ...) are kept.
             mergedColumns.Add(new TableColumn
             {
@@ -127,11 +127,11 @@ public static class CatalogGovernanceRatchet
             }
         }
 
-        // SEC-94-11: the incoming definition (and the replace intent) is carried only when it asks to replace; otherwise the stored
+        // the incoming definition (and the replace intent) is carried only when it asks to replace; otherwise the stored
         // definition is kept and the result stays unflagged, so a round trip can never wipe it.
         var replace = incoming.ReplaceKeyDefinition;
 
-        // SEC-RATCHET-01: metadata-level settings a catalog does not own (owner tenant, profile release, synthetic samples,
+        // metadata-level settings a catalog does not own (owner tenant, profile release, synthetic samples,
         // row filter evaluation, group size overrides, row count hints) are carried over from the persisted state as well.
         return existing with
         {

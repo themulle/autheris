@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Domain.Options.DataSources;
 
-/// <summary>Issue #447 (REQ-ATR-11): the individual transport names behind a flag value, for admin diagnostics and reports.</summary>
+/// <summary>Issue #447: the individual transport names behind a flag value, for admin diagnostics and reports.</summary>
 public static class TransportFlagNames
 {
     private static readonly DataSourceTransportFlags[] Singles =

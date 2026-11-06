@@ -3,7 +3,7 @@ namespace Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 
 /// <summary>
-/// PLAN-SEC-115: the startup-only read-path switches (REST data endpoint, MCP tool groups, disabled tools). An immutable snapshot of
+/// the startup-only read-path switches (REST data endpoint, MCP tool groups, disabled tools). An immutable snapshot of
 /// the configuration; no member takes request-derived data, so an agent can never select or widen a switch.
 /// </summary>
 public interface IReadPathSwitches

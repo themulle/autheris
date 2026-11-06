@@ -20,7 +20,7 @@ public interface INonCachingCallerAttributeProvider
 }
 
 /// <summary>
-/// Reads an attribute from claims of the caller's validated bearer token (PLAN-GOV-129 A-5.1, BC-129-04). Per attribute: one claim type and
+/// Reads an attribute from claims of the caller's validated bearer token (129 A-5.1, BC-129-04). Per attribute: one claim type and
 /// one trusted issuer; the claim must be of that issuer and belong to an identity of an allowed scheme (header-derived, Basic, Test and
 /// normalizer-added claims never qualify). Two different values for a scalar attribute are <c>Failed(Ambiguous)</c>; size and count are
 /// bounded before anything is parsed; a JSON array claim is parsed strictly (depth 1, no objects, no nulls, no comments).
@@ -176,7 +176,7 @@ public sealed class ClaimsAttributeProvider : ICallerAttributeProvider, INonCach
     }
 }
 
-/// <summary>Save-time rules of a claims attribute (SEC-129-04 a): a claim, a trusted issuer, the acknowledgement that the claim is IdP-controlled, and a sane token age.</summary>
+/// <summary>Save-time rules of a claims attribute (04 a): a claim, a trusted issuer, the acknowledgement that the claim is IdP-controlled, and a sane token age.</summary>
 public sealed class ClaimsAttributeDefinitionValidator : ICallerAttributeDefinitionValidator
 {
     private readonly CallerAttributeClaimsOptions _options;

@@ -52,7 +52,7 @@ public sealed class ScimAuthenticationHandler : AuthenticationHandler<Authentica
             return Task.FromResult(AuthenticateResult.Fail("Empty bearer token."));
         }
 
-        // ARCH-MNT-06 (SC-03): the caller allowlist is evaluated before anything else is revealed about the realm or the secret, and a
+        //  (SC-03): the caller allowlist is evaluated before anything else is revealed about the realm or the secret, and a
         // rejected peer receives the same generic failure as a wrong token (no "IP not allowed" oracle).
         var allowedRanges = _realmOptions.CurrentValue.Scim?.AllowedIpRanges;
         if (allowedRanges is { Count: > 0 })

@@ -168,7 +168,7 @@ public sealed class GatewayExtensibilityMiddleware
             return;
         }
 
-        // WP-ARC-C-14: Zero-copy slice of the underlying MemoryStream buffer
+        // Zero-copy slice of the underlying MemoryStream buffer
         ReadOnlyMemory<byte> responseMemory = boundedStream.WrittenMemory;
 
         // 3. Egress phase

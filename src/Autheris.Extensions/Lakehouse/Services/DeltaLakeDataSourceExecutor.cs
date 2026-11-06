@@ -74,7 +74,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 
         var predicates = ExtractPredicates(context.Arguments);
 
-        // SEC-DL-02 / SEC M-35 / EX-17: Reject filter on uncataloged columns or non-clear columns to prevent inference side-channels
+        // 02 / SEC M-35 / EX-17: Reject filter on uncataloged columns or non-clear columns to prevent inference side-channels
         foreach (var column in predicates.Keys.ToList())
         {
             var colMeta = context.Metadata.GetColumn(column);

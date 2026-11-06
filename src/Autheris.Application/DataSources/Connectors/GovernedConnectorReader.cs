@@ -106,7 +106,7 @@ public static class GovernedConnectorReader
                 VirtualFilterErrorCodes.EnforcementIncomplete);
         }
 
-        // SEC-2 (F-GOV-14): an HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
+        //  (F-GOV-14): an HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
         // connector never relaxes enforcement by self-attestation; the gateway always filters and masks its rows.
         var mayAttest = metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative;
 
@@ -200,7 +200,7 @@ public static class GovernedConnectorReader
     /// <summary>
     /// Governed row-by-row streaming: streams from upstream, evaluates Virtual Filter, row filter,
     /// column masking/projection, and cumulative byte limit row-by-row without buffering in memory.
-    /// SEC-PERF254-03: Throws RESPONSE_TOO_LARGE as soon as cumulativeEstimatedBytes exceeds policy.MaxBytes.
+    /// Throws RESPONSE_TOO_LARGE as soon as cumulativeEstimatedBytes exceeds policy.MaxBytes.
     /// </summary>
     public static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamAsync(
         IAutherisConnector connector,
@@ -350,7 +350,7 @@ public static class GovernedConnectorReader
         foreach (var col in targetColumns)
         {
             // Zero-Trust: sensitive columns in the catalog never leave in clear text without an explicit Clear rule (for a holder of a
-            // restricted scope a scope-specific one, REQ-GOV-143). The decision owns that rule; no path-local copy of it.
+            // restricted scope a scope-specific one). The decision owns that rule; no path-local copy of it.
             var access = decision.GetEffectiveColumnAccess(col.ColumnName, metadata);
             if (access == ColumnAccessLevel.Deny)
             {

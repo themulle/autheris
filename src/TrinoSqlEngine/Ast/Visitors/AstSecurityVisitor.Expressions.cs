@@ -255,7 +255,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             c.Name.Parts.Count >= 2 && string.Equals(c.Name.Parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase));
         if (referencesTarget)
         {
-            // SEC-ADG-06 item 2: a correlated row filter cannot be bound to a DML target (nor to the inserted values).
+            // 06 item 2: a correlated row filter cannot be bound to a DML target (nor to the inserted values).
             throw new SecurityException("Correlated row filters are not supported for INSERT, UPDATE, DELETE and MERGE statements.");
         }
 

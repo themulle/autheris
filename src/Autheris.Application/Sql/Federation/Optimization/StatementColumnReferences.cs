@@ -7,7 +7,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
 /// <summary>
-/// PARITY-GAP-018 / SEC-PG-21..24: every column a federated statement reads, taken from the parsed AST (select items including function and
+/// PARITY-GAP-018 / 21..24: every column a federated statement reads, taken from the parsed AST (select items including function and
 /// aggregate arguments, GROUP BY, HAVING, ORDER BY, WHERE, join conditions, nested scopes), not from the text of the select list. The
 /// result only says which names a statement mentions; attribution to a table and the access level of each column stay with the planner
 /// (a Deny column is never staged, a masked column is staged by the governed read, i.e. already masked).
@@ -19,7 +19,7 @@ public sealed record StatementColumnReferences(
 {
     /// <summary>
     /// Collects the references. A node the walker cannot classify (unsupported AST type, execution stack limit) sets
-    /// <see cref="Unclassifiable"/>: the caller then stages every allowed column of every table (SEC-PG-23), it never falls back to text.
+    /// <see cref="Unclassifiable"/>the caller then stages every allowed column of every table, it never falls back to text.
     /// </summary>
     public static StatementColumnReferences Collect(SqlStatement statement)
     {

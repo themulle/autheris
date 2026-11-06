@@ -7,7 +7,7 @@ using Autheris.Application.OData.Interfaces;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// SEC-PERF254-02 / WP-5: Pre-warms discovery documents by generating and caching global OpenAPI index document.
+/// Pre-warms discovery documents by generating and caching global OpenAPI index document.
 /// Strictly forbidden from accessing tenant credentials or writing governance/audit data.
 /// </summary>
 public sealed class DiscoveryDocumentWarmup : IStartupWarmup

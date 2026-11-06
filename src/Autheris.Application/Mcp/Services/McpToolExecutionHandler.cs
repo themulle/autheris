@@ -98,7 +98,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         McpSemanticTools.IsSemanticTool(toolName);
 
     /// <summary>
-    /// Issue #447 (REQ-ATR-04): the central tool error mapping. A transport denial from any gate call below becomes a tool error
+    /// Issue #447: the central tool error mapping. A transport denial from any gate call below becomes a tool error
     /// (<c>isError</c>) with the code <c>TRANSPORT_NOT_ALLOWED</c> and fixed text: no source name, no sub-reason.
     /// </summary>
     public async Task<string> ExecuteToolAsync(
@@ -544,7 +544,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         bool isReadOnlyCaller = userPrincipal.IsReadOnly() || sessionContext.IsReadOnly;
         if (_procedureRegistry.TryGet(procName, out var reg) && reg != null)
         {
-            // Visibility check first: prevents existence and mode oracle (SEC-GOV153-02)
+            // Visibility check first: prevents existence and mode oracle
             var isVisible = await _procedureExecutionService.IsVisibleAsync(reg, userPrincipal, tenantId, ct).ConfigureAwait(false);
             if (!isVisible)
             {

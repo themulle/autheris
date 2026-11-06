@@ -4,7 +4,7 @@ using System;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Failure logging for paths that handle governed or staged data (SEC-FED-DELTA-01). Exception messages and inner
+/// Failure logging for paths that handle governed or staged data. Exception messages and inner
 /// exceptions can quote data values, so a line at Information or above carries the caller's constant template, its
 /// arguments and the exception type name, never the exception object. The full exception is written at Debug only.
 /// </summary>

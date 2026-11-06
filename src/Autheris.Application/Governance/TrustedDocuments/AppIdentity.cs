@@ -4,7 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 
 /// <summary>
-/// The identity an app-scoped trusted document set belongs to: <c>appId/version</c> (Issue #281, SEC-281-5). Both parts are validated by
+/// The identity an app-scoped trusted document set belongs to: <c>appId/version</c>(Issue #281). Both parts are validated by
 /// source-generated, culture-invariant regexes with a match timeout, always behind a length check.
 /// </summary>
 public readonly partial record struct AppIdentity(string AppId, string Version)

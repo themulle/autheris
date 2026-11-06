@@ -24,7 +24,7 @@ public sealed class DeclarativeConsentApplyService(
     IDatasetCatalogAdminService? datasetCatalog = null,
     IOptions<GovernanceTextOptions>? textOptions = null) : IDeclarativeConsentApplyService
 {
-    // WP-SC-16: the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
+    // the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
 
@@ -91,8 +91,8 @@ public sealed class DeclarativeConsentApplyService(
             }
         }
 
-        // PLAN-GOV-158-INC1 decision 6: normalise every description before anything is read or written (also in dry-run); a violation
-        // rejects the whole manifest with a neutral message that names only the policy index (SEC-GOV158I1-03).
+        // INC1 decision 6: normalise every description before anything is read or written (also in dry-run); a violation
+        // rejects the whole manifest with a neutral message that names only the policy index.
         var descriptions = new string?[policies.Count];
         for (var i = 0; i < policies.Count; i++)
         {
@@ -146,7 +146,7 @@ public sealed class DeclarativeConsentApplyService(
                 granteeSid = new Sid(policy.GranteeRef);
             }
 
-            // WP-SC-16: individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
+            // individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
             var individual = granteeType is GranteeType.User or GranteeType.ServicePrincipal;
 
             // SR-M-10 (SoD): no self-grant, neither directly (any identifier form) nor through a group or role the actor holds.
@@ -208,7 +208,7 @@ public sealed class DeclarativeConsentApplyService(
                 validTo = now.AddDays(days);
             }
 
-            // WP-SC-02: role consents have no subject SID, so they are looked up by role name (the subject lookup never returns them).
+            // role consents have no subject SID, so they are looked up by role name (the subject lookup never returns them).
             IReadOnlyList<Consent> existingConsents = granteeType == GranteeType.Role
                 ? await consentRepository.GetActiveRoleConsentsAsync(tableId, roleName!, tenantId, now, ct).ConfigureAwait(false)
                 : await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);
@@ -234,7 +234,7 @@ public sealed class DeclarativeConsentApplyService(
             if (matchingConsent != null)
             {
                 // Decision 6: a description-only difference is an in-place update (same id, no revoke, no epoch bump); every semantic
-                // difference already failed IsIdentical and takes the revoke/create path (SEC-GOV158I1-07).
+                // difference already failed IsIdentical and takes the revoke/create path.
                 await ConsentDescriptionLoader.LoadAsync(consentRepository, [matchingConsent], ct).ConfigureAwait(false);
                 var storedDescription = UntrustedText.Normalize(matchingConsent.Description, GovernanceTextOptions.ConsentDescriptionCeiling, allowLineFeed: false);
                 var storedNormalized = storedDescription.IsValid ? storedDescription.Value : matchingConsent.Description;
@@ -408,7 +408,7 @@ public sealed class DeclarativeConsentApplyService(
             }
         }
 
-        // WP-SC-02: one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
+        // one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
         // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
         // epoch invalidation after the commit cannot lose it.
         if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0))

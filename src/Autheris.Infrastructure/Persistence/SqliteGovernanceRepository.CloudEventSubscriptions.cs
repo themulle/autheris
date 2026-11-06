@@ -10,7 +10,7 @@ using Autheris.Domain.Model;
 using Microsoft.Data.Sqlite;
 
 /// <summary>
-/// SQLite <see cref="ICloudEventSubscriptionStore"/> (WP-ARC-A-03). Every statement runs through
+/// SQLite <see cref="ICloudEventSubscriptionStore"/>. Every statement runs through
 /// <see cref="WriteAsync{T}"/> or <see cref="ReadAsync{T}"/> on a per-operation connection. Every
 /// statement is scoped by <c>tenant_id</c>.
 /// </summary>

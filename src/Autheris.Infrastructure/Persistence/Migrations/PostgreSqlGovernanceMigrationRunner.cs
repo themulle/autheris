@@ -139,7 +139,7 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
         ExecuteAsync(connection, null, "SELECT pg_advisory_unlock(" + SchemaAdvisoryLockKey.ToString(CultureInfo.InvariantCulture) + ")", ct);
 
     /// <summary>
-    /// SEC-94-09: both append-only triggers must sit on <c>audit_log_entries</c> as resolved through the <c>search_path</c>, call
+    /// both append-only triggers must sit on<c>audit_log_entries</c> as resolved through the <c>search_path</c>, call
     /// <c>autheris_audit_append_only</c>, have the expected timing and events and must not be disabled (or replica-only).
     /// </summary>
     internal const string AuditTriggerPostConditionSql =

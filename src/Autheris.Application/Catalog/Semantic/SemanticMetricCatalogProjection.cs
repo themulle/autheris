@@ -9,7 +9,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
 /// <summary>
-/// The descriptive fields of a metric that every authenticated caller may see (#112 A1-6 c, SEC-112-18). Filter templates, type parameters
+/// The descriptive fields of a metric that every authenticated caller may see (#112 A1-6 c). Filter templates, type parameters
 /// and free-form <c>Meta</c> are manifest implementation detail and are never part of it.
 /// </summary>
 public sealed record MetricDefinitionSummary(string Name, string Type, string? Label, string? Description, string? Unit)

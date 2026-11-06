@@ -349,7 +349,7 @@ public sealed partial class QueryAnalysisService
                     }
                 }
             }
-            // Issue #123 (WP-123-4): Subtree pushdown analysis
+            // Issue #123: Subtree pushdown analysis
             if (parsedStatement != null && resolvedTables.Count >= 2)
             {
                 var partitionResult = Autheris.Application.Sql.Federation.Subtrees.SubtreeGraphPartitioner.PartitionSubtrees(parsedStatement, resolvedTables);

@@ -156,7 +156,7 @@ public static partial class AdvancedRlsFilterGenerator
     }
 
     /// <summary>
-    /// Typed form of <see cref="BuildCorrelatedSubquery"/> (SEC-X1-02): an EXISTS over the reserved target alias whose values are
+    /// Typed form of <see cref="BuildCorrelatedSubquery"/>an EXISTS over the reserved target alias whose values are
     /// policy parameters. <paramref name="parameterPrefix"/> keeps the names of independently built predicates distinct.
     /// </summary>
     public static PolicyPredicate BuildCorrelatedPredicate(

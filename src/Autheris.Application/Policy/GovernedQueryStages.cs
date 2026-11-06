@@ -18,7 +18,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
 /// <summary>
-/// Failure semantics of one audit write (WP-ARC-B-03). Every table-read call site propagates a failed audit write today
+/// Failure semantics of one audit write. Every table-read call site propagates a failed audit write today
 /// (<see cref="Required"/>); the parameter exists so that the audit contract of the audit work package can assign tiers per
 /// event without touching the call sites again.
 /// </summary>
@@ -32,7 +32,7 @@ public enum AuditTier
 }
 
 /// <summary>
-/// WP-ARC-B-03: the shared pipeline stages of every governed read adapter (REST datasets, GraphQL flat and tree reads,
+/// the shared pipeline stages of every governed read adapter (REST datasets, GraphQL flat and tree reads,
 /// OData, MCP, connectors, procedures): the authorization stage and the audit shape.
 /// <para>
 /// Authorization: one place evaluates the unified decision point and applies the non-canonical ClusterAdmin fail-closed check
@@ -48,7 +48,7 @@ public static class GovernedQueryStages
     // ---------------------------------------------------------------- authorization
 
     /// <summary>
-    /// WP-X0n / SEC-X1-17: the unified decision point drops a ClusterAdmin role claim of a non-canonical principal while the
+    /// WP-X0n / the unified decision point drops a ClusterAdmin role claim of a non-canonical principal while the
     /// governed compiler keeps every role claim. That one input difference fails closed here, before any read.
     /// </summary>
     /// <exception cref="UnauthorizedAccessException">The principal carries a ClusterAdmin role claim without being a canonical cluster admin.</exception>
@@ -179,7 +179,7 @@ public static class GovernedQueryStages
     }
 
     /// <summary>
-    /// The write seam over the unified audit contract (WP-ARC-A-06): <see cref="AuditTier.Required"/> maps to
+    /// The write seam over the unified audit contract:<see cref="AuditTier.Required"/> maps to
     /// <see cref="IAuditWriter.RecordRequiredAsync"/>, <see cref="AuditTier.BestEffort"/> to <see cref="IAuditWriter.RecordBestEffortAsync"/>.
     /// </summary>
     public static Task WriteAsync(IAuditWriter audit, AuditLogEntry entry, AuditTier tier, CancellationToken ct)

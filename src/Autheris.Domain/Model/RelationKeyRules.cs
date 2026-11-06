@@ -10,7 +10,7 @@ public enum RelationKeyViolation
     TooWide
 }
 
-/// <summary>Single source of truth for relation join key rules (issue #151, SEC-REL151-03).</summary>
+/// <summary>Single source of truth for relation join key rules (issue #151).</summary>
 public static class RelationKeyRules
 {
     public const int MaxKeyColumns = 16;

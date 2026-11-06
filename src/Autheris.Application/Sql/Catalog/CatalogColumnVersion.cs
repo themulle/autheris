@@ -6,7 +6,7 @@ namespace Autheris.Application.Sql.Catalog;
 
 /// <summary>
 /// The version of a catalog entry: a hash of name, native type (including length and precision), length semantics and
-/// collation of every column in order. A change of any of them changes the version, so no cached plan survives it (SEC-X1-09).
+/// collation of every column in order. A change of any of them changes the version, so no cached plan survives it.
 /// </summary>
 public static class CatalogColumnVersion
 {

@@ -37,7 +37,7 @@ public static partial class GatewayGovernanceServiceExtensions
     private static void AddCatalogAndRowFilterAdministration(IServiceCollection services)
     {
         // Issue #107: admin surface of the row filter key-set cache settings and the startup validation of its global options
-        // (runs with the GatewayOptions ValidateOnStart; SEC-RF107-16).
+        // (runs with the GatewayOptions ValidateOnStart).
         services.AddSingleton<IRowFilterEvaluationAdminService, RowFilterEvaluationAdminService>();
 
         // Issue #111: the only writer of dataset tags and catalog visibility tiers (REST, manifest and MCP admin tool).
@@ -53,8 +53,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetService<TimeProvider>(),
             sp.GetService<ICatalogVisibilityMetrics>()));
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
-        // Issue #107 (WP-C): the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,
-        // SEC-RF107-16); every other option is read per statement by the stage through IOptionsMonitor.
+        // Issue #107: the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,
+        // 16); every other option is read per statement by the stage through IOptionsMonitor.
         services.AddSingleton<TrinoSqlEngine.Governance.IPolicyKeyQueryCompiler>(sp =>
             sp.GetRequiredService<TrinoSqlEngine.ISqlEngine>() as TrinoSqlEngine.Governance.IPolicyKeyQueryCompiler ?? new TrinoSqlEngine.Governance.PolicyKeyQueryCompiler());
         services.AddSingleton(sp =>
@@ -78,7 +78,7 @@ public static partial class GatewayGovernanceServiceExtensions
 
     private static void AddOpenApiCatalogAndEnterpriseMoats(IServiceCollection services)
     {
-        // Outbound SSRF protection (HIGH-03 / SEC-02) & OpenAPI ingestion (P1).
+        // Outbound SSRF protection (HIGH-03) & OpenAPI ingestion (P1).
         services.AddHttpClient<IAuditWormExportService, AuditWormExportService>().AddSecureOutboundHandlers(EgressIntegrations.AuditWorm);
         services.AddSingleton<IOpenApiIngestionService, OpenApiIngestionService>();
         services.AddAutherisCatalog();
@@ -88,12 +88,12 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
-        services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // WP-SC-16
+        services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // 16
             .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
                 Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(Autheris.Domain.Options.IndividualGrantOptions.SectionName), o))
             .ValidateDataAnnotations()
             .ValidateOnStart();
-        services.AddOptions<Autheris.Domain.Options.GovernanceTextOptions>() // PLAN-GOV-158-INC1
+        services.AddOptions<Autheris.Domain.Options.GovernanceTextOptions>() // INC1
             .BindConfiguration(Autheris.Domain.Options.GovernanceTextOptions.SectionName)
             .ValidateDataAnnotations()
             .ValidateOnStart();

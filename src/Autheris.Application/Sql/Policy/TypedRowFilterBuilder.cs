@@ -213,7 +213,7 @@ public sealed partial class TypedRowFilterBuilder
     }
 
     /// <summary>
-    /// REQ-GOV-129 (A-3): a <c>USER_ATTRIBUTE</c> leaf. A resolved attribute binds as policy parameters (EQ/NEQ scalar, IN scalar or list,
+    /// 129 (A-3): a<c>USER_ATTRIBUTE</c> leaf. A resolved attribute binds as policy parameters (EQ/NEQ scalar, IN scalar or list,
     /// padded); every other state (no set, unknown or invalid name, not resolved, wrong operator or cardinality) is the fail-closed constant
     /// of RR-L4-01: ALLOW matches no rows (<c>1 = 0</c>), DENY matches all rows (<c>1 = 1</c>) so <c>NOT (1 = 1)</c> blocks access. The stored
     /// <c>ValueJson</c> is never read: a literal is not a fallback.

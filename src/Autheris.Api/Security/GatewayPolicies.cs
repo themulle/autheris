@@ -27,7 +27,7 @@ public static class GatewayPolicies
     /// <summary>SEC2-09: Prometheus scrape endpoint; any authenticated user is not enough.</summary>
     public const string MetricsScrape = "MetricsScrape";
 
-    // WP-ARC-C-06: Declarative endpoint authorization policies
+    // Declarative endpoint authorization policies
     public const string AdminOnly = "AdminOnly";
     public const string OperatorOrAbove = "OperatorOrAbove";
     public const string AuditorOrAbove = "AuditorOrAbove";
@@ -82,7 +82,7 @@ public static class GatewayPolicies
     }
 
     /// <summary>
-    /// Fluent extension method registering all named gateway policies and the authenticated-user fallback policy (WP-ARC-C-06).
+    /// Fluent extension method registering all named gateway policies and the authenticated-user fallback policy.
     /// </summary>
     public static AuthorizationOptions AddGatewayAuthorizationPolicies(this AuthorizationOptions options)
     {
@@ -110,7 +110,7 @@ public static class GatewayPolicies
         AddRolePolicy(options, SchemaPublisher, SchemaPublisherRoles);
         AddRolePolicy(options, MetricsScrape, MetricsScrapeRoles);
 
-        // WP-ARC-C-06 policies
+        // 06 policies
         AddRolePolicy(options, AdminOnly, AdminOnlyRoles);
         AddRolePolicy(options, OperatorOrAbove, OperatorOrAboveRoles);
         AddRolePolicy(options, AuditorOrAbove, AuditorOrAboveRoles);

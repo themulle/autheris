@@ -4,7 +4,7 @@ namespace Autheris.Application.Security;
 public sealed record TenantCollision(string Canonical, IReadOnlyList<string> Spellings);
 
 /// <summary>
-/// Decision B-1 / SEC-ADG-04: tenant ids are case-sensitive (<c>Acme</c> and <c>acme</c> are different tenants) and every dialect
+/// Decision B-1 / tenant ids are case-sensitive (<c>Acme</c> and <c>acme</c> are different tenants) and every dialect
 /// compares them byte-exactly. Ids that collide case-insensitively are still a hazard for every consumer that is
 /// case-insensitive (caches, logs, operators), so they are reported at startup and the colliding tenants are denied until an
 /// operator resolves the collision. Existing ids are never rewritten.

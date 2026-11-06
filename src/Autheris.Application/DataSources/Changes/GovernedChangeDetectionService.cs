@@ -89,7 +89,7 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             throw new GatewayForbiddenException($"Table '{table}' is not active.");
         }
 
-        // Issue #447 (SEC-ATR-04): the version provider reads the table's source, so the ingress transport must be allowed on it first.
+        // Issue #447: the version provider reads the table's source, so the ingress transport must be allowed on it first.
         await _transportGate.EnsureCatalogSourceAsync(
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 
@@ -139,7 +139,7 @@ public sealed partial class GovernedChangeDetectionService : IGovernedChangeDete
             throw new GatewayForbiddenException($"Table '{request.Table}' is not active.");
         }
 
-        // Issue #447 (SEC-ATR-04): the change log and the current rows come from the table's source; deny before any of them is read.
+        // Issue #447: the change log and the current rows come from the table's source; deny before any of them is read.
         await _transportGate.EnsureCatalogSourceAsync(
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 

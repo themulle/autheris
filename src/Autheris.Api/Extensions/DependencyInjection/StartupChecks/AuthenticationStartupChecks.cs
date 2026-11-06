@@ -21,7 +21,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c> body (ARCH-MNT-12).</summary>
+/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c>body.</summary>
 internal static class AuthenticationStartupChecks
 {
     internal static void BasicAuthSession(StartupCheckContext context)
@@ -137,7 +137,7 @@ internal static class AuthenticationStartupChecks
                 throw new ValidationException($"Security violation: Outside Development, BasicAuth PBKDF2 hashes must use at least {minIterations} iterations.");
             }
 
-            // API-05: truncated hash / short salt (copy-paste, templating, line wrapping) must fail at boot, not authenticate weakly.
+            // truncated hash / short salt (copy-paste, templating, line wrapping) must fail at boot, not authenticate weakly.
             if (options.Authentication.BasicAuth.Users.Any(u => !PasswordHasher.HasWellFormedSaltAndHash(u.Password)))
             {
                 throw new ValidationException("Security violation (API-05): Outside Development, BasicAuth hashes must carry a salt of at least 16 bytes and a 32-byte hash (truncated value?).");

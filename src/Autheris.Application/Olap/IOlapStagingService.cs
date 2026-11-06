@@ -20,7 +20,7 @@ public sealed record OlapStagingOutcome(int StatusCode, string? Error = null, st
 }
 
 /// <summary>
-/// WP-ARC-B-07: stages the requested tables (allowlist, access decision, governed read, budgets, required audits) and runs the
+/// stages the requested tables (allowlist, access decision, governed read, budgets, required audits) and runs the
 /// OLAP query. The endpoint keeps HTTP concerns only.
 /// </summary>
 public interface IOlapStagingService

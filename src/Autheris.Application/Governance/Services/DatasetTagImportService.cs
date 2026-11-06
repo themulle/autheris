@@ -11,7 +11,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-/// <summary>Issue #111 WP-6 (A-2, A-3): see <see cref="IDatasetTagImportService"/>.</summary>
+/// <summary>Issue #111 (A-2, A-3): see<see cref="IDatasetTagImportService"/>.</summary>
 public sealed class DatasetTagImportService : IDatasetTagImportService
 {
     private static readonly Sid ImportActor = new("system:dbt-import");

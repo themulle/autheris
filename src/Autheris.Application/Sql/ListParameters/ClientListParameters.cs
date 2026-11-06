@@ -10,7 +10,7 @@ public static class ClientListParameters
 {
     /// <summary>
     /// Shapes of the lists that the statement references (<paramref name="referencedNames"/>, case-insensitive); a supplied list the SQL
-    /// does not reference is dropped, so it neither enters the template cache key nor widens a limit (SEC-128-04).
+    /// does not reference is dropped, so it neither enters the template cache key nor widens a limit.
     /// </summary>
     public static ClientListShapes Shapes(IReadOnlyDictionary<string, object?> clientValues, IReadOnlySet<string> referencedNames)
     {
@@ -54,7 +54,7 @@ public static class ClientListParameters
 
     /// <summary>
     /// Refuses a request whose RAW parameters contain a list (a JSON array, a collection or a <see cref="ClientListValue"/>) with
-    /// SQL_LIST_PARAM_UNSUPPORTED. The federated executor never sees parameters, so a list would be dropped silently (SEC-128-12).
+    /// SQL_LIST_PARAM_UNSUPPORTED. The federated executor never sees parameters, so a list would be dropped silently.
     /// </summary>
     public static void RejectForFederation(IReadOnlyDictionary<string, object?>? rawParameters)
     {

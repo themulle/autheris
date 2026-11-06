@@ -35,7 +35,7 @@ public sealed record VirtualFilterPathLookup(string Argument, string Column, Vir
 /// <summary>
 /// F-GOV-14 (WI-6): the plan of one protected HTTP table. <see cref="Enforcement"/> is always present, also when
 /// <see cref="SkipUpstream"/> is set, so the governed read path runs the same guards and coverage check for a table
-/// that is not read as for one that is (SEC-13). Only the planner creates plans.
+/// that is not read as for one that is. Only the planner creates plans.
 /// </summary>
 public sealed class VirtualFilterTablePlan
 {

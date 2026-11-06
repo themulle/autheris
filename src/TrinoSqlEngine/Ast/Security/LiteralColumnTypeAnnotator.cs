@@ -9,7 +9,7 @@ using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// WP-X0q / SEC-ADG-16 item 2: records the catalog data type of the column a user literal is compared with
+/// WP-X0q / 16 item 2: records the catalog data type of the column a user literal is compared with
 /// (<c>col = 5</c>, <c>5 &lt; col</c>, <c>col IN (...)</c>, <c>col BETWEEN ... AND ...</c>), so the generator can reject a
 /// cross-family comparison and the binder can follow the column type. It runs on the user tree before the security injection and
 /// resolves a column only when that is unambiguous: through the alias or table name of a catalog table of the same query block, or

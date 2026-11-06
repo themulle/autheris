@@ -8,7 +8,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Evaluates Zero-Trust consent policies and ABAC rules for individual tables participating in a cross-domain join.
-/// Ensures strict per-table authorization isolation (SEC-CDJ-02).
+/// Ensures strict per-table authorization isolation.
 /// </summary>
 public interface ICrossDomainAccessResolver
 {

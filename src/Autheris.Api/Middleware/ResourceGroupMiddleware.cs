@@ -204,7 +204,7 @@ public sealed class ResourceGroupMiddleware
     /// <summary>
     /// Resolves the tier from the path (<c>/mcp</c> agents, <c>/odata</c> bulk, else interactive). A client-chosen
     /// <c>X-Workload-Tier</c> header is only honoured when it does not raise the caller above that resolved tier
-    /// (security review: anti-noisy-neighbor, SEC-02); ClusterAdmin / GovernanceAdmin may request any tier.
+    /// (security review: anti-noisy-neighbor); ClusterAdmin / GovernanceAdmin may request any tier.
     /// </summary>
     internal static ResourceGroupTier ClassifyWorkloadTier(HttpContext context)
     {

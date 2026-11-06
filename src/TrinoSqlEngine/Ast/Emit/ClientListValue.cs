@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// A normalized client list value (REQ-SQL-128): immutable, non-null elements of one CLR type that matches
+/// A normalized client list value: immutable, non-null elements of one CLR type that matches
 /// <see cref="ElementType"/>. The binder reads single elements by index; the value never reaches SQL text, logs or exception text.
 /// </summary>
 public sealed class ClientListValue

@@ -27,7 +27,7 @@ public class WatermarkDimensionDefinition
     public string Column { get; set; } = string.Empty;
 
     /// <summary>
-    /// SEC-CDC101-02: Mandatory initial value to prevent SQL three-valued logic silent NULL starvation.
+    /// Mandatory initial value to prevent SQL three-valued logic silent NULL starvation.
     /// </summary>
     public string InitialValue { get; set; } = string.Empty;
 }

@@ -9,7 +9,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// Strictly typed DbParameter binder for multi-watermark query polling (PLAN-CDC-101 D-3, SEC-CDC101-02).
+/// Strictly typed DbParameter binder for multi-watermark query polling (101 D-3).
 /// Enforces parameter whitelisting and Silent-NULL defense.
 /// </summary>
 public static class QueryPollerParameterBinder
@@ -36,7 +36,7 @@ public static class QueryPollerParameterBinder
                 rawValue = dim.InitialValue;
             }
 
-            // SEC-CDC101-02: Silent-NULL Defense
+            // Silent-NULL Defense
             if (string.IsNullOrWhiteSpace(rawValue))
             {
                 throw new InvalidOperationException(

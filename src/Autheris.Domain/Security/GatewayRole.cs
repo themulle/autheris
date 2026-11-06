@@ -26,7 +26,7 @@ public enum GatewayRole
     FilterAdmin = 30,
     FilterSync = 31,
 
-    // Caller attributes (REQ-GOV-129, BC-129-03, BC-129-13): approving data-granting changes and revealing attribute values are separate roles;
+    // Caller attributes (BC-129-03, BC-129-13): approving data-granting changes and revealing attribute values are separate roles;
     // neither is implied by GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
     CallerAttributeApprover = 32,
     CallerAttributeInspector = 33

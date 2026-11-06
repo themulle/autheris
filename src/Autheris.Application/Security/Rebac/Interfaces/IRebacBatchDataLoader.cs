@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// F-SEC-04: Batch DataLoader for ReBAC checks.
+/// F-Batch DataLoader for ReBAC checks.
 /// Eliminates N+1 queries during GraphQL list evaluation by de-duplicating and bulk-executing tuple queries.
 /// </summary>
 public interface IRebacBatchDataLoader

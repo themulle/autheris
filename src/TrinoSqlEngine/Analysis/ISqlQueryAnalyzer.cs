@@ -41,7 +41,7 @@ public sealed record SqlQueryMetadata(
     IReadOnlyList<FilterColumnReference>? FilterColumnReferences = null)
 {
     /// <summary>
-    /// #322 (SEC-RG-04): the columns of window <c>PARTITION BY</c> and <c>ORDER BY</c> (OVER clauses and named windows). Kept apart from
+    /// #322: the columns of window<c>PARTITION BY</c> and <c>ORDER BY</c> (OVER clauses and named windows). Kept apart from
     /// <see cref="FilterColumnReferences"/> so a masked or denied column in a window answers with its own code; every consumer that
     /// needs "all referenced columns" must read both lists.
     /// </summary>
@@ -51,7 +51,7 @@ public sealed record SqlQueryMetadata(
     public bool HasRecursiveCte { get; init; }
 
     /// <summary>
-    /// Issue #277 (SEC-277-04): a CTE of a WITH without RECURSIVE names itself in its own body. The name is still reported in
+    /// Issue #277: a CTE of a WITH without RECURSIVE names itself in its own body. The name is still reported in
     /// <see cref="ReferencedTables"/> (unchanged for other consumers); callers reject the statement before any existence-dependent answer.
     /// </summary>
     public bool HasNonRecursiveSelfReference { get; init; }

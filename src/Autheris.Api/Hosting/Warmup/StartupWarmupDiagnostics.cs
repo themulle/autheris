@@ -3,7 +3,7 @@ namespace Autheris.Api.Hosting.Warmup;
 using System.Diagnostics.Metrics;
 using Autheris.Domain.Diagnostics;
 
-/// <summary>PLAN-OPS-150 (D-150-9): warm-up instruments on the shared gateway meter. No request, query, rate-limit or audit counter.</summary>
+/// <summary>150 (D-150-9): warm-up instruments on the shared gateway meter. No request, query, rate-limit or audit counter.</summary>
 public static class StartupWarmupDiagnostics
 {
     public const string Completed = "completed";

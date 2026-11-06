@@ -68,7 +68,7 @@ public sealed class IdentityRealmOptionsValidator : IValidateOptions<IdentityRea
             }
         }
 
-        // 2. Enforce SEC-SC-21: customer realms cannot bind to workforce tenants
+        // 2. Enforce customer realms cannot bind to workforce tenants
         foreach (var (realmId, config) in options.Realms)
         {
             if (config.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer)

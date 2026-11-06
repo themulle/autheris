@@ -7,10 +7,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PLAN-OPS-150 D-150-5 / A-150-2: HotChocolate-native warm-up of every executor build. Runs the constant <c>{ __typename }</c>
+/// 150 D-150-5 / A-150-2: HotChocolate-native warm-up of every executor build. Runs the constant<c>{ __typename }</c>
 /// in-process with <c>MarkAsWarmupRequest</c> (empty context data, no principal) and records the executor as warmed only when the
 /// result proves the pipeline. Depends on nothing but the proof, the options, a logger and the accessor, so it cannot reach audit,
-/// consent, data sources or rate limiting (SEC-OPS150-17). Never throws into the executor build.
+/// consent, data sources or rate limiting. Never throws into the executor build.
 /// </summary>
 public sealed partial class GraphQlExecutorWarmupTask(
     GraphQlWarmupProof proof,

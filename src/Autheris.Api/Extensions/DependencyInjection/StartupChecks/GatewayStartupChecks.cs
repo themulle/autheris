@@ -21,7 +21,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c> body (ARCH-MNT-12).</summary>
+/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c>body.</summary>
 internal static class GatewayStartupChecks
 {
     /// <summary>The checks in execution order; the first failing check wins (fail-fast, no aggregation).</summary>

@@ -5,7 +5,7 @@ using System;
 /// <summary>
 /// SQLite column type affinity from the declared type text (https://www.sqlite.org/datatype3.html, section 3.1). The rules are tested
 /// in order, so <c>INTERESTING TEXT</c> is INTEGER. SQLite declared types are free text; the tenant column must have TEXT affinity
-/// (SEC-X1-09), otherwise a numeric affinity stores <c>'007'</c> as <c>7</c> and the byte-exact tenant comparison is meaningless.
+/// otherwise a numeric affinity stores<c>'007'</c> as <c>7</c> and the byte-exact tenant comparison is meaningless.
 /// </summary>
 public static class SqliteTypeAffinity
 {

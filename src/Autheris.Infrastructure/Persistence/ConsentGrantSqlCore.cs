@@ -14,7 +14,7 @@ using Autheris.Domain.Model;
 internal readonly record struct RevokeTarget(TableIdentifier Table, string? TenantRaw, bool IsGranteeSelf, bool AlreadyRevoked);
 
 /// <summary>
-/// Engine-neutral statement execution of the consent grant paths (ARCH-MNT-22 step 1, security-driven scope). Only statement-level pieces
+/// Engine-neutral statement execution of the consent grant paths ( step 1, security-driven scope). Only statement-level pieces
 /// live here: parameter binding, execution and row mapping. Authorisation (grantee-self / approver check), the <c>alreadyRevoked</c> decision,
 /// the audit entry, transactions, rollback, epoch bump and cache eviction stay in the dialect repositories (SC-02, SC-03); this class gets an
 /// open connection and transaction and never commits, rolls back, opens or disposes either. Tenant filter exemptions (SC-04): (a) revoke by
@@ -82,7 +82,7 @@ internal static class ConsentGrantSqlCore
 
     /// <summary>
     /// Sets <c>CONSENTS.description</c> of one non-revoked, unexpired consent of the tenant inside <paramref name="tx"/>; touches no other column.
-    /// Returns false (no row changed) for an unknown, foreign-tenant, revoked or expired consent (SEC-GOV158I1-05).
+    /// Returns false (no row changed) for an unknown, foreign-tenant, revoked or expired consent.
     /// </summary>
     public static async Task<bool> UpdateDescriptionAsync(DbConnection conn, DbTransaction tx, ConsentDescriptionUpdate update, TimeProvider clock, CancellationToken ct)
     {

@@ -61,7 +61,7 @@ public sealed class AuditOptions
     public AuditRetentionOptions Retention { get; init; } = new();
 
     /// <summary>
-    /// SEC-ADG-23 (X1.2): store the compiled SQL text (markers only, no values by construction) in the audit record of a governed
+    /// 23 (X1.2): store the compiled SQL text (markers only, no values by construction) in the audit record of a governed
     /// statement. Default <c>false</c>: the record carries only the compiler version, the dialect, the bind count and the
     /// <c>sql.compiled_digest</c>.
     /// </summary>

@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Consumes CDC stream events from ICdcStreamStore and applies incremental mutations to the table cache.
 /// Automatically detects stream sequence gaps, fences the cache, and triggers shadow resync.
-/// Conforms to SEC-BL04-08 and WP-TC-04.
+/// Conforms to 04.
 /// </summary>
 public sealed class CdcTableCacheConsumer
 {
@@ -65,7 +65,7 @@ public sealed class CdcTableCacheConsumer
 
             foreach (var evt in readResult.Events)
             {
-                // SEC-BL04-08 Sequence Integrity & Gap Detection
+                // 08 Sequence Integrity & Gap Detection
                 if (evt.Kind == CdcStreamEventKind.Gap)
                 {
                     _logger?.LogWarning("SEC-BL04-08: Gap event detected for table '{Table}' at stream offset {Offset}. Fencing table.", table, evt.Offset);
@@ -129,7 +129,7 @@ public sealed class CdcTableCacheConsumer
         TableCacheEntryMetadata metadata,
         CancellationToken ct = default)
     {
-        // SEC-BL04-08: Immediately fence the table by setting IsHealthy = false
+        // Immediately fence the table by setting IsHealthy = false
         var fencedMeta = metadata with
         {
             IsHealthy = false,

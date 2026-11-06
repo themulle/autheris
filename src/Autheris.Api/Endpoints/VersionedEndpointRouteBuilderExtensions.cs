@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// WP-ARC-C-08: Canonical <c>/api/v1</c> route group helpers (the deprecated legacy route aliases were removed).
+/// Canonical<c>/api/v1</c> route group helpers (the deprecated legacy route aliases were removed).
 /// </summary>
 public static class VersionedEndpointRouteBuilderExtensions
 {

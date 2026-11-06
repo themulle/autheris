@@ -115,7 +115,7 @@ public static class StreamingCdcEndpoints
     }
 
     /// <summary>
-    /// A-1 / SEC-4 / SR-L-20: fail-closed tenant policy for ingested CDC events. Returns a rejection result or <c>null</c>;
+    /// A-1 / SR-L-20: fail-closed tenant policy for ingested CDC events. Returns a rejection result or<c>null</c>;
     /// <paramref name="resolved"/> is the (possibly tenant-stamped) event.
     /// </summary>
     internal static IResult? ApplyIngestTenantPolicy(
@@ -139,7 +139,7 @@ public static class StreamingCdcEndpoints
             return null;
         }
 
-        // SEC-4: Enforce strict fail-closed tenant isolation on ingested CDC events
+        // Enforce strict fail-closed tenant isolation on ingested CDC events
         if (string.IsNullOrWhiteSpace(callerTenant))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);

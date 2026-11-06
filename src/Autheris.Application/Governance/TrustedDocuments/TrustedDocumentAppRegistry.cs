@@ -36,7 +36,7 @@ public sealed class TrustedDocumentAppSnapshot
 
 public interface ITrustedDocumentAppRegistry
 {
-    /// <summary>The current snapshot. Throws when the store cannot be read: callers must reject (fail closed, SEC-281-7).</summary>
+    /// <summary>The current snapshot. Throws when the store cannot be read: callers must reject (fail closed).</summary>
     ValueTask<TrustedDocumentAppSnapshot> GetAsync(CancellationToken ct);
 
     /// <summary>Makes the next <see cref="GetAsync"/> check the store at once (a local write is effective immediately).</summary>
@@ -46,7 +46,7 @@ public interface ITrustedDocumentAppRegistry
 /// <summary>
 /// Singleton registry: the generation row is compared at most every <c>CacheRefreshSeconds</c> (changes of other instances); the writing
 /// instance invalidates synchronously. Refresh is single-flight (one store read per interval, no stampede). A failed check clears the
-/// snapshot, so nothing stale is served once a refresh is due and has failed (SEC-281-7).
+/// snapshot, so nothing stale is served once a refresh is due and has failed.
 /// </summary>
 public sealed class TrustedDocumentAppRegistry : ITrustedDocumentAppRegistry, IDisposable
 {

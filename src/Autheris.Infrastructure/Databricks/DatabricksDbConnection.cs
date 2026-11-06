@@ -8,7 +8,7 @@ using Autheris.Domain.Options;
 /// <summary>
 /// ADO.NET facade over <see cref="DatabricksStatementExecutionClient"/> (WP-X0j). There is no session and no transaction: Delta
 /// statements are independent, so <see cref="BeginTransaction"/> is refused (fail closed) and nothing is pooled. Opening does not
-/// contact the workspace; every statement goes through the hardened REST client (SEC-ADG-09).
+/// contact the workspace; every statement goes through the hardened REST client.
 /// </summary>
 public sealed class DatabricksDbConnection : DbConnection
 {

@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// The catalog identity of the virtual tables a semantic manifest import creates (#112 A1-4, SEC-112-14/-15/-23). One place decides
+/// The catalog identity of the virtual tables a semantic manifest import creates (#112 A1-4, 14/-15/-23). One place decides
 /// what a virtual table is and how its tenant schema is named, so the visibility engine, the metadata listing and the ingestion
 /// service can never classify the same table differently.
 /// </summary>
@@ -73,7 +73,7 @@ public static partial class SemanticVirtualTables
     }
 
     /// <summary>
-    /// SEC-112-15: the persistence boundary of the catalog keeps the virtual-table namespace to the ingestion service. A table in the
+    /// the persistence boundary of the catalog keeps the virtual-table namespace to the ingestion service. A table in the
     /// semantic domain must be a well-formed, marked virtual table, and no other table may use a tenant-hash schema name.
     /// </summary>
     /// <exception cref="Autheris.Domain.Exceptions.GatewayInvalidQueryException">The identity is reserved for semantic virtual tables.</exception>

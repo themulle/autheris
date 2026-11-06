@@ -2,7 +2,7 @@ namespace Autheris.Api.Hosting.Warmup;
 
 using Microsoft.Extensions.Options;
 
-/// <summary>SEC-OPS150-12: rejects out-of-range values and unknown step names (including <c>GraphQlExecutor</c>) at start.</summary>
+/// <summary>rejects out-of-range values and unknown step names (including<c>GraphQlExecutor</c>) at start.</summary>
 public sealed class StartupWarmupOptionsValidator : IValidateOptions<StartupWarmupOptions>
 {
     public const int MinTimeoutSeconds = 1;

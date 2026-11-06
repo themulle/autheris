@@ -23,7 +23,7 @@ public sealed record ConjunctClassificationResult(
     IReadOnlyList<MultiTableConjunct> MultiTableConjuncts);
 
 /// <summary>
-/// WP-122-1: Attributes conjunct columns to source tables and isolates single-table pushdown candidates.
+/// Attributes conjunct columns to source tables and isolates single-table pushdown candidates.
 /// Preserves single-table disjunctions (OR) while classifying cross-table disjunctions as MultiTable.
 /// </summary>
 public static class SingleTableConjunctClassifier

@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Autonomous poller executing periodic extractions and zero-downtime shadow swaps.
-/// Conforms to SEC-BL04-07 and WP-TC-04.
+/// Conforms to 04.
 /// </summary>
 public sealed class PeriodicTableCacheRefresher
 {

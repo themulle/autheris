@@ -27,7 +27,7 @@ public sealed record KeysetCursorContext(
     string? RequestHash = null);
 
 /// <summary>
-/// PLAN-DATA-178 / SEC-DATA178-03: Deterministic keyset cursor encoder and decoder
+/// Deterministic keyset cursor encoder and decoder
 /// providing opaque, tamper-evident composite primary key pagination tokens.
 /// </summary>
 public interface IKeysetCursorEncoder

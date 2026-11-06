@@ -254,7 +254,7 @@ public sealed partial class SemanticMetricQueryService
                 referencedCols.Add(c);
             }
 
-            // WP-0 (SEC-112-01): the column set of the combined clause is a union. A free-text request clause has an empty set, so its
+            // the column set of the combined clause is a union. A free-text request clause has an empty set, so its
             // columns are extracted from its text; otherwise they would be missing next to the metric filter columns and never be checked.
             if (requestWhere.ReferencedColumns.Count == 0)
             {

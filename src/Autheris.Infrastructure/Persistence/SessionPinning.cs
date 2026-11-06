@@ -3,7 +3,7 @@ using Autheris.Application.Common.Interfaces;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// WP-X0b (SEC-X1-08): session pins applied by <see cref="SqlConnectionFactory"/> on every rental. All statements are constant;
+/// WP-X0b: session pins applied by<see cref="SqlConnectionFactory"/> on every rental. All statements are constant;
 /// the default schema is a bound value that the database quotes itself (<c>format('%I')</c>, <c>DBMS_ASSERT.ENQUOTE_NAME</c>).
 /// Every pin is verified inside the database; a mismatch makes the request fail closed.
 /// </summary>

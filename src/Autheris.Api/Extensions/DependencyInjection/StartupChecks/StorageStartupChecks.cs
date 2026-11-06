@@ -21,7 +21,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c> body (ARCH-MNT-12).</summary>
+/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c>body.</summary>
 internal static class StorageStartupChecks
 {
     internal static void ProductionStorageAndAudit(StartupCheckContext context)
@@ -42,7 +42,7 @@ internal static class StorageStartupChecks
             throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
         }
 
-        // WP-ARC-B-13: an unset connection string resolves to the state-directory file outside Development/Test, so only an
+        // an unset connection string resolves to the state-directory file outside Development/Test, so only an
         // explicitly configured in-memory database can be in effect here (and is rejected).
         if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
             GatewayStartupValidator.IsInMemorySqlite(options.GovernanceDb.ConnectionString))

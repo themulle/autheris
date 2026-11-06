@@ -153,7 +153,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
             // 30s +/- 30s tolerance window.
             var count = await _clusterState.IncrementAsync(replayKey, 1, ReplayTtl, ct).ConfigureAwait(false);
 
-            // WP-ARC-A-09: null means the shared store is unavailable. Replay protection must then fail closed: the
+            // null means the shared store is unavailable. Replay protection must then fail closed: the
             // code is rejected because another node may already have consumed it.
             return count is { } value && value <= 1;
         }

@@ -9,7 +9,7 @@ using Autheris.Application.ConsentRequests;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// SEC-GOV113-05: Row filter predicate AST validation.
+/// Row filter predicate AST validation.
 /// Enforces column whitelist against table metadata, operator whitelist (=, !=, &lt;, &lt;=, &gt;, &gt;=, IN, NOT IN, LIKE, IS NULL, IS NOT NULL),
 /// value type compatibility, and rejects subqueries / arbitrary SQL expressions with 400 BAD_REQUEST.
 /// </summary>

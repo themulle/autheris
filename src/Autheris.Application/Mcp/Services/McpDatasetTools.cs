@@ -158,7 +158,7 @@ public static class McpDatasetTools
 
     /// <summary>
     /// The built-in definitions as the switches leave them: when the REST data family is closed (or the Query group is off) the
-    /// <c>describe_api</c> example no longer names the closed path (PLAN-SEC-115 ST-115-13). Identical to <see cref="Definitions()"/> by default.
+    /// <c>describe_api</c>example no longer names the closed path (115 ST-115-13). Identical to<see cref="Definitions()"/> by default.
     /// </summary>
     public static IEnumerable<McpToolDefinition> Definitions(Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches)
     {

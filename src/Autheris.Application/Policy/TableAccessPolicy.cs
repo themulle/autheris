@@ -30,7 +30,7 @@ public enum RebacEnforcement
 /// <summary>
 /// One caller and one catalog table. <paramref name="Claims"/> feed the Casbin attributes and the purpose;
 /// <paramref name="ClientIp"/> overrides the request IP resolver (unknown IPs are <see cref="IPAddress.None"/>).
-/// <paramref name="Principal"/> (REQ-GOV-129, F-1) is used only to resolve caller attributes: it is never logged, hashed or put into a cache key.
+/// <paramref name="Principal"/>(F-1) is used only to resolve caller attributes: it is never logged, hashed or put into a cache key.
 /// </summary>
 public sealed record TableAccessQuery(
     Sid UserSid,
@@ -78,7 +78,7 @@ public sealed record TableAccessQuery(
 }
 
 /// <summary>
-/// Architecture 1 (SQL2-6, POL-6, API-10): the single access decision for a caller on a catalog table. REST/OData/GraphQL
+/// Architecture 1 (SQL2-6, POL-6): the single access decision for a caller on a catalog table. REST/OData/GraphQL
 /// (<see cref="Autheris.Application.Services.GatewayExecutionService"/>), WebSQL, stored procedures, DuckDB OLAP and the unified PDP all decide here, in
 /// the same order:
 /// <list type="number">
@@ -314,7 +314,7 @@ public sealed partial class TableAccessPolicy
             ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
             : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
 
-        // REQ-GOV-143 (SEC-GOV143-13/-14): a query without any claims (absent, not merely without scp) has unknown token scopes and is treated as
+        // 143 (-14): a query without any claims (absent, not merely without scp) has unknown token scopes and is treated as
         // holding every restricted scope with no clearance. Applied after the cache read and the rebuilds above; the cache holds the plain
         // decision of the (scope-less) key and never this copy. Claims without scp stay unrestricted (scope-less and app-only tokens).
         if (query.Claims is null && decision.IsAllowed && RestrictedScopeClearance.Unknown(_restrictedScopes) is { } unknown)
@@ -351,7 +351,7 @@ public sealed partial class TableAccessPolicy
                 // without one, or when a builder has no typed form, the legacy text path stays until X1.
                 if (mandatory.CallerAttributesTextConstant && (_rowPolicyFactory == null || mandatory.TypedPredicate == null))
                 {
-                    // REQ-GOV-129 (BC-129-05): the text of a caller attribute filter is only a constant; without the typed predicate the table is denied,
+                    // 129 (BC-129-05): the text of a caller attribute filter is only a constant; without the typed predicate the table is denied,
                     // whether or not a sibling filter has a typed form.
                     return TableAccessDecision.Denied(table, "Denied by virtual filters.");
                 }
@@ -448,7 +448,7 @@ public sealed partial class TableAccessPolicy
 
                 if (!string.IsNullOrWhiteSpace(hookResult.AdditionalRowFilterSql))
                 {
-                    // SEC-BL08-10: AST validation and parenthesis wrapping
+                    // AST validation and parenthesis wrapping
                     try
                     {
                         Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(

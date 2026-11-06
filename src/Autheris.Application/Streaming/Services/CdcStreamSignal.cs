@@ -9,7 +9,7 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// The data-free wake-up message of <see cref="CdcStreamSignal"/> (PLAN-CDC-99 D-A12, AC-14): stream id and head offset only,
+/// The data-free wake-up message of <see cref="CdcStreamSignal"/>(99 D-A12, AC-14): stream id and head offset only,
 /// never row data, tenant or table name.
 /// </summary>
 public sealed record CdcStreamAdvanced(string StreamId, long HeadOffset);

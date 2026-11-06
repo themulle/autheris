@@ -5,7 +5,7 @@ using System.Globalization;
 using Autheris.Application.Catalog.Semantic;
 
 /// <summary>
-/// Issue #448 (SEC-MGS-09): Strict parsing and validation rules for catalog minimum group size
+/// Issue #448: Strict parsing and validation rules for catalog minimum group size
 /// and non-personal table flags.
 /// </summary>
 public static class CatalogMinGroupSizeRules

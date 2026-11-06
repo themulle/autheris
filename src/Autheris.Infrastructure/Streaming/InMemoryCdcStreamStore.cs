@@ -13,7 +13,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Non-durable <see cref="ICdcStreamStore"/> and <see cref="ICdcStreamKeyStore"/> with exactly the fencing and compare-and-set semantics
-/// of the governance-database stores (PLAN-CDC-99 D-A4). One lock serialises every operation, so an append is atomic. For tests and
+/// of the governance-database stores (99 D-A4). One lock serialises every operation, so an append is atomic. For tests and
 /// Development hosts; the stream does not survive a restart (<see cref="IsDurable"/> is false).
 /// </summary>
 public sealed class InMemoryCdcStreamStore : ICdcStreamStore, ICdcStreamKeyStore

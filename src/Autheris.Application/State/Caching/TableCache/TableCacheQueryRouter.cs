@@ -12,7 +12,7 @@ using Autheris.Domain.Common;
 
 /// <summary>
 /// Evaluates whether incoming AST queries can be served from the governed table cache.
-/// Conforms to SEC-BL04-11 and WP-TC-05.
+/// Conforms to 05.
 /// </summary>
 public sealed class TableCacheQueryRouter : ITableCacheQueryRouter
 {
@@ -43,7 +43,7 @@ public sealed class TableCacheQueryRouter : ITableCacheQueryRouter
             throw new SecurityException($"{InternalTableAccessProhibitedCode}: Illegal characters detected in SQL identifier: '{identifier}'");
         }
 
-        // SEC-BL04-11: Anti-Bypass: Reject direct queries to internal staging or shadow tables
+        // Anti-Bypass: Reject direct queries to internal staging or shadow tables
         if (trimmed.StartsWith("staging_", StringComparison.OrdinalIgnoreCase) ||
             trimmed.StartsWith("autheris_cache", StringComparison.OrdinalIgnoreCase))
         {
@@ -57,7 +57,7 @@ public sealed class TableCacheQueryRouter : ITableCacheQueryRouter
         string? whereClause,
         CancellationToken ct = default)
     {
-        // SEC-BL04-11: Validate table identifiers against anti-bypass allowlist
+        // Validate table identifiers against anti-bypass allowlist
         ValidateIdentifier(table.Domain);
         ValidateIdentifier(table.Schema);
         ValidateIdentifier(table.TableName);

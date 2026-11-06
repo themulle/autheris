@@ -8,7 +8,7 @@ using Autheris.Domain.Diagnostics;
 using OpenTelemetry;
 
 /// <summary>
-/// First processor in the tracer pipeline enforcing SEC-OT06-01 fail-closed span redaction:
+/// First processor in the tracer pipeline enforcing 01 fail-closed span redaction:
 /// - Validates Autheris-source spans against <see cref="TelemetrySpanCatalog"/>.
 /// - Strips queries, unapproved headers, and statement text from third-party instrumentation spans.
 /// - Replaces free-text status descriptions with stable error codes.

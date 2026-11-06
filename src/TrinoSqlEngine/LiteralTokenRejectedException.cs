@@ -4,7 +4,7 @@ using System;
 using Antlr4.Runtime.Misc;
 
 /// <summary>
-/// #296 (SEC-PG-08): marker cause of a rejected literal. A string literal (or quoted identifier) contains a character sequence that the
+/// #296: marker cause of a rejected literal. A string literal (or quoted identifier) contains a character sequence that the
 /// lexer hardening rejects (SQ-01 backslash escapes, SQL-1 <c>[</c>, <c>]</c>, <c>--</c>, <c>/*</c>). The check sites throw a
 /// <see cref="ParseCanceledException"/> exactly as before (callers and tests that match that type keep working) and carry this exception as
 /// its inner exception; the error mapper matches this type only and reports the documented <c>SQL_LITERAL_NOT_PERMITTED</c>. The message is

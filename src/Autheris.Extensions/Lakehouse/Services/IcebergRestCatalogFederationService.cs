@@ -164,7 +164,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         var actorSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
 
-        // SEC-IRC-01: Authenticate caller and enforce fail-closed authorization
+        // Authenticate caller and enforce fail-closed authorization
         if (principal.Identity?.IsAuthenticated != true)
         {
             _logger.LogWarning("Unauthenticated attempt to load Iceberg table '{Namespace}.{Table}' for tenant '{Tenant}'.", LogSanitizer.Sanitize(@namespace), LogSanitizer.Sanitize(table), LogSanitizer.Sanitize(tenantId));
@@ -201,7 +201,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         var location = tableMeta.Table.Location ?? $"lakehouse/{tenantId}/{@namespace}/{table}";
 
-        // SEC-IRC-02: Path traversal validation on lakehouse location
+        // Path traversal validation on lakehouse location
         LakehouseLocationGuard.EnsureNoTraversal(location, location);
 
         var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -304,7 +304,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             .Where(c => c.TenantId == tenant && c.TableIdentifier == tableId && c.IsActive(now))
             .ToList();
 
-        // REQ-GOV-143 (SEC-GOV143-02/-15): the token scopes decide whether the caller holds a restricted scope, so a base Clear alone does not
+        // 143 (-15): the token scopes decide whether the caller holds a restricted scope, so a base Clear alone does not
         // release a sensitive column to a restricted holder. Claims overload only (it also reads a plain 'scope' claim); empty maps to null.
         var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
         var decision = _consentService.ResolveAccess(

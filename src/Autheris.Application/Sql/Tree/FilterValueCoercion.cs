@@ -6,7 +6,7 @@ namespace Autheris.Application.Sql.Tree;
 
 /// <summary>
 /// Coerces a raw filter value to the CLR type of a column kind (invariant culture, no locale surprises). Failures carry fixed texts
-/// that never echo the client value (SEC-112-11).
+/// that never echo the client value.
 /// </summary>
 public static class FilterValueCoercion
 {

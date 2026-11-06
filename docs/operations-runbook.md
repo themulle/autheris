@@ -307,7 +307,7 @@ Reference: F-SEC-06.
 
 ### 4.ai Decision cache kill switch (shape-shared decisions)
 
-By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input ([F-SEC-06, section 2.2a](features/f-sec-06-casbin-decision-cache-policy-epoch.md)). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
+By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input (decision cache shape sharing). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
 
 1. Set `Gateway:Casbin:DecisionCache:ShareAcrossUsers=false` (environment variable `Gateway__Casbin__DecisionCache__ShareAcrossUsers=false`) and roll the replicas. Every decision is keyed by user again; nothing else changes.
 2. Expect a lower hit ratio and more `sub_rule` evaluations per request until the cache warms up per user. Keep `Capacity` at the default `100000` or raise it.

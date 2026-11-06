@@ -10,7 +10,7 @@ using HotChocolate.Types;
 public sealed partial class QueryCostAnalyzerRule
 {
     /// <summary>
-    /// #112 SEC-112-19: the largest number of typed aggregate and <c>queryMetrics</c> root fields (aliases counted separately, fragments
+    /// #112 the largest number of typed aggregate and<c>queryMetrics</c> root fields (aliases counted separately, fragments
     /// resolved) over the operations of the document. Stops once <paramref name="stopAfter"/> is exceeded.
     /// </summary>
     public static int CountAggregateRootFields(DocumentNode document, ISchemaDefinition schema, int stopAfter = int.MaxValue)

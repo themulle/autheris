@@ -8,7 +8,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Webhooks;
 
 /// <summary>
-/// AES-256-GCM protection of webhook secrets (WP-ARC-A-03). The key is derived (SHA-256) from the operator-provisioned secret
+/// AES-256-GCM protection of webhook secrets. The key is derived (SHA-256) from the operator-provisioned secret
 /// <c>cdc-webhook-kek</c> (at least 32 bytes) resolved through <see cref="IKeyVaultSecretProvider"/>. Output format:
 /// <c>enc:v1:base64(nonce[12] | tag[16] | ciphertext)</c>; AAD is <c>"{tenant}|{subscriptionId}"</c>. Nothing is ever logged.
 /// </summary>

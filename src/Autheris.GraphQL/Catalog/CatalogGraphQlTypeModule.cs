@@ -63,7 +63,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly GraphQLOptions _graphQlOptions;
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
 
-    /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447, REQ-ATR-08).</summary>
+    /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447).</summary>
     private System.Collections.Concurrent.ConcurrentDictionary<string, bool> _transportSeen = new(StringComparer.OrdinalIgnoreCase);
 
     public CatalogGraphQlTypeModule(
@@ -96,7 +96,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Offset pagination is supported up to offset {maxAllowedOffset}.");
 
     /// <summary>
-    /// Issue #447 REQ-ATR-08: the schema omits tables whose source does not allow GraphQL, so the schema never names a source the
+    /// Issue #447 the schema omits tables whose source does not allow GraphQL, so the schema never names a source the
     /// transport may not read (the gate at the data path stays the enforcement point). <paramref name="record"/> notes each decision.
     /// </summary>
     private Func<TableMetadata, bool>? GetTableFilter(System.Collections.Concurrent.ConcurrentDictionary<string, bool>? record = null)
@@ -430,7 +430,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
                     ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);
 
-                    // Issue #447 (SEC-ATR-06): every root field of this table names its logical data source, so the transport gate
+                    // Issue #447: every root field of this table names its logical data source, so the transport gate
                     // middleware can check the whole operation before any resolver runs.
                     var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
                     var rootFieldNames = new List<string> { table.QueryFieldName, $"{table.QueryFieldName}Connection" };
@@ -729,7 +729,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
             if (pageRangeViolated)
             {
-                // SEC-RG-08 (#330): the tree was built with a zero-row page and has just passed table authorization, so a denied table
+                // 08 (#330): the tree was built with a zero-row page and has just passed table authorization, so a denied table
                 // answers ACCESS_DENIED for every page size; only an authorized caller learns the fixed page-range error.
                 throw new GatewayPageRangeException();
             }

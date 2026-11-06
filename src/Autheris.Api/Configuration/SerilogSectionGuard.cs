@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 
 /// <summary>
 /// Startup guard: the removed <c>Serilog</c> configuration section (BL-06, replaced by OpenTelemetry logging) and the forbidden OTLP header
-/// keys (SEC-OT06-14) fail startup. There is no switch that downgrades either to a warning (L1). Messages name keys, never values.
+/// keys fail startup. There is no switch that downgrades either to a warning (L1). Messages name keys, never values.
 /// </summary>
 public static class SerilogSectionGuard
 {

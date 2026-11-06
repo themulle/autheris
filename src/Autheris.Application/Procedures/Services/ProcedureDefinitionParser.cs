@@ -272,7 +272,7 @@ public static partial class ProcedureDefinitionParser
     }
 
     /// <summary>
-    /// SEC-PROC152I2-08: <c>limit</c> is the reserved row-limit input of the endpoint; no parameter or context binding may use
+    /// <c>limit</c> is the reserved row-limit input of the endpoint; no parameter or context binding may use
     /// the name (any case, optional leading '@'), so the input can never be shadowed or confused with a procedure parameter.
     /// </summary>
     private static void RejectReservedNames(List<ProcedureParameter> parameters, List<ProcedureContextBinding> contexts)
@@ -591,7 +591,7 @@ public static partial class ProcedureDefinitionParser
         };
     }
 
-    // SEC-PROC152I2-12: SQLSTATE classes that signal infrastructure, authentication or resource failures (or success/warning
+    // SQLSTATE classes that signal infrastructure, authentication or resource failures (or success/warning
     // states) must never be reported as a business rejection.
     private static readonly HashSet<string> RejectedSqlStateClasses = new(StringComparer.Ordinal)
     {

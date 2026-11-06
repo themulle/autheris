@@ -156,7 +156,7 @@ public static partial class DataApiFilterTranslator
     }
 
     /// <summary>
-    /// #323 (SEC-RG-14): <c>startswith|endswith|contains(identifier, 'literal')</c> becomes <c>identifier LIKE 'pattern' ESCAPE '!'</c>. The
+    /// #323:<c>startswith|endswith|contains(identifier, 'literal')</c> becomes <c>identifier LIKE 'pattern' ESCAPE '!'</c>. The
     /// literal is escaped (<c>!</c>, <c>%</c>, <c>_</c> get an <c>!</c> prefix; <c>''</c> stays one quote) so a caller cannot widen the pattern. The escape
     /// character is not a backslash: the SQL token policy rejects every backslash in a string literal. Only that exact shape
     /// is rewritten and only on a real string literal (never inside one); any other argument shape stays untouched and fails as before.
@@ -321,7 +321,7 @@ public static partial class DataApiFilterTranslator
 
     private static string ReplaceOperators(string text)
     {
-        // #324 (SEC-RG-10): "= NULL" never matches (3VL); a comparison with the null keyword is an IS [NOT] NULL test. Non-literal segments only.
+        // #324: "= NULL" never matches (3VL); a comparison with the null keyword is an IS [NOT] NULL test. Non-literal segments only.
         var result = EqNullRegex().Replace(text, "IS NULL");
         result = NeNullRegex().Replace(result, "IS NOT NULL");
         // Safe word-boundary operator replacements

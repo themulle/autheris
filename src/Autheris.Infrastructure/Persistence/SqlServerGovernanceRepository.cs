@@ -18,7 +18,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 {
     private readonly string _connectionString;
     private readonly IEpochValidationService _epochValidationService;
-    // WP-PF-06: bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
+    // bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
     private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
@@ -126,7 +126,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
         };
         _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
 
-        // SEC-04: Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging
+        // Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging
         byte[]? key = null;
         var auditSecretRef = options?.Value?.GovernanceDb?.AuditHmacKeyVaultRef;
         if (secretProvider != null && !string.IsNullOrWhiteSpace(auditSecretRef))
@@ -224,7 +224,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 
         _auditAnchorStore = auditAnchorStore;
 
-        // No DDL and no database I/O here: the schema is created by the governance migration runner (WP-ARC-B-12).
+        // No DDL and no database I/O here: the schema is created by the governance migration runner.
         _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
     }
 

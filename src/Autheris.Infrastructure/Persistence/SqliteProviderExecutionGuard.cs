@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// SEC-X1-10 (X1.2): the <see cref="IProviderExecutionGuard"/> of the gateway. A SQLite connection runs its work under
+/// 10 (X1.2): the<see cref="IProviderExecutionGuard"/> of the gateway. A SQLite connection runs its work under
 /// <see cref="SqliteExecutionGuard"/> (an interrupt at the timeout and on cancellation); every other provider enforces the command
 /// timeout itself and passes through.
 /// </summary>

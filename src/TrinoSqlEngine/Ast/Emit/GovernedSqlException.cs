@@ -26,7 +26,7 @@ public static class GovernedSqlErrorCodes
     /// <summary>The statement uses an identifier with the reserved gateway prefix (a user error, 400; not a gateway defect).</summary>
     public const string ReservedIdentifier = "SQL_RESERVED_IDENTIFIER";
 
-    /// <summary>One code for every "table not usable" cause (not registered, inactive, no columns, denied, hidden column, load failure; SEC-X1-05).</summary>
+    /// <summary>One code for every "table not usable" cause (not registered, inactive, no columns, denied, hidden column, load failure).</summary>
     public const string PolicyDenied = "SQL_POLICY_DENIED";
 
     /// <summary>Statement-level rules that do not depend on whether a table exists (DDL, function not permitted, read-only token, missing writer role).</summary>
@@ -37,7 +37,7 @@ public static class GovernedSqlErrorCodes
     public const string Timeout = "SQL_TIMEOUT";
     public const string SourceUnavailable = "SQL_SOURCE_UNAVAILABLE";
 
-    // REQ-SQL-128: client list parameters. Fixed messages, never counts, names or values.
+    // client list parameters. Fixed messages, never counts, names or values.
     public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
     public const string ListParamPosition = "SQL_LIST_PARAM_POSITION";
     public const string ListParamType = "SQL_LIST_PARAM_TYPE";
@@ -45,7 +45,7 @@ public static class GovernedSqlErrorCodes
     public const string ListParamTooLarge = "SQL_LIST_PARAM_TOO_LARGE";
     public const string ListParamUnsupported = "SQL_LIST_PARAM_UNSUPPORTED";
 
-    // REQ-SQL-130: time zone conversion. Fixed messages, never the zone, the timestamp, a count or the dialect-specific zone id.
+    // time zone conversion. Fixed messages, never the zone, the timestamp, a count or the dialect-specific zone id.
     public const string TimeZoneInvalid = "SQL_TIMEZONE_INVALID";
     public const string TimeZoneArgument = "SQL_TIMEZONE_ARGUMENT";
     public const string FunctionUnsupportedDialect = "SQL_FUNCTION_UNSUPPORTED_DIALECT";
@@ -57,7 +57,7 @@ public static class GovernedSqlErrorCodes
     /// <summary>#310: an aggregate function was applied to a column type it does not accept (400).</summary>
     public const string AggregationInvalidFunctionForType = "AGGREGATION_INVALID_FUNCTION_FOR_TYPE";
 
-    // Issue #132 (PLAN-DATA-132, SEC-DATA132-01): AST rejection of client three-part/four-part physical database names.
+    // Issue #132: AST rejection of client three-part/four-part physical database names.
     public const string InvalidIdentifierQualification = "INVALID_IDENTIFIER_QUALIFICATION";
 
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>

@@ -81,7 +81,7 @@ public sealed class FederatedParameterContract
             return Empty;
         }
 
-        // 1. Reserved prefix validation (fail closed SEC-DATA131-06)
+        // 1. Reserved prefix validation (fail closed 06)
         foreach (var key in rawParameters.Keys)
         {
             ValidateParameterName(key);

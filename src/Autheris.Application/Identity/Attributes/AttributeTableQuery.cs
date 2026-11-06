@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using Autheris.Domain.Common;
 
-/// <summary>The fixed lookup an attribute-table provider performs (PLAN-GOV-129 A-5.2). Identifiers only; no user text.</summary>
+/// <summary>The fixed lookup an attribute-table provider performs (129 A-5.2). Identifiers only; no user text.</summary>
 public sealed record AttributeTableSpec(
     string DataSource,
     string? Schema,

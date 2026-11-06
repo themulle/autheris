@@ -963,7 +963,7 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
 | `EpochCheckSeconds` | `int` | `1 .. TtlSeconds` | `5` | Interval of cluster policy epoch reads per tenant. |
 | `UnavailableBackoffMilliseconds` | `int` | `100 .. 10000` | `1000` | Cache bypass after a failed epoch read. |
 
-Details: [F-SEC-06](features/f-sec-06-casbin-decision-cache-policy-epoch.md).
+Details: see [Operations Runbook](operations-runbook.md).
 
 #### Startup Validation & Model Contract (Probes M1–M8, W1–W6)
 
@@ -1178,7 +1178,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 |---|---|---|---|
 | `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /api/extensions/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
 
-With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See `docs/features/f-dbt-05-streaming-metadata-ingestion.md` for the payload and its limits.
+With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See the dbt module documentation for the payload and its limits.
 
 ## 3. Deployment & Umgebungsvariablen
 

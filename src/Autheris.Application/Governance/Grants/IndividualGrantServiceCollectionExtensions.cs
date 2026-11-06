@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 public static class IndividualGrantServiceCollectionExtensions
 {
     /// <summary>
-    /// WP-SC-16: registers <see cref="IGrantPolicy"/> and <see cref="IIndividualGrantLimits"/>;
+    /// registers<see cref="IGrantPolicy"/> and <see cref="IIndividualGrantLimits"/>;
     /// the host binds <see cref="IndividualGrantOptions"/> (a realm profile can only shorten the built-in maxima).
     /// The read-time clamp limits of <see cref="IndividualGrantLimits"/> follow the same options.
     /// </summary>

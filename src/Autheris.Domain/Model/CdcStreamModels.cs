@@ -50,7 +50,7 @@ public enum CdcStartPosition
     FromOffset = 3
 }
 
-/// <summary>Stable activation / production failure codes of the governed CDC stream (PLAN-CDC-99 D-A3).</summary>
+/// <summary>Stable activation / production failure codes of the governed CDC stream (99 D-A3).</summary>
 public static class CdcActivationCodes
 {
     public const string TableUnavailable = "CDC_TABLE_UNAVAILABLE";
@@ -135,7 +135,7 @@ public sealed record CdcProtectedBlob(string DekId, byte[] Data);
 public sealed record CdcStreamEventRecord(
     CdcStreamId StreamId, long Offset, long ChangeVersion, CdcStreamEventKind Kind, CdcOperation? Operation,
     CdcTenantScope TenantScope, string? TenantId,
-    string? PriorTenantId /* SEC-CDC99-01: before-image tenant when it differs from the event tenant */,
+    string? PriorTenantId /*  before-image tenant when it differs from the event tenant*/,
     CdcProtectedBlob Payload, DateTimeOffset ProducedAt);
 
 /// <summary>Image write; <see cref="Image"/> null means the image is deleted.</summary>

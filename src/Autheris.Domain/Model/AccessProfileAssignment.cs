@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-/// <summary>WP-SC-03: who a profile is assigned to. Standing access is given to groups and roles; individual users are time-bound.</summary>
+/// <summary>who a profile is assigned to. Standing access is given to groups and roles; individual users are time-bound.</summary>
 public enum AccessProfileSubjectType
 {
     User = 0,
@@ -12,7 +12,7 @@ public enum AccessProfileSubjectType
     Role = 2
 }
 
-/// <summary>WP-SC-03 / SEC-SC-04: assignment kind for access profiles.</summary>
+/// <summary>assignment kind for access profiles.</summary>
 public enum AccessProfileAssignmentKind
 {
     Standard = 0
@@ -20,7 +20,7 @@ public enum AccessProfileAssignmentKind
 
 /// <summary>
 /// One row of <c>ACCESS_PROFILE_ASSIGNMENTS</c>. <see cref="AssignedAt"/> is the start of the current grant period (set by the repository, a
-/// renewal restarts it). <see cref="CreatedBy"/> is the requester, <see cref="ApprovedBy"/> the second person (SEC-SC-04: four-eyes).
+/// renewal restarts it). <see cref="CreatedBy"/> is the requester, <see cref="ApprovedBy"/>the second person (four-eyes).
 /// </summary>
 public sealed record AccessProfileAssignment
 {
@@ -34,7 +34,7 @@ public sealed record AccessProfileAssignment
     public string? Justification { get; init; }
     public AccessProfileAssignmentKind Kind { get; init; } = AccessProfileAssignmentKind.Standard;
 
-    /// <summary>WP-SC-16: number of approved renewals of this assignment.</summary>
+    /// <summary>number of approved renewals of this assignment.</summary>
     public int RenewalCount { get; init; }
 }
 
@@ -45,7 +45,7 @@ public sealed class AccessProfileAssignmentRejectedException(string code, string
 }
 
 /// <summary>
-/// WP-SC-03 / SEC-SC-04 / SEC-SC-20: write-time validation, read-time effectiveness (fail closed) and deterministic precedence of profile assignments.
+/// write-time validation, read-time effectiveness (fail closed) and deterministic precedence of profile assignments.
 /// <c>Unmasked</c> takes effect only through (a) a group/role mapping approved by a second administrator or (b) a time-bound individual grant
 /// (at most 30 days, requester, approver and grantee all different).
 /// </summary>

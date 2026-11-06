@@ -6,7 +6,7 @@ using TrinoSqlEngine.Parsing;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// ARCH-MNT-15-SC-04: the ANTLR cache bounds must each be greater than zero and below their upper bound; a violation fails start-up. Messages
+/// SC-04: the ANTLR cache bounds must each be greater than zero and below their upper bound; a violation fails start-up. Messages
 /// name option paths only, never values.
 /// </summary>
 public sealed class SqlParserCacheOptionsValidator : IValidateOptions<GatewayOptions>

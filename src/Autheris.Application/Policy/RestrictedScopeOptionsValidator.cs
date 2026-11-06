@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #143 (PLAN-GOV-143 D-2, SEC-GOV143-06/11): startup validation of <see cref="RestrictedScopeOptions"/> (<c>ValidateOnStart</c>).
+/// Issue #143 (143 D-2, 06/11): startup validation of<see cref="RestrictedScopeOptions"/> (<c>ValidateOnStart</c>).
 /// A null, blank, whitespace-containing, <c>/</c>-terminated or longer than 256 characters entry fails; more than 64 entries fail;
 /// <c>Enabled=false</c> is only accepted in Development; a custom list without <c>Agent.Read</c> only logs a warning.
 /// </summary>

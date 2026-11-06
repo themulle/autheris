@@ -26,7 +26,7 @@ using Microsoft.Extensions.Logging;
 public static class GatewayStartupValidator
 {
     /// <summary>
-    /// Issue #277 (SEC-277-08): with <c>WebSql:AllowRecursiveCte</c> on, a recursive statement can fill provider temp space until the
+    /// Issue #277: with<c>WebSql:AllowRecursiveCte</c> on, a recursive statement can fill provider temp space until the
     /// execution timeout fires; the gateway has no in-code bound for it. One warning names the values and the deployment prerequisite.
     /// </summary>
     internal static void WarnAboutRecursiveCte(GatewayOptions options, ILogger? logger)
@@ -109,7 +109,7 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// SEC-ADG-28 (X1): <c>WebSql:SqlRewriterEngine</c> was the switch between the legacy string rewriter and the AST compiler. There is
+    /// 28 (X1):<c>WebSql:SqlRewriterEngine</c> was the switch between the legacy string rewriter and the AST compiler. There is
     /// one path now and no runtime switch (rollback is a revert), so a configured value fails the start in every environment:
     /// warn-and-ignore would let an operator believe in a kill switch that does not exist. The configured value is never echoed.
     /// </summary>
@@ -172,7 +172,7 @@ public static class GatewayStartupValidator
     public sealed record DeniedTable(string Table, string PolicyId, string Code);
 
     /// <summary>
-    /// SEC-ADG-26 (X1): every stored row predicate that the production parser rejects denies its table, and so does a dialect that WebSQL
+    /// 26 (X1): every stored row predicate that the production parser rejects denies its table, and so does a dialect that WebSQL
     /// does not admit. A deny at scale is an outage, so the start lists all of them (a warning per table, ids and codes only). The same
     /// lint runs as the blocking pre-deploy step <c>tools/PolicyPredicateLint</c>.
     /// </summary>
@@ -217,7 +217,7 @@ public static class GatewayStartupValidator
         return denied;
     }
 
-    /// <summary>WP-X0i / SEC-ADG-09: validates every Databricks data source (exact host, auth mode, Pat only in Development).</summary>
+    /// <summary>WP-X0i / validates every Databricks data source (exact host, auth mode, Pat only in Development).</summary>
     public static void ValidateDatabricks(GatewayOptions options, IHostEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -242,7 +242,7 @@ public static class GatewayStartupValidator
                 throw new ValidationException($"Databricks data source '{name}': WarehouseId is required.");
             }
 
-            // Issue #238 (SEC-OBO238-04): EnforcementMode cross-validation
+            // Issue #238: EnforcementMode cross-validation
             if (connection.EnforcementMode is EnforcementMode.Delegated or EnforcementMode.DelegatedDefenceInDepth)
             {
                 if (connection.KeySetCacheAllowed)
@@ -291,7 +291,7 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// WP-F1 / CR-ADG-08: outside Development a data source connection never carries a plaintext password.
+    /// CR-ADG-08: outside Development a data source connection never carries a plaintext password.
     /// Outside Development, PostgreSQL, SQL Server and Oracle reject literal passwords. Oracle additionally enforces TCPS and
     /// mandatory PasswordKeyVaultRef.
     /// </summary>
@@ -555,7 +555,7 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// WP-ARC-A-02: configured webhook subscriptions need a stable, unique id (<= 128 chars). Outbox rows reference the id, so a generated
+    /// configured webhook subscriptions need a stable, unique id (<= 128 chars). Outbox rows reference the id, so a generated
     /// or colliding id would dead-letter queued deliveries after a restart or on another node. Messages never echo URLs or secrets.
     /// </summary>
     public static void ValidateWebhookSubscriptions(GatewayOptions options)
@@ -588,7 +588,7 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// WP-X0b, SEC-X1-08: <c>DefaultSchema</c> must match the strict identifier rule in every environment, and a WebSQL-reachable
+    /// WP-X0b,<c>DefaultSchema</c> must match the strict identifier rule in every environment, and a WebSQL-reachable
     /// PostgreSQL or Oracle data source must have one (the session pin needs it).
     /// </summary>
     public static void ValidateDefaultSchemas(GatewayOptions options)
@@ -754,7 +754,7 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// REQ-COST-419 / SEC-COST-01: Validates that per-tier and per-scope complexity overrides do not exceed the
+    /// Validates that per-tier and per-scope complexity overrides do not exceed the
     /// hard safety ceiling of 10000 or fall below the minimum bounded threshold of 100.
     /// </summary>
     internal static void ValidateClientTierComplexityOverrides(GatewayOptions options)

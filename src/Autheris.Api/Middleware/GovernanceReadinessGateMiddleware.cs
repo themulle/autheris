@@ -7,7 +7,7 @@ using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Translates <see cref="GovernanceStoreNotReadyException"/> into a fail-closed 503 Service Unavailable ProblemDetails response (WP-ARC-C-04).
+/// Translates <see cref="GovernanceStoreNotReadyException"/>into a fail-closed 503 Service Unavailable ProblemDetails response.
 /// </summary>
 public sealed class GovernanceReadinessGateMiddleware
 {

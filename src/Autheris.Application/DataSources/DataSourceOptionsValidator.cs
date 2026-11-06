@@ -5,7 +5,7 @@ using Autheris.Domain.Options.DataSources;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// SEC-DS05-08: Startup validator for <see cref="DataSourceConfigurationOptions"/>.
+/// Startup validator for<see cref="DataSourceConfigurationOptions"/>.
 /// Ensures non-escalation invariants, valid numerical ranges, and pool configurations fail-fast at boot.
 /// </summary>
 public sealed class DataSourceOptionsValidator : IValidateOptions<DataSourceConfigurationOptions>
@@ -74,7 +74,7 @@ public sealed class DataSourceOptionsValidator : IValidateOptions<DataSourceConf
     {
         if (profile == null) return;
 
-        // SEC-ATR-01 / decision 13: a numeric value with undefined bits is a misconfiguration, never silently widened or narrowed.
+        // 01 / decision 13: a numeric value with undefined bits is a misconfiguration, never silently widened or narrowed.
         if (profile.AllowedTransports.HasValue && (profile.AllowedTransports.Value & ~DataSourceTransportFlags.All) != 0)
             failures.Add($"{prefix}.AllowedTransports contains undefined transport flags.");
 

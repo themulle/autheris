@@ -121,7 +121,7 @@ public sealed class RoleResolver : IRoleResolver
             }
             catch (Exception)
             {
-                // SEC-SC-12 / GOV-08: a provider failure marks the resolution degraded (never cached, the PDP denies on it).
+                // 12 / GOV-08: a provider failure marks the resolution degraded (never cached, the PDP denies on it).
                 degraded = true;
             }
         }

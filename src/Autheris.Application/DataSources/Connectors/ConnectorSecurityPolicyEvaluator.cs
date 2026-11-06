@@ -26,7 +26,7 @@ public static class ConnectorSecurityPolicyEvaluator
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(metadata);
 
-        // SEC-AC-01: Zero-Trust / Fail-Closed: Refuse execution if table access is denied by policy
+        // Zero-Trust / Fail-Closed: Refuse execution if table access is denied by policy
         if (!session.AccessDecision.IsAllowed)
         {
             var reasons = session.AccessDecision.DeniedReasons.Count > 0
@@ -35,7 +35,7 @@ public static class ConnectorSecurityPolicyEvaluator
             throw new SecurityException($"Zero-Trust violation: Access to table '{metadata.Identifier}' denied: {reasons}");
         }
 
-        // SEC-AC-02: Zero-Trust: Validate RLS filter early before any connection or query execution
+        // Zero-Trust: Validate RLS filter early before any connection or query execution
         if (!string.IsNullOrWhiteSpace(session.PushdownFilterSql))
         {
             SqlSecurityValidator.ValidatePredicateSql(
@@ -45,7 +45,7 @@ public static class ConnectorSecurityPolicyEvaluator
                 SqlSecurityValidator.MaxLengthFor(session.AccessDecision));
         }
 
-        // SEC-01: Side-channel inference protection: verify column filters target only Clear columns
+        // Side-channel inference protection: verify column filters target only Clear columns
         if (session.Arguments != null && session.Arguments.Count > 0)
         {
             foreach (var (argKey, argVal) in session.Arguments)

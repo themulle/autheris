@@ -9,7 +9,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Data.SqlClient;
 
-/// <summary>SQL Server <see cref="ICloudEventSubscriptionStore"/> (WP-ARC-A-03). Every statement is scoped by <c>tenant_id</c>.</summary>
+/// <summary>SQL Server <see cref="ICloudEventSubscriptionStore"/>. Every statement is scoped by<c>tenant_id</c>.</summary>
 public partial class SqlServerGovernanceRepository : ICloudEventSubscriptionStore
 {
     public async ValueTask RegisterSubscriptionAsync(CloudEventWebhookSubscription subscription, int maxSubscriptionsPerTenant, CancellationToken ct = default)

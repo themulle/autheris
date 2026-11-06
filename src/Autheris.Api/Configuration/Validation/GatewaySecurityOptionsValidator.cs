@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// WP-ARC-C-02: Validates security, authentication, audit retention, CORS, masking secret, and ReBAC seed options.
+/// Validates security, authentication, audit retention, CORS, masking secret, and ReBAC seed options.
 /// </summary>
 public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewayOptions>
 {

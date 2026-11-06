@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// PLAN-DATA-178: Request payload for governed single-table bulk keyset streaming.
+/// Request payload for governed single-table bulk keyset streaming.
 /// </summary>
 public sealed record BulkTableStreamRequest(
     [property: JsonPropertyName("select")] IReadOnlyList<string>? Select = null,
@@ -21,7 +21,7 @@ public sealed record BulkTableStreamRequest(
 }
 
 /// <summary>
-/// PLAN-DATA-178: Typed JSON filter AST node supporting parameter-driven evaluation
+/// Typed JSON filter AST node supporting parameter-driven evaluation
 /// with zero raw SQL injection risk.
 /// </summary>
 public sealed record TypedFilterNode(

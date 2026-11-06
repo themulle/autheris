@@ -19,7 +19,7 @@ using Microsoft.Extensions.Options;
 public sealed record CdcBuiltBatch(IReadOnlyList<CdcStreamEventRecord> Events, IReadOnlyList<CdcRowImageWrite> ImageWrites, long NewHead);
 
 /// <summary>
-/// PLAN-CDC-99 D-A4 step 2, D-A6, D-A9, SEC-CDC99-01/-03: turns source rows into stream event records. Fingerprints each key per
+/// 99 D-A4 step 2, D-A6, D-A9, 01/-03: turns source rows into stream event records. Fingerprints each key per
 /// stream, supplies the before-image from the last-image store (or marks it unknown), attributes every image to its OWN tenant,
 /// serialises and encrypts with the offset bound into the AAD. Offsets are assigned here, before encryption. Nothing is written; a
 /// failure (unsupported type, key unavailable) leaves the stream untouched.
@@ -94,7 +94,7 @@ public sealed class CdcChangeEventBuilder
             var before = row.Operation == CdcOperation.Insert ? null : previous?.Image;
             var beforeUnknown = row.Operation != CdcOperation.Insert && before is null;
 
-            // each image is attributed to its OWN tenant (SEC-CDC99-01)
+            // each image is attributed to its OWN tenant
             CdcTenantScope scope;
             string? tenant;
             string? prior = null;
@@ -199,7 +199,7 @@ public sealed class CdcChangeEventBuilder
 
     /// <summary>
     /// Tenant of one image, with the read path's rules (D-A6): a tenant column attributes the row (<c>Row</c>; a null, empty or malformed
-    /// value is <c>Unresolved</c>, byte-exact after <see cref="TenantId.TryParse"/>, SEC-CDC99-03); a table without one belongs to its
+    /// value is <c>Unresolved</c>, byte-exact after <see cref="TenantId.TryParse"/>); a table without one belongs to its
     /// owner tenant (<c>Owner</c>) or is <c>Shared</c>.
     /// </summary>
     private static (CdcTenantScope Scope, string? Tenant) ImageTenant(CdcActivation activation, IReadOnlyDictionary<string, object?> image)

@@ -10,7 +10,7 @@ using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Durable, fenced MSSQL Change Tracking watermark store on top of the governance database (WP-ARC-A-11).
+/// Durable, fenced MSSQL Change Tracking watermark store on top of the governance database.
 /// Recovery after a lost or corrupted watermark: delete the row of the table in <c>autheris_cdc_watermarks</c>; the
 /// poller then restarts at the current change tracking version.
 /// </summary>

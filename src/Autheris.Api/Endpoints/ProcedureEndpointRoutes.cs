@@ -85,7 +85,7 @@ public static class ProcedureEndpointRoutes
     }
 
     /// <summary>
-    /// SEC-PROC152-10: the visible Active procedures. An evaluation failure for one procedure omits only that procedure.
+    /// the visible Active procedures. An evaluation failure for one procedure omits only that procedure.
     /// </summary>
     private static async Task<List<RegisteredProcedure>> VisibleAsync(
         HttpContext http,
@@ -136,7 +136,7 @@ public static class ProcedureEndpointRoutes
                 ["schema"] = SchemaFor(p)
             }).ToList();
 
-            // SEC-PROC152I2-15: the reserved row-limit input; the maximum is the effective MaxRows (no scan-cap value is published).
+            // the reserved row-limit input; the maximum is the effective MaxRows (no scan-cap value is published).
             queryParams.Add(new Dictionary<string, object?>
             {
                 ["name"] = "limit",
@@ -377,7 +377,7 @@ public static class ProcedureEndpointRoutes
         }
         catch (KeyNotFoundException)
         {
-            // SEC-PROC152-01: unknown and not-permitted procedures answer the same fixed bytes (NL-SC-22/28).
+            // unknown and not-permitted procedures answer the same fixed bytes (NL-SC-22/28).
             await ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Procedure endpoint not found.").ExecuteAsync(http).ConfigureAwait(false);
         }
         catch (ProcedureUnavailableException)
@@ -400,7 +400,7 @@ public static class ProcedureEndpointRoutes
         }
         catch (ProcedureBusinessException ex)
         {
-            // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response (SEC-PROC152-08).
+            // Fixed or operator-declared text only; number, SQLSTATE and the database text never reach the response.
             // NL-SC-30: the operator text is control-stripped and length-capped; an operator code outside the governed set falls back to PROCEDURE_REJECTED.
             var rejectedCode = ex.MappedCode is { } mapped && mapped.StartsWith("PROCEDURE_", StringComparison.Ordinal) && ApiErrorCodes.IsGoverned(mapped)
                 ? mapped
@@ -414,14 +414,14 @@ public static class ProcedureEndpointRoutes
         }
         catch (DbException ex)
         {
-            // Driver text may contain data values: log the type only (SEC-PROC152-08).
+            // Driver text may contain data values: log the type only.
             logger.LogError("Database failure executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
             await ApiProblems.WriteAsync(http, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred.", ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // Neither the (caller supplied) name nor any parameter value is logged (SEC-PROC152-11).
-            // SEC-PROC152-08: exception type only; the message and inner exceptions may carry values.
+            // Neither the (caller supplied) name nor any parameter value is logged.
+            // exception type only; the message and inner exceptions may carry values.
             logger.LogError("Unexpected error executing a procedure endpoint ({ExceptionType}).", ex.GetType().Name);
             await ApiProblems.WriteAsync(http, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred.", ct).ConfigureAwait(false);
         }

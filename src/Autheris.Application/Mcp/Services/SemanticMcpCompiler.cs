@@ -52,7 +52,7 @@ public sealed class SemanticMcpCompiler(
             ? meta.Table.Description
             : (meta is null
                 ? $"Dataset for {targetTable.Domain}.{targetTable.TableName}"
-                : McpCatalogText.DisplayName(meta.Table.DisplayName, targetTable.TableName)); // SEC-CAT146A-01: externally authored text, never raw
+                : McpCatalogText.DisplayName(meta.Table.DisplayName, targetTable.TableName)); // externally authored text, never raw
 
         // Enforce Dynamic Compactor constraint: Short description < 120 chars for LLM Tool Picker
         var shortDesc = tableDesc.Length > 110 ? CutOnRuneBoundary(tableDesc, 107) + "..." : tableDesc;
@@ -118,7 +118,7 @@ public sealed class SemanticMcpCompiler(
         System.Security.Claims.ClaimsPrincipal? principal = null,
         CancellationToken ct = default)
     {
-        // PLAN-SEC-115 A-6: semantic resources render catalog metadata, so they follow the Catalog group (no repository call when off).
+        // 115 A-6: semantic resources render catalog metadata, so they follow the Catalog group (no repository call when off).
         if (switches is not null && !switches.IsGroupEnabled(McpToolGroup.Catalog))
         {
             return [];

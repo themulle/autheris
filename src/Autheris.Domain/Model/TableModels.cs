@@ -461,7 +461,7 @@ public sealed record TableMetadata
         Table.RequiredFilterColumnGroups.IsDefault ? ImmutableArray<ImmutableArray<string>>.Empty : Table.RequiredFilterColumnGroups;
 
     /// <summary>
-    /// Validates required filter columns on catalog ingestion or load (SEC-GOV163-01, fail closed).
+    /// Validates required filter columns on catalog ingestion or load (fail closed).
     /// </summary>
     public void ValidateRequiredFilterColumns()
     {

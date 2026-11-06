@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// Evaluates table sensitivity for degraded epoch validation and zero-tolerance cache revocation (SEC-EPOCH-01 / AR-14).
+/// Evaluates table sensitivity for degraded epoch validation and zero-tolerance cache revocation (AR-14).
 /// </summary>
 public interface ITableSensitivityLookup
 {

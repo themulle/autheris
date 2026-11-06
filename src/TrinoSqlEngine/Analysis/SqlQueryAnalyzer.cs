@@ -195,7 +195,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(context.name.GetText());
         if ((context.Parent as SqlBaseParser.WithContext)?.RECURSIVE() != null)
         {
-            // Issue #277 (SEC-277-01): in a WITH RECURSIVE the name is visible in its own body (and in later CTEs, never in earlier ones),
+            // Issue #277: in a WITH RECURSIVE the name is visible in its own body (and in later CTEs, never in earlier ones),
             // exactly like the compiler's scope. Exit-timing below stays (idempotent add).
             _hasRecursiveCte = true;
             _cteScopeStack.Peek().Add(cteKey);
@@ -435,7 +435,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         ExtractFilterColumnReferences(context, context.Parent is SqlBaseParser.WindowSpecificationContext ? _windowColumnReferences : _filterColumnReferences);
     }
 
-    /// <summary>#322 (SEC-RG-04): PARTITION BY expressions of a window (the ORDER BY is taken by <see cref="EnterOrderBy"/>).</summary>
+    /// <summary>#322: PARTITION BY expressions of a window (the ORDER BY is taken by<see cref="EnterOrderBy"/>).</summary>
     public override void EnterWindowSpecification(SqlBaseParser.WindowSpecificationContext context)
     {
         foreach (var partition in context._partition)
@@ -524,7 +524,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
                 return;
             }
 
-            // Issue #277 (SEC-277-04): keyword-less self-reference; the name stays reported as a table (see SqlQueryMetadata).
+            // Issue #277: keyword-less self-reference; the name stays reported as a table (see SqlQueryMetadata).
             if (_definingNonRecursiveCtes.Contains(key))
             {
                 _hasNonRecursiveSelfReference = true;

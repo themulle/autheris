@@ -9,7 +9,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// WP-ARC-B-01: a transport-neutral table-read intent. The planner turns it into Trino-dialect SQL text for the governed
+/// a transport-neutral table-read intent. The planner turns it into Trino-dialect SQL text for the governed
 /// compile path (<c>IGovernedSqlExecutionService</c>); every adapter (REST datasets, GraphQL flat reads, OData, MCP, connector
 /// SPI) states what it wants to read and never builds SQL text itself.
 /// </summary>
@@ -72,7 +72,7 @@ public sealed record PlannedTableAggregate(
     IReadOnlyDictionary<string, TimeBucketKeyShape>? BucketKeyShapes = null);
 
 /// <summary>
-/// WP-ARC-B-01: shared governed table-read planner. Authorizes columns against the <see cref="TableAccessDecision"/>, guards
+/// shared governed table-read planner. Authorizes columns against the<see cref="TableAccessDecision"/>, guards
 /// filter and order columns against oracle inference, and formulates the SQL. Fail-closed: an unknown column, a denied or
 /// masked filter/order column or an unsupported filter throws; no best-effort text is ever produced.
 /// </summary>
@@ -102,7 +102,7 @@ public interface IGovernedTableReadPlanner
     string BuildFullTableSelect(TableIdentifier table);
 
     /// <summary>
-    /// PLAN-DATA-178: Plans a bulk keyset streaming query against a single table using monotonic keyset cursor seek.
+    /// Plans a bulk keyset streaming query against a single table using monotonic keyset cursor seek.
     /// Rejects joins, subqueries, and raw SQL injection. A supplied cursor is verified against the context built by
     /// <see cref="KeysetCursorContextFactory.ForBulkStream"/> from <paramref name="tenantId"/>, <paramref name="callerSid"/>,
     /// the table, its key and the request filter/projection; a cursor issued for any other context is rejected.

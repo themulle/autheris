@@ -130,7 +130,7 @@ public static partial class GovernanceEndpoints
         }
         catch (Autheris.Application.Governance.Services.DeclarativeManifestValidationException ex)
         {
-            // SEC-GOV158I1-03: fixed message naming only the policy index, never the rejected text.
+            // fixed message naming only the policy index, never the rejected text.
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Manifest policy at index {ex.PolicyIndex} has an invalid description.", context);
         }
         catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException ex)

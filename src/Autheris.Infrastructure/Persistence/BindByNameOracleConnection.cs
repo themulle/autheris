@@ -7,7 +7,7 @@ using Oracle.ManagedDataAccess.Client;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// SEC-ADG-03 / CR-ADG-07: ODP.NET binds by POSITION unless <c>OracleCommand.BindByName</c> is true. With reused markers and
+/// 03 / CR-ADG-07: ODP.NET binds by POSITION unless<c>OracleCommand.BindByName</c> is true. With reused markers and
 /// out-of-order parameters a positional bind attaches a tenant value to a user slot. <see cref="SqlConnectionFactory"/> returns
 /// this wrapper for every Oracle connection, so no consumer can obtain a raw <see cref="OracleCommand"/>:
 /// every command it creates has <c>BindByName = true</c>, setting it to false throws, and every execute method asserts it again.

@@ -6,7 +6,7 @@ using Antlr4.Runtime.Atn;
 using Antlr4.Runtime.Misc;
 
 /// <summary>
-/// ARCH-MNT-15: owns the current <see cref="AntlrCacheGeneration"/> and is the only place that constructs <c>SqlBaseLexer</c> and
+/// owns the current<see cref="AntlrCacheGeneration"/> and is the only place that constructs <c>SqlBaseLexer</c> and
 /// <c>SqlBaseParser</c> (SC-01, enforced by an architecture test). Every recognizer is bound to the generation that is current when it is created.
 /// When the state count of a generation passes the cap, a fresh generation is published with one compare-exchange; in-flight work keeps the old one.
 /// No lock on the parse path, no <c>ClearDFA</c> (SC-02).

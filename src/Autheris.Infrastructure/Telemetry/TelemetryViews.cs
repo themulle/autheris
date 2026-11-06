@@ -4,7 +4,7 @@ using System;
 
 /// <summary>
 /// Metric view configurations defining histogram duration buckets and cardinality boundaries.
-/// Enforces D-14 and SEC-OT06-08.
+/// Enforces D-14 and 08.
 /// </summary>
 public static class TelemetryViews
 {

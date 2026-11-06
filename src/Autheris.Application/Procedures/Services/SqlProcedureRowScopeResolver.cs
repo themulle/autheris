@@ -184,7 +184,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
                 }
             }
 
-            // SEC-ADG-02: a duplicate bare parameter name (two filter values, a filter value that names the tenant or a key) fails closed.
+            // a duplicate bare parameter name (two filter values, a filter value that names the tenant or a key) fails closed.
             var bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (tenantColumn != null)
             {

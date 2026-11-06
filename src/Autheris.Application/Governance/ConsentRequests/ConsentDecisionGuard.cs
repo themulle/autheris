@@ -39,7 +39,7 @@ public interface IConsentDecisionGuard
 }
 
 /// <summary>
-/// SEC-113-R2-01: the one shared predicate "is this principal a person that may decide?". A person decides; an application never does.
+/// the one shared predicate "is this principal a person that may decide?". A person decides; an application never does.
 /// Denied: unauthenticated or null principals, read-only tokens, <c>idtyp=app</c>, certificate (mTLS) subjects, and principals the
 /// resolver classifies as service principal unless they carry a delegated scope claim (<c>scp</c> or its mapped URI; app-only tokens
 /// never carry one) together with an immutable person identifier (oid or SID).
@@ -126,7 +126,7 @@ public interface IConsentDecisionDenialRecorder
 }
 
 /// <summary>
-/// SEC-113-R2-02 (c): the first denial of a principal in a minute writes one Tier-A <c>CONSENT_DENIED</c> entry (reason class only);
+/// 02 (c): the first denial of a principal in a minute writes one Tier-A<c>CONSENT_DENIED</c> entry (reason class only);
 /// further denials of the same principal in that minute only count in the metric, so a looping caller cannot flood the audit chain.
 /// An audit failure is logged and counted and never turns the denial into an error or an allow.
 /// </summary>

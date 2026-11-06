@@ -117,7 +117,7 @@ public static class GatewayMcpServer
         new() { Uri = "autheris://api/docs/mcp-tools", Name = "MCP Tools Reference", Description = "Markdown reference for available MCP tools", MimeType = "text/markdown" }
     ];
 
-    /// <summary>PLAN-SEC-115 A-6: omits the native resources whose group is switched off (the same gate <c>ReadAsync</c> applies).</summary>
+    /// <summary>115 A-6: omits the native resources whose group is switched off (the same gate<c>ReadAsync</c> applies).</summary>
     internal static List<Resource> FilterResources(IEnumerable<Resource> resources, IReadPathSwitches? switches) =>
         switches is null ? resources.ToList() : resources.Where(r => switches.IsResourceEnabled(r.Uri!)).ToList();
 
@@ -189,7 +189,7 @@ public static class GatewayMcpServer
     /// </summary>
     internal static async Task<ReadResourceResult> ReadGuardedNativeResourceAsync(IServiceProvider services, string uri, IMcpResourceProvider provider, CancellationToken ct)
     {
-        // PLAN-SEC-115 C-115-6: a closed resource answers like an unknown URI without reaching the guardrail or the provider.
+        // 115 C-115-6: a closed resource answers like an unknown URI without reaching the guardrail or the provider.
         var targets = provider.IsResourceEnabled(uri) ? McpResourceProvider.GuardTargets(uri) : null;
         if (targets is null)
         {
@@ -327,7 +327,7 @@ public static class GatewayMcpServer
 
     public static GetPromptResult BuildPrompt(string promptName, IReadOnlyDictionary<string, string?>? arguments, IReadPathSwitches? switches = null)
     {
-        // A gated prompt answers exactly like an unknown one (PLAN-SEC-115 ST-115-14).
+        // A gated prompt answers exactly like an unknown one (115 ST-115-14).
         if (switches is not null && !switches.IsPromptEnabled(promptName))
         {
             throw new McpProtocolException($"Prompt '{promptName}' not found.", McpErrorCode.InvalidParams);

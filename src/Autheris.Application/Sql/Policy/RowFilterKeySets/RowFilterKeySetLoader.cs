@@ -12,7 +12,7 @@ using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Everything the loader needs for one key query. <see cref="Connection"/> is the governed read connection of the data source; its provider must
-/// match <see cref="Dialect"/> (the catalog dialect). <see cref="Converter"/> converts the loaded keys to the foreign key type (SEC-RF107-07).
+/// match <see cref="Dialect"/> (the catalog dialect). <see cref="Converter"/>converts the loaded keys to the foreign key type.
 /// </summary>
 public sealed record RowFilterKeySetLoadRequest(
     DataSourceConnectionOptions Connection,
@@ -32,19 +32,19 @@ public interface IRowFilterKeySetLoader
 }
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-11): runs one compiled key query on the governed read connection of a data source.
+/// Issue #107 (107 A-11): runs one compiled key query on the governed read connection of a data source.
 /// <list type="bullet">
-/// <item>The session is tenant only: <c>userSid: null, purpose: null</c> (SEC-RF107-01 b); the key set is principal independent.</item>
-/// <item>SQL Server: <c>SET TRANSACTION ISOLATION LEVEL READ COMMITTED</c> before the query, regardless of <c>ReadUncommitted</c> (SEC-RF107-12), so
+/// <item>The session is tenant only: <c>userSid: null, purpose: null</c>(01 b); the key set is principal independent.</item>
+/// <item>SQL Server: <c>SET TRANSACTION ISOLATION LEVEL READ COMMITTED</c> before the query, regardless of <c>ReadUncommitted</c>so
 /// uncommitted rows are never cached. PostgreSQL and Oracle: <c>SET TRANSACTION READ ONLY</c>, always rolled back. SQLite: <c>PRAGMA query_only</c>.</item>
 /// <item>Every <see cref="CompiledKeyQuery.Parameters"/> element is bound through the engine's production binder (<see cref="CompiledSqlBinders.BindKeyQuery"/>; the SQLite row limit is a
-/// <c>QueryLiteral</c> bind) and the command's parameter count is checked before execution (SEC-RF107-20, D-WPC-8).</item>
+/// <c>QueryLiteral</c>bind) and the command's parameter count is checked before execution (D-WPC-8).</item>
 /// <item>At most <c>MaxKeys + 1</c> rows are read; one more than <c>MaxKeys</c> yields the overflow sentinel. A set with a value that does not fit
-/// the foreign key type yields the not-bindable sentinel (SEC-RF107-07 b).</item>
-/// <item><see cref="RowFilterKeySetEntry.LoadedAt"/> is taken before anything else, so before the key query starts (SEC-RF107-04 b).</item>
+/// the foreign key type yields the not-bindable sentinel (07 b).</item>
+/// <item><see cref="RowFilterKeySetEntry.LoadedAt"/>is taken before anything else, so before the key query starts (04 b).</item>
 /// <item>Any exception (connection, session, command, read, timeout, conversion) is a <c>ROW_FILTER_KEY_SET_UNAVAILABLE</c> denial with a fixed
 /// message; the cause is attached as inner exception only, the Warning carries the exception type only, partial rows are discarded, nothing is
-/// cached (SEC-RF107-08).</item>
+/// cached.</item>
 /// </list>
 /// </summary>
 public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
@@ -90,7 +90,7 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
         }
         catch (Exception ex)
         {
-            // SEC-RF107-08: database messages can quote data; only the type is logged, the cause travels as inner exception.
+            // database messages can quote data; only the type is logged, the cause travels as inner exception.
             _logger?.LogWarning("The row-filter key set could not be loaded ({ExceptionType}); the statement is denied.", ex.GetType().Name);
             throw RowFilterKeySetErrorCodes.Unavailable(ex);
         }
@@ -122,7 +122,7 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
             }
             else if (dialect == DatabaseDialect.SqlServer)
             {
-                // SEC-RF107-12: ReadUncommitted of the source applies to user statements; a cached key set must never hold dirty rows.
+                // ReadUncommitted of the source applies to user statements; a cached key set must never hold dirty rows.
                 await ExecuteAsync(connection, null, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED", ct).ConfigureAwait(false);
             }
             else if (dialect == DatabaseDialect.Sqlite)
@@ -131,7 +131,7 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
                 queryOnly = true;
             }
 
-            // SEC-RF107-01 b: principal independent; the session carries the tenant only.
+            // 01 b: principal independent; the session carries the tenant only.
             await _sessionInitializer.InitializeSessionAsync(connection, tx, dialect, request.Tenant, userSid: null, purpose: null, ct: ct).ConfigureAwait(false);
 
             await using var cmd = connection.CreateCommand();
@@ -140,7 +140,7 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
             cmd.CommandTimeout = (int)Math.Max(1, Math.Ceiling(request.Timeout.TotalSeconds));
             CompiledSqlBinders.BindKeyQuery(cmd, query, request.Dialect);
 
-            // SEC-RF107-20: a bind that was not added would silently change the query (D-WPC-8).
+            // a bind that was not added would silently change the query (D-WPC-8).
             if (cmd.Parameters.Count != query.Parameters.Length)
             {
                 throw new InvalidOperationException("The bound parameter count does not match the compiled key query.");

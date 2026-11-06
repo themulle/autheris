@@ -5,8 +5,8 @@ using System.Globalization;
 using System.Text;
 
 /// <summary>
-/// Read-side sanitiser for externally authored catalog text that MCP clients (and the LLMs behind them) consume (PLAN-CAT-146-A,
-/// SEC-CAT146A-02..04). Pure and logger-free: the text never reaches a log, exception or metric (SEC-CAT146A-06).
+/// Read-side sanitiser for externally authored catalog text that MCP clients (and the LLMs behind them) consume (
+/// 02..04). Pure and logger-free: the text never reaches a log, exception or metric.
 /// </summary>
 internal static class McpCatalogText
 {

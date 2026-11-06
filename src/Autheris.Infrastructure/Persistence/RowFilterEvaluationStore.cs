@@ -6,9 +6,9 @@ using Autheris.Domain.Model;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 C-4, C-5): shared read/write of the row filter evaluation settings for all governance engines.
+/// Issue #107 (107 C-4, C-5): shared read/write of the row filter evaluation settings for all governance engines.
 /// Object level lives in <c>TABLE_ROW_FILTER_STRATEGIES</c> (separate from <c>TABLES</c> because ingestion upserts rewrite it), rule level in
-/// three nullable columns of <c>CONSENT_ROW_FILTERS</c>. The callers own the transaction and the epoch bump (one transaction, SEC-RF107-14e);
+/// three nullable columns of <c>CONSENT_ROW_FILTERS</c>. The callers own the transaction and the epoch bump (one transaction, 14e);
 /// no value-range validation happens here (caps are configuration, validated by the admin service and again on read).
 /// </summary>
 internal static class RowFilterEvaluationStore

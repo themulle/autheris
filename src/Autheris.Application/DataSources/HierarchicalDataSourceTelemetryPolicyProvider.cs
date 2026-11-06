@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Hierarchical implementation of <see cref="IDataSourceTelemetryPolicyProvider"/> (BL-05).
 /// Resolves per-source log levels, statement text logging, and telemetry policies via <see cref="IDataSourceOptionsResolver"/>,
-/// clamped against the global <see cref="TelemetryCeiling"/> (SEC-DS05-06).
+/// clamped against the global <see cref="TelemetryCeiling"/>.
 /// </summary>
 public sealed class HierarchicalDataSourceTelemetryPolicyProvider : IDataSourceTelemetryPolicyProvider
 {

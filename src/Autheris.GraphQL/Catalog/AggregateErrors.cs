@@ -7,7 +7,7 @@ using HotChocolate;
 namespace Autheris.GraphQL.Catalog;
 
 /// <summary>
-/// #112 SEC-112-11 / C-11: the one place that builds typed aggregation errors. Every message is fixed, every code stable; no column,
+/// #112 11 / C-11: the one place that builds typed aggregation errors. Every message is fixed, every code stable; no column,
 /// table, alias or value of the request is echoed.
 /// </summary>
 internal static class AggregateErrors
@@ -75,7 +75,7 @@ internal static class AggregateFailureMapper
         AggregationFilterRejectedException => AggregateErrors.Create(AggregationFilterRejectedException.ErrorCodeConst, AggregationFilterRejectedException.FixedMessage),
         AggregationTimeBucketUnsupportedException => AggregateErrors.TimeBucketUnsupported(),
         GatewayInvalidQueryException or ArgumentException => AggregateErrors.ArgumentInvalid(),
-        // #333 (SEC-PGP-03): compiler refusals of planner output are fixed 4xx/UNAVAILABLE answers; no exception text, inner exception or SQL is passed on.
+        // #333: compiler refusals of planner output are fixed 4xx/UNAVAILABLE answers; no exception text, inner exception or SQL is passed on.
         TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneUnavailable } => AggregateErrors.Create("UNAVAILABLE", "The database is currently unavailable."),
         // The caller supplied the zone: an invalid or malformed zone is an argument error.
         TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneInvalid or TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneArgument } => AggregateErrors.ArgumentInvalid(),

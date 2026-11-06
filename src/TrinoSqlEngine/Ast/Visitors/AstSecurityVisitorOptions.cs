@@ -25,7 +25,7 @@ internal sealed record AstSecurityVisitorOptions
 
     /// <summary>
     /// Catalog data type of a column of a table (normalized table name, column name), or null when unknown. Null (no lookup) switches the
-    /// aggregate type guard off; the compiler always sets it (#310, SEC-PG-09).
+    /// aggregate type guard off; the compiler always sets it (#310).
     /// </summary>
     public Func<string, string, string?>? ColumnDataType { get; init; }
 
@@ -59,6 +59,6 @@ internal sealed record AstSecurityVisitorOptions
     public bool RejectWholeRowReferencesInSelect { get; init; } = true;
     public bool EnforceWithCheckOption { get; init; } = true;
 
-    /// <summary>Issue #277 (SEC-277-03): a <c>WITH RECURSIVE</c> compiles only when true. Default false; DML rejects it regardless.</summary>
+    /// <summary>Issue #277: a<c>WITH RECURSIVE</c> compiles only when true. Default false; DML rejects it regardless.</summary>
     public bool AllowRecursiveCte { get; init; }
 }

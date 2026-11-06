@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Configuration and options for dynamic OpenAPI 3.1 document generation (F-API-03).
+/// Configuration and options for dynamic OpenAPI 3.1 document generation (F-).
 /// </summary>
 public sealed record OpenApiDocumentOptions
 {

@@ -22,7 +22,7 @@ public sealed record CdcSourceRow(
 /// <summary>
 /// The only place that sends text to a tracked source database (fixed statements over validated identifiers, bound values; a login with
 /// <c>SELECT</c> and <c>VIEW CHANGE TRACKING</c> suffices). It never reads a catalog view: keys come from the declared table definition
-/// (F-GOV-21, PLAN-CDC-99 D-A3).
+/// (F-GOV-21, 99 D-A3).
 /// </summary>
 internal static class CdcSourceQueries
 {

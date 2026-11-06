@@ -26,7 +26,7 @@ public static class GatewayEventServiceExtensions
         services.AddSingleton<IGatewayEventBus>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
         services.AddSingleton<IGatewayEventBusDrain>(sp => sp.GetRequiredService<InMemoryGatewayEventBus>());
 
-        // WP-ARC-A-02: durable webhook outbox. The bridge enqueues configured-webhook rows; the delivery service (any node) drains
+        // durable webhook outbox. The bridge enqueues configured-webhook rows; the delivery service (any node) drains
         // with leases. CloudEvent (CDC) rows must be delivered even when the configured webhooks are disabled.
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
         if (gatewayOptions.Webhooks.Enabled || cdcWebhooksEnabled)
@@ -46,7 +46,7 @@ public static class GatewayEventServiceExtensions
             services.AddHostedService<WebhookEventBridgeHostedService>();
         }
 
-        // REQ-CDC-99 I1-C: governed CDC stream crypto, signal, tail hub, retention and the compatibility feed.
+        // 99 I1-C: governed CDC stream crypto, signal, tail hub, retention and the compatibility feed.
         services.AddAutherisCdcStream(gatewayOptions);
 
         return services;

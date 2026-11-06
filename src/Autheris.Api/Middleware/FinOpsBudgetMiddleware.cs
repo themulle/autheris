@@ -45,7 +45,7 @@ public sealed class FinOpsBudgetMiddleware
             return;
         }
 
-        // API-4: Anonyme / unauthentifizierte Anfragen belasten kein FinOps-Budget
+        // Anonyme / unauthentifizierte Anfragen belasten kein FinOps-Budget
         if (context.User.Identity?.IsAuthenticated != true)
         {
             await _next(context).ConfigureAwait(false);

@@ -52,7 +52,7 @@ public sealed class PreAuthIpRateLimitingMiddleware
 
         // Issue #44: Exempt requests carrying an Authorization Bearer token from the pre-auth IP limit.
         // They are strictly governed downstream by PostAuthSidRateLimitingMiddleware (per-identity SID bucket) and CostQuota.
-        // WP-PF-08: Basic credentials are exempt in the same way. Failed Basic attempts are throttled by the credential guard BEFORE any password
+        // Basic credentials are exempt in the same way. Failed Basic attempts are throttled by the credential guard BEFORE any password
         // hash is computed (per user+IP and per IP) and unauthenticated requests are charged against this budget after authentication.
         if (_options.ExemptAuthenticatedRequests &&
             context.Request.Headers.TryGetValue("Authorization", out var authHeader) &&

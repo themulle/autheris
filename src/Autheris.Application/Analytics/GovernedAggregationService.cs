@@ -76,7 +76,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         ILogger<GovernedAggregationService>? logger = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -111,7 +111,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         ILogger<GovernedAggregationService>? logger = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp;
@@ -164,7 +164,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
                 ["reasons"] = decision.DeniedReasons
             }, ct).ConfigureAwait(false);
 
-            // WP-0 (W0-4): the caller-facing message is fixed. The table name and the denial reasons stay in the audit entry above, so a denied
+            //  (W0-4): the caller-facing message is fixed. The table name and the denial reasons stay in the audit entry above, so a denied
             // table is not distinguishable from a missing one by message content.
             throw new GatewayForbiddenException(DeniedMessage);
         }
@@ -331,7 +331,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         // Differencing protection (#37): Totals are computed strictly over the surviving visible groups.
         var totalsRow = ComputeDifferencingSafeTotals(orderedBuckets, resolvedAggregates, metadata);
 
-        // WP-0 (SEC-112-04): the exact number of suppressed rows can be the exact size of a single group below k, so it is gated by the same
+        // the exact number of suppressed rows can be the exact size of a single group below k, so it is gated by the same
         // option as the groups count and is never returned next to noised values. The true values stay in the audit entry below.
         int exposedSuppressedGroups = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount ? suppressedGroupsCount : 0;
         long exposedSuppressedRows = _analyticsOptions.Privacy.ExposeSuppressedGroupsCount ? suppressedRowsCount : 0;

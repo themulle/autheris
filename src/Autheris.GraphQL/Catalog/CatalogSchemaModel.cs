@@ -277,7 +277,7 @@ public sealed partial class CatalogSchemaModel
             }
 
             // BUG #157: a table without queryable columns would yield field-less GraphQL types and abort schema build. It is
-            // omitted before the collision check and before any name is reserved (SEC-BUG157-08).
+            // omitted before the collision check and before any name is reserved.
             if (columns.Count == 0)
             {
                 omittedTables.Add(new CatalogOmittedTable(meta.Identifier, CatalogTableOmissionReason.NoQueryableColumns));
@@ -294,7 +294,7 @@ public sealed partial class CatalogSchemaModel
             else
             {
                 // #112 A1-11: the typed aggregate names (and the T_aggregate root field) are reserved per table. The table list is
-                // sorted ordinally, so the omission is deterministic and independent of the caller (SEC-112-27: the schema is global).
+                // sorted ordinally, so the omission is deterministic and independent of the caller (the schema is global).
                 var aggregateNames = AggregateTypeNames.For(typeName);
                 collidingName = aggregateNames.All().FirstOrDefault(usedSchemaTypeNames.Contains);
             }
@@ -485,7 +485,7 @@ public sealed partial class CatalogSchemaModel
 
         if (invalidRelations.Count > 0)
         {
-            // SEC-REL151-09: one summary plus at most MaxInvalidRelationDetailLines detail lines, relation id only.
+            // one summary plus at most MaxInvalidRelationDetailLines detail lines, relation id only.
             logger?.LogWarning(
                 "GraphQL catalog schema: {Count} relation(s) with invalid or missing join key columns are not exposed.",
                 invalidRelations.Count);
@@ -503,7 +503,7 @@ public sealed partial class CatalogSchemaModel
                 omittedRelations);
         }
 
-        // Deterministic order independent of repository row order; immutable array so snapshots are never mutated (SEC-BUG157-07).
+        // Deterministic order independent of repository row order; immutable array so snapshots are never mutated.
         var omittedSnapshot = omittedTables
             .OrderBy(o => o.Table.Domain, StringComparer.Ordinal)
             .ThenBy(o => o.Table.Schema, StringComparer.Ordinal)
@@ -516,7 +516,7 @@ public sealed partial class CatalogSchemaModel
     private const int MaxInvalidRelationDetailLines = 10;
 
     /// <summary>
-    /// Fail closed (SEC-REL151-03/08): the key pairs must satisfy <see cref="RelationKeyRules"/> and every key column must
+    /// Fail closed (08): the key pairs must satisfy<see cref="RelationKeyRules"/> and every key column must
     /// still exist in the metadata of its table.
     /// </summary>
     private static bool HasValidKeys(TableRelation rel, TableMetadata parent, TableMetadata child)

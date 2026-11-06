@@ -221,7 +221,7 @@ public sealed partial class CrossSourceRelationResolver
             return false;
         }
 
-        // REQ-GOV-129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
+        // 129 (A-8): typed policy first (bound caller attributes), text only for a decision without one.
         return InMemoryRowFilterEvaluator.RowPassesDecision(row, childDecision, childMetadata);
     }
 

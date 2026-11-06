@@ -118,7 +118,7 @@ public sealed class CatalogVisibleBitSet
     }
 
     /// <summary>
-    /// SEC-PERF254-01: Computes full 64-character lowercase SHA-256 hex digest using canonical length-prefixed encoding
+    /// Computes full 64-character lowercase SHA-256 hex digest using canonical length-prefixed encoding
     /// of sorted table names ({length}:{qualifiedName};) to eliminate delimiter injection collisions.
     /// </summary>
     public static string ComputeSha256(IEnumerable<Autheris.Domain.Common.TableIdentifier> tables)

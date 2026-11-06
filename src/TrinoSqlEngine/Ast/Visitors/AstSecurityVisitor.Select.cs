@@ -28,7 +28,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         WithClause? with = null;
         if (node.With != null)
         {
-            // Issue #277 (SEC-277-03): the opt-in gate is the first check of a recursive WITH, before the ambiguity and catalog-name checks.
+            // Issue #277: the opt-in gate is the first check of a recursive WITH, before the ambiguity and catalog-name checks.
             if (node.With.IsRecursive && !_options.AllowRecursiveCte)
             {
                 throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
@@ -48,7 +48,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     // and recursive members are still secured. A name that is also a catalog table is ambiguous and rejected.
                     EnsureRecursiveCteIsNotACatalogTable(cte.Name);
                     _cteScopeStack.Peek().Add(cteKey);
-                    // SEC-277-10: computed with the name in scope, over every member, by output position.
+                    // computed with the name in scope, over every member, by output position.
                     cteMaskedCols = CollectRecursiveCteMaskedColumns(cte, cteKey);
                     if (cteMaskedCols.Count > 0)
                         _cteMaskedColumns.Peek()[cteKey] = cteMaskedCols;
@@ -58,7 +58,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     cteMaskedCols = CollectMaskedOutputColumns(cte.Query, cte.ColumnAliases);
                 }
 
-                // Non-recursive: visit the CTE body BEFORE adding the name to the scope (Exit-timing, SEC-CTE & SEC C-02)
+                // Non-recursive: visit the CTE body BEFORE adding the name to the scope (Exit-timing, & SEC C-02)
                 if (!node.With.IsRecursive) _definingNonRecursiveCtes.Add(cteKey);
                 SelectStatement cteQuery;
                 try
@@ -166,7 +166,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // The sources are not read after this call: base.VisitQuerySpecification re-enters this method for nested specifications.
         bool maskedScope = EnsureProjectionMaskGuards(node);
 
-        // SEC-PG-09: after the mask guards, so a masked or unknown column keeps its own answer and no type is disclosed.
+        // after the mask guards, so a masked or unknown column keeps its own answer and no type is disclosed.
         EnsureAggregateTypesValid(node);
         if (!maskedScope)
             return base.VisitQuerySpecification(node);

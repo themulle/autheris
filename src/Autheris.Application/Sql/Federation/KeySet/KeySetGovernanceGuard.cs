@@ -4,16 +4,16 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// WP-124-2: Zero-Trust Governance Guards for Dynamic Key-Set Filters.
+/// Zero-Trust Governance Guards for Dynamic Key-Set Filters.
 /// Enforces:
-/// - SEC-DATA124-01: Cleartext join key invariant (both sides must be ColumnAccessLevel.Clear; SEC-FED-19).
-/// - SEC-DATA124-02: Explicit data-owner consent (AllowKeySetImport == true on target DataSourceConnectionOptions).
+/// - Cleartext join key invariant (both sides must be ColumnAccessLevel.Clear).
+/// - Explicit data-owner consent (AllowKeySetImport == true on target DataSourceConnectionOptions).
 /// </summary>
 public static class KeySetGovernanceGuard
 {
     /// <summary>
-    /// SEC-DATA124-01: Verifies that both join key columns have ColumnAccessLevel.Clear.
-    /// Any column classified as Mask, MaskWithHmac, Redact, or Deny strictly blocks key-set pushdown (SEC-FED-19).
+    /// Verifies that both join key columns have ColumnAccessLevel.Clear.
+    /// Any column classified as Mask, MaskWithHmac, Redact, or Deny strictly blocks key-set pushdown.
     /// </summary>
     public static bool AreJoinKeysClear(
         TableMetadata drivingMeta,
@@ -44,7 +44,7 @@ public static class KeySetGovernanceGuard
     }
 
     /// <summary>
-    /// SEC-DATA124-02: Explicit Data-Owner Consent.
+    /// Explicit Data-Owner Consent.
     /// Dynamic key import into the target source requires explicit opt-in via AllowKeySetImport == true.
     /// Default is false (fail closed).
     /// </summary>

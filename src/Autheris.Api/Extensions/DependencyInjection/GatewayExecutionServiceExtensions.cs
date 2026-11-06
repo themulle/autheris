@@ -52,7 +52,7 @@ public static class GatewayExecutionServiceExtensions
             var opts = sp.GetService<IOptions<GatewayOptions>>();
             var maskingProvider = sp.GetService<IColumnMaskingProvider>();
 
-            // WP-ARC-B-02 / ARC-I-13: the default SQL connector reads through the governed pipeline and requires the masking provider.
+            // 02 / ARC-I-13: the default SQL connector reads through the governed pipeline and requires the masking provider.
             if (metaRepo != null && maskingProvider != null)
             {
                 var defaultSqlConnector = new SqlConnector(
@@ -110,7 +110,7 @@ public static class GatewayExecutionServiceExtensions
                 sp.GetRequiredService<IOptions<GatewayOptions>>(),
                 sp.GetService<ILogger<DuckDbOlapEngine>>()));
 
-        // REQ-SQL-130: time zone conversion state (registry self-test and DuckDB ICU probe), evaluated once at startup; fail closed until then.
+        // time zone conversion state (registry self-test and DuckDB ICU probe), evaluated once at startup; fail closed until then.
         services.AddSingleton<Autheris.Application.Sql.TimeZones.TimeZoneConversionState>();
         services.AddSingleton<Autheris.Application.Sql.TimeZones.ITimeZoneConversionState>(sp => sp.GetRequiredService<Autheris.Application.Sql.TimeZones.TimeZoneConversionState>());
         services.AddHostedService<Autheris.Application.Sql.TimeZones.TimeZoneConversionStartupCheck>();
@@ -122,7 +122,7 @@ public static class GatewayExecutionServiceExtensions
         // Connectors to foreign systems (Autheris.Extensions)
         services.AddGatewayExtensions(gatewayOptions);
 
-        // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03, WP-ARC-A-13)
+        // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03)
         services.AddAutherisStreaming();
         services.AddSingleton<ICdcEventIngestionService, CdcEventIngestionService>();
         services.AddScoped<IStreamRlsPolicyEnforcer, StreamRlsPolicyEnforcer>();

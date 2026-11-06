@@ -8,13 +8,13 @@ using Microsoft.Extensions.Internal;
 public sealed record SingleFlightLoadResult<TValue>(TValue Value, DateTimeOffset AbsoluteExpiration, long SizeBytes) where TValue : class;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-5): generic dedicated, size-limited, single-flight cache extracted from <c>VirtualFilterKeySetCache</c>.
+/// Issue #107 (107 A-5): generic dedicated, size-limited, single-flight cache extracted from<c>VirtualFilterKeySetCache</c>.
 /// <list type="bullet">
 /// <item>Single flight per key: concurrent cold callers of one key share one in-flight load; a slow load of one key never delays another.</item>
 /// <item>A failed load is seen by its waiters and never cached.</item>
 /// <item>The shared load is detached from caller cancellation (each caller only stops waiting) and bounded by its own timeout.</item>
 /// <item>Absolute expiration only (never sliding), measured with the injected <see cref="TimeProvider"/>.</item>
-/// <item>A waiter of an in-flight load receives the new result or the failure, never a stale value (SEC-RF107-04 d).</item>
+/// <item>A waiter of an in-flight load receives the new result or the failure, never a stale value (04 d).</item>
 /// </list>
 /// </summary>
 public sealed class SingleFlightKeySetCache<TValue> : IDisposable where TValue : class
@@ -90,7 +90,7 @@ public sealed class SingleFlightKeySetCache<TValue> : IDisposable where TValue :
         return await flight.Completion.Task.WaitAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>Test hook: stores a value without a load (forced-collision tests, SEC-RF107-02).</summary>
+    /// <summary>Test hook: stores a value without a load (forced-collision tests).</summary>
     internal void InsertForTest(string key, TValue value, DateTimeOffset absoluteExpiration, long sizeBytes)
         => _cache.Set(key, value, new MemoryCacheEntryOptions { AbsoluteExpiration = absoluteExpiration, Size = Math.Max(1, sizeBytes) });
 

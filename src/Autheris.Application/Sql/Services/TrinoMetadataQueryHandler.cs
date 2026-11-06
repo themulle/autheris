@@ -236,7 +236,7 @@ public static class TrinoMetadataQueryHandler
                     ["table_catalog"] = t.Identifier.Domain,
                     ["table_schema"] = t.Identifier.Schema,
                     ["table_name"] = t.Identifier.TableName,
-                    // SEC-112-23: the same helper as the visibility engine; never a schema string alone.
+                    // the same helper as the visibility engine; never a schema string alone.
                     ["table_type"] = Autheris.Application.Catalog.Semantic.SemanticVirtualTables.IsVirtualTable(t) ? "VIEW" : "BASE TABLE"
                 })
                 .ToList();

@@ -51,7 +51,7 @@ public sealed record CompiledSql(
     public int? ExpectedAffectedRows { get; internal init; }
 
     /// <summary>
-    /// Issue #277 (SEC-277-09): true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit
+    /// Issue #277: true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit
     /// audits like the first compile.
     /// </summary>
     public bool HasRecursiveCte { get; init; }
@@ -63,7 +63,7 @@ public sealed record CompiledSql(
     public bool RequiresRowCountCheck => ExpectedAffectedRows.HasValue;
 
     /// <summary>
-    /// REQ-SQL-130 (BC-130-5d): a time zone slot is consumable only through the production binder, which maps its value through the closed zone
+    /// 130 (BC-130-5d): a time zone slot is consumable only through the production binder, which maps its value through the closed zone
     /// set before the command exists. Every other consumer of <see cref="Parameters"/> (generated-query paths, key-set providers, tree queries) calls
     /// this first, so a zone slot never reaches a provider as an unmapped value or as <c>NULL</c>. The message carries no value and no name.
     /// </summary>

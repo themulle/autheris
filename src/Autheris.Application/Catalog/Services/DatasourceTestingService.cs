@@ -320,7 +320,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                         continue;
                     }
 
-                    // CRLF injection prevention (SEC-MED-08)
+                    // CRLF injection prevention
                     if (k.Contains('\r') || k.Contains('\n') || (v != null && (v.Contains('\r') || v.Contains('\n'))))
                     {
                         continue;

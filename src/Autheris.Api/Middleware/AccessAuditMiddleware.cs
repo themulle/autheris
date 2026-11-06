@@ -20,7 +20,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Middleware;
 
 /// <summary>
-/// Central access audit middleware providing comprehensive, fail-closed audit by default (PLAN-AUDIT-02-LUECKENLOSES-ZUGRIFFS-AUDIT §3.1).
+/// Central access audit middleware providing comprehensive, fail-closed audit by default (AUDIT §3.1).
 /// Guarantees exactly one audit completion log entry per request unless explicitly exempted.
 /// </summary>
 public sealed class AccessAuditMiddleware
@@ -259,7 +259,7 @@ public sealed class AccessAuditMiddleware
             }
 
             // Tenant attribution uses the same precedence as the rest of the pipeline: the resolved SecurityPrincipalContext
-            // first, then the canonical claim resolution. An invalid claim never fails the audit finalizer (API-7: that
+            // first, then the canonical claim resolution. An invalid claim never fails the audit finalizer (that
             // surfaced as a 500); the entry goes to the platform bucket (DT-A-6), is flagged, and never records the raw claim value.
             if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext principalContext)
             {

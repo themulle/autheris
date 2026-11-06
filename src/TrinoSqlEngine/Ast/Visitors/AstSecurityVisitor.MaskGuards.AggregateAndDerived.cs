@@ -32,7 +32,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     /// <summary>
     /// A masked column must not be an aggregate argument (including FILTER, ordered-aggregate ORDER BY, and window functions) or a
-    /// grouping expression: the secured derived table would feed mask output into the aggregate (WP-FEAT-02, <c>AGGREGATION_ON_MASKED_COLUMN</c>).
+    /// grouping expression: the secured derived table would feed mask output into the aggregate (<c>AGGREGATION_ON_MASKED_COLUMN</c>).
     /// Subqueries are skipped here; their own query specification is visited with its own tables.
     /// </summary>
     private void EnsureNoMaskedColumnsInAggregatesAndGrouping(QuerySpecification node)

@@ -9,7 +9,7 @@ using Autheris.Domain.Model;
 using HotChocolate.Language;
 
 /// <summary>
-/// Issue #421 (WP-D of #417) / HIGH-03: Evaluates whether a GraphQL root-list plan can utilize a database index
+/// Issue #421 ( of #417) / HIGH-03: Evaluates whether a GraphQL root-list plan can utilize a database index
 /// based on catalog metadata (declared primary keys, secondary/unique indexes, and source physical indexes).
 /// Zero live stats, zero-allocation friendly, fail-closed anti-enumeration.
 /// </summary>
@@ -41,7 +41,7 @@ public static class IndexUsabilityEvaluator
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
-        // SEC-COST-421-02: Prune indexes that touch columns unauthorized or hidden from the caller
+        // Prune indexes that touch columns unauthorized or hidden from the caller
         var effectiveMeta = visibleColumns is not null
             ? TableKeyVisibility.Restrict(
                 metadata,

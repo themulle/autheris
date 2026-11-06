@@ -19,7 +19,7 @@ public enum CallerAttributeChangeResult
 }
 
 /// <summary>
-/// Storage of the caller attribute registry and the service sets (PLAN-GOV-129 C-3). A draft is stored beside the active row; approving
+/// Storage of the caller attribute registry and the service sets (129 C-3). A draft is stored beside the active row; approving
 /// is one transaction that compares the hash the approver saw and refuses an approver equal to the draft's creator, so the repository
 /// itself never activates an unapproved definition. Every successful write increments the generation once.
 /// </summary>

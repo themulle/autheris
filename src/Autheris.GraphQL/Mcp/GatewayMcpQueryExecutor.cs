@@ -42,7 +42,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IMcpToolExecutionHandler? _toolExecutionHandler;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
-    // Issue #447 (SEC-ATR-11): the in-process GraphQL request runs in the MCP request scope, so it inherits the stamped ingress.
+    // Issue #447: the in-process GraphQL request runs in the MCP request scope, so it inherits the stamped ingress.
     // Without it HotChocolate would open a fresh scope with no ingress, which the transport gate denies.
     private readonly IServiceProvider? _services;
 
@@ -328,7 +328,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
         catch (ArgumentException ex)
         {
-            // SEC-X1-01: the argument message may quote a request value or an object name; it stays in the log.
+            // the argument message may quote a request value or an object name; it stays in the log.
             _logger.LogWarning(ex, "Dataset tool '{ToolName}' rejected its arguments.", tool.Name);
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "The tool arguments are invalid.");
         }

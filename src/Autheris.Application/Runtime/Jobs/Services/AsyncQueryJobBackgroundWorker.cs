@@ -235,7 +235,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            // Issue #447 (SEC-ATR-05): the worker scope carries the ingress persisted with the job at submit. An item without one
+            // Issue #447: the worker scope carries the ingress persisted with the job at submit. An item without one
             // (None), or a host without the context registration, leaves the ingress unset, which the transport gate denies (fail-closed).
             if (scope.ServiceProvider.GetService<Autheris.Domain.Audit.AuditContext>() is { } auditContext)
             {
@@ -316,7 +316,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         catch (Exception ex)
         {
             DeletePartialResult(writtenPath);
-            // WP-X0a (SEC-X1-01): the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
+            // WP-X0a: the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
             var sanitized = Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.FixedMessageOrDefault(ex, "The job could not be executed. Contact support with the trace id.");
             var failed = runningJob with
             {
@@ -387,7 +387,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             return value;
         }
 
-        // OWASP CSV Formula Injection defense (SEC-MED-16):
+        // OWASP CSV Formula Injection defense:
         // If the value starts with '=', '+', '-', '@', '\t', or '\r', prepend a single quote "'"
         // unless the value is a valid numeric literal (e.g. negative or positive number).
         if (value.StartsWith('=') || value.StartsWith('+') || value.StartsWith('-') ||

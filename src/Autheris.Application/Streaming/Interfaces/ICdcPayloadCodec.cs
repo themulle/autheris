@@ -5,8 +5,8 @@ using System.Collections.Generic;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Plaintext serialisation of stream payloads and row images (PLAN-CDC-99 D-A7). The producer serialises with it before
-/// encryption; the shipped implementation is the closed-tag <c>CdcPayloadCodec</c> (SEC-CDC99-16). Implementations throw
+/// Plaintext serialisation of stream payloads and row images (99 D-A7). The producer serialises with it before
+/// encryption; the shipped implementation is the closed-tag <c>CdcPayloadCodec</c>. Implementations throw
 /// <see cref="NotSupportedException"/> for a CLR value type outside the tag set; the producer then fails the whole batch
 /// (<see cref="CdcActivationCodes.UnsupportedType"/>, nothing is written).
 /// </summary>

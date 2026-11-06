@@ -13,7 +13,7 @@ public enum OutboundPropagationMode
     /// <summary>Always injects W3C traceparent/tracestate headers.</summary>
     Always = 1,
 
-    /// <summary>Strips W3C headers to prevent internal trace leakage to third-party endpoints (SEC-DS05-07).</summary>
+    /// <summary>Strips W3C headers to prevent internal trace leakage to third-party endpoints.</summary>
     Never = 2
 }
 

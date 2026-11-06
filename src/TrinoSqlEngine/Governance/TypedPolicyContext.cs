@@ -12,7 +12,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 
-/// <summary>Policy state of one table that took part in a compile; recorded for the value-free plan template (SEC-ADG-01).</summary>
+/// <summary>Policy state of one table that took part in a compile; recorded for the value-free plan template.</summary>
 
 /// <summary>A catalog table the compile resolved, with the fingerprint of everything that decided its injection.</summary>
 public sealed record TableDependency(SqlQualifiedName Name, string Fingerprint);
@@ -27,7 +27,7 @@ public sealed class TypedPolicyContext
     private readonly List<TableDependency> _dependencies = new();
 
     // G8: one compile references the same table several times; the fingerprint is computed once per catalog entry instance and compile.
-    // The context lives for one compile only, so nothing request dependent outlives it (SEC-ADG-01).
+    // The context lives for one compile only, so nothing request dependent outlives it.
     private Dictionary<TableCatalogEntry, string>? _fingerprints;
 
     public TypedPolicyContext(

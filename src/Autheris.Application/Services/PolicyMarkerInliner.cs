@@ -85,7 +85,7 @@ internal static class PolicyMarkerInliner
 
     private static Dictionary<string, object?> Normalize(IReadOnlyDictionary<string, object?>? parameters)
     {
-        // SEC-ADG-02: two keys that name the same parameter (marker prefix or case) fail closed; the last one must never win silently.
+        // two keys that name the same parameter (marker prefix or case) fail closed; the last one must never win silently.
         var map = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(parameters))
         {

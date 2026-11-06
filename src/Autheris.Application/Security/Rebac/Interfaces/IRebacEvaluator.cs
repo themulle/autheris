@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// F-SEC-04: High-performance ReBAC evaluation engine.
+/// F-High-performance ReBAC evaluation engine.
 /// Evaluates entity-to-entity and user-to-object relationships with graph traversal and DataLoader batching.
 /// </summary>
 public interface IRebacEvaluator

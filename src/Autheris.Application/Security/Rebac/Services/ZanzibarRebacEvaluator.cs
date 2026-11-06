@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// F-SEC-04: Zanzibar/OpenFGA-compliant Graph Traversal ReBAC Evaluator.
+/// F-Zanzibar/OpenFGA-compliant Graph Traversal ReBAC Evaluator.
 /// Resolves direct, inherited, and hierarchical relationships with cycle detection,
 /// recursion bounding, and batch-evaluation capabilities.
 /// </summary>
@@ -247,7 +247,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
                 var expiry = _timeProvider.GetUtcNow().AddSeconds(ttl);
                 if (allowed && tracker.Earliest is { } tupleExpiry && tupleExpiry < expiry)
                 {
-                    expiry = tupleExpiry; // WP-SC-16: a decision never outlives the time-bound tuple it rests on
+                    expiry = tupleExpiry; // a decision never outlives the time-bound tuple it rests on
                 }
 
                 StoreInCache(tenant, cacheKey, allowed, expiry, currentGen.Value);
@@ -371,7 +371,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             return false;
         }
 
-        // Cyclic recursion guard (SEC-REBAC-01)
+        // Cyclic recursion guard
         if (depth > maxDepth)
         {
             _logger.LogWarning(
@@ -396,7 +396,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         try
         {
             // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
-            // WP-SC-16: expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
+            // expired tuples are filtered here as well, so a store that does not filter cannot grant access (fail closed).
             var now = _timeProvider.GetUtcNow();
             var directTuples = await GetTuplesWithMemoAsync(memo, memoMaxEntries, tenantId, user, relation, obj, ct).ConfigureAwait(false);
             var direct = directTuples

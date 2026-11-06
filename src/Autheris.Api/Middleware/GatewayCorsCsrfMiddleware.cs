@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 
 /// <summary>
-/// Anti-CSRF and CORS preflight/origin validation middleware for GraphQL and state-changing REST requests (WP-ARC-C-04).
+/// Anti-CSRF and CORS preflight/origin validation middleware for GraphQL and state-changing REST requests.
 /// </summary>
 public sealed class GatewayCorsCsrfMiddleware
 {
