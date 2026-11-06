@@ -107,7 +107,7 @@ dotnet test tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -
 About +1,900 src, +2,200 test lines. 10 person-days (model and approval 2.5, registration and single-source expansion 2, federation and nesting 1.5, lifecycle 1.5, discovery/usage/audit/explain 1.5, parity 1).
 
 ## 12. Required edits to other components (made by this WP, after the program)
-- Decision point (WP-SIMPL-46 code): object kind `VirtualView`, definer semantics, `VIEW_BASE_DENY`, `VIEW_NOT_ACTIVE`.
+- Decision point (WP-SIMPL-46 code): object kind `VirtualView`, definer semantics (no propagation of base-table grants, denies or hard policies), `VIEW_NOT_ACTIVE`.
 - Consent pipeline (WP-SIMPL-47 code): request kind `VIEW_DEFINITION`, `view.*` events.
 - Discovery (WP-SIMPL-41 code): kind `VirtualView`, base-object names filtered by visibility.
 - Source admission (WP-SIMPL-44 code): `views` added to the reserved source names.
