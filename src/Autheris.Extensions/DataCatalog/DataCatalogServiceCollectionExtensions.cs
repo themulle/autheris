@@ -1,6 +1,6 @@
 namespace Autheris.Extensions.DataCatalog;
 
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;

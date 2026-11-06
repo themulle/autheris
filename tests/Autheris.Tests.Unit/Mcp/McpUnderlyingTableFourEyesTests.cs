@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;

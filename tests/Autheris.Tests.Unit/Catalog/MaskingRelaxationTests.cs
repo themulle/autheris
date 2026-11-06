@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;

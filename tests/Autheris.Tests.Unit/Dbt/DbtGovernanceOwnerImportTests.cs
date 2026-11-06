@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance;
 using Autheris.Application.Interfaces;
 using Autheris.Application.VirtualFilters;

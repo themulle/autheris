@@ -43,10 +43,10 @@ public sealed class AnalyticsOptionsValidator : IValidateOptions<AnalyticsOption
             return ValidateOptionsResult.Fail("Analytics:Privacy must not be null.");
         }
 
-        if (options.Privacy.CatalogMinGroupSizeFloor is < 1 or > Autheris.Application.Dbt.Services.SemanticManifestValidator.MaxMinGroupSize)
+        if (options.Privacy.CatalogMinGroupSizeFloor is < 1 or > Autheris.Application.Catalog.Semantic.SemanticManifestValidator.MaxMinGroupSize)
         {
             return ValidateOptionsResult.Fail(
-                $"Analytics:Privacy:CatalogMinGroupSizeFloor must be between 1 and {Autheris.Application.Dbt.Services.SemanticManifestValidator.MaxMinGroupSize}.");
+                $"Analytics:Privacy:CatalogMinGroupSizeFloor must be between 1 and {Autheris.Application.Catalog.Semantic.SemanticManifestValidator.MaxMinGroupSize}.");
         }
 
         var minAllowed = options.Privacy.AllowDisabled ? 1 : 2;

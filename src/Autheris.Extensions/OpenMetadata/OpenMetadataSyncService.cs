@@ -2,8 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -154,7 +153,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                     if (!dryRun)
                     {
                         // SEC M-32: merge with persisted state – sync may only tighten governance flags.
-                        var merged = Autheris.Application.DataCatalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
+                        var merged = Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                         tableMetadataMap[tableId] = merged;
                         await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
                     }
@@ -839,7 +838,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
 
                 var (tableMeta, _) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null, existingSourceType: existing?.Table.SourceType, existingSourceName: existing?.Table.SourceName);
-                var merged = Autheris.Application.DataCatalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
+                var merged = Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                 await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
                 await _epochRepo.IncrementTableEpochAsync(tableId, ct);
                 return true;

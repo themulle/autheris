@@ -26,7 +26,7 @@ public sealed class DemoRootFieldsRemovedTests
         services.AddLogging();
         services.AddSingleton(Substitute.For<IRateLimiterService>());
         services.AddSingleton(Substitute.For<Autheris.Application.Governance.Interfaces.ISchemaSunsettingService>());
-        services.AddSingleton(Substitute.For<Autheris.Application.Dbt.Interfaces.IDbtHealthCircuitBreaker>());
+        services.AddSingleton(Substitute.For<Autheris.Application.Catalog.Semantic.IDbtHealthCircuitBreaker>());
         services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
         services.AddSingleton(Substitute.For<IHostEnvironment>());
         services.AddSingleton(Substitute.For<ITableMetadataRepository>());

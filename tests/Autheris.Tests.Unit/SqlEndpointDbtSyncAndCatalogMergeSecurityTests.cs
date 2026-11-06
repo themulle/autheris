@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.SqlEndpoints.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Integrations.Backstage;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;

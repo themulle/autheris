@@ -1,7 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using System.Text.Json;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

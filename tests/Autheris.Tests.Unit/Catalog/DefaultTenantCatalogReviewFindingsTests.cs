@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Interfaces;

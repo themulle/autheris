@@ -3,10 +3,9 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
@@ -269,7 +268,7 @@ public sealed partial class Mutation
             await auditLog.RecordAuditEventAsync(writeAheadEntry, ct).ConfigureAwait(false);
         }
 
-        Autheris.Application.DataCatalog.Models.CatalogSyncResult result;
+        Autheris.Application.Catalog.Models.CatalogSyncResult result;
         try
         {
             result = await catalogSyncService.SyncCatalogAsync(dryRun, restrictToTenant, ct).ConfigureAwait(false);

@@ -1,4 +1,3 @@
-using Autheris.Application.Auditing;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;

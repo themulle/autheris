@@ -1,8 +1,7 @@
 namespace Autheris.Tests.Unit.Catalog;
 
 using System.Text;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
@@ -114,7 +113,7 @@ public sealed class DbtDatasetTagTests
         """, Autheris.Tests.Common.TestTenants.Default);
 
         captured!.Table.Tags.ShouldBeEmpty();
-        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"),
+        await _tags.Received(1).ImportDbtTagsAsync(new TableIdentifier("semantic", Autheris.Application.Catalog.Semantic.SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"),
             Arg.Is<IEnumerable<string?>>(t => t.SequenceEqual(new string?[] { "dbt", "semantic-model" })), Arg.Any<CancellationToken>());
     }
 }

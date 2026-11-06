@@ -1,5 +1,5 @@
 using Autheris.Api.Configuration.Validation;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;
 using Shouldly;

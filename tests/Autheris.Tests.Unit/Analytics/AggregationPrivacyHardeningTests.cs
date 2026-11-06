@@ -505,7 +505,7 @@ public sealed class AggregationPrivacyHardeningTests
     [Fact]
     public void SemanticMetricCatalogProjection_NonAdmin_GetsOnlyDescriptiveFields()
     {
-        var projected = Autheris.Application.Dbt.Services.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole("Analyst"));
+        var projected = Autheris.Application.Catalog.Semantic.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole("Analyst"));
 
         var json = System.Text.Json.JsonSerializer.Serialize(projected);
         json.ShouldContain("mrr");
@@ -520,7 +520,7 @@ public sealed class AggregationPrivacyHardeningTests
     [InlineData("GovernanceAdmin")]
     public void SemanticMetricCatalogProjection_Administrators_GetTheFullDefinition(string role)
     {
-        var projected = Autheris.Application.Dbt.Services.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole(role));
+        var projected = Autheris.Application.Catalog.Semantic.SemanticMetricCatalogProjection.Project([MetricWithFilter("mrr")], PrincipalWithRole(role));
 
         System.Text.Json.JsonSerializer.Serialize(projected).ShouldContain("secret_filter");
     }
@@ -528,7 +528,7 @@ public sealed class AggregationPrivacyHardeningTests
     [Fact]
     public async Task InMemorySemanticCatalog_MultiTenancy_TenantSeesOnlyItsOwnPartition()
     {
-        var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog();
+        var catalog = new Autheris.Application.Catalog.Semantic.InMemorySemanticCatalog();
         var tenantA = new TenantId("tenant-a");
         var tenantB = new TenantId("tenant-b");
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("a_metric")], "1.0"), tenantA);
@@ -545,7 +545,7 @@ public sealed class AggregationPrivacyHardeningTests
     public async Task InMemorySemanticCatalog_SingleTenancy_TenantsAreIsolated_DefaultTenantIncluded()
     {
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
-        var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog(options);
+        var catalog = new Autheris.Application.Catalog.Semantic.InMemorySemanticCatalog(options);
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("legacy_metric")], "1.0"), Autheris.Tests.Common.TestTenants.Default);
 
         (await catalog.GetMetricAsync("legacy_metric", Autheris.Tests.Common.TestTenants.Default)).ShouldNotBeNull();
@@ -555,7 +555,7 @@ public sealed class AggregationPrivacyHardeningTests
     [Fact]
     public async Task QueryMetricsAsync_ResolvesMetricsInThePrincipalsTenantOnly()
     {
-        var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog();
+        var catalog = new Autheris.Application.Catalog.Semantic.InMemorySemanticCatalog();
         await catalog.RegisterManifestAsync(new DbtSemanticManifest([], [MetricWithFilter("only_a")], "1.0"), new TenantId("tenant-a"));
         var service = new SemanticMetricQueryService(
             catalog,
@@ -582,7 +582,7 @@ public sealed class AggregationPrivacyHardeningTests
         bool tablePresent,
         IUnifiedPolicyDecisionPoint? pdp = null)
     {
-        var catalog = new Autheris.Application.Dbt.Services.InMemorySemanticCatalog();
+        var catalog = new Autheris.Application.Catalog.Semantic.InMemorySemanticCatalog();
         var model = new DbtSemanticModel(
             "orders_model",
             "orders",

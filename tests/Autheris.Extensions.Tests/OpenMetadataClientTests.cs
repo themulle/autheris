@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.Logging.Abstractions;

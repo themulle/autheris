@@ -3,7 +3,7 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Collections.Immutable;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

@@ -1,6 +1,6 @@
 # F-DBT-3: Live-Telemetry Exposure Publisher
 
-**Components:** [`IDbtExposurePublisher.cs`](../../src/Autheris.Application/Dbt/Interfaces/IDbtExposurePublisher.cs), [`DbtExposurePublisher.cs`](../../src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs)
+**Components:** [`IDbtExposurePublisher.cs`](../../src/Autheris.Extensions/Dbt/IDbtExposurePublisher.cs), [`DbtExposurePublisher.cs`](../../src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs)
 
 ---
 

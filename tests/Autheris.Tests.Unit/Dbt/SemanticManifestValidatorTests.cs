@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Dbt;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Policy.Lint;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

@@ -35,7 +35,7 @@ public sealed record MetricQueryResult(
     IReadOnlyList<AggregationGroupRow> Groups,
     AggregationGroupRow? Totals,
     AggregationMetadata Metadata,
-    IReadOnlyDictionary<string, Autheris.Application.Dbt.Services.MetricDefinitionSummary> MetricDefinitions)
+    IReadOnlyDictionary<string, Autheris.Application.Catalog.Semantic.MetricDefinitionSummary> MetricDefinitions)
 {
     /// <summary>Static value kind per requested metric (count INT, ratio and derived DECIMAL, otherwise from the function and column type). For the typed surface only: REST and MCP output is unchanged.</summary>
     [System.Text.Json.Serialization.JsonIgnore]

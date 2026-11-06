@@ -1,7 +1,7 @@
 namespace Autheris.Extensions.Dbt;
 
 using System.Collections.Generic;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Model;
 
 /// <summary>Collects relation definitions and reason-coded warnings with the SEC-REL151-02 limits.</summary>

@@ -1,16 +1,13 @@
 # WP-SIMPL-07: src/Autheris.Application top-level folders allow-list. One folder name per line.
 Analytics
 Audit
-Auditing
 Caching
 Catalog
 Common
 Connectors
 ConsentRequests
 Data
-DataCatalog
 DataSources
-Dbt
 Docs
 Events
 Extensibility
@@ -28,7 +25,6 @@ Mesh
 OData
 Observability
 Olap
-OpenMetadata
 Performance
 Plugins
 Policy

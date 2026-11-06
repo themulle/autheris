@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;

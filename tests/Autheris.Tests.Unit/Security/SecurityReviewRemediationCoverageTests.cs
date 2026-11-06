@@ -7,7 +7,7 @@ using System.Security.Claims;
 using System.Text;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Interfaces;

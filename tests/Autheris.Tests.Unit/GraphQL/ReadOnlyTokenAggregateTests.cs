@@ -56,7 +56,7 @@ public sealed class ReadOnlyTokenAggregateTests
                     ["revenue"], "v1", [],
                     new AggregationGroupRow(new Dictionary<string, object?>(), 2, new Dictionary<string, object?>()),
                     new AggregationMetadata(5, SmallGroupStrategy.Suppress, false, 0, 0, false, false),
-                    new Dictionary<string, Autheris.Application.Dbt.Services.MetricDefinitionSummary>()));
+                    new Dictionary<string, Autheris.Application.Catalog.Semantic.MetricDefinitionSummary>()));
 
             var table = TypedAggregateTestHost.DefaultTable();
             var metadataRepo = Substitute.For<ITableMetadataRepository>();

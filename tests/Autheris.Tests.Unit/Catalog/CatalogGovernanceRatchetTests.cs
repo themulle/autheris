@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Reflection;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
