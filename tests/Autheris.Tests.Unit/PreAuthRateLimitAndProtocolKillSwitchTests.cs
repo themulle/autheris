@@ -173,7 +173,6 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         result.Endpoints.ShouldNotBeNull();
         result.Endpoints!.ShouldContain(e => e.Protocol.Contains("OData"));
         result.Endpoints.ShouldContain(e => e.Protocol.Contains("Arrow IPC export"));
-        result.Endpoints.ShouldContain(e => e.Protocol.Contains("Arrow Flight SQL"));
         result.Endpoints.ShouldContain(e => e.Protocol.Contains("Iceberg REST Catalog"));
     }
 

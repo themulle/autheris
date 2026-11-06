@@ -147,7 +147,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("ProductionTransport_McpDeveloperCors", ("Mcp:EnableDeveloperCors", "true")),
             Prod("ProductionTransport_HmacReferenceMissing", ("DataMasking:HmacSecretKeyVaultRef", "")),
             Prod("ProductionTransport_OpenMetadataPlainHttp", ("OpenMetadata:Enabled", "true"), ("OpenMetadata:ServerUrl", "http://metadata.example.org/api")),
-            Prod("ProductionTransport_DataSourceWithoutTls", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d;Username=u;Password=p"), ("DataSources:Connections:pg:DefaultSchema", "public")),
+            Prod("ProductionTransport_DataSourceWithoutTls", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d;Username=u"), ("DataSources:Connections:pg:PasswordKeyVaultRef", "kv://secret"), ("DataSources:Connections:pg:DefaultSchema", "public")),
             Prod("ProductionTransport_WildcardOrigin", ("GraphQL:TrustedOrigins:0", "*")),
             Prod("ProductionTransport_PlainHttpOrigin", ("GraphQL:TrustedOrigins:0", "http://app.example.org")),
             Prod("ProductionTransport_RebacClusterWithoutRedis", ("HighAvailability:MultiNodeClusterMode", "true"), ("Rebac:Enabled", "true")),
