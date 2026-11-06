@@ -150,7 +150,7 @@ public class ParameterAccountingTests
     [Fact]
     public void Generate_ForUnsupportedDialect_FailsClosed()
     {
-        var generator = TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.Snowflake);
+        var generator = TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.Ansi);
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             generator.Generate(CompilerTestHelpers.Build("SELECT 1"), new ParameterSource(System.Collections.Frozen.FrozenDictionary<string, PolicyValue>.Empty, new Dictionary<string, object?>()), CancellationToken.None));
     }

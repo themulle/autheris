@@ -8,7 +8,7 @@ using Xunit;
 /// <summary>
 /// Wunsch 4, Phase 6c: CAST target types were emitted with their Trino names. SQL Server has no <c>double</c> or
 /// <c>boolean</c>, and its <c>timestamp</c> is rowversion; PostgreSQL has no <c>double</c>/<c>tinyint</c>; Oracle needs
-/// VARCHAR2/NUMBER. TRY_CAST exists only in SQL Server, DuckDB and Snowflake.
+/// VARCHAR2/NUMBER. TRY_CAST exists only in SQL Server and DuckDB.
 /// </summary>
 [Trait("Category", "SqlGate")]
 public sealed class CastTypeNameTests
@@ -104,7 +104,6 @@ public sealed class CastTypeNameTests
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.DuckDb)]
-    [InlineData(TargetSqlDialect.Snowflake)]
     public void TryCast_WhereSupported(TargetSqlDialect dialect)
     {
         Assert.Contains("TRY_CAST(", Cast("integer", dialect, "TRY_CAST"));

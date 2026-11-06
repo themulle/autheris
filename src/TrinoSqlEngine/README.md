@@ -25,7 +25,7 @@ There is exactly one way to produce governed SQL: `ISqlEngine.Compile`. There is
 - **Typed policy input**: tenant binding, row policies, column masks, table catalog and DML guards are values of the request, never
   text. Policy and mask values travel as parameters.
 - **Dialect generators** for PostgreSQL, SQL Server, SQLite, Oracle, DuckDB and Databricks, driven by a declarative capability table
-  (`DialectCapabilityTable`), plus ANSI and Snowflake generators that only render inline text.
+  (`DialectCapabilityTable`), plus an ANSI generator that only renders inline text.
 - **Binders and a checked DML executor** (`CompiledSqlBinders`, `CheckedDmlExecutor`): the only code that assigns
   `DbCommand.CommandText` for governed SQL, with a row-count check for INSERT statements that have check-option semantics.
 - **Hardened limits**: query length, nesting depth, parse tree depth, parse time budget, parser concurrency, compile time budget,
@@ -201,8 +201,8 @@ the supported DML classes. A dialect without an entry cannot be compiled.
 | Databricks | Experimental |
 
 A tier flip is a security decision, because it admits a dialect. An experimental dialect is rejected unless a test sets
-`CompileRequest.AllowExperimentalDialect`. ANSI and Snowflake generators render inline text only (policy rendering and tests); they have
-no capability entry and are not compilable.
+`CompileRequest.AllowExperimentalDialect`. The ANSI generator renders inline text only (policy rendering and tests); it has
+no capability entry and is not compilable.
 
 ---
 

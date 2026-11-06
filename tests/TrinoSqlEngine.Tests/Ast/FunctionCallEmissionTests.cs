@@ -21,7 +21,6 @@ public sealed class FunctionCallEmissionTests
     [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.DuckDb)]
-    [InlineData(TargetSqlDialect.Snowflake)]
     public void CountStar_IsEmittedAsCountStar(TargetSqlDialect dialect)
     {
         string sql = Generate("SELECT dept, COUNT(*) AS n FROM orders GROUP BY dept HAVING COUNT(*) > 5", dialect);

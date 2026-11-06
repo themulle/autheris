@@ -260,7 +260,7 @@ public sealed class RowFilterKeySetStageTests : IDisposable
         var h = Harness();
         var preds = Preds((StageHarness.Orders, Predicate(StageHarness.Orders, Correlated())));
 
-        var (_, report) = await Apply(h, StageHarness.Context(dialect: TargetSqlDialect.Snowflake), preds);
+        var (_, report) = await Apply(h, StageHarness.Context(dialect: TargetSqlDialect.Ansi), preds);
 
         report.Outcomes.Single().Reason.ShouldBe(KeySetFallbackReason.DialectUnsupported);
         h.Loader.Calls.ShouldBe(0);

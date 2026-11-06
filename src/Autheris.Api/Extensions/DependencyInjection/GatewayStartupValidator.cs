@@ -291,10 +291,11 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// WP-F1 / CR-ADG-08: outside Development an Oracle data source never carries a plaintext password (the connection string
-    /// has no <c>Password</c>; <c>PasswordKeyVaultRef</c> names the Key Vault secret) and always uses the policy-compliant account.
+    /// WP-F1 / CR-ADG-08 / WP-SIMPL-13: outside Development a data source connection never carries a plaintext password.
+    /// Outside Development, PostgreSQL, SQL Server and Oracle reject literal passwords. Oracle additionally enforces TCPS and
+    /// mandatory PasswordKeyVaultRef.
     /// </summary>
-    public static void ValidateOracleRuntime(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
+    public static void ValidateDataSourceSecrets(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
@@ -302,29 +303,35 @@ public static class GatewayStartupValidator
 
         foreach (var (name, connection) in options.DataSources.Connections)
         {
-            if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.Oracle) || string.IsNullOrWhiteSpace(connection.ConnectionString))
+            if (string.IsNullOrWhiteSpace(connection.ConnectionString) ||
+                !DataSourceProvider.TryResolveDialect(connection.Provider, out var dialect) ||
+                !ConnectionSecretPolicy.AppliesTo(dialect))
             {
                 continue;
             }
 
             if (development)
             {
-                if (OracleConnectionStringPolicy.HasPlaintextPassword(connection.ConnectionString))
+                if (ConnectionSecretPolicy.HasPlaintextPassword(dialect, connection.ConnectionString))
                 {
-                    logger?.LogWarning("Oracle data source '{DataSource}' uses a plaintext password (allowed in Development only).", name);
+                    logger?.LogWarning("Plaintext password detected in data source connection string for {Provider} data source '{DataSource}' (allowed in Development only).", dialect, name);
                 }
 
                 continue;
             }
 
-            OracleConnectionStringPolicy.Validate(connection.ConnectionString, requireTcps: true);
-            if (OracleConnectionStringPolicy.HasPlaintextPassword(connection.ConnectionString))
+            if (dialect == DatabaseDialect.Oracle)
             {
-                throw new ValidationException(
-                    $"Security violation: Oracle data source '{name}' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:{name}:PasswordKeyVaultRef).");
+                OracleConnectionStringPolicy.Validate(connection.ConnectionString, requireTcps: true);
             }
 
-            if (string.IsNullOrWhiteSpace(connection.PasswordKeyVaultRef))
+            if (ConnectionSecretPolicy.HasPlaintextPassword(dialect, connection.ConnectionString))
+            {
+                throw new ValidationException(
+                    $"Security violation: {dialect} data source '{name}' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:{name}:PasswordKeyVaultRef).");
+            }
+
+            if (dialect == DatabaseDialect.Oracle && string.IsNullOrWhiteSpace(connection.PasswordKeyVaultRef))
             {
                 throw new ValidationException(
                     $"Security violation: Oracle data source '{name}' needs DataSources:Connections:{name}:PasswordKeyVaultRef outside Development.");

@@ -42,42 +42,42 @@ public sealed class OracleStartupValidationTests
     public void OracleConnectionString_SecretsOnlyFromKeyVault_PlaintextPasswordFailsStartupOutsideDevelopment()
     {
         var options = Options("User Id=app;Password=hunter2;Data Source=" + Tcps, passwordRef: "vault-ref");
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateOracleRuntime(options, Env(Environments.Production)));
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateOracleRuntime(options, Env(Environments.Staging)));
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDataSourceSecrets(options, Env(Environments.Production)));
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDataSourceSecrets(options, Env(Environments.Staging)));
     }
 
     [Fact]
     public void OracleConnectionString_WithoutAKeyVaultReference_FailsStartupOutsideDevelopment()
     {
         var options = Options("User Id=app;Data Source=" + Tcps);
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateOracleRuntime(options, Env(Environments.Production)));
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDataSourceSecrets(options, Env(Environments.Production)));
     }
 
     [Fact]
     public void OracleConnectionString_WithAKeyVaultReferenceAndNoPassword_IsAccepted()
     {
         var options = Options("User Id=app;Data Source=" + Tcps, passwordRef: "vault-ref");
-        Should.NotThrow(() => GatewayStartupValidator.ValidateOracleRuntime(options, Env(Environments.Production)));
+        Should.NotThrow(() => GatewayStartupValidator.ValidateDataSourceSecrets(options, Env(Environments.Production)));
     }
 
     [Fact]
     public void PlaintextPassword_IsAllowed_InDevelopment()
     {
         var options = Options("User Id=app;Password=hunter2;Data Source=localhost:1521/FREEPDB1");
-        Should.NotThrow(() => GatewayStartupValidator.ValidateOracleRuntime(options, Env(Environments.Development)));
+        Should.NotThrow(() => GatewayStartupValidator.ValidateDataSourceSecrets(options, Env(Environments.Development)));
     }
 
     [Fact]
     public void ValidatorAppliesTheConnectionPolicy_TcpsAndAccountRules_OutsideDevelopment()
     {
-        Should.Throw<SecurityException>(() => GatewayStartupValidator.ValidateOracleRuntime(
+        Should.Throw<SecurityException>(() => GatewayStartupValidator.ValidateDataSourceSecrets(
             Options("User Id=app;Data Source=db.example:1521/APP", "vault-ref"), Env(Environments.Production)));
-        Should.Throw<SecurityException>(() => GatewayStartupValidator.ValidateOracleRuntime(
+        Should.Throw<SecurityException>(() => GatewayStartupValidator.ValidateDataSourceSecrets(
             Options("User Id=\"SYSTEM\";Data Source=" + Tcps, "vault-ref"), Env(Environments.Production)));
     }
 
     [Fact]
-    public void OtherProviders_AreNotAffected()
+    public void PostgreSqlPlaintextPassword_FailsStartupOutsideDevelopment()
     {
         var options = new GatewayOptions
         {
@@ -89,7 +89,7 @@ public sealed class OracleStartupValidationTests
                 }
             }
         };
-        Should.NotThrow(() => GatewayStartupValidator.ValidateOracleRuntime(options, Env(Environments.Production)));
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDataSourceSecrets(options, Env(Environments.Production)));
     }
 
     [Fact]
@@ -98,6 +98,38 @@ public sealed class OracleStartupValidationTests
         var factory = new SqlConnectionFactory(Env(Environments.Production), Substitute.For<IKeyVaultSecretProvider>());
         var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Password=hunter2;Data Source=" + Tcps, PasswordKeyVaultRef = "ref", DefaultSchema = "APP" };
         await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
+    }
+
+    [Theory]
+    [InlineData("PostgreSql", "Host=localhost;Database=db;Username=u;Password=secret")]
+    [InlineData("SqlServer", "Server=localhost;Database=db;User Id=u;Password=secret")]
+    public async Task Factory_RefusesPostgresAndSqlServerPlaintextPassword_OutsideDevelopment_BeforeConnecting(string provider, string connectionString)
+    {
+        var factory = new SqlConnectionFactory(Env(Environments.Production), Substitute.For<IKeyVaultSecretProvider>());
+        var options = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString, PasswordKeyVaultRef = "ref", DefaultSchema = "public" };
+        await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
+    }
+
+    [Theory]
+    [InlineData("PostgreSql", "Host=localhost;Database=db;Username=u")]
+    [InlineData("SqlServer", "Server=localhost;Database=db;User Id=u")]
+    public async Task Factory_InjectsKeyVaultPassword_ForPostgresAndSqlServer(string provider, string connectionString)
+    {
+        var secrets = Substitute.For<IKeyVaultSecretProvider>();
+        secrets.GetSecretBytes("ref").Returns(Encoding.UTF8.GetBytes("resolved-pass"));
+        var factory = new SqlConnectionFactory(Env(Environments.Production), secrets);
+        var options = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString, PasswordKeyVaultRef = "ref", DefaultSchema = "public" };
+
+        try
+        {
+            await factory.CreateOpenConnectionAsync(options);
+        }
+        catch (Exception ex) when (ex is not SecurityException)
+        {
+            // Expected socket / DB unreachable exception, NOT SecurityException
+        }
+
+        secrets.Received().GetSecretBytes("ref");
     }
 
     [Fact]
@@ -116,14 +148,6 @@ public sealed class OracleStartupValidationTests
         var factory = new SqlConnectionFactory(Env(Environments.Production), secrets);
         var options = new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "User Id=app;Data Source=" + Tcps, PasswordKeyVaultRef = "ref", DefaultSchema = "APP" };
         await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
-    }
-
-    [Fact]
-    public void PlaintextPasswordDetection_IsAccurate()
-    {
-        OracleConnectionStringPolicy.HasPlaintextPassword("User Id=a;Password=x;Data Source=d").ShouldBeTrue();
-        OracleConnectionStringPolicy.HasPlaintextPassword("User Id=a;Data Source=d").ShouldBeFalse();
-        OracleConnectionStringPolicy.HasPlaintextPassword("User Id=a;Password=;Data Source=d").ShouldBeFalse();
     }
 
     // ---- administrative account check ignores delimiters ----

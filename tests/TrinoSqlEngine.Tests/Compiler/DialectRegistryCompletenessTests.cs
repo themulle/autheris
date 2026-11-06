@@ -10,7 +10,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// ARC-S-07: every dialect is described by data. A dialect with a capability entry must also have a generator, binder, allowlist,
 /// type map and marker style; a dialect without one must fail closed. Known remaining enum-keyed sites (not data driven yet):
 /// the IsSqlServer mask guards in AstSecurityVisitor.MaskGuards, Oracle identifier upper-casing, SqlIdentifierHelper, the
-/// named-parameter prefix switch in SqlDialectGeneratorBase.FormatParameter and the unbound-only marker styles of Ansi/Snowflake.
+/// named-parameter prefix switch in SqlDialectGeneratorBase.FormatParameter and the unbound-only marker style of Ansi.
 /// </summary>
 [Trait("Category", "SqlGate")]
 public class DialectRegistryCompletenessTests
@@ -46,9 +46,8 @@ public class DialectRegistryCompletenessTests
     }
 
     [Fact]
-    public void SnowflakeAndAnsi_HaveNoCapabilityEntry()
+    public void Ansi_HasNoCapabilityEntry()
     {
-        Assert.False(DialectCapabilityTable.Default.TryGet(TargetSqlDialect.Snowflake, out _));
         Assert.False(DialectCapabilityTable.Default.TryGet(TargetSqlDialect.Ansi, out _));
     }
 
@@ -92,7 +91,6 @@ public class DialectRegistryCompletenessTests
     [InlineData(TargetSqlDialect.Sqlite, "?1")]
     [InlineData(TargetSqlDialect.Oracle, ":p1")]
     [InlineData(TargetSqlDialect.Databricks, ":p1")]
-    [InlineData(TargetSqlDialect.Snowflake, ":1")]
     [InlineData(TargetSqlDialect.Ansi, "?1")]
     public void UnboundMarker_UsesCapabilityStyle(TargetSqlDialect dialect, string expectedMarker)
     {

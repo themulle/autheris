@@ -26,7 +26,7 @@ internal sealed record CaseCtx(TargetSqlDialect Dialect, bool StrictGuards, stri
     public static Gen<CaseCtx> Gen() =>
         from dialect in FsCheck.Fluent.Gen.Frequency(
             (10, FsCheck.Fluent.Gen.Elements(Governed)),
-            (1, FsCheck.Fluent.Gen.Elements(TargetSqlDialect.Ansi, TargetSqlDialect.Snowflake)))
+            (1, FsCheck.Fluent.Gen.Elements(TargetSqlDialect.Ansi)))
         from strict in FsCheck.Fluent.Gen.Elements(true, true, false)
         from tn in FsCheck.Fluent.Gen.Choose(0, 99999)
         from th in FsCheck.Fluent.Gen.Choose(0, QueryGen.Hostile.Length - 1)

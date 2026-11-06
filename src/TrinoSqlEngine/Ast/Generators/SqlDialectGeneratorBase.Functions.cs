@@ -18,7 +18,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// <summary>Wunsch 4: the dialect accepts <c>JOIN … USING (…)</c> (all but SQL Server).</summary>
     protected virtual bool SupportsJoinUsing => true;
 
-    /// <summary>Wunsch 4: the dialect has TRY_CAST (SQL Server, DuckDB, Snowflake).</summary>
+    /// <summary>Wunsch 4: the dialect has TRY_CAST (SQL Server, DuckDB).</summary>
     protected virtual bool SupportsTryCast => false;
 
     /// <summary>A validated Trino type: lower-case base name (e.g. <c>timestamp</c>), argument list without spaces, time zone flag.</summary>
@@ -47,7 +47,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     /// <summary>
     /// Wunsch 4: CAST target type in the dialect's spelling. The default keeps the (validated) Trino spelling, which is valid
-    /// for SQLite, DuckDB, Snowflake and ANSI.
+    /// for SQLite, DuckDB and ANSI.
     /// </summary>
     protected virtual string FormatTypeName(TrinoType type) => StandardTypeName(type);
 
@@ -74,8 +74,8 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     }
 
     /// <summary>
-    /// CR-ADG-25: closed CAST target type set shared by the dialects without their own type map (PostgreSQL, DuckDB, SQLite, ANSI,
-    /// Snowflake). Anything else (<c>regclass</c>, <c>regrole</c>, <c>xml</c>, <c>json</c>, <c>oid</c>, ...) fails closed.
+    /// CR-ADG-25: closed CAST target type set shared by the dialects without their own type map (PostgreSQL, DuckDB, SQLite, ANSI).
+    /// Anything else (<c>regclass</c>, <c>regrole</c>, <c>xml</c>, <c>json</c>, <c>oid</c>, ...) fails closed.
     /// </summary>
     protected string StandardTypeName(TrinoType type) => type.Name switch
     {
@@ -433,7 +433,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         builder.Append(')');
     }
 
-    /// <summary>Virtual filters (phase 7b): <c>DATE_TRUNC('unit', x)</c> (PostgreSQL, DuckDB, Snowflake, ANSI fallback).</summary>
+    /// <summary>Virtual filters (phase 7b): <c>DATE_TRUNC('unit', x)</c> (PostgreSQL, DuckDB, ANSI fallback).</summary>
     protected virtual void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
     {
         builder.Append("DATE_TRUNC('");

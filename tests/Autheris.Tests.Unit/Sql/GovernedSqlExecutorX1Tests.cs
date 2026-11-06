@@ -411,6 +411,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     [Theory]
     [InlineData("Snowflake")]
+    [InlineData("Ansi")]
     [InlineData("duckdb")]
     [InlineData("nonsense")]
     public async Task UnmappedProvider_FailsClosed_NoCommandCreated(string provider)

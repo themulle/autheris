@@ -305,7 +305,6 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                         builder.Append(rawName);
                         return;
                     case TargetSqlDialect.Oracle:
-                    case TargetSqlDialect.Snowflake:
                         builder.Append(':');
                         builder.Append(rawName);
                         return;

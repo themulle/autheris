@@ -51,7 +51,7 @@ public static class SqlDialectMapper
     /// X1.3, WebSQL admission: a dialect is executable when it maps to an AST dialect, the connection factory supports it and its
     /// capability entry has the tier <see cref="DialectSupportTier.Production"/>. A tier flip therefore admits a dialect, which is why
     /// <c>DialectCapabilityTable.cs</c> is under security CODEOWNERS and the admitted set is pinned by <c>Admission_ExactSet</c>.
-    /// Databricks maps and connects but stays Experimental until X1-DBX (S-4); DuckDb, Snowflake and Ansi are not database dialects.
+    /// Databricks maps and connects but stays Experimental until X1-DBX (S-4); DuckDb and Ansi are not database dialects.
     /// </summary>
     public static bool IsExecutable(DatabaseDialect dialect) => IsExecutable(dialect, DialectCapabilityTable.Default);
 

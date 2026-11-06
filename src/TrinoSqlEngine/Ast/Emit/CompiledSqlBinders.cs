@@ -26,7 +26,7 @@ public static class CompiledSqlBinders
     private static readonly DatabricksCheckedDmlExecutor DatabricksExecutor = new(Databricks);
     private static readonly CheckedDmlExecutor SqliteExecutor = new(Sqlite);
 
-    /// <exception cref="SqlCompileNotSupportedException">Reason Dialect, for Snowflake, Ansi and any dialect without a binder.</exception>
+    /// <exception cref="SqlCompileNotSupportedException">Reason Dialect, for Ansi and any dialect without a binder.</exception>
     public static DbCommandCompiledSqlBinder For(TargetSqlDialect dialect)
     {
         return Resolve(dialect);

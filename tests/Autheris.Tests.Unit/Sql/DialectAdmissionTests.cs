@@ -19,7 +19,7 @@ public sealed class DialectAdmissionTests
     [Fact]
     public void Admission_ExactSet()
     {
-        // The admitted set is exactly these four. DuckDB, Databricks, Snowflake and Ansi are not admitted: a change of this list is a
+        // The admitted set is exactly these four. DuckDB, Databricks and Ansi are not admitted: a change of this list is a
         // security decision (CODEOWNERS on DialectCapabilityTable.cs) and must change this test in the same commit.
         Enum.GetValues<DatabaseDialect>().Where(SqlDialectMapper.IsExecutable)
             .ShouldBe([DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite, DatabaseDialect.Oracle], ignoreOrder: true);
@@ -27,7 +27,7 @@ public sealed class DialectAdmissionTests
             [DatabaseDialect.Oracle, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite], ignoreOrder: true);
 
         // The target dialects that no database dialect maps to are not admitted by construction.
-        foreach (var target in new[] { TargetSqlDialect.DuckDb, TargetSqlDialect.Snowflake, TargetSqlDialect.Ansi, TargetSqlDialect.Databricks })
+        foreach (var target in new[] { TargetSqlDialect.DuckDb, TargetSqlDialect.Ansi, TargetSqlDialect.Databricks })
         {
             Enum.GetValues<DatabaseDialect>()
                 .Where(d => SqlDialectMapper.TryToTargetDialect(d, out var t) && t == target)
