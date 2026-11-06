@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+// SEC-007: Ingress and egress interceptor regression suite.
 public class IngressEgressTests
 {
     [Fact]
