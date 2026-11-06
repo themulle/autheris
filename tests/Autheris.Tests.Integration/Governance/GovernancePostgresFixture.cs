@@ -28,8 +28,7 @@ public sealed class GovernancePostgresCollection : ICollectionFixture<Governance
 /// </summary>
 public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostgresFixture
 {
-    public const string PinnedPostgresImage =
-        "postgres:17-alpine@sha256:6f30057d31f5861b66f3545d4821f987aacf1dd920765f0acaded0c5ceff975c";
+    public const string PinnedPostgresImage = "postgres:16-alpine";
 
     private PostgreSqlContainer? _ownedContainer;
     private string _adminConnectionString = string.Empty;
