@@ -17,8 +17,7 @@ public static partial class GovernanceProviderGuard
     [
         "GovernanceDb:Provider",
         "Gateway:GovernanceDb:Provider",
-        "Governance:Provider",
-        "Gateway:Governance:Provider"
+        "Governance:Provider"
     ];
 
     private static readonly string[] ConnectionStringKeys =
@@ -26,7 +25,6 @@ public static partial class GovernanceProviderGuard
         "GovernanceDb:ConnectionString",
         "Gateway:GovernanceDb:ConnectionString",
         "Governance:ConnectionString",
-        "Gateway:Governance:ConnectionString",
         "GovernanceDb:MigrationConnectionString",
         "Gateway:GovernanceDb:MigrationConnectionString"
     ];

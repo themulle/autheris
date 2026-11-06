@@ -33,13 +33,11 @@ public static class LakehouseServiceCollectionExtensions
         services.TryAddTransient<SsrfProtectionHandler>();
         services.AddSingleton<LocalStorageProvider>();
 
-        // SEC E-02 / E-03: Lakehouse never uses the egress allowlist (target URLs come from Iceberg manifests).
+        // SEC E-02 / E-03: Lakehouse uses hardened outbound handler for storage calls.
         services.AddHttpClient(nameof(S3LakehouseStorageProvider))
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false })
-            .AddHttpMessageHandler<SsrfProtectionHandler>();
+            .AddSecureOutboundHandlers(EgressIntegrations.Lakehouse);
         services.AddHttpClient(nameof(AzureBlobStorageProvider))
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false })
-            .AddHttpMessageHandler<SsrfProtectionHandler>();
+            .AddSecureOutboundHandlers(EgressIntegrations.Lakehouse);
 
         services.AddSingleton(sp => new S3LakehouseStorageProvider(
             sp.GetRequiredService<IHttpClientFactory>(),
@@ -56,10 +54,14 @@ public static class LakehouseServiceCollectionExtensions
         services.AddSingleton<IIcebergPartitionPruner, IcebergPartitionPruner>();
         services.AddSingleton<IDeltaMetadataReader, DeltaMetadataReader>();
         services.AddSingleton<IDeltaPartitionPruner, DeltaPartitionPruner>();
-        services.AddScoped<ILakehouseDataSourceExecutor, LakehouseDataSourceExecutor>();
-        services.AddScoped<IDataSourceExecutor, LakehouseDataSourceExecutor>();
-        services.AddScoped<IDataSourceExecutor, DeltaLakeDataSourceExecutor>();
-        services.AddScoped<IIcebergRestCatalogFederationService, IcebergRestCatalogFederationService>();
+
+        if (!services.Any(d => d.ServiceType == typeof(IDataSourceExecutor) && d.ImplementationType == typeof(LakehouseDataSourceExecutor)))
+        {
+            services.AddScoped<ILakehouseDataSourceExecutor, LakehouseDataSourceExecutor>();
+            services.AddScoped<IDataSourceExecutor, LakehouseDataSourceExecutor>();
+            services.AddScoped<IDataSourceExecutor, DeltaLakeDataSourceExecutor>();
+            services.AddScoped<IIcebergRestCatalogFederationService, IcebergRestCatalogFederationService>();
+        }
 
         return services;
     }

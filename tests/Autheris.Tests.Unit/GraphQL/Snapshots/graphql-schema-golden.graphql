@@ -3,280 +3,273 @@ schema {
   mutation: Mutation
 }
 
-type Query {
-  table(
+type AffectedEntity {
+  cyclicReferenceDetected: Boolean!
+  id: String!
+  name: String!
+  ownerEmail: String
+  ownerTeam: String
+  type: LineageNodeType!
+}
+
+type CallingApplicationUsage {
+  actorSids: [String!]
+  application: String!
+  calls: Long!
+  day: String!
+  distinctActors: Int!
+  queryNames: [String!]!
+  rejections: RejectionBreakdown!
+  rowsMeasuredCalls: Long!
+  rowsReturned: Long!
+  versions: [String!]!
+}
+
+type ConsentDto {
+  columns: [String!]!
+  description: String
+  effect: String!
+  granteeSid: String
+  granteeType: String!
+  id: UUID!
+  roleName: String
+  tableIdentifier: String!
+  validFrom: DateTime!
+  validTo: DateTime!
+}
+
+type ConsentRequestDto {
+  businessJustification: String
+  contextJson: String
+  id: UUID!
+  itsmTicketId: String
+  requestedAt: DateTime!
+  requestedGranteeRef: String
+  requestedGranteeType: String!
+  requestedValidTo: DateTime
+  requesterSid: String!
+  status: String!
+  tableId: UUID!
+  tableIdentifier: String!
+}
+
+type ConsentRequestPayload {
+  description: String
+  message: String!
+  requestId: UUID!
+  status: String!
+}
+
+type ConsentRevocationImpactReport {
+  affectedDownstreamCount: Int!
+  affectedEntities: [AffectedEntity!]!
+  containsCycles: Boolean!
+  severity: String!
+}
+
+type DataCatalogSyncPayload {
+  art9ProtectedTablesCount: Int!
+  maskedColumnsCount: Int!
+  success: Boolean!
+  syncedColumnsCount: Int!
+  syncedTablesCount: Int!
+  warnings: [String!]!
+}
+
+type DownstreamConsumerEntity {
+  distanceFromRoot: Int!
+  id: String!
+  name: String!
+  ownerEmail: String
+  ownerTeam: String
+  type: LineageNodeType!
+  upstreamDependencyId: String
+}
+
+type EffectiveTableAccessDto {
+  activeRowFilters: [String!]!
+  allowedColumns: [String!]!
+  consentDescription: String
+  consentDescriptionOrigin: String!
+  consentDescriptions: [String!]!
+  decision: String!
+  deniedColumns: [String!]!
+  maskedColumns: [String!]!
+  restrictedScope: Boolean!
+  scopeClearRequiredColumns: [String!]
+  table: String!
+  validTo: DateTime
+}
+
+type GdprDisclosureReport {
+  disclosedRecipients: [GdprRecipientAccessRecord!]!
+  evidenceLevel: String!
+  generatedAt: DateTime!
+  incompletenessReasons: [String!]
+  isComplete: Boolean!
+  legalBasisNotice: String!
+  sensitivityCategories: [String!]!
+  subjectSid: String
+  targetTable: String
+  timeWindowDays: Int!
+  totalAccessEvents: Int!
+}
+
+type GdprRecipientAccessRecord {
+  accessedColumns: [String!]!
+  firstAccess: DateTime!
+  lastAccess: DateTime!
+  maskingRuleApplied: String
+  purpose: String!
+  recipientCategory: String!
+  recipientSid: String!
+  totalQueries: Int!
+}
+
+type Mutation {
+  approveConsentRequest(
+    columnMasking: ColumnMaskingInput
+    description: String
+    idempotencyKey: String
+    requestId: UUID!
+    rowFilter: RowFilterInput
+  ): ConsentRequestPayload! @cost(weight: "10")
+  rejectConsentRequest(
+    idempotencyKey: String
+    reason: String!
+    requestId: UUID!
+  ): ConsentRequestPayload! @cost(weight: "10")
+  reloadSchema: Boolean! @cost(weight: "10")
+  requestTableAccess(
+    context: AccessRequestContextInput
     domain: String!
-    name: String!
-    schema: String! = "dbo"
-    first: Int! = 50
-    after: Int! = 0
-  ): TableRecordPayload! @cost(weight: "10")
-  myAccess(table: String!): EffectiveTableAccessDto! @cost(weight: "10")
-  myAccessRequests(status: String, first: Int, after: Int): [ConsentRequestDto!]!
+    durationDays: Int!
+    idempotencyKey: String
+    justification: String!
+    schema: String!
+    tableName: String!
+  ): ConsentRequestPayload! @cost(weight: "10")
+  revokeConsent(consentId: UUID!, reason: String!): Boolean! @cost(weight: "10")
+  setConsentDescription(consentId: UUID!, description: String): ConsentDto!
     @cost(weight: "10")
-  pendingApprovalsForMe(first: Int, after: Int): [ConsentRequestDto!]!
+  syncDataCatalog(dryRun: Boolean! = false): DataCatalogSyncPayload!
     @cost(weight: "10")
-  myActiveConsents(table: String, first: Int, after: Int): [ConsentDto!]!
+  syncOpenMetadata(dryRun: Boolean! = false): OpenMetadataSyncPayload!
     @cost(weight: "10")
-  catalog(
-    domain: String
-    first: Int
-    after: Int
-    search: String
-    tag: String
-    language: String
-  ): [TableMetadataDto!]! @cost(weight: "10")
+  withdrawAccessRequest(requestId: UUID!): ConsentRequestPayload!
+    @cost(weight: "10")
+}
+
+type OpenMetadataSyncPayload {
+  success: Boolean!
+  syncedConsents: Int!
+  syncedMaskingRules: Int!
+  syncedTables: Int!
+  warnings: [String!]!
+}
+
+type Query {
   calculateConsentRevocationImpact(consentId: UUID!): ConsentRevocationImpactReport!
     @cost(weight: "10")
+  catalog(
+    after: Int
+    domain: String
+    first: Int
+    language: String
+    search: String
+    tag: String
+  ): [TableMetadataDto!]! @cost(weight: "10")
+  exportGdprDataDisclosureReportPdfBase64(
+    domain: String
+    schema: String
+    subjectSid: String
+    tableName: String
+    timeWindowDays: Int! = 365
+  ): String! @cost(weight: "10")
+  gdprDataDisclosureReport(
+    domain: String
+    schema: String
+    subjectSid: String
+    tableName: String
+    timeWindowDays: Int! = 365
+  ): GdprDisclosureReport! @cost(weight: "10")
+  myAccess(table: String!): EffectiveTableAccessDto! @cost(weight: "10")
+  myAccessRequests(after: Int, first: Int, status: String): [ConsentRequestDto!]!
+    @cost(weight: "10")
+  myActiveConsents(after: Int, first: Int, table: String): [ConsentDto!]!
+    @cost(weight: "10")
+  pendingApprovalsForMe(after: Int, first: Int): [ConsentRequestDto!]!
+    @cost(weight: "10")
+  table(
+    after: Int! = 0
+    domain: String!
+    first: Int! = 50
+    name: String!
+    schema: String! = "dbo"
+  ): TableRecordPayload! @cost(weight: "10")
   tableConsumers(
     domain: String!
     schema: String!
     tableName: String!
     timeWindowDays: Int! = 30
   ): TableConsumersReport! @cost(weight: "10")
-  gdprDataDisclosureReport(
-    domain: String
-    schema: String
-    tableName: String
-    subjectSid: String
-    timeWindowDays: Int! = 365
-  ): GdprDisclosureReport! @cost(weight: "10")
-  exportGdprDataDisclosureReportPdfBase64(
-    domain: String
-    schema: String
-    tableName: String
-    subjectSid: String
-    timeWindowDays: Int! = 365
-  ): String! @cost(weight: "10")
-}
-
-type Mutation {
-  setConsentDescription(consentId: UUID!, description: String): ConsentDto!
-    @cost(weight: "10")
-  requestTableAccess(
-    domain: String!
-    schema: String!
-    tableName: String!
-    justification: String!
-    durationDays: Int!
-    idempotencyKey: String
-    context: AccessRequestContextInput
-  ): ConsentRequestPayload! @cost(weight: "10")
-  withdrawAccessRequest(requestId: UUID!): ConsentRequestPayload!
-    @cost(weight: "10")
-  approveConsentRequest(
-    requestId: UUID!
-    idempotencyKey: String
-    rowFilter: RowFilterInput
-    columnMasking: ColumnMaskingInput
-    description: String
-  ): ConsentRequestPayload! @cost(weight: "10")
-  rejectConsentRequest(
-    requestId: UUID!
-    reason: String!
-    idempotencyKey: String
-  ): ConsentRequestPayload! @cost(weight: "10")
-  revokeConsent(consentId: UUID!, reason: String!): Boolean! @cost(weight: "10")
-  reloadSchema: Boolean! @cost(weight: "10")
-  syncOpenMetadata(dryRun: Boolean! = false): OpenMetadataSyncPayload!
-    @cost(weight: "10")
-  syncDataCatalog(dryRun: Boolean! = false): DataCatalogSyncPayload!
-    @cost(weight: "10")
-}
-
-type AffectedEntity {
-  id: String!
-  name: String!
-  type: LineageNodeType!
-  ownerTeam: String
-  ownerEmail: String
-  cyclicReferenceDetected: Boolean!
-}
-
-type CallingApplicationUsage {
-  application: String!
-  day: String!
-  calls: Long!
-  rowsReturned: Long!
-  rowsMeasuredCalls: Long!
-  rejections: RejectionBreakdown!
-  versions: [String!]!
-  queryNames: [String!]!
-  distinctActors: Int!
-  actorSids: [String!]
-}
-
-type ConsentDto {
-  id: UUID!
-  tableIdentifier: String!
-  effect: String!
-  granteeType: String!
-  granteeSid: String
-  roleName: String
-  validFrom: DateTime!
-  validTo: DateTime!
-  columns: [String!]!
-  description: String
-}
-
-type ConsentRequestDto {
-  id: UUID!
-  tableId: UUID!
-  tableIdentifier: String!
-  requesterSid: String!
-  requestedGranteeType: String!
-  requestedGranteeRef: String
-  businessJustification: String
-  status: String!
-  requestedAt: DateTime!
-  requestedValidTo: DateTime
-  itsmTicketId: String
-  contextJson: String
-}
-
-type ConsentRequestPayload {
-  requestId: UUID!
-  status: String!
-  message: String!
-  itsmTicketReference: ItsmTicketReference
-  description: String
-}
-
-type ConsentRevocationImpactReport {
-  severity: String!
-  affectedDownstreamCount: Int!
-  affectedEntities: [AffectedEntity!]!
-  containsCycles: Boolean!
-}
-
-type DataCatalogSyncPayload {
-  success: Boolean!
-  syncedTablesCount: Int!
-  syncedColumnsCount: Int!
-  maskedColumnsCount: Int!
-  art9ProtectedTablesCount: Int!
-  warnings: [String!]!
-}
-
-type DownstreamConsumerEntity {
-  id: String!
-  name: String!
-  type: LineageNodeType!
-  ownerTeam: String
-  ownerEmail: String
-  distanceFromRoot: Int!
-  upstreamDependencyId: String
-}
-
-type EffectiveTableAccessDto {
-  table: String!
-  decision: String!
-  allowedColumns: [String!]!
-  maskedColumns: [String!]!
-  deniedColumns: [String!]!
-  activeRowFilters: [String!]!
-  consentDescription: String
-  validTo: DateTime
-  restrictedScope: Boolean!
-  scopeClearRequiredColumns: [String!]
-  consentDescriptions: [String!]!
-  consentDescriptionOrigin: String!
-}
-
-type GdprDisclosureReport {
-  targetTable: String
-  subjectSid: String
-  generatedAt: DateTime!
-  timeWindowDays: Int!
-  totalAccessEvents: Int!
-  disclosedRecipients: [GdprRecipientAccessRecord!]!
-  sensitivityCategories: [String!]!
-  legalBasisNotice: String!
-  isComplete: Boolean!
-  evidenceLevel: String!
-  incompletenessReasons: [String!]
-}
-
-type GdprRecipientAccessRecord {
-  recipientSid: String!
-  recipientCategory: String!
-  purpose: String!
-  firstAccess: DateTime!
-  lastAccess: DateTime!
-  totalQueries: Int!
-  accessedColumns: [String!]!
-  maskingRuleApplied: String
-}
-
-type ItsmTicketReference {
-  system: ItsmSystemType!
-  ticketId: String!
-  ticketUrl: String!
-}
-
-type OpenMetadataSyncPayload {
-  success: Boolean!
-  syncedTables: Int!
-  syncedConsents: Int!
-  syncedMaskingRules: Int!
-  warnings: [String!]!
 }
 
 type RejectionBreakdown {
   access: Long!
-  rateLimit: Long!
   cost: Long!
   other: Long!
+  rateLimit: Long!
   total: Long!
 }
 
 type RuntimeConsumerSummary {
   actorSid: String!
-  queryCount: Int!
+  clientType: String!
   firstSeenAt: DateTime!
   lastSeenAt: DateTime!
-  clientType: String!
+  queryCount: Int!
 }
 
 type TableConsumersReport {
-  table: String!
-  breakingChangeRisk: String!
-  totalDownstreamCount: Int!
   activeReadersCount: Int!
-  lastAccessedAt: DateTime
-  downstreamConsumers: [DownstreamConsumerEntity!]!
-  runtimeConsumers: [RuntimeConsumerSummary!]!
-  recommendedMitigations: [String!]!
   applicationUsages: [CallingApplicationUsage!]
+  breakingChangeRisk: String!
+  downstreamConsumers: [DownstreamConsumerEntity!]!
+  lastAccessedAt: DateTime
+  recommendedMitigations: [String!]!
+  runtimeConsumers: [RuntimeConsumerSummary!]!
   suppressedSmallGroups: Boolean!
+  table: String!
+  totalDownstreamCount: Int!
 }
 
 type TableMetadataDto {
-  domain: String!
-  schema: String!
-  tableName: String!
-  displayName: String!
-  sensitivity: String!
-  description: String
-  columns: [String!]!
-  tags: [String!]!
   accessStatus: String
+  columns: [String!]!
   dataOwner: String
   delegates: [String!]
+  description: String
+  displayName: String!
+  domain: String!
   language: String
+  schema: String!
+  sensitivity: String!
+  tableName: String!
+  tags: [String!]!
 }
 
 type TableRecordPayload {
+  jsonRows: [String!]!
   tableName: String!
   totalCount: Int!
-  jsonRows: [String!]!
 }
 
 input AccessRequestContextInput {
   application: String
-  tool: String
-  justification: String
   expectedDuration: String
+  justification: String
+  tool: String
 }
 
 input ColumnMaskingInput {
@@ -285,42 +278,37 @@ input ColumnMaskingInput {
 
 input ColumnMaskRuleInput {
   columnName: String!
-  maskingType: String
   maskingLevel: ColumnAccessLevel!
+  maskingType: String
 }
 
 input RowFilterInput {
-  rowFilterSql: String
   filterGroup: String
   predicates: [RowFilterPredicateInput!]
+  rowFilterSql: String
 }
 
 input RowFilterPredicateInput {
   columnName: String!
   operator: String!
-  valueType: String
-  valueJson: String
   value: String
+  valueJson: String
   values: [String!]
+  valueType: String
 }
 
 enum ColumnAccessLevel {
+  CLEAR
   DENY
   MASK
-  CLEAR
-}
-
-enum ItsmSystemType {
-  SERVICE_NOW
-  JIRA
 }
 
 enum LineageNodeType {
-  TABLE
   COLUMN
   DASHBOARD
-  PIPELINE
   EXTERNAL_SERVICE
+  PIPELINE
+  TABLE
 }
 
 "The `DateTime` scalar type represents a date and time with time zone offset information."

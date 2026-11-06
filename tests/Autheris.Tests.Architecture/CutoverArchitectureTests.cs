@@ -41,6 +41,7 @@ public sealed class CutoverArchitectureTests
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
         typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
+        typeof(Autheris.Modules.Abstractions.IAutherisModule).Assembly,
         typeof(TrinoSqlEngine.FastSqlEngine).Assembly
     ];
 

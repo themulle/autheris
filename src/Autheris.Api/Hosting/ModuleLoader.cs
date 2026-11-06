@@ -441,7 +441,6 @@ public sealed class ModuleLoader
         var pluginDirs = new[]
         {
             configuration["Gateway:Plugins:Directory"],
-            configuration["Gateway:Plugins:Auth:Directory"],
         };
 
         var fullModulesRoot = Path.GetFullPath(modulesRoot)

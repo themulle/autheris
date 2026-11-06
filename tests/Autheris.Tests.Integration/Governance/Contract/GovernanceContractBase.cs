@@ -222,7 +222,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
             {
                 ["Gateway:GovernanceDb:Provider"] = gatewayOptions.GovernanceDb.Provider,
                 ["Gateway:GovernanceDb:ConnectionString"] = gatewayOptions.GovernanceDb.ConnectionString,
-                ["Gateway:State:Directory"] = resolvedAnchorDir,
                 ["Gateway:CdcWebhooks:Enabled"] = "true"
             })
             .Build();
