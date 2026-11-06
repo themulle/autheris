@@ -3,11 +3,9 @@ namespace Autheris.Extensions;
 using System;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Backstage;
 using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Dbt;
-using Autheris.Extensions.Itsm;
 using Autheris.Extensions.Lakehouse;
 using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OData;
@@ -36,14 +34,12 @@ public static class ExtensionsServiceCollectionExtensions
         // SEC HIGH-03 / EX-12: shared SSRF handler for all outbound HttpClients of the extensions.
         services.TryAddTransient<SsrfProtectionHandler>();
 
-        services.AddItsmIntegration(gatewayOptions);
         services.AddOpenMetadataIntegration(gatewayOptions);
         services.AddDataCatalogIntegration(gatewayOptions);
         services.AddDbtIntegration(gatewayOptions);
         services.AddODataIntegration(gatewayOptions);
         services.AddLakehouseIntegration(gatewayOptions);
         services.AddLineageExportIntegration(gatewayOptions);
-        services.AddBackstageIntegration(gatewayOptions);
         services.AddCdcSourceIntegration(gatewayOptions);
 
         return services;

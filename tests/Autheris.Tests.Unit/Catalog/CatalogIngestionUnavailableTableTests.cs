@@ -83,14 +83,12 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
         var id = new TableIdentifier("crm", "dbo", "orders");
         await SeedCorruptTableWithMaskingAsync(id);
         var client = Substitute.For<IDataCatalogClient>();
-        client.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
+        client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new List<CatalogTableAsset>
         {
             new() { Identifier = id, Columns = [new() { ColumnName = "id" }, new() { ColumnName = "ssn" }], PrimaryKeyColumns = ["id"] }
         });
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(client);
-        var sut = new DataCatalogSyncService(factory, _repo, Substitute.For<IEpochValidationService>(),
+        var sut = new DataCatalogSyncService(client, _repo, Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions()), Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync(dryRun: false);

@@ -20,7 +20,7 @@ using Autheris.Domain.Interfaces;
 /// <summary>
 /// OpenLineage 1.x/2.x and Apache Atlas compatible lineage client.
 /// Pushes Autheris dataset dependencies, column lineage, and downstream consumer graphs
-/// to OpenLineage backends (e.g. Marquez, Apache Atlas, Collibra Lineage).
+/// to OpenLineage backends (e.g. Marquez, Apache Atlas).
 /// </summary>
 public sealed class OpenLineageClient : IOpenLineageClient
 {

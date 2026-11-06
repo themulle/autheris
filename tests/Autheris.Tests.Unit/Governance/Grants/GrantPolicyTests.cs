@@ -45,14 +45,6 @@ public sealed class GrantPolicyTests
     }
 
     [Fact]
-    public void SEC_SC_20_BreakGlass_Maximum_Is72Hours()
-    {
-        var p = Policy();
-        p.Evaluate(Req(TimeSpan.FromHours(72), kind: GrantKind.BreakGlass)).Allowed.ShouldBeTrue();
-        p.Evaluate(Req(TimeSpan.FromHours(73), kind: GrantKind.BreakGlass)).ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
-    }
-
-    [Fact]
     public void SEC_SC_20_ServicePrincipal_Maximum_Is365Days()
     {
         var p = Policy();
@@ -67,7 +59,6 @@ public sealed class GrantPolicyTests
     [InlineData(GrantKind.ManifestPolicy)]
     [InlineData(GrantKind.McpAdminGrant)]
     [InlineData(GrantKind.BulkGrant)]
-    [InlineData(GrantKind.BreakGlass)]
     public void SEC_SC_20_MissingExpiry_IsRejected_OnEveryGrantKind(GrantKind kind)
     {
         var d = Policy().Evaluate(Req(null, kind: kind));
@@ -128,11 +119,9 @@ public sealed class GrantPolicyTests
     }
 
     [Fact]
-    public void SEC_SC_20_UnmaskedAndBreakGlass_RequireJustification()
+    public void SEC_SC_20_Unmasked_RequiresJustification()
     {
         Policy().Evaluate(Req(TimeSpan.FromDays(7), mask: MaskingPolicyMode.Unmasked, justification: " ")).ErrorCode
-            .ShouldBe(GrantErrorCodes.JustificationRequired);
-        Policy().Evaluate(Req(TimeSpan.FromHours(24), kind: GrantKind.BreakGlass, justification: null)).ErrorCode
             .ShouldBe(GrantErrorCodes.JustificationRequired);
     }
 

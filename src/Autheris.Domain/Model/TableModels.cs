@@ -188,8 +188,8 @@ public sealed record Table
     }
 
     /// <summary>
-    /// D-4 (ADR-010): CONFIDENTIAL and above count as highly sensitive (four eyes, shorter consent TTL, degraded mode,
-    /// Backstage): CONFIDENTIAL, HIGH, RESTRICTED, SECRET and every unknown value (e.g. PII). PUBLIC, LOW, INTERNAL,
+    /// D-4 (ADR-010): CONFIDENTIAL and above count as highly sensitive (four eyes, shorter consent TTL, degraded mode):
+    /// CONFIDENTIAL, HIGH, RESTRICTED, SECRET and every unknown value (e.g. PII). PUBLIC, LOW, INTERNAL,
     /// NORMAL and MEDIUM do not. Same ranking as the catalog governance ratchet.
     /// </summary>
     public static bool IsSensitivityHigh(string? sensitivity) =>

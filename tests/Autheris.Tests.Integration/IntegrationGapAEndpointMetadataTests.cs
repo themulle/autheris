@@ -57,11 +57,6 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [InlineData("GET", "/odata/v4/$swagger")]
     [InlineData("GET", "/docs")]
     [InlineData("POST", "/api/webhooks/openmetadata")]
-    [InlineData("POST", "/api/webhooks/itsm/status-change")]
-    [InlineData("POST", "/api/webhooks/servicenow")]
-    [InlineData("POST", "/api/webhooks/jira")]
-    [InlineData("POST", "/api/webhooks/catalog")]
-    [InlineData("POST", "/api/v1/governance/catalog/webhook/{provider}")]
     [InlineData("POST", "/api/extensions/dbt/webhooks/dbt-cloud")]
     public void GAP01_PreviouslyAnonymousRoutes_AllowAnonymous(string method, string rawPattern)
     {
@@ -169,8 +164,6 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [InlineData("/api/extensions/dbt/validate-contract", 100 * Mb)]
     [InlineData("/api/extensions/dbt/run-results", 50 * Mb)]
     [InlineData("/api/extensions/dbt/webhooks/dbt-cloud", 10 * Mb)]
-    [InlineData("/api/webhooks/catalog", 10 * Mb)]
-    [InlineData("/api/v1/governance/catalog/webhook/{provider}", 10 * Mb)]
     [InlineData("/api/v1/cdc/events", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)

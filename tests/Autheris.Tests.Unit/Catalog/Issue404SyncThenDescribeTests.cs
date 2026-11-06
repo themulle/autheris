@@ -39,7 +39,7 @@ public sealed class Issue404SyncThenDescribeTests : IDisposable
             GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=t24_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
         });
         _repo = GovernanceStoreFactory.CreateSqlite(_epoch, options);
-        _client.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
+        _client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         _client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new List<CatalogTableAsset>
         {
             new()
@@ -63,16 +63,14 @@ public sealed class Issue404SyncThenDescribeTests : IDisposable
 
     private async Task SyncAsync()
     {
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(_client);
         var audit = Substitute.For<IAuditWriter>();
         audit.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(c =>
         {
             _audits.Add(c.Arg<AuditLogEntry>().DetailsJson ?? string.Empty);
             return Task.CompletedTask;
         });
-        var sut = new DataCatalogSyncService(factory, _repo, _epoch,
-            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.MicrosoftPurview } }),
+        var sut = new DataCatalogSyncService(_client, _repo, _epoch,
+            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
             _physical, audit, NullLogger<DataCatalogSyncService>.Instance, physicalIndexes: _repo);
         var result = await sut.SyncCatalogAsync();
         result.Warnings.ShouldBeEmpty();

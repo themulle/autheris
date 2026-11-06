@@ -767,101 +767,8 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
     }
 
     // =========================================================================
-    // M-06: Break-glass hardening
+    // M-06: Client IP forwarding in GatewayExtensibilityMiddleware
     // =========================================================================
-
-    [Fact]
-    public void M06_RequireRoleForBreakGlass_DefaultsToTrue()
-    {
-        new GatewayOptions().Extensibility.RequireRoleForBreakGlass.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task M06_AnonymousBreakGlass_IsDenied_AndNotAudited()
-    {
-        var repo = Substitute.For<IGovernanceRepository>();
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(new GatewayOptions
-            {
-                Extensibility = new ExtensibilityOptions { RequireRoleForBreakGlass = false }
-            }),
-            NullLogger<JustificationAndBreakGlassInterceptor>.Instance,
-            repo);
-
-        var context = new IngressContext
-        {
-            User = new ClaimsPrincipal(new ClaimsIdentity()),
-            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["X-Break-Glass"] = "true",
-                ["X-Access-Justification"] = "INC-12345",
-                ["X-Forwarded-For"] = "6.6.6.6"
-            }
-        };
-
-        var result = await interceptor.OnIngressAsync(context);
-
-        result.Decision.ShouldBe(IngressDecision.Deny);
-        result.StatusCode.ShouldBe(401);
-        context.Items.ContainsKey("IsBreakGlass").ShouldBeFalse();
-        await repo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task M06_AuthenticatedWithoutBreakGlassRole_IsDeniedByDefault()
-    {
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(new GatewayOptions()),
-            NullLogger<JustificationAndBreakGlassInterceptor>.Instance);
-
-        var context = new IngressContext
-        {
-            User = User("S-1-5-21-DEV", "Developer"),
-            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["X-Break-Glass"] = "true",
-                ["X-Access-Justification"] = "INC-12345"
-            }
-        };
-
-        var result = await interceptor.OnIngressAsync(context);
-
-        result.Decision.ShouldBe(IngressDecision.Deny);
-        result.StatusCode.ShouldBe(403);
-    }
-
-    [Fact]
-    public async Task M06_BreakGlassAudit_UsesConnectionIp_NotXForwardedForHeader()
-    {
-        var repo = Substitute.For<IGovernanceRepository>();
-        AuditLogEntry? recorded = null;
-        repo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(new GatewayOptions()),
-            NullLogger<JustificationAndBreakGlassInterceptor>.Instance,
-            repo);
-
-        var context = new IngressContext
-        {
-            User = User("S-1-5-21-OPERATOR", "BreakGlassOperator"),
-            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["X-Break-Glass"] = "true",
-                ["X-Access-Justification"] = "INC-12345",
-                ["X-Forwarded-For"] = "6.6.6.6"
-            }
-        };
-        context.Items[JustificationAndBreakGlassInterceptor.ClientIpItemKey] = "10.1.2.3";
-
-        var result = await interceptor.OnIngressAsync(context);
-
-        result.Decision.ShouldBe(IngressDecision.Continue);
-        recorded.ShouldNotBeNull();
-        recorded!.DetailsJson.ShouldContain("10.1.2.3");
-        recorded.DetailsJson.ShouldNotContain("6.6.6.6");
-    }
 
     [Fact]
     public async Task M06_GatewayExtensibilityMiddleware_PassesConnectionIpToIngress()
@@ -885,7 +792,7 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         await middleware.InvokeAsync(httpContext);
 
         capture.ClientIp.ShouldBe("10.9.8.7");
-        GatewayExtensibilityMiddleware.ClientIpItemKey.ShouldBe(JustificationAndBreakGlassInterceptor.ClientIpItemKey);
+        GatewayExtensibilityMiddleware.ClientIpItemKey.ShouldBe("ClientIpAddress");
     }
 
     private sealed class CapturingInterceptor : IIngressInterceptor

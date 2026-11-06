@@ -300,7 +300,7 @@ Autheris provides its own decoupled semantic schema grounding for AI agents via 
 
 ## 8. Testing Data Catalog Synchronization
 
-You can test Data Catalog synchronization against Microsoft Purview, Collibra, Alation, or OpenMetadata locally:
+You can test Data Catalog synchronization against OpenMetadata locally:
 
 ```graphql
 # Administrative Mutation (requires GovernanceAdmin or ClusterAdmin)

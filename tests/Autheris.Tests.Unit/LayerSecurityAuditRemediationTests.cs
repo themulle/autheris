@@ -234,40 +234,6 @@ public sealed class LayerSecurityAuditRemediationTests
     }
 
     [Fact]
-    public async Task Application_BreakGlass_RejectsUnauthenticated()
-    {
-        // CRIT-03: Unauthenticated break-glass request must be rejected with 401
-        var gatewayOptions = new GatewayOptions
-        {
-            Extensibility = new ExtensibilityOptions
-            {
-                Enabled = true,
-                EnableBreakGlass = true,
-                RequireRoleForBreakGlass = true,
-                BreakGlassAllowedRoles = ["EmergencyAdmin"]
-            }
-        };
-
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(gatewayOptions),
-            NullLogger<JustificationAndBreakGlassInterceptor>.Instance);
-
-        var context = new IngressContext
-        {
-            User = null, // unauthenticated
-            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["X-Break-Glass"] = "true",
-                ["X-Access-Justification"] = "INC-12345"
-            }
-        };
-
-        var result = await interceptor.OnIngressAsync(context);
-        result.Decision.ShouldBe(IngressDecision.Deny);
-        result.StatusCode.ShouldBe(401);
-    }
-
-    [Fact]
     public void Application_SubgraphResultMasker_MasksAliasesAndNumbers()
     {
         // CRIT-04 & SEC-APP-04: Masking must work with GraphQL aliases and non-string types

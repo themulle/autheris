@@ -14,7 +14,6 @@ public enum GrantKind
     McpAdminGrant,
     BulkGrant,
     Renewal,
-    BreakGlass,
     RebacTuple
 }
 
@@ -34,7 +33,6 @@ public enum GrantClass
     Sensitive,
     IndividualUnmasked,
     IndividualPrivileged,
-    BreakGlass,
     ServicePrincipal,
     CustomerRegular
 }

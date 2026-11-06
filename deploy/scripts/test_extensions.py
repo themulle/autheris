@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """
-Comprehensive Integration Test Suite for all GqlGateway Extensions:
+Comprehensive Integration Test Suite for GqlGateway Extensions:
 1. Lakehouse: Apache Iceberg v2 Connector over MinIO (S3) & Azure Blob Storage emulation
 2. OData v4: Direct Connector, CSDL Metadata Generator & Keyset Paging
-3. Multi-Catalog Governance:
+3. OpenMetadata Catalog Governance:
    - OpenMetadata REST v1 tables & webhook
-   - Microsoft Purview / Apache Atlas basic search & classification mapping
-   - Collibra Data Intelligence REST Core v2 assets & domain hierarchy
-   - Alation Data Catalog integration API v2 & PII field mapping
    - Automated GDPR Art. 9 Enforcement (Health, Biometric, High Sensitivity)
-4. ITSM Approval Workflows:
-   - ServiceNow Table API Change Request & Webhook Handler
-   - Jira Service Management REST API Issue Creation & Webhook Handler
-5. dbt (data build tool):
+4. dbt (data build tool):
    - Streaming manifest.json distribution
    - Contract validation & breaking changes gate
    - Zero-Trust proposal approval lifecycle
@@ -155,109 +149,18 @@ def test_odata():
     return True
 
 # ------------------------------------------------------------------------------
-# 3. Enterprise Multi-Catalog Extension Tests (OpenMetadata, Purview, Collibra, Alation)
+# 3. Enterprise Catalog Extension Tests (OpenMetadata)
 # ------------------------------------------------------------------------------
 def test_catalogs():
-    log("Testing Enterprise Multi-Catalog Integrations (OpenMetadata, Purview, Collibra, Alation)...")
+    log("Testing Enterprise Catalog Integrations (OpenMetadata)...")
 
     # 1. OpenMetadata REST API
     status, _, om_body = http_req(f"{MOCK_URL}/api/v1/tables", method="GET", expect_status=200)
     om_data = json.loads(om_body)
     tables = om_data.get("data", [])
     log(f"OpenMetadata REST API: {len(tables)} tables verified.")
-
-    # 2. Microsoft Purview / Apache Atlas Search API
-    status, _, purview_body = http_req(f"{MOCK_URL}/catalog/api/atlas/v2/search/basic?typeName=rdbms_table", method="GET", expect_status=200)
-    purview_data = json.loads(purview_body)
-    entities = purview_data.get("entities", [])
-    if len(entities) == 0:
-        raise RuntimeError("Purview API returned 0 entities.")
-    log(f"Microsoft Purview Apache Atlas Search: {len(entities)} catalog entities verified.")
-
-    # 3. Collibra Data Intelligence Platform REST Core API v2
-    status, _, collibra_body = http_req(f"{MOCK_URL}/rest/2.0/assets?typeNames=Table&limit=250", method="GET", expect_status=200)
-    collibra_data = json.loads(collibra_body)
-    assets = collibra_data.get("results", [])
-    if len(assets) == 0:
-        raise RuntimeError("Collibra API returned 0 assets.")
-    log(f"Collibra Data Intelligence: {len(assets)} assets verified (Domain: {assets[0].get('domain', {}).get('name')}).")
-
-    # 4. Alation Data Catalog Integration API v2
-    status, _, alation_body = http_req(f"{MOCK_URL}/integration/v2/table/?limit=250", method="GET", expect_status=200)
-    alation_tables = json.loads(alation_body)
-    if len(alation_tables) == 0:
-        raise RuntimeError("Alation API returned 0 tables.")
-    log(f"Alation Data Catalog: {len(alation_tables)} tables verified (Tags: {alation_tables[0].get('tags')}).")
-
-    # 5. Catalog Invalidation Webhook (with GDPR Art. 9 Health Tag detection)
-    catalog_payload = {
-        "eventType": "ENTITY_UPDATED",
-        "entityType": "table",
-        "entityId": "11111111-2222-3333-4444-555555555555",
-        "domain": "finance",
-        "schema": "public",
-        "tableName": "invoices",
-        "tags": ["GDPR.Art9.Health", "PII.Sensitive"]
-    }
-    status, _, body = http_req(
-        f"{BASE_URL}/api/webhooks/catalog?provider=OpenMetadata",
-        method="POST",
-        data=catalog_payload,
-        expect_status=200
-    )
-    log_success("Multi-Catalog Integrations & GDPR Art. 9 Invalidation Webhooks verified.")
+    log_success("OpenMetadata Catalog Integration verified.")
     return True
-
-# ------------------------------------------------------------------------------
-# 4. ITSM Workflow Extension Tests (ServiceNow & Jira)
-# ------------------------------------------------------------------------------
-def test_itsm():
-    log("Testing ITSM Outbound Clients & Inbound Approval Webhooks (ServiceNow & Jira)...")
-
-    # 1. ServiceNow Outbound Client & Table API
-    snow_create = {"table": "finance.public.invoices", "requester": "user1@corp.local"}
-    status, _, snow_res = http_req(f"{MOCK_URL}/api/now/table/change_request", method="POST", data=snow_create, expect_status=201)
-    snow_ticket = json.loads(snow_res).get("result", {})
-    log(f"ServiceNow Table API: Created ticket {snow_ticket.get('number')} (sys_id: {snow_ticket.get('sys_id')}).")
-
-    # 2. ServiceNow Inbound Approval Webhook
-    snow_payload = {
-        "number": snow_ticket.get("number", "CHG0010042"),
-        "state": "3", # Approved
-        "approval": "approved",
-        "table": "finance.public.invoices",
-        "requester": "S-1-5-21-FINANCE-USER-1"
-    }
-    status, _, _ = http_req(
-        f"{BASE_URL}/api/webhooks/servicenow",
-        method="POST",
-        data=snow_payload,
-        expect_status=200
-    )
-    log("ServiceNow Inbound Approval Webhook processed.")
-
-    # 3. Jira Outbound Client & Issue API
-    jira_create = {"fields": {"project": {"key": "SEC"}, "summary": "Data Access Request"}}
-    status, _, jira_res = http_req(f"{MOCK_URL}/rest/api/2/issue", method="POST", data=jira_create, expect_status=201)
-    jira_issue = json.loads(jira_res)
-    log(f"Jira Service Management REST API: Created issue {jira_issue.get('key')}.")
-
-    # 4. Jira Inbound Approval Webhook
-    jira_payload = {
-        "issue": {
-            "key": jira_issue.get("key", "SEC-1042"),
-            "fields": {
-                "status": {"name": "Approved"}
-            }
-        }
-    }
-    status, _, _ = http_req(
-        f"{BASE_URL}/api/webhooks/jira",
-        method="POST",
-        data=jira_payload,
-        expect_status=200
-    )
-    log_success("ITSM Workflows (ServiceNow & Jira Service Management) verified.")
     return True
 
 # ------------------------------------------------------------------------------
@@ -351,20 +254,13 @@ def main():
         results["OData v4 Direct Connector"] = False
         overall_ok = False
 
-    # 3. Multi-Catalog & Enterprise Tests
+    # 3. Catalog & Enterprise Tests
     if enable_enterprise or scenario in ("enterprise", "full"):
         try:
-            results["Data Catalogs (OpenMetadata, Purview, Collibra, Alation)"] = test_catalogs()
+            results["Data Catalogs (OpenMetadata)"] = test_catalogs()
         except Exception as e:
             log_err(f"Catalogs verification failed: {e}")
-            results["Data Catalogs (OpenMetadata, Purview, Collibra, Alation)"] = False
-            overall_ok = False
-
-        try:
-            results["ITSM Workflows (ServiceNow & Jira)"] = test_itsm()
-        except Exception as e:
-            log_err(f"ITSM verification failed: {e}")
-            results["ITSM Workflows (ServiceNow & Jira)"] = False
+            results["Data Catalogs (OpenMetadata)"] = False
             overall_ok = False
 
         try:

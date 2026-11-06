@@ -251,8 +251,7 @@ sequenceDiagram
 - Sanitized responses return standardized domain codes: `FORBIDDEN`, `UNAUTHENTICATED`, `NOT_FOUND`, `INVALID_REQUEST`.
 
 ### 8.4 Enterprise Data Catalog Federation & Lineage Analysis
-- **Multi-Catalog Provider Integration**: Pluggable `IDataCatalogClient` architecture integrating **Microsoft Purview**, **Collibra**, **Alation**, and **OpenMetadata**.
-- **Mirror vs Reference Mode**: Mirroring ingests metadata, descriptions, and classifications into local governance storage; Reference mode queries external catalogs on-demand.
+- **OpenMetadata Catalog Integration**: `IDataCatalogClient` integration synchronizing metadata, descriptions, and classifications from **OpenMetadata** into local governance storage.
 - **Automated GDPR Art. 9 & PII Tagging**: Automatic detection of special categories of data under GDPR Art. 9 (health, biometrics, genetics, religious, political) enforcing `HIGH` sensitivity, mandatory four-eyes approval (`RequiresFourEyes = true`), and `REDACT` masking.
 - **Static & Operational Lineage Traversal**: Iterative BFS graph traversal over BI Dashboards, ETL Pipelines, and External Services combined with cryptographic audit log correlation to assess breaking change blast radius before schema modifications.
 - **GDPR Art. 15 Right of Access Reporting**: Aggregates all disclosed recipients, access timestamps, purposes, and masking rules over up to 365 days.

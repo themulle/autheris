@@ -125,7 +125,7 @@ public static class DatabaseDialectExtensions
     }
 
     /// <summary>
-    /// D-1: Source type to store for a table imported from an external catalog (Alation, Collibra, Purview, OpenMetadata).
+    /// D-1: Source type to store for a table imported from an external catalog (e.g. OpenMetadata).
     /// A supported dialect already on the table is kept (a catalog sync never switches the dialect); otherwise the catalog
     /// value is used. <paramref name="isSupported"/> is false when the result is not a database dialect, so the table stays
     /// unqueryable (fail-closed) until an administrator sets the source type.

@@ -356,31 +356,6 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BreakGlass_IsEffectiveWithoutApproval_ButLimitedAndNotRenewable()
-    {
-        if (!Available) return;
-        var p = await NewProfileAsync(MaskingPolicyMode.Unmasked);
-        BreakGlassRejected(p.ProfileId, hours: 73, why: "outage");
-        BreakGlassRejected(p.ProfileId, hours: 24, why: null);
-
-        var stored = await Repo.AssignProfileAsync(TenantA, p.ProfileId, BreakGlass("erin", 48, "outage"));
-
-        stored.Kind.ShouldBe(AccessProfileAssignmentKind.BreakGlass);
-        Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, ["erin"], [], [])).ShouldContain(p.ProfileId);
-        Rejected(() => Repo.RenewAssignmentAsync(TenantA, p.ProfileId, AccessProfileSubjectType.User, "erin", DateTimeOffset.UtcNow.AddHours(20), "owner1"), AccessProfileAssignmentRules.BreakGlassNotRenewable);
-        Rejected(() => Repo.AssignProfileAsync(TenantA, p.ProfileId, UserGrant("erin", 5)), AccessProfileAssignmentRules.KindConflict);
-    }
-
-    private void BreakGlassRejected(string profileId, int hours, string? why) =>
-        Should.ThrowAsync<AccessProfileAssignmentRejectedException>(() => Repo.AssignProfileAsync(TenantA, profileId, BreakGlass("erin", hours, why))).GetAwaiter().GetResult();
-
-    private static AccessProfileAssignment BreakGlass(string subject, int hours, string? why) => new()
-    {
-        Subject = subject, SubjectType = AccessProfileSubjectType.User, Kind = AccessProfileAssignmentKind.BreakGlass,
-        ExpiresAt = DateTimeOffset.UtcNow.AddHours(hours), CreatedBy = "admin1", Justification = why
-    };
-
-    [Fact]
     public async Task RemoveAssignment_RemovesOnlyThatAssignment()
     {
         if (!Available) return;

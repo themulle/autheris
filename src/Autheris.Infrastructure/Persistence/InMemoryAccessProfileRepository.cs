@@ -108,11 +108,6 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
     {
         var profile = RequireProfile(tenantId, profileId);
         var existing = RequireAssignment(profile, subjectType, subject);
-        if (existing.Kind == AccessProfileAssignmentKind.BreakGlass)
-        {
-            throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.BreakGlassNotRenewable, "A break-glass exception cannot be renewed.");
-        }
-
         AccessProfileAssignmentRules.ValidateApprover(profile, existing, approvedBy);
         var now = DateTimeOffset.UtcNow;
         var renewed = existing with { AssignedAt = now, ExpiresAt = newExpiresAt, ApprovedBy = approvedBy.Trim(), ApprovedAt = now, RenewalCount = existing.RenewalCount + 1 };

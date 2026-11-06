@@ -42,7 +42,6 @@ using Autheris.Application.ResourceGroups;
 using Autheris.Application.Observability;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Domain.Diagnostics;

@@ -24,7 +24,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Itsm;
+using Autheris.Infrastructure.Governance;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -53,17 +53,10 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IColumnMaskingProvider, ColumnMaskingProvider>();
     }
 
-    private static void AddItsmConsentRequests(IServiceCollection services, GatewayOptions gatewayOptions)
+    private static void AddConsentRequests(IServiceCollection services)
     {
-        // ITSM orchestration (dispatcher, recertification, outbox workers)
-        services.AddScoped<ItsmWorkflowDispatcher>();
-        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestDispatcher, Autheris.Application.ConsentRequests.ItsmConsentRequestDispatcher>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
         services.AddScoped<IConsentRecertificationService, ConsentRecertificationWorkflowService>();
-        if (gatewayOptions.Itsm.Enabled)
-        {
-            services.AddHostedService<ItsmOutboxDispatcherHostedService>();
-            services.AddHostedService<ConsentRecertificationHostedService>();
-        }
+        services.AddHostedService<ConsentRecertificationHostedService>();
     }
 }

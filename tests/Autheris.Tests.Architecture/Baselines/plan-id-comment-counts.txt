@@ -2,7 +2,7 @@
 Autheris.Api|294
 Autheris.Application|864
 Autheris.Domain|175
-Autheris.Extensions|62
+Autheris.Extensions|61
 Autheris.GraphQL|75
-Autheris.Infrastructure|225
+Autheris.Infrastructure|220
 TrinoSqlEngine|204

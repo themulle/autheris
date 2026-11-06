@@ -328,13 +328,11 @@ public sealed class UnknownGatewayKeyGuardTests
 
     private static readonly string[] ExpectedFreeFormSubtrees =
     [
-        "Gateway:Catalog:Alation:DataSourceToDomainMap",
         "Gateway:Catalog:TagToMaskingRuleMap",
         "Gateway:Classification:Workflow:Profiles:OwnerResolution:RuleBasedMappings",
         "Gateway:Dbt:DatabaseMappings",
         "Gateway:Federation:FieldClassifications",
         "Gateway:FinOps:TenantMonthlyBudgets",
-        "Gateway:Itsm:InstanceToTenantMap",
         "Gateway:OpenMetadata:RoleToGatewayRoleMap",
         "Gateway:OpenMetadata:ServiceDatabaseToDomainMap",
         "Gateway:OpenMetadata:ServiceDatabaseToTenantMap",

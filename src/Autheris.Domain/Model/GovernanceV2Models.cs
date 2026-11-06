@@ -80,18 +80,6 @@ public sealed record ConsentRevocationImpactReport(
     bool ContainsCycles
 );
 
-public enum ItsmSystemType
-{
-    ServiceNow = 1,
-    Jira = 2
-}
-
-public sealed record ItsmTicketReference(
-    ItsmSystemType System,
-    string TicketId,
-    string TicketUrl
-);
-
 public enum JustificationCategory
 {
     LegitimateAudit = 1,
@@ -111,10 +99,7 @@ public sealed record JustificationTriageResult(
 
 public enum DataCatalogProviderType
 {
-    OpenMetadata = 1,
-    MicrosoftPurview = 2,
-    Collibra = 3,
-    Alation = 4
+    OpenMetadata = 1
 }
 
 public enum DataCatalogSyncMode

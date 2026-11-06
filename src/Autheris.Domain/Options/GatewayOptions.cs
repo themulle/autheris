@@ -20,7 +20,6 @@ public sealed class GatewayOptions
     [Required] public OpenMetadataOptions OpenMetadata { get; init; } = new();
     [Required] public PluginsOptions Plugins { get; init; } = new();
     [Required] public SqlDataSourceOptions DataSources { get; init; } = new();
-    [Required] public ItsmOptions Itsm { get; init; } = new();
     [Required] public DataCatalogOptions Catalog { get; init; } = new();
     [Required] public McpOptions Mcp { get; init; } = new();
     [Required] public RestApiOptions RestApi { get; init; } = new();
@@ -30,7 +29,6 @@ public sealed class GatewayOptions
     [Required] public ExtensibilityOptions Extensibility { get; init; } = new();
     [Required] public CasbinOptions Casbin { get; init; } = new();
     [Required] public DbtOptions Dbt { get; init; } = new();
-    [Required] public BackstageIntegrationOptions Backstage { get; init; } = new();
     [Required] public ResourceGroupsOptions ResourceGroups { get; init; } = new();
     [Required] public SystemMetricsOptions SystemMetrics { get; init; } = new();
     [Required] public GoldenQueryOptions GoldenQueries { get; init; } = new();

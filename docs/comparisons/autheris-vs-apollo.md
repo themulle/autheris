@@ -11,7 +11,7 @@ Comprehensive competitive breakdown between **Autheris Enterprise Gateway** and 
 | **License & Commercial TCO** | **BSL 1.1 / Commercial** (predictable, self-hostable) | **Elastic License v2 (ELv2)** (restrictive, vendor cloud lock-in) |
 | **Row-Level Security (RLS)** | **Native AST Pushdown:** Injects Casbin ABAC filters directly into SQL/Lakehouse query trees | **Delegated:** Apollo Router cannot enforce RLS; authorization must be implemented in every subgraph |
 | **Data-Owner Governance** | **Built-in Data Owner Consents:** Time-bounded, 4-Eyes SoD approval workflows, automated delegations | **External / None:** No concept of data-owner consents; requires building custom auth portals |
-| **Enterprise Data Catalogs** | **Zero-Touch Sync:** Native connectors for Microsoft Purview, Collibra, Alation, and OpenMetadata | **Manual Schema Tagging:** No automated sync with enterprise catalog governance platforms |
+| **Enterprise Data Catalogs** | **Zero-Touch Sync:** Native connectors for OpenMetadata and dbt | **Manual Schema Tagging:** No automated sync with enterprise catalog governance platforms |
 | **Audit & Regulatory Compliance** | **Cryptographic WORM Audit:** HMAC-SHA256 hash chains, SEC Rule 17a-4, one-click GDPR Art. 15 disclosure | **Basic Log Shipping:** Standard tracing without cryptographic tamper-evidence or GDPR report automation |
 | **Protocol Exposure** | **Universal Data Access:** Exposes governed data as GraphQL, REST, WebSQL, OData v4, and Arrow IPC over HTTP | **GraphQL Only:** Subgraphs and clients are locked exclusively to GraphQL |
 | **Extensibility Model** | **In-Process C# (.NET 10)** | **Rhai Scripting (slow) or Rust plugins** (high DX friction for enterprise teams) |

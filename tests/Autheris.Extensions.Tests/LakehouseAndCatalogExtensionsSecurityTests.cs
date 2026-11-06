@@ -25,7 +25,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Dbt;
-using Autheris.Extensions.Itsm;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.Extensions.OpenMetadata;
@@ -644,7 +643,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
     {
         var id = new TableIdentifier("finance", "dbo", "payroll");
         var client = Substitute.For<IDataCatalogClient>();
-        client.ProviderType.Returns(DataCatalogProviderType.Collibra);
+        client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(new List<CatalogTableAsset>
             {
@@ -663,14 +662,11 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                 return Task.FromResult(m);
             });
 
-        // EXT-MOVE: the remaining (merged) sync resolves the active client through IDataCatalogClientFactory.
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(client);
         var sut = new DataCatalogSyncService(
-            factory,
+            client,
             repo,
             Substitute.For<IEpochValidationService>(),
-            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.Collibra } }),
+            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
             Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync();
@@ -722,87 +718,6 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
 
     // ------------------------------------------------------------------ M-34
 
-    private static (CatalogWebhookHandler Handler, IPolicyEpochRepository Epochs) CreateWebhookHandler(string secret)
-    {
-        var epochs = Substitute.For<IPolicyEpochRepository>();
-        var handler = new CatalogWebhookHandler(
-            Options.Create(new GatewayOptions
-            {
-                Catalog = new DataCatalogOptions { WebhookSecret = secret }
-            }),
-            epochs,
-            Substitute.For<IDataCatalogSyncService>(),
-            NullLogger<CatalogWebhookHandler>.Instance);
-        return (handler, epochs);
-    }
-
-    private static string CatalogPayload(string table) =>
-        $"{{\"eventType\":\"entityUpdated\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"m34.public.{table}\",\"nonce\":\"{Guid.NewGuid():N}\"}}";
-
-    [Fact]
-    public async Task Catalog_Webhook_Payload_Only_Signature_Is_Rejected_TimestampBoundSignature_IsAccepted()
-    {
-        const string secret = "catalog-secret-m34";
-        var (handler, _) = CreateWebhookHandler(secret);
-        var ts = DateTimeOffset.UtcNow;
-        var payload = CatalogPayload("orders_a");
-
-        var legacy = await handler.HandleWebhookAsync(payload, "sha256=" + Hmac(payload, secret), ts);
-        legacy.Success.ShouldBeFalse();
-        legacy.Status.ShouldBe("REJECTED_INVALID_SIGNATURE");
-
-        // Same signature replayed with a fresh timestamp header must not verify either
-        var bound = Hmac($"{ts.AddMinutes(-4).ToUnixTimeSeconds()}.{payload}", secret);
-        (await handler.HandleWebhookAsync(payload, bound, ts)).Status.ShouldBe("REJECTED_INVALID_SIGNATURE");
-
-        var ok = await handler.HandleWebhookAsync(payload, Hmac($"{ts.ToUnixTimeSeconds()}.{payload}", secret), ts);
-        ok.Success.ShouldBeTrue();
-        ok.Status.ShouldBe("INVALIDATED");
-    }
-
-    [Fact]
-    public async Task M34_ReplayedDelivery_IsDeduplicated()
-    {
-        const string secret = "catalog-secret-m34-replay";
-        var (handler, epochs) = CreateWebhookHandler(secret);
-        var ts = DateTimeOffset.UtcNow;
-        var payload = CatalogPayload("orders_b");
-        var signature = Hmac($"{ts.ToUnixTimeSeconds()}.{payload}", secret);
-
-        (await handler.HandleWebhookAsync(payload, signature, ts)).Status.ShouldBe("INVALIDATED");
-        var replay = await handler.HandleWebhookAsync(payload, signature, ts);
-
-        replay.Status.ShouldBe("IGNORED_DUPLICATE_EVENT");
-        await epochs.Received(1).IncrementTableEpochAsync(Arg.Is<TableIdentifier>(t => t.TableName == "orders_b"), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task M34_EventId_IsDeduplicated_AcrossDifferentTimestamps()
-    {
-        const string secret = "catalog-secret-m34-id";
-        var (handler, _) = CreateWebhookHandler(secret);
-        var eventId = Guid.NewGuid().ToString();
-        var payload = $"{{\"id\":\"{eventId}\",\"entityType\":\"table\",\"entityFullyQualifiedName\":\"m34.public.orders_c\"}}";
-
-        var ts1 = DateTimeOffset.UtcNow.AddSeconds(-30);
-        var ts2 = DateTimeOffset.UtcNow;
-
-        (await handler.HandleWebhookAsync(payload, Hmac($"{ts1.ToUnixTimeSeconds()}.{payload}", secret), ts1)).Status.ShouldBe("INVALIDATED");
-        (await handler.HandleWebhookAsync(payload, Hmac($"{ts2.ToUnixTimeSeconds()}.{payload}", secret), ts2)).Status.ShouldBe("IGNORED_DUPLICATE_EVENT");
-    }
-
-    [Fact]
-    public async Task M34_MissingTimestamp_IsRejected()
-    {
-        var (handler, _) = CreateWebhookHandler("catalog-secret-m34-ts");
-        var payload = CatalogPayload("orders_d");
-
-        var result = await handler.HandleWebhookAsync(payload, "sha256=" + Hmac(payload, "catalog-secret-m34-ts"), null);
-
-        result.Success.ShouldBeFalse();
-        result.Status.ShouldBe("REJECTED_MISSING_TIMESTAMP");
-    }
-
     [Fact]
     public async Task M34_DbtWebhook_WithoutTimestampOrEventId_IsRejected()
     {
@@ -820,34 +735,6 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
     }
 
     // ------------------------------------------------------------------ Low findings
-
-    [Fact]
-    public async Task Low_ItsmClients_NonJsonSuccessResponse_IsTreatedAsFailure()
-    {
-        var request = new ItsmTicketRequest(
-            new TenantId("tenant-a"), new Sid("S-1-5-21-1"), new TableIdentifier("finance", "dbo", "invoices"), "Need access", 7, null, null);
-
-        var htmlHandler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("<html>login page</html>", Encoding.UTF8, "text/html")
-        });
-
-        // EXT-MOVE: ported from the removed extension duplicates (JiraClient/ServiceNowClient) to the remaining clients.
-        var itsmOptions = Options.Create(new GatewayOptions
-        {
-            Itsm = new ItsmOptions { JiraBaseUrl = "https://jira.corp.local", ServiceNowBaseUrl = "https://snow.corp.local" }
-        });
-
-        var jira = new JiraCloudRestClient(new HttpClient(htmlHandler), itsmOptions, NullLogger<JiraCloudRestClient>.Instance);
-        var jiraResult = await jira.CreateAccessTicketAsync(request);
-        jiraResult.Success.ShouldBeFalse();
-        jiraResult.TicketReference.ShouldBeNull();
-
-        var snow = new ServiceNowTableApiClient(new HttpClient(htmlHandler), itsmOptions, NullLogger<ServiceNowTableApiClient>.Instance);
-        var snowResult = await snow.CreateAccessTicketAsync(request);
-        snowResult.Success.ShouldBeFalse();
-        snowResult.TicketReference.ShouldBeNull();
-    }
 
     [Fact]
     public async Task Low_LocalStorage_RejectsSymlinks_AndRequiresBasePathOutsideDevelopment()

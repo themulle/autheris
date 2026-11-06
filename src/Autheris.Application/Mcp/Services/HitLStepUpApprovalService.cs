@@ -7,7 +7,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Mcp.Interfaces;
-using Autheris.Application.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -177,50 +176,6 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         var createdAt = DateTimeOffset.UtcNow;
         var expiresAt = createdAt.AddSeconds(timeoutSeconds);
 
-        string? itsmTicketId = null;
-        string? itsmTicketUrl = null;
-
-        // Auto-create ITSM ticket if enabled
-        if (_options.Value.HitLStepUp.AutoCreateItsmTicket && _scopeFactory != null)
-        {
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var itsmDispatcher = scope.ServiceProvider.GetService<ItsmWorkflowDispatcher>();
-                if (itsmDispatcher != null)
-                {
-                    var ticketRequest = new ItsmTicketRequest(
-                        Tenant: new TenantId(tenantId),
-                        RequesterSid: new Sid(requesterSid),
-                        TargetTable: targetTable,
-                        Justification: justification ?? $"Human-in-the-Loop Step-Up approval required for MCP tool '{toolName}' on table '{targetTable}'",
-                        DurationDays: 1,
-                        TriageCategory: JustificationCategory.LegitimateAudit,
-                        TriageConfidence: 1.0
-                    );
-
-                    var dispatchResult = await itsmDispatcher.DispatchTicketRequestAsync(
-                        ticketRequest,
-                        _options.Value.HitLStepUp.PreferredItsmSystem,
-                        ct).ConfigureAwait(false);
-
-                    if (dispatchResult.Success && dispatchResult.TicketReference != null)
-                    {
-                        itsmTicketId = dispatchResult.TicketReference.TicketId;
-                        itsmTicketUrl = dispatchResult.TicketReference.TicketUrl;
-                        var safeTicketId = (itsmTicketId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
-                        var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
-                        _logger.LogInformation("Dispatched HitL ITSM ticket '{TicketId}' for approval '{ApprovalId}'.", safeTicketId, safeApprovalIdForLog);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
-                _logger.LogWarning(ex, "Failed to auto-create ITSM ticket for HitL approval '{ApprovalId}'. Proceeding with in-memory approval gate.", safeApprovalIdForLog);
-            }
-        }
-
         var ticket = new HitLApprovalTicket(
             ApprovalId: approvalId,
             ToolName: toolName,
@@ -230,9 +185,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             Justification: justification,
             CreatedAt: createdAt,
             ExpiresAt: expiresAt,
-            Status: HitLApprovalStatus.Pending,
-            ItsmTicketId: itsmTicketId,
-            ItsmTicketUrl: itsmTicketUrl
+            Status: HitLApprovalStatus.Pending
         );
         ticket = ticket with { Signature = ComputeTicketSignature(_hmacKey, ticket) };
 

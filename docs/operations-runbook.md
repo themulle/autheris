@@ -362,7 +362,7 @@ The gateway runs `DataCatalogSyncBackgroundService` periodically (configurable v
   kubectl logs -l app=gql-gateway -n data-governance | grep "DataCatalogSync"
   ```
 - Alerts to monitor:
-  - `Failed to fetch tables from Data Catalog`: Indicates connectivity or credential issues to Microsoft Purview / Collibra / Alation / OpenMetadata.
+  - `Failed to fetch tables from Data Catalog`: Indicates connectivity or credential issues to OpenMetadata.
   - `Sync already in progress`: Indicates previous sync cycle exceeded interval; increase `SyncIntervalMinutes`.
 
 ### 5.2 Manual / On-Demand Catalog Sync

@@ -29,16 +29,14 @@ graph TD
     end
 
     subgraph Extensions ["Autheris.Extensions"]
-        DC["DataCatalog/<br/>Purview, Collibra, Alation, OpenMetadata"]
+        DC["DataCatalog/<br/>OpenMetadata Catalog Sync"]
         DBT["Dbt/<br/>Manifest Ingestion, Lineage & Contracts"]
-        ITSM["Itsm/<br/>ServiceNow & Jira Clients"]
         ODATA["OData/<br/>CSDL & Formatters for PowerBI/Excel"]
         LAKE["Lakehouse/<br/>Iceberg v2, S3 SigV4, Azure ADLS, Parquet"]
     end
 
     DC -->|implements IDataCatalogClient| CoreApp
     DBT -->|implements IDbtMetadataIngestionService,<br/>IDbtContractValidator, IDbtExposurePublisher| CoreApp
-    ITSM -->|implements IItsmWorkflowClient| CoreApp
     ODATA -->|implements IODataHandler| CoreApp
     LAKE -->|implements ILakehouseDataSourceExecutor,<br/>ILakehouseStorageProvider| CoreApp
     Extensions -.-> CoreDomain
@@ -48,9 +46,8 @@ graph TD
 
 | Modul | Hauptklassen / Services | Core-Schnittstellen | Anwendungsfall |
 | :--- | :--- | :--- | :--- |
-| **DataCatalog** | [`DataCatalogSyncService`](../../src/Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs)<br/>[`PurviewDataCatalogClient`](../../src/Autheris.Extensions/DataCatalog/PurviewDataCatalogClient.cs)<br/>[`CollibraDataCatalogClient`](../../src/Autheris.Extensions/DataCatalog/CollibraDataCatalogClient.cs)<br/>[`DataCatalogClientFactory`](../../src/Autheris.Extensions/DataCatalog/DataCatalogClientFactory.cs)<br/>[`AlationCatalogClient`](../../src/Autheris.Extensions/DataCatalog/AlationCatalogClient.cs)<br/>[`OpenMetadataCatalogAdapter`](../../src/Autheris.Extensions/DataCatalog/OpenMetadataCatalogAdapter.cs) | `IDataCatalogClient`<br/>`IDataCatalogSyncService` | Bidirektionaler Sync oder Realtime-Lookup von Tabellen- und Spalten-Metadaten, DSGVO-Tags und Eigentümern. |
+| **DataCatalog** | [`DataCatalogSyncService`](../../src/Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs)<br/>[`OpenMetadataCatalogAdapter`](../../src/Autheris.Extensions/DataCatalog/OpenMetadataCatalogAdapter.cs) | `IDataCatalogClient`<br/>`IDataCatalogSyncService` | Synchronisation von Tabellen- und Spalten-Metadaten, DSGVO-Tags und Eigentümern aus OpenMetadata. |
 | **Dbt** | [`DbtMetadataIngestionService`](../../src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs)<br/>[`DbtContractValidator`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs)<br/>[`DbtArtifactStreamingParser`](../../src/Autheris.Extensions/Dbt/DbtArtifactStreamingParser.cs)<br/>[`DbtExposurePublisher`](../../src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs) | `IDbtMetadataIngestionService`<br/>`IDbtContractValidator`<br/>`IDbtExposurePublisher` | Automatisierte Ingestion von dbt `manifest.json`, Zero-Trust Proposal Approval Workflow, Lineage Impact Graph und CI Breaking-Change Contract Enforcement. |
-| **Itsm** | [`ServiceNowTableApiClient`](../../src/Autheris.Extensions/Itsm/ServiceNowTableApiClient.cs)<br/>[`JiraCloudRestClient`](../../src/Autheris.Extensions/Itsm/JiraCloudRestClient.cs)<br/>[`ItsmWebhookHandler`](../../src/Autheris.Extensions/Itsm/ItsmWebhookHandler.cs) | `IItsmWorkflowClient`<br/>`IItsmWebhookHandler` | Erzeugung von Genehmigungs-Tickets für sensible Datenabfragen und Vier-Augen-Prozesse. |
 | **OData** | [`ODataHandler`](../../src/Autheris.Extensions/OData/ODataHandler.cs)<br/>[`ODataCsdlGenerator`](../../src/Autheris.Extensions/OData/ODataCsdlGenerator.cs)<br/>[`ODataResponseFormatter`](../../src/Autheris.Extensions/OData/ODataResponseFormatter.cs) | `IODataHandler` | Bereitstellung eines standardisierten OData v4 Endpunkts für Power BI, Microsoft Excel und SAP-Systeme. |
 | **Lakehouse** | [`LakehouseDataSourceExecutor`](../../src/Autheris.Extensions/Lakehouse/Services/LakehouseDataSourceExecutor.cs)<br/>[`CompositeLakehouseStorageProvider`](../../src/Autheris.Extensions/Lakehouse/Services/CompositeLakehouseStorageProvider.cs)<br/>[`S3LakehouseStorageProvider`](../../src/Autheris.Extensions/Lakehouse/Services/S3LakehouseStorageProvider.cs)<br/>[`AzureBlobStorageProvider`](../../src/Autheris.Extensions/Lakehouse/Services/AzureBlobStorageProvider.cs)<br/>[`IcebergMetadataReader`](../../src/Autheris.Extensions/Lakehouse/Services/IcebergMetadataReader.cs)<br/>[`IcebergPartitionPruner`](../../src/Autheris.Extensions/Lakehouse/Services/IcebergPartitionPruner.cs) | `ILakehouseDataSourceExecutor`<br/>`ILakehouseStorageProvider`<br/>`IIcebergMetadataReader`<br/>`IIcebergPartitionPruner` | In-Process Ausführung analytischer Abfragen auf Apache Iceberg v2 Tabellen in Object Storage (AWS S3, Azure ADLS Gen2, MinIO) mit vektorisiertem Partition- & Min/Max-Pruning. |
 

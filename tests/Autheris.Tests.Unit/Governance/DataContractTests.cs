@@ -77,24 +77,4 @@ public sealed class DataContractTests
         updatedContract.Status.ShouldBe(DataContractStatus.Broken);
         updatedContract.Assertions[0].FailureReason!.ShouldContain("48 hours");
     }
-
-    [Fact]
-    public async Task DataHubCatalogClient_IngestMetadataChangeEvent_Succeeds()
-    {
-        var engine = new InMemoryDataContractEngine();
-        var client = new DataHubCatalogClient(engine, NullLogger<DataHubCatalogClient>.Instance);
-
-        const string mclEvent = """
-        {
-          "entityType": "assertion",
-          "entityUrn": "urn:li:assertion:sales_orders_freshness",
-          "aspect": {
-            "type": "SUCCESS"
-          }
-        }
-        """;
-
-        var result = await client.IngestMetadataChangeEventAsync(mclEvent);
-        result.ShouldBeTrue();
-    }
 }

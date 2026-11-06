@@ -91,9 +91,7 @@ public static class GatewaySections
     public const string OpenMetadata = "Gateway:OpenMetadata";
     public const string Catalog = "Gateway:Catalog";
     public const string CatalogSearch = "Gateway:Catalog:Search";
-    public const string Itsm = "Gateway:Itsm";
     public const string Dbt = "Gateway:Dbt";
-    public const string Backstage = "Gateway:Backstage";
     public const string Plugins = "Gateway:Plugins";
     public const string Extensibility = "Gateway:Extensibility";
     public const string Webhooks = "Gateway:Webhooks";

@@ -22,7 +22,7 @@ public sealed class OptionsAuditTests
     public void No_enforcement_option_deleted_while_wired()
     {
         var removed = RepositoryScan.ReadBaseline("removed-options.txt");
-        removed.Count.ShouldBe(31, "The removed-options baseline must contain exactly the 31 deleted options.");
+        removed.Count.ShouldBe(76, "The removed-options baseline must contain all 76 deleted options.");
 
         var assemblies = new[]
         {

@@ -28,11 +28,9 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Itsm;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.GraphQL.Subscriptions;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Persistence;
 using HotChocolate;
 using Path = System.IO.Path;
@@ -321,59 +319,6 @@ public sealed class SecurityReviewG5Tests : IDisposable
         new WormDirectoryAuditChainAnchorStore(_dir).Load()!.Sequence.ShouldBe(-1);
     }
 
-    // ---------------------------------------------------------------- Break-glass attribution
-
-    [Fact]
-    public async Task BreakGlass_AuditUsesSidAndTenantNotIdentityName()
-    {
-        var repo = Substitute.For<IGovernanceRepository>();
-        AuditLogEntry? captured = null;
-        repo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => captured = e), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(new GatewayOptions()), NullLogger<JustificationAndBreakGlassInterceptor>.Instance, repo);
-        var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "operator"), new Claim(ClaimTypes.Role, "BreakGlassOperator"),
-             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-OPS"), new Claim("tenant_id", "tenant-x")], "TestAuth"));
-        var context = new IngressContext
-        {
-            Headers = new Dictionary<string, string> { ["X-Break-Glass"] = "true", ["X-Access-Justification"] = "INC-1" },
-            User = user
-        };
-
-        await interceptor.OnIngressAsync(context);
-
-        captured.ShouldNotBeNull();
-        captured.ActorSid.Value.ShouldBe("S-1-5-21-OPS");
-        captured.TenantId.Value.ShouldBe("tenant-x");
-    }
-
-    [Fact]
-    public async Task BreakGlass_AuditRecordingFails_FailsClosedAndDoesNotSetIsBreakGlass()
-    {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
-            .Returns<Task>(_ => throw new InvalidOperationException("DB unavailable"));
-
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(new GatewayOptions()), NullLogger<JustificationAndBreakGlassInterceptor>.Instance, repo);
-
-        var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "operator"), new Claim(ClaimTypes.Role, "BreakGlassOperator"),
-             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-OPS"), new Claim("tenant_id", "tenant-x")], "TestAuth"));
-
-        var context = new IngressContext
-        {
-            Headers = new Dictionary<string, string> { ["X-Break-Glass"] = "true", ["X-Access-Justification"] = "INC-1" },
-            User = user
-        };
-
-        var result = await interceptor.OnIngressAsync(context);
-
-        result.Decision.ShouldBe(IngressDecision.Deny);
-        result.StatusCode.ShouldBe(500);
-        context.Items.ContainsKey("IsBreakGlass").ShouldBeFalse();
-    }
-
     // ---------------------------------------------------------------- Iceberg guard
 
     private static readonly TableIdentifier OrdersId = new("tenant-1", "raw", "orders");
@@ -442,30 +387,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
         response.ShouldNotBeNull();
     }
 
-    // ---------------------------------------------------------------- ITSM
-
-    [Fact]
-    public void Itsm_UnknownServiceNowState_IsIgnoredNotRejected()
-    {
-        var parse = typeof(ItsmWebhookHandler).GetMethod("ParsePayload", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var json = "{\"number\":\"CHG1\",\"instance_name\":\"i1\",\"state\":\"2\"}";
-
-        var dto = parse.Invoke(null, [json, NullLogger.Instance]);
-
-        dto.ShouldNotBeNull();
-        dto.GetType().GetProperty("Action")!.GetValue(dto)!.ToString().ShouldBe("IGNORE");
-    }
-
-    [Fact]
-    public void Itsm_ExplicitRejectState_IsStillRejected()
-    {
-        var parse = typeof(ItsmWebhookHandler).GetMethod("ParsePayload", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var json = "{\"number\":\"CHG1\",\"instance_name\":\"i1\",\"approval\":\"rejected\"}";
-
-        var dto = parse.Invoke(null, [json, NullLogger.Instance]);
-
-        dto!.GetType().GetProperty("Action")!.GetValue(dto)!.ToString().ShouldBe("REJECT");
-    }
+    // ---------------------------------------------------------------- Consent external approval status
 
     private static async Task<(SqliteGovernanceRepository repo, ConsentRequest request)> PendingExternalRequestAsync(string status = "PENDING_EXTERNAL_APPROVAL")
     {
@@ -542,59 +464,5 @@ public sealed class SecurityReviewG5Tests : IDisposable
 
             (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("APPROVED");
         }
-    }
-
-    [Fact]
-    public async Task Outbox_DispatchLockHeldElsewhere_SkipsCycle()
-    {
-        var outbox = Substitute.For<IItsmOutboxRepository>();
-        var cluster = Substitute.For<IDistributedClusterStateProvider>();
-        cluster.TryAcquireLockAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>((IAsyncDisposable?)null));
-        var sp = new ServiceCollection()
-            .AddSingleton(outbox)
-            .AddSingleton(cluster)
-            .AddSingleton(new ItsmWorkflowDispatcher([], NullLogger<ItsmWorkflowDispatcher>.Instance))
-            .BuildServiceProvider();
-        var service = new ItsmOutboxDispatcherHostedService(sp, NullLogger<ItsmOutboxDispatcherHostedService>.Instance);
-
-        (await service.ProcessPendingMessagesAsync()).ShouldBe(0);
-
-        await outbox.DidNotReceive().GetPendingMessagesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
-    }
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private long _ticks;
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
-        public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
-    }
-
-    [Fact]
-    public async Task INF4_Outbox_StopsDispatchingBeforeTheLockLeaseRunsOut()
-    {
-        // INF-4: each dispatch takes 2 minutes here; with a 5 minute lease only messages that still fit are started,
-        // the rest stays pending for the next cycle instead of being sent after another instance took the lock.
-        var clock = new ManualTimeProvider();
-        var messages = Enumerable.Range(1, 5)
-            .Select(i => new ItsmOutboxMessage($"m{i}", $"r{i}", "tenant-a", "CREATE", "{\"Title\":\"t\"}", "ServiceNow", ItsmOutboxStatus.Pending, 0, 5, DateTimeOffset.UtcNow))
-            .ToList();
-        var outbox = Substitute.For<IItsmOutboxRepository>();
-        outbox.GetPendingMessagesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(messages);
-        outbox.MarkFailedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-            .Returns(_ => { clock.Advance(TimeSpan.FromMinutes(2)); return Task.CompletedTask; });
-        var cluster = Substitute.For<IDistributedClusterStateProvider>();
-        cluster.TryAcquireLockAsync(Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<IAsyncDisposable?>(Substitute.For<IAsyncDisposable>()));
-        var sp = new ServiceCollection()
-            .AddSingleton(outbox)
-            .AddSingleton(cluster)
-            .AddSingleton(new ItsmWorkflowDispatcher([], NullLogger<ItsmWorkflowDispatcher>.Instance))
-            .BuildServiceProvider();
-        var service = new ItsmOutboxDispatcherHostedService(sp, NullLogger<ItsmOutboxDispatcherHostedService>.Instance, timeProvider: clock);
-
-        await service.ProcessPendingMessagesAsync();
-
-        await outbox.Received(2).MarkFailedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<TimeSpan>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
     }
 }

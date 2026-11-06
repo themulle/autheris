@@ -134,7 +134,6 @@ public static class GatewayCoreServiceExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<IExtensibilityPipeline, ExtensibilityPipeline>();
-        services.AddSingleton<IIngressInterceptor, JustificationAndBreakGlassInterceptor>();
         services.AddSingleton<IEgressInterceptor, AuditLineageEgressInterceptor>();
 
         return services;
