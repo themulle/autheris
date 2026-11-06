@@ -99,8 +99,7 @@ public sealed class GovernedAggregationTotalsTests
             metaRepo,
             new NullAudit(),
             sqlExecutionService: sql,
-            analyticsOptions: Options.Create(new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } }),
-            dpEngine: null);
+            analyticsOptions: Options.Create(new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } }));
         var query = new AggregationQuery(
             TableId,
             GroupBy: ["department"],

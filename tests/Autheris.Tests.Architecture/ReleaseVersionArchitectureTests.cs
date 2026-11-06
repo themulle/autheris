@@ -21,9 +21,8 @@ public sealed class ReleaseVersionArchitectureTests
         versionEl.Value.Trim().ShouldBe("0.0.0-dev");
         versionEl.Attribute("Condition")?.Value.Trim().ShouldBe("'$(Version)' == ''");
 
-        var csprojFiles = Directory.EnumerateFiles(RepositoryScan.RepoRoot, "*.csproj", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-                     && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+        var csprojFiles = RepositoryScan.EnumerateFiles("", "*.csproj")
+            .Select(p => Path.Combine(RepositoryScan.RepoRoot, p))
             .ToList();
 
         csprojFiles.ShouldNotBeEmpty();

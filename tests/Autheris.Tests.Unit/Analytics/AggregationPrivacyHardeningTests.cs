@@ -146,8 +146,7 @@ public sealed class AggregationPrivacyHardeningTests
             metaRepo,
             audit,
             dataSourceExecutors: [executor],
-            analyticsOptions: Options.Create(options),
-            dpEngine: null);
+            analyticsOptions: Options.Create(options));
         return (service, executor, audit);
     }
 
@@ -751,8 +750,7 @@ public sealed class AggregationPrivacyHardeningTests
             metaRepo,
             new CapturingAuditLogRepository(),
             gatewayExecutionService: gateway,
-            analyticsOptions: Options.Create(new AnalyticsOptions()),
-            dpEngine: null);
+            analyticsOptions: Options.Create(new AnalyticsOptions()));
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
@@ -788,8 +786,7 @@ public sealed class AggregationPrivacyHardeningTests
             analyticsOptions: Options.Create(new AnalyticsOptions
             {
                 Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 3, SuppressionMode = SmallGroupStrategy.MergeIntoOther }
-            }),
-            dpEngine: null);
+            }));
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId,

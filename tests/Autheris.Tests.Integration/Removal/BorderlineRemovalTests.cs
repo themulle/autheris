@@ -23,6 +23,7 @@ public sealed class BorderlineRemovalTests : IClassFixture<WebApplicationFactory
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
             builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");

@@ -147,7 +147,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     {
         var client = _factory.CreateClient();
 
-        foreach (var path in new[] { "/health/live", "/health/ready", "/", "/getting-started", "/odata/v4/$swagger", "/docs" })
+        foreach (var path in new[] { "/health/live", "/health/ready", "/", "/odata/v4/$swagger", "/docs" })
         {
             var response = await client.GetAsync(path);
             response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized, $"GET {path}");
@@ -172,8 +172,6 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [InlineData("/api/webhooks/catalog", 10 * Mb)]
     [InlineData("/api/v1/governance/catalog/webhook/{provider}", 10 * Mb)]
     [InlineData("/api/v1/cdc/events", 10 * Mb)]
-    [InlineData("/api/schema-registry/publish", 10 * Mb)]
-    [InlineData("/api/schema-registry/check", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)
     {

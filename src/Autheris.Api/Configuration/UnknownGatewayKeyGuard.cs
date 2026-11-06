@@ -46,7 +46,7 @@ public static class UnknownGatewayKeyGuard
             }
 
             if (entry.Key.StartsWith("Analytics:Privacy:Noise", StringComparison.OrdinalIgnoreCase) ||
-                entry.Key.StartsWith("Gateway:Analytics:Privacy:Noise", StringComparison.OrdinalIgnoreCase))
+                entry.Key.StartsWith(GatewayConfigurationSchema.Root + ":Analytics:Privacy:Noise", StringComparison.OrdinalIgnoreCase))
             {
                 unknown.Add("Analytics:Privacy:Noise (removed (OD-11); small-group suppression applies)");
                 break;

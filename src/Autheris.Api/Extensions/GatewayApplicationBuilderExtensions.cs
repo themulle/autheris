@@ -100,6 +100,18 @@ public static class GatewayApplicationBuilderExtensions
             new PathString(ResolveMcpBasePath(gatewayOptions)));
         // Issue #447 (SEC-ATR-02): stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
         app.UseMiddleware<IngressTransportMiddleware>();
+        // SEC-SIMPL-30: unmapped/removed routes return 404 NotFound for both authenticated and anonymous callers
+        // before AuthorizationMiddleware's FallbackPolicy challenges unmatched endpoints with 401.
+        app.Use(static (context, next) =>
+        {
+            if (context.GetEndpoint() is null)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return Task.CompletedTask;
+            }
+
+            return next(context);
+        });
         app.UseAuthorization();
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();

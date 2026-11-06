@@ -131,7 +131,6 @@ public sealed class Issue405GroupKeyAuditServiceTests
         Prop(entry, "refusal_reason").ShouldBe("GROUP_KEY_TYPE_NOT_GROUPABLE");
         h.Planner.ReceivedCalls().ShouldBeEmpty();
         h.Sql.ReceivedCalls().ShouldBeEmpty();
-        h.Dp.ReceivedCalls().ShouldBeEmpty();
     }
 
     [Fact]
