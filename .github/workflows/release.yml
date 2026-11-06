@@ -14,8 +14,16 @@ on:
 permissions: {}
 
 jobs:
+  footprint:
+    name: Footprint & CI Duration Budget Gate
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/footprint-budget.yml
+
   build:
     name: Build, Attest & Sign Release Binaries
+    needs: footprint
     runs-on: ubuntu-latest
     permissions:
       contents: read

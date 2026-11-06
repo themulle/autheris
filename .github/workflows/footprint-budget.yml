@@ -1,0 +1,60 @@
+name: Footprint & CI Duration Budget
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  footprint-budget:
+    name: Measure Footprint & Enforce Budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Measure binary and runtime footprint
+        run: bash benchmarks/scripts/footprint.sh
+
+      - name: Measure CI wall-clock duration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash benchmarks/scripts/ci-duration.sh
+
+      - name: Check results against budgets
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse --short=7 HEAD)"
+          DATE="$(date -u +%Y-%m-%d)"
+          bash benchmarks/scripts/check-budgets.sh \
+            benchmarks/budgets.json \
+            "benchmarks/results/footprint-${DATE}-${SHA}.json" \
+            "benchmarks/results/ci-duration-${DATE}-${SHA}.json"
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: footprint-budget-results
+          path: benchmarks/results/*.json
+          retention-days: 90
+          if-no-files-found: error
