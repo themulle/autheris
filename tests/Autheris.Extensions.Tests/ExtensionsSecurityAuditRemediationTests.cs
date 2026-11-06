@@ -15,7 +15,7 @@ using Autheris.Domain.Model;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Dbt;
 using Autheris.Extensions.Lakehouse.Services;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;

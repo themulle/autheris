@@ -16,7 +16,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;

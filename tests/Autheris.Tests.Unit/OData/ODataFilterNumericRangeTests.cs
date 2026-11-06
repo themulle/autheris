@@ -1,8 +1,8 @@
-namespace Autheris.Extensions.Tests;
+namespace Autheris.Tests.Unit.OData;
 
+using Autheris.Application.OData;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
-using Autheris.Extensions.OData;
 using Shouldly;
 using Xunit;
 

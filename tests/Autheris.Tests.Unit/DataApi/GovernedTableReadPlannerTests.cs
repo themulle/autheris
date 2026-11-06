@@ -11,7 +11,7 @@ using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Shouldly;
 using TrinoSqlEngine;
 using Xunit;

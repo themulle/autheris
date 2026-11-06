@@ -43,7 +43,7 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
     [
         ("src/Autheris.Api/Endpoints/McpEndpoints.cs", "new { jsonrpc = \"2.0\"", 1, "JSON-RPC 2.0 section 5.1 error object"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs", "new { error = new { code", 6, "OData v4 JSON section 21 error object"),
-        ("src/Autheris.Extensions/OData/ODataResponseFormatter.cs", "new { error = new { code, message }", 1, "OData v4 JSON section 21 error object"),
+        ("src/Autheris.Application/OData/ODataResponseFormatter.cs", "new { error = new { code, message }", 1, "OData v4 JSON section 21 error object"),
         ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", "new { error = new { code = \"UNAUTHORIZED\"", 1, "OData v4 JSON error object for the OData basic-auth challenge"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", "new { error = new { code = \"NotFound\"", 1, "OData v4 JSON error object (reshaped, fixed message)"),
         ("src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs", "new { error = new { message, type = code", 1, "Iceberg REST catalog ErrorModel {message,type,code}"),

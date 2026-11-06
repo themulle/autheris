@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.OData;
 
 using System.Security.Claims;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Shouldly;
 using Xunit;
 

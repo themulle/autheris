@@ -1,0 +1,7 @@
+# Power BI Desktop (Mashup Engine) Navigator Preview & Query Folding ($filter, $select, $orderby, $top)
+GET /odata/v4/erp_main_orders?$filter=region%20eq%20'EU'%20and%20amount%20ge%20100&$select=id,customer,amount,region&$orderby=id%20asc&$top=2 HTTP/1.1
+Host: localhost
+Accept: application/json;odata.metadata=minimal
+OData-MaxVersion: 4.0
+OData-Version: 4.0
+User-Agent: Microsoft.Data.Mashup (https://go.microsoft.com/fwlink/?LinkID=304225)

@@ -1,0 +1,7 @@
+# Microsoft Excel (Get Data -> From OData Feed) Table Import with $count and $top
+GET /odata/v4/erp/main/orders?$count=true&$top=10&$orderby=id%20asc HTTP/1.1
+Host: localhost
+Accept: application/json;odata.metadata=minimal
+OData-MaxVersion: 4.0
+OData-Version: 4.0
+User-Agent: Microsoft.Data.Mashup; Excel (https://go.microsoft.com/fwlink/?LinkID=304225)

@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.OData;
+namespace Autheris.Application.OData;
 
 using System;
 using System.Collections.Generic;
@@ -51,7 +51,7 @@ public static class ODataFilterParser
         var paramCtx = new SqlGenerationContext(defaultDialect, paramPrefix);
         var defaultPredicate = ast.ToSql(paramCtx);
 
-        // WP-ARC-B-01: the same AST rendered in Trino syntax for the governed compile path. Parameters are numbered in
+        // The same AST rendered in Trino syntax for the governed compile path. Parameters are numbered in
         // render order, so the names (and values) equal those of the dialect rendering above.
         string TrinoBuilder(Func<string, string> columnResolver)
         {

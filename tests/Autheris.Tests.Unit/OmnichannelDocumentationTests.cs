@@ -12,7 +12,7 @@ using Autheris.Application.OData.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Autheris.GraphQL.DynamicTypes;
 using HotChocolate;
 using HotChocolate.Execution;

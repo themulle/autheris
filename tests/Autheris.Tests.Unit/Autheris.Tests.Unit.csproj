@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <None Update="GraphQL\Snapshots\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="OData\Schemas\*.xsd" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

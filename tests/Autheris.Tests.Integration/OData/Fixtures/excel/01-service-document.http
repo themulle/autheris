@@ -1,0 +1,6 @@
+# Microsoft Excel (Get Data -> From OData Feed) Service Document Discovery
+GET /odata/v4 HTTP/1.1
+Host: localhost
+Accept: application/json;odata.metadata=minimal
+OData-MaxVersion: 4.0
+User-Agent: Microsoft.Data.Mashup; Excel (https://go.microsoft.com/fwlink/?LinkID=304225)

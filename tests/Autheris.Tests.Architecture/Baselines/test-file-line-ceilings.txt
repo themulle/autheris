@@ -1,7 +1,6 @@
 # WP-SIMPL-23 baseline: test files exceeding the 800-line ceiling (ratchet: shrink-only)
 tests/Autheris.Extensions.Tests/DbtTests.cs	1114
 tests/Autheris.Extensions.Tests/LakehouseAndCatalogExtensionsSecurityTests.cs	1385
-tests/Autheris.Extensions.Tests/ODataTests.cs	1317
 tests/Autheris.Extensions.Tests/OpenMetadataReconcileAndAlationHardeningTests.cs	988
 tests/Autheris.Tests.Architecture/CutoverArchitectureTests.cs	889
 tests/Autheris.Tests.Architecture/DeletedFeaturesArchitectureTests.cs	900
@@ -21,6 +20,7 @@ tests/Autheris.Tests.Unit/GraphQL/GovernedTreeQueryServiceTests.cs	862
 tests/Autheris.Tests.Unit/Hosting/StartupWarmupExecutorTests.cs	875
 tests/Autheris.Tests.Unit/HostingAuthAndMiddlewareSecurityTests.cs	1034
 tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs	987
+tests/Autheris.Tests.Unit/OData/ODataTests.cs	1317
 tests/Autheris.Tests.Unit/ParquetOutputNegotiationTests.cs	1086
 tests/Autheris.Tests.Unit/ProcedureEndpointTests.cs	1393
 tests/Autheris.Tests.Unit/Procedures/ProcedureExecutionSecurityTests.cs	1068

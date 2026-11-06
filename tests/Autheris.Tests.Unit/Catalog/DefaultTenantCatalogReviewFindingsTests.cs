@@ -19,7 +19,7 @@ using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;

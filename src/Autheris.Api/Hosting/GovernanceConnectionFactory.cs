@@ -33,17 +33,6 @@ public sealed class GovernanceConnectionFactory : IGovernanceConnectionFactory, 
     }
 
     public GovernanceConnectionFactory(
-        IOptions<GatewayOptions> gatewayOptions,
-        IGatewayStatePaths? statePaths = null,
-        IHostEnvironment? environment = null)
-        : this(
-            gatewayOptions?.Value?.GovernanceDb ?? new GovernanceDbOptions(),
-            statePaths,
-            environment)
-    {
-    }
-
-    public GovernanceConnectionFactory(
         GovernanceDbOptions governanceDb,
         IGatewayStatePaths? statePaths = null,
         IHostEnvironment? environment = null)
