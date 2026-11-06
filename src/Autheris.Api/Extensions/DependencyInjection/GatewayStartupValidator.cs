@@ -325,7 +325,18 @@ public static class GatewayStartupValidator
                 OracleConnectionStringPolicy.Validate(connection.ConnectionString, requireTcps: true);
             }
 
-            if (ConnectionSecretPolicy.HasPlaintextPassword(dialect, connection.ConnectionString))
+            bool hasPlaintext;
+            try
+            {
+                hasPlaintext = ConnectionSecretPolicy.HasPlaintextPassword(dialect, connection.ConnectionString);
+            }
+            catch (System.Security.SecurityException) when (dialect == DatabaseDialect.SqlServer)
+            {
+                // Defer malformed connection string handling for SQL Server to ValidateSqlServerWindowsAuth
+                continue;
+            }
+
+            if (hasPlaintext)
             {
                 throw new ValidationException(
                     $"Security violation: {dialect} data source '{name}' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:{name}:PasswordKeyVaultRef).");
