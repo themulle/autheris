@@ -23,7 +23,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     /// <summary>
     /// Bind-parameter budget of the inline (string only) emission: the capability table entry of the dialect, or a fixed ceiling for a
-    /// dialect without an entry (ANSI and the test-only Snowflake generator).
+    /// dialect without an entry (ANSI generator).
     /// </summary>
     private static int InlineParameterBudget(TargetSqlDialect dialect) =>
         DialectCapabilityTable.Default.TryGet(dialect, out var caps) ? caps.MaxBindParameters : 65535;

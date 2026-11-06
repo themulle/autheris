@@ -63,7 +63,8 @@ internal static class GatewayStartupChecks
 
     internal static void OracleRuntime(StartupCheckContext context)
     {
-        GatewayStartupValidator.ValidateOracleRuntime(context.Options, context.Environment, context.Logger);
+        DataSourceDialectValidator.Validate(context.Options);
+        GatewayStartupValidator.ValidateDataSourceSecrets(context.Options, context.Environment, context.Logger);
     }
 
     internal static void SqlServerWindowsAuth(StartupCheckContext context)

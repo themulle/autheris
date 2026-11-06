@@ -95,7 +95,7 @@ public sealed class SqlDialectRegistryTests
     public void GetProvider_UnmappedDialect_ThrowsNotSupportedException()
     {
         Should.Throw<NotSupportedException>(() => SqlDialectRegistry.Default.GetProvider((DatabaseDialect)99));
-        Should.Throw<NotSupportedException>(() => SqlDialectRegistry.Default.GetProvider(TargetSqlDialect.Snowflake));
+        Should.Throw<NotSupportedException>(() => SqlDialectRegistry.Default.GetProvider(TargetSqlDialect.Ansi));
     }
 
     [Fact]

@@ -292,9 +292,8 @@ public class CheckedDmlExecutorTransactionTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Snowflake)]
     [InlineData(TargetSqlDialect.Ansi)]
-    public void CompiledSqlBinders_Snowflake_Throws(TargetSqlDialect dialect)
+    public void CompiledSqlBinders_Ansi_Throws(TargetSqlDialect dialect)
     {
         var ex = Assert.Throws<SqlCompileNotSupportedException>(() => CompiledSqlBinders.For(dialect));
         Assert.Equal(SqlCompileNotSupportedReason.Dialect, ex.Reason);

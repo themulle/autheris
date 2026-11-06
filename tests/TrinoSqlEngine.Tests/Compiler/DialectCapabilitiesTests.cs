@@ -33,7 +33,6 @@ public class DialectCapabilitiesTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Snowflake)]
     [InlineData(TargetSqlDialect.Ansi)]
     [InlineData((TargetSqlDialect)999)]
     public void UnknownOrUnsupportedDialect_Throws(TargetSqlDialect dialect)

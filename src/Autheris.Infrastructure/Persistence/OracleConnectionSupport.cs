@@ -59,18 +59,8 @@ public static class OracleConnectionStringPolicy
     }
 
     /// <summary>True when the connection string carries a literal (non-empty) <c>Password</c>.</summary>
-    public static bool HasPlaintextPassword(string connectionString)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        try
-        {
-            return !string.IsNullOrEmpty(new OracleConnectionStringBuilder(connectionString).Password);
-        }
-        catch (Exception ex) when (ex is ArgumentException or FormatException)
-        {
-            throw new SecurityException("The Oracle connection string is not valid.");
-        }
-    }
+    public static bool HasPlaintextPassword(string connectionString) =>
+        ConnectionSecretPolicy.HasPlaintextPassword(Domain.Common.DatabaseDialect.Oracle, connectionString);
 
     private static bool HasValue(OracleConnectionStringBuilder builder, string key) =>
         builder.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value?.ToString());

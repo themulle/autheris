@@ -325,13 +325,12 @@ public sealed class SqlEmitterContext
         }
     }
 
-    // Dialects without a capability entry (string-only generation for Ansi and Snowflake) keep an explicit marker style; any other
+    // Dialects without a capability entry (string-only generation for Ansi) keep an explicit marker style; any other
     // dialect without an entry fails closed instead of falling back to a silent default.
     private static readonly FrozenDictionary<TargetSqlDialect, ParameterMarkerStyle> UnboundOnlyMarkerStyles =
         new Dictionary<TargetSqlDialect, ParameterMarkerStyle>
         {
-            [TargetSqlDialect.Ansi] = ParameterMarkerStyle.QuestionOrdinal,
-            [TargetSqlDialect.Snowflake] = ParameterMarkerStyle.ColonOrdinal
+            [TargetSqlDialect.Ansi] = ParameterMarkerStyle.QuestionOrdinal
         }.ToFrozenDictionary();
 
     /// <summary>

@@ -8,7 +8,6 @@ public enum TargetSqlDialect
     SqlServer,
     Sqlite,
     DuckDb,
-    Snowflake,
     Oracle,
     Databricks
 }

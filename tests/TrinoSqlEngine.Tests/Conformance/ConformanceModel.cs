@@ -28,7 +28,7 @@ internal sealed record ConformanceFixture(
 
 internal sealed record ConformanceFile(string Dialect, IReadOnlyList<ConformanceFixture> Cases);
 
-/// <summary>The six production dialects of the G2 gate (the Snowflake threshold is dropped from the X1 gate, plan 28.3).</summary>
+/// <summary>The six production dialects of the G2 gate.</summary>
 internal static class ConformanceDialects
 {
     public static readonly IReadOnlyList<(string Name, TargetSqlDialect Dialect)> All = new[]

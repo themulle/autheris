@@ -17,6 +17,7 @@ namespace Autheris.Infrastructure.Persistence;
 public sealed class SqlConnectionFactory : ISqlConnectionFactory
 {
     private readonly bool _requireOracleTcps;
+    private readonly bool _productionSecrets;
     private readonly IKeyVaultSecretProvider? _secrets;
     private readonly IHostEnvironment? _environment;
     private readonly IServiceProvider? _services;
@@ -47,6 +48,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         _logger = services?.GetService<Microsoft.Extensions.Logging.ILogger<SqlConnectionFactory>>();
         _loginBreaker = new SqlLoginCircuitBreaker(timeProvider, _logger);
         _requireOracleTcps = environment is null || !environment.IsDevelopment();
+        _productionSecrets = _requireOracleTcps;
     }
 
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
@@ -96,7 +98,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         {
             // WP-F1: validated before any network traffic.
             OracleConnectionStringPolicy.Validate(connectionString, _requireOracleTcps);
-            connectionString = ResolveOraclePassword(options, connectionString);
+            connectionString = ResolvePassword(dialect, options, connectionString);
         }
         else if (dialect == DatabaseDialect.SqlServer)
         {
@@ -104,14 +106,19 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             _loginBreaker.ThrowIfOpen(options);
             // Issue #102: validate and configure Managed NTLM (System.Net.Security.UseManagedNtlm) / GSSAPI (gss-ntlmssp / libgssapi-krb5-2) before opening.
             connectionString = SqlServerWindowsAuthConfigurator.PrepareConnection(options, _secrets, _environment, out sqlServerSspiProvider);
+            connectionString = ResolvePassword(dialect, options, connectionString);
             LogAuthPathOnce(options);
+        }
+        else if (dialect == DatabaseDialect.PostgreSql)
+        {
+            connectionString = ResolvePassword(dialect, options, connectionString);
         }
 
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
             DatabaseDialect.SqlServer => CreateSqlServerConnection(connectionString, sqlServerSspiProvider),
-            DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
+            DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(connectionString),
             // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
             DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(connectionString)),
             _ => throw UnsupportedProvider(options.Provider)
@@ -275,20 +282,23 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     }
 
     /// <summary>
-    /// CR-ADG-08: outside Development a plaintext password in the connection string is refused (fail closed); the password is
-    /// resolved from the Key Vault reference and never logged.
+    /// CR-ADG-08: outside Development a plaintext password in the connection string is refused (fail closed);
+    /// when configured, the password is resolved from the Key Vault reference and never logged.
     /// </summary>
-    private string ResolveOraclePassword(DataSourceConnectionOptions options, string connectionString)
+    private string ResolvePassword(DatabaseDialect dialect, DataSourceConnectionOptions options, string connectionString)
     {
-        bool plaintext = OracleConnectionStringPolicy.HasPlaintextPassword(connectionString);
-        if (_requireOracleTcps && plaintext)
+        bool plaintext = ConnectionSecretPolicy.HasPlaintextPassword(dialect, connectionString);
+        if (_productionSecrets && plaintext)
         {
-            throw new System.Security.SecurityException("An Oracle connection string with a plaintext password is not permitted outside Development; use PasswordKeyVaultRef.");
+            string message = dialect == DatabaseDialect.Oracle
+                ? "An Oracle connection string with a plaintext password is not permitted outside Development; use PasswordKeyVaultRef."
+                : $"A {dialect} connection string with a plaintext password is not permitted outside Development; use PasswordKeyVaultRef.";
+            throw new System.Security.SecurityException(message);
         }
 
         if (string.IsNullOrWhiteSpace(options.PasswordKeyVaultRef))
         {
-            if (_requireOracleTcps)
+            if (dialect == DatabaseDialect.Oracle && _productionSecrets)
             {
                 throw new System.Security.SecurityException("An Oracle data source needs a Key Vault password reference outside Development.");
             }
@@ -296,9 +306,10 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             return connectionString;
         }
 
-        string password = SecretReferenceResolver.Resolve(_secrets, options.PasswordKeyVaultRef, _environment, allowPlaintextInDevelopment: false, logger: null, "Oracle database password")
-            ?? throw new System.Security.SecurityException("The Oracle database password could not be resolved (fail-closed).");
-        return new OracleConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
+        string description = dialect == DatabaseDialect.Oracle ? "Oracle database password" : $"{dialect} database password";
+        string password = SecretReferenceResolver.Resolve(_secrets, options.PasswordKeyVaultRef, _environment, allowPlaintextInDevelopment: false, logger: null, description)
+            ?? throw new System.Security.SecurityException($"The {dialect} database password could not be resolved (fail-closed).");
+        return ConnectionSecretPolicy.WithPassword(dialect, connectionString, password);
     }
 
     private static SqlConnection CreateSqlServerConnection(string connectionString, SspiContextProvider? sspiContextProvider)

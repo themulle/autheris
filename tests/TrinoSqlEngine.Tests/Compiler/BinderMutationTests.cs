@@ -497,7 +497,6 @@ public class BinderMutationTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Snowflake)]
     [InlineData(TargetSqlDialect.Ansi)]
     public void ForAndCheckedExecutorFor_RefuseDialectsWithoutABinder_WithTheDialectInTheMessage(TargetSqlDialect dialect)
     {
@@ -531,8 +530,8 @@ public class BinderMutationTests
     public void FactoryRefusalSeam_StillRefusesDialectsWithoutABinder()
     {
         using var seam = CompilerHooks.Use(new MutantHooks { DisabledControls = new HashSet<SecurityControl> { SecurityControl.BinderFactoryRefusal } });
-        Assert.Equal("Not yet supported by the governed SQL compiler: Dialect (no binder for dialect Snowflake).",
-            Assert.Throws<SqlCompileNotSupportedException>(() => CompiledSqlBinders.For(TargetSqlDialect.Snowflake)).Message);
+        Assert.Equal("Not yet supported by the governed SQL compiler: Dialect (no binder for dialect Ansi).",
+            Assert.Throws<SqlCompileNotSupportedException>(() => CompiledSqlBinders.For(TargetSqlDialect.Ansi)).Message);
     }
 
     // ---- ColumnBindAdapter ----
