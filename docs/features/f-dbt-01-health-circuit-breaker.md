@@ -1,6 +1,6 @@
 # F-DBT-1: dbt Data Health Circuit Breaker
 
-**Components:** [`IDbtHealthCircuitBreaker.cs`](../../src/Autheris.Application/Dbt/Interfaces/IDbtHealthCircuitBreaker.cs), [`DbtHealthCircuitBreaker.cs`](../../src/Autheris.Application/Dbt/Services/DbtHealthCircuitBreaker.cs)
+**Components:** [`IDbtHealthCircuitBreaker.cs`](../../src/Autheris.Application/Catalog/Semantic/IDbtHealthCircuitBreaker.cs), [`DbtHealthCircuitBreaker.cs`](../../src/Autheris.Extensions/Dbt/DbtHealthCircuitBreaker.cs)
 
 ---
 

@@ -1,6 +1,6 @@
 # F-DBT-2: dbt Model Contract Enforcement & Breaking-Change CI Gate
 
-**Components:** [`IDbtContractValidator.cs`](../../src/Autheris.Application/Dbt/Interfaces/IDbtContractValidator.cs), [`DbtContractValidator.cs`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs)
+**Components:** [`IDbtContractValidator.cs`](../../src/Autheris.Extensions/Dbt/IDbtContractValidator.cs), [`DbtContractValidator.cs`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs)
 
 ---
 

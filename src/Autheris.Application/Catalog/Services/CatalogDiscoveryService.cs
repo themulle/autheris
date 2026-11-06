@@ -771,6 +771,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
                 using var httpClient = new HttpClient(handler);
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
+                using var specRequest = new HttpRequestMessage(HttpMethod.Get, specUri);
+                using var specResponse = await httpClient.SendAsync(specRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
                 specResponse.EnsureSuccessStatusCode();
                 specContent = await BoundedHttpContentReader.ReadStringAsync(specResponse.Content, _maxSpecDownloadBytes, ct).ConfigureAwait(false);
             }

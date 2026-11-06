@@ -101,6 +101,8 @@ public abstract class RelationRepositoryContractTestsBase : IAsyncLifetime
 
     protected int ExecCount(string sql, params (string Name, object Value)[] parameters)
     {
+        using var conn = OpenRaw();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         foreach (var (n, v) in parameters)
         {
@@ -123,6 +125,8 @@ public abstract class RelationRepositoryContractTestsBase : IAsyncLifetime
 
     private List<(string Parent, string Child)> StoredPairs(Guid relationId)
     {
+        using var conn = OpenRaw();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT parent_column, child_column FROM TABLE_RELATION_KEYS WHERE relation_id = @id ORDER BY key_ordinal";
         var p = cmd.CreateParameter();
         p.ParameterName = "@id";

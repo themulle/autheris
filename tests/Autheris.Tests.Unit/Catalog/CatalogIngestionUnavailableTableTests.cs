@@ -66,6 +66,7 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
 
     private long Scalar(string sql)
     {
+        using var cmd = _repo.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(cmd.ExecuteScalar());
     }

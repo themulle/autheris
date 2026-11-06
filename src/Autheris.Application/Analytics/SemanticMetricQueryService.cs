@@ -549,7 +549,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         }
     }
 
-    internal static (DbtSemanticModel Model, List<DbtMeasure> Measures) ResolveModelAndMeasures(
+    public static (DbtSemanticModel Model, List<DbtMeasure> Measures) ResolveModelAndMeasures(
         DbtMetric metric,
         IReadOnlyList<DbtSemanticModel> allModels)
     {

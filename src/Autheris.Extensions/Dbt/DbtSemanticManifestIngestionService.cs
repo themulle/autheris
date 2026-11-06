@@ -75,7 +75,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestJson);
         if (!_tenancy.TryMapKey(tenantId, out _))
         {
-            // SEC-112-13: a tenant without catalog standing is refused before any parsing or side effect.
+            // A tenant without catalog standing is refused before any parsing or side effect.
             throw new GatewayForbiddenException();
         }
 
@@ -147,7 +147,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         return result;
     }
 
-    /// <summary>SEC-112-17: the importer's own scope. The catalog owner (default tenant) is unrestricted (physical metadata); every other tenant sees only tables it holds consents on or that are shared.</summary>
+    /// <summary>The importer's own scope. The catalog owner (default tenant) is unrestricted (physical metadata); every other tenant sees only tables it holds consents on or that are shared.</summary>
     private async Task<Func<TableMetadata, bool>?> BuildVisibilityAsync(TenantId tenantId, CancellationToken ct)
     {
         if (_tenancy.IsCatalogOwner(tenantId))
