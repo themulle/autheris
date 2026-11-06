@@ -4,5 +4,5 @@ Autheris.Application|879
 Autheris.Domain|176
 Autheris.Extensions|62
 Autheris.GraphQL|75
-Autheris.Infrastructure|226
+Autheris.Infrastructure|225
 TrinoSqlEngine|204

@@ -3,7 +3,6 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Diagnostics;
 using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Interfaces;
