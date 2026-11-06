@@ -1,6 +1,6 @@
 # Simplification program: work package specifications
 
-Developer-ready specifications for every work package of the [simplification plan](../2026-11-05-plan-project-simplification.md) ([PRD](../2026-11-05-req-project-simplification.md), [Phase 3 security review](../2026-11-05-sec-project-simplification.md), [ADR-019](../../adr/ADR-019-sql-engine-build-vs-buy.md), [ADR-020](../../adr/ADR-020-unified-authorization-model.md)). Owner decisions OD-1..OD-43 in the PRD (section 2.0) and ADR-020 (Accepted, OD-30) are binding; where a spec and an owner decision disagree, the owner decision wins, and a later owner decision wins over an earlier one.
+Developer-ready specifications for every work package of the [simplification plan](../2026-11-05-plan-project-simplification.md) ([PRD](../2026-11-05-req-project-simplification.md), [Phase 3 security review](../2026-11-05-sec-project-simplification.md), [ADR-019](../../adr/ADR-019-sql-engine-build-vs-buy.md), [ADR-020](../../adr/ADR-020-unified-authorization-model.md)). Owner decisions OD-1..OD-44 in the PRD (section 2.0) and ADR-020 (Accepted, OD-30) are binding; where a spec and an owner decision disagree, the owner decision wins, and a later owner decision wins over an earlier one.
 
 Each spec has the same structure: goal, preconditions, scope, verified current state, TDD implementation steps, exact tests, verification commands, acceptance checklist, PR slicing (<= 400 net added src lines unless `size-exception`), risks and estimate. Specs were written against `docs/plans-project-simplification` @ `63cbb893` (code base `fe0e131d`); re-verify line numbers before editing. Items marked "verify" in a spec must be confirmed by the developer before Phase 4. Migration steps are never hard-coded by number: each WP that changes governance DDL uses the next free forward-only migration step at merge time (per the frozen v1.5.0 base policy).
 
@@ -33,6 +33,7 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 | 3 | Core authorization 4 | [14](WP-SIMPL-14-delete-casbin.md) Casbin deletion | WP-06; WP-46 PR 1-5; WP-43 PR 4 (Envoy); WP-45 PR 1-3 (every `IPolicyEnforcementService` consumer incl. Envoy ext_authz calls the decision point); not in parallel with WP-46 or WP-45 PR 4 |
 | 3 | Core authorization 4 | [26](WP-SIMPL-26-pilot-module-odata.md) OData core hardening (OD-24) | WP-46 merged; must merge before WP-29 |
 | 3 | Persistence lane | [42](WP-SIMPL-42-usage-accounting-users-groups.md) usage accounting (replaces FinOps) | PR-1 any time; PR-2+ after WP-11, WP-19, WP-20a-20d; PR-3b after WP-46 PR 1 (grant id on the decision record); PR-7 after WP-37 |
+| 5 | After the feature freeze (Stage 3 exit) | [49](WP-SIMPL-49-virtual-views.md) virtual views (OD-44) | WP-46, 47, 48, 41, 42, 44, 21, 20 merged; not under `freeze-exception` |
 
 `[WF]` = changes GitHub workflows; approved by the owner in the defined bundles (OD-17).
 
@@ -94,6 +95,10 @@ New work package [WP-SIMPL-48](WP-SIMPL-48-row-policies-dynamic-coverage.md); am
 - **OD-41:** per-cell column state when overlapping grants differ in columns or masking: one signature compiles to a plain `WHERE`, several signatures to flags computed once plus `CASE`; no `UNION ALL`.
 - **OD-42:** the decision record lists every contributing grant; audit and usage count the access for each grant in full, user/group/tenant totals once (revises R6).
 - **OD-43:** non-blocking approval-time hint (redundant grant, empty intersection, future objects included) and an effective-access report with provenance.
+
+## Owner decision OD-44 (2026-11-06)
+
+- **OD-44:** virtual views: data owners or GovernanceAdmins define read-only views as SQL in Autheris (nothing is created in the source); active only after the owners of every base object approved the exact definition; catalog objects in the reserved data source `views`, granted, discovered, audited and metered like tables on every transport; definer semantics (a view grant suffices); multi-source views run in the DuckDB federation; PII by lineage, Masked unless base owners approved Clear. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-virtual-views.md).
 
 ## Security advisories
 

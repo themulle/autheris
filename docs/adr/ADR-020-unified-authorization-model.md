@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted by the owner on 2026-11-05 (OD-30). This ADR revises OD-7 (ReBAC enforcement; advisory GHSA-78j7-3gh6-7cqx, details in the private advisory) and replaces SEC-SIMPL-85; implementation in WP-SIMPL-46. Amended by OD-32..OD-35 (access-profile assignments materialize grant records; owner grant records; independent write grants; write enforcement in the shared pipeline) and by OD-38..OD-43 (named row policies at two levels, dynamic object coverage, per-cell masking, every contributing grant recorded, transparency; see "Amendment 2026-11-06" below; implementation in WP-SIMPL-48).
+Accepted by the owner on 2026-11-05 (OD-30). This ADR revises OD-7 (ReBAC enforcement; advisory GHSA-78j7-3gh6-7cqx, details in the private advisory) and replaces SEC-SIMPL-85; implementation in WP-SIMPL-46. Amended by OD-32..OD-35 (access-profile assignments materialize grant records; owner grant records; independent write grants; write enforcement in the shared pipeline) and by OD-38..OD-43 (named row policies at two levels, dynamic object coverage, per-cell masking, every contributing grant recorded, transparency; see "Amendment 2026-11-06" below; implementation in WP-SIMPL-48) and by OD-44 (virtual views with definer semantics, WP-SIMPL-49).
 
 ## Context
 
@@ -70,7 +70,7 @@ Adopt **option B**.
 7. **Casbin is removed without a native replacement on the data path** (WP-SIMPL-14 re-scoped). Its policy simulation is replaced by the PDP explain API.
 8. **Explainability.** One explain API answers "why can X see Y" and one owner view answers "who can see Y", both from the PDP trace and the grant store.
 
-## Amendment 2026-11-06 (OD-38..OD-43)
+## Amendment 2026-11-06 (OD-38..OD-44)
 
 - **Row policies (OD-38).** Row restrictions that read other tables are named, approved row policies (the existing virtual-filter definition model), structured or SQL; SQL policies need the approval of the data owner of every table they read. Key columns may be composite and are compared pair-wise. Evaluation is `Live` (correlated semi-join, same data source) or `KeySet` (cached keys bound as parameters; mandatory across data sources); failure, timeout or overflow deny. Grants reference policies with typed parameter values; free SQL in grants is removed.
 - **Two levels (OD-39).** Grant row scopes are ORed across the subject's grants (a filtered group grant and an unfiltered group grant of the same user yield all rows, by intent). Hard row policies are assigned to a user or AD group, are subject-bound, are ANDed after the grant union and cannot be bypassed by any grant. Objects without the key columns are `Deny` by default, `Skip` only explicitly.
@@ -78,8 +78,9 @@ Adopt **option B**.
 - **Per-cell masking (OD-41).** Grants are grouped by column signature; one signature compiles to a plain `WHERE`; several signatures compute each scope once as a flag and decide each cell with `CASE`. No `UNION ALL` rewrite.
 - **Attribution (OD-42).** The decision record lists every contributing grant; audit and usage count the access for each of them. `AuthorizingGrant` is not used.
 - **Transparency (OD-43).** Non-blocking approval-time hint (redundant grant, empty intersection) and an effective-access report with provenance (group, grant, row policy), without predicate or parameter values of other subjects.
+- **Virtual views (OD-44).** A view defined in Autheris and approved by the owners of every base object is an object of its own (reserved data source `views`). The decision point decides it with the caller's grants on the view only (definer semantics); an explicit deny of the caller on any base object denies the view; PII columns propagate by lineage and stay Masked unless the base owners approved Clear and the view grant has Clear. Implementation after the feature freeze (WP-SIMPL-49).
 
-Precedence is unchanged: precondition > explicit deny (including hard-policy denies) > grant (row-scope union, then hard policies, then narrowing inputs) > default deny.
+Precedence is unchanged: precondition > explicit deny (including hard-policy denies and base-object denies of a view) > grant (row-scope union, then hard policies, then narrowing inputs) > default deny.
 
 ## Consequences
 
@@ -99,6 +100,6 @@ Precedence is unchanged: precondition > explicit deny (including hard-policy den
 - PDP p95 latency above 5 ms per object on the parity benchmark after caching.
 
 ## References
-- PRD `docs/plans/2026-11-05-req-project-simplification.md` OD-7, OD-9, OD-19, OD-21, OD-22, OD-26, OD-27, OD-29, OD-32..OD-43
+- PRD `docs/plans/2026-11-05-req-project-simplification.md` OD-7, OD-9, OD-19, OD-21, OD-22, OD-26, OD-27, OD-29, OD-32..OD-44
 - Phase 3 `docs/plans/2026-11-05-sec-project-simplification.md` SEC-SIMPL-30, 31, 33, 85
-- WP-SIMPL-14, 36, 41, 42, 43, 45, 46, 47, 48
+- WP-SIMPL-14, 36, 41, 42, 43, 45, 46, 47, 48, 49
