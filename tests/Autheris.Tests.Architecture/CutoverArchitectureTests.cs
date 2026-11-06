@@ -541,7 +541,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Services.SqlTableReadExecutor", "ExecuteAsync", true),
         ("Autheris.Application.Services.GatewayExecutionService", "ExecuteTablePageAsync", true),
         ("Autheris.Application.Services.GatewayExecutionService", "ExecuteTableQueryAsync", true),
-        ("Autheris.Extensions.OData.ODataHandler", "ExecuteEntitySetQueryAsync", true),
+        ("Autheris.Application.OData.ODataHandler", "ExecuteEntitySetQueryAsync", true),
         ("Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor", "ExecuteOperationAsync", true)
     ];
 

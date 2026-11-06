@@ -1,4 +1,7 @@
+using System;
+using System.Linq;
 using Autheris.Api.Mcp;
+using Autheris.Extensions;
 using Autheris.Infrastructure.Docs;
 using NetArchTest.Rules;
 using Shouldly;
@@ -11,6 +14,8 @@ namespace Autheris.Tests.Architecture;
 /// </summary>
 public sealed class PackageBoundaryArchitectureTests
 {
+    private static readonly string LegacyODataNamespace = string.Concat("Autheris.Extensions", ".OData");
+
     [Fact]
     public void Application_ShouldNotHaveDependencyOnPrometheus()
     {
@@ -88,5 +93,16 @@ public sealed class PackageBoundaryArchitectureTests
         var unexpected = actualFiles.Where(f => !allowedFiles.Contains(f)).ToList();
         unexpected.ShouldBeEmpty(
             "New Autheris.Api files referencing Autheris.Extensions are forbidden:\n" + string.Join("\n", unexpected));
+    }
+
+    [Fact]
+    public void Extensions_has_no_OData_namespace()
+    {
+        var odataTypes = typeof(ExtensionsServiceCollectionExtensions).Assembly
+            .GetTypes()
+            .Where(t => t.Namespace != null && t.Namespace.StartsWith(LegacyODataNamespace, StringComparison.Ordinal))
+            .ToArray();
+
+        odataTypes.ShouldBeEmpty("OData core lives in Autheris.Application.OData, not Autheris.Extensions.");
     }
 }

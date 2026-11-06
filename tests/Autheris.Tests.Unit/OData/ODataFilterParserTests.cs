@@ -4,7 +4,7 @@ using System;
 using System.Linq;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Shouldly;
 using Xunit;
 

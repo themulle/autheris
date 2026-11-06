@@ -20,7 +20,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Autheris.Tests.Unit.Catalog;
 using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;

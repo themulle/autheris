@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.OData;
+namespace Autheris.Application.OData;
 
 using System.Collections.Generic;
 using System.Security.Claims;

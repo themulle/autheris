@@ -4,8 +4,6 @@ src/Autheris.Api/Endpoints/CatalogEndpoints.cs
 src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs
 src/Autheris.Api/Endpoints/DbtEndpoints.cs
 src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs
-src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs
-src/Autheris.Api/Endpoints/ODataEndpoints.cs
 src/Autheris.Api/Endpoints/StreamingCdcEndpoints.cs
 src/Autheris.Api/Extensions/DependencyInjection/GatewayAnalyticsServiceExtensions.cs
 src/Autheris.Api/Extensions/DependencyInjection/GatewayCatalogServiceExtensions.cs

@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Domain.Common;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using NSubstitute;

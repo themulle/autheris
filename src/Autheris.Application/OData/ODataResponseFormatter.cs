@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.OData;
+namespace Autheris.Application.OData;
 
 using System;
 using System.Collections.Generic;

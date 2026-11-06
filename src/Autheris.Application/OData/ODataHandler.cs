@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.OData;
+namespace Autheris.Application.OData;
 
 using System;
 using System.Collections.Generic;
@@ -70,8 +70,8 @@ public sealed partial class ODataHandler(
 
         var isOwner = _tenantResolver?.IsDefaultTenant(tenant) == true;
         // DT-SC-08: the owner's widening is physical metadata only; other tenants' virtual tables are never candidates (shared rule).
-        // Issue #447 REQ-ATR-08: a source that does not allow the ingress transport is not a candidate (hidden, never an error);
-        // no ingress leaves the list unfiltered. The cached documents are keyed by the filtered tables (SEC-ATR-07).
+        // Issue #447: a source that does not allow the ingress transport is not a candidate (hidden, never an error);
+        // no ingress leaves the list unfiltered. The cached documents are keyed by the filtered tables.
         var transport = _ingress?.Current ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None;
         return Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(allTables, tenant)
             .Where(t => t.Table.IsActive &&
@@ -227,8 +227,8 @@ public sealed partial class ODataHandler(
     }
 
     /// <summary>
-    /// The authorized-tables entry also depends on the transports the sources allow (they hide tables, REQ-ATR-08), so the key carries the
-    /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447, REQ-ATR-10).
+    /// The authorized-tables entry also depends on the transports the sources allow (they hide tables), so the key carries the
+    /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447).
     /// </summary>
     private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal) =>
         BuildAuthorizedTablesCacheKey(principal) is { } key ? $"{key}:g{_transportResolver?.Generation ?? 0}" : null;
@@ -283,7 +283,7 @@ public sealed partial class ODataHandler(
                     continue;
                 }
 
-                // SD-4 / SEC-94-03: keys, indexes and Meta marker keys that touch a hidden column are dropped as a whole.
+                // SD-4: keys, indexes and Meta marker keys that touch a hidden column are dropped as a whole.
                 var filteredMeta = Autheris.Application.DataSources.Services.TableKeyVisibility.Restrict(tableMeta, allowedColumns);
 
                 authorizedTables.Add(filteredMeta);
@@ -522,7 +522,7 @@ public sealed partial class ODataHandler(
         }
         catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
         {
-            // Issue #447 (REQ-ATR-04): stable code and fixed text, also in verbose mode (no source name, no sub-reason).
+            // Issue #447: stable code and fixed text, also in verbose mode (no source name, no sub-reason).
             _logger.LogWarning("OData query for {Table} refused: the data source does not allow this transport.", table);
             const string transportDenied = "Access to the data source is not allowed over this transport.";
             return new ODataQueryResult(
@@ -627,7 +627,7 @@ public sealed partial class ODataHandler(
     {
         var cleanRoot = serviceRootUrl.TrimEnd('/');
         var sb = new System.Text.StringBuilder();
-        // SEC-94-14: every path segment is escaped, so a name with '/', '?' or '#' cannot alter the link structure.
+        // Every path segment is escaped, so a name with '/', '?' or '#' cannot alter the link structure.
         sb.Append(cleanRoot).Append('/')
           .Append(Uri.EscapeDataString(table.Domain)).Append('/')
           .Append(Uri.EscapeDataString(table.Schema)).Append('/')

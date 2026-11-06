@@ -1,4 +1,4 @@
-namespace Autheris.Extensions.Tests;
+namespace Autheris.Tests.Unit.OData;
 
 using System;
 using System.Collections.Generic;
@@ -7,10 +7,10 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.OData;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Autheris.Extensions.OData;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
@@ -68,8 +68,8 @@ public sealed class ODataTests
     public void ODataCsdlGenerator_MetadataConformsToOasisXsdSchemas()
     {
         var schemas = new System.Xml.Schema.XmlSchemaSet();
-        var edmPath = Path.Combine(AppContext.BaseDirectory, "Schemas", "edm.xsd");
-        var edmxPath = Path.Combine(AppContext.BaseDirectory, "Schemas", "edmx.xsd");
+        var edmPath = Path.Combine(AppContext.BaseDirectory, "OData", "Schemas", "edm.xsd");
+        var edmxPath = Path.Combine(AppContext.BaseDirectory, "OData", "Schemas", "edmx.xsd");
 
         File.Exists(edmPath).ShouldBeTrue();
         File.Exists(edmxPath).ShouldBeTrue();

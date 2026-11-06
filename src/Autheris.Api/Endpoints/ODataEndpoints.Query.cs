@@ -12,7 +12,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Serialization;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -23,12 +23,26 @@ public static partial class ODataEndpoints
     /// Befund 4a.2 & SR15-31: Support single-segment entity set name path (/odata/v4/lwetem_prod_md_crane) as an alias
     /// matching the OData 4.0 CSDL EntitySet name, strictly isolated to the caller's tenant catalog.
     /// </summary>
+    internal static bool IsWriteMethod(string? method) =>
+        HttpMethods.IsPost(method ?? string.Empty) ||
+        HttpMethods.IsPut(method ?? string.Empty) ||
+        HttpMethods.IsPatch(method ?? string.Empty) ||
+        HttpMethods.IsDelete(method ?? string.Empty) ||
+        string.Equals(method, "MERGE", StringComparison.OrdinalIgnoreCase);
+
     internal static async Task<IResult> HandleFlatEntitySetRequestAsync(
         string entitySetName,
         IODataHandler odataHandler,
         ITableMetadataRepository metadataRepo,
         HttpContext context)
     {
+        if (IsWriteMethod(context.Request.Method) || string.Equals(entitySetName, "$batch", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.Headers["OData-Version"] = "4.0";
+            context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
+            return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
+        }
+
         if (entitySetName.StartsWith('$'))
         {
             return Results.NotFound();
@@ -90,6 +104,12 @@ public static partial class ODataEndpoints
         HttpContext context)
     {
         context.Response.Headers["OData-Version"] = "4.0";
+        if (IsWriteMethod(context.Request.Method))
+        {
+            context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
+            return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
+        }
+
         var serviceRoot = ResolveServiceRoot(context);
         var tableId = new TableIdentifier(domain, schema, tableName);
 

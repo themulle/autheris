@@ -7,6 +7,7 @@ using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Observability;
+using Autheris.Application.OData;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
 using Autheris.Application.Runtime.ResourceGroups;
@@ -49,6 +50,7 @@ public static class GatewayCoreServiceExtensions
             IncludeWebSqlSpec = gatewayOptions.WebSql.Enabled
         });
         services.AddSingleton<IDynamicOpenApiGenerator, DynamicOpenApiGenerator>();
+        services.AddODataIntegration(gatewayOptions);
 
         // Resource Groups & Workload Isolation (F-PERF-08)
         services.AddSingleton<IResourceGroupManager, ResourceGroupManager>();
