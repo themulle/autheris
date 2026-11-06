@@ -33,6 +33,7 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:TrafficShadowing:TimeoutMs", "2000")]
     [InlineData("Gateway:TrafficShadowing:StripPiiHeaders", "true")]
     [InlineData("Gateway:Arrow:EnableFlightSql", "true")]
+    [InlineData("Gateway:Arrow:FlightTicketSigningKey", "super-secret-hmac-key-for-tickets-32bytes")]
     [InlineData("Gateway:RowLimits:FlightSql", "true")]
     [InlineData("Gateway:RowLimits:FlightSql:DefaultMaxRows", "1000")]
     [InlineData("Gateway:RowLimits:FlightSql:MaxAllowedRows", "5000")]
@@ -82,6 +83,7 @@ public sealed class RemovedConfigKeysTests
 
     [Theory]
     [InlineData("Gateway:Arrow:EnableFlightSql")]
+    [InlineData("Gateway:Arrow:FlightTicketSigningKey")]
     [InlineData("Gateway:RowLimits:FlightSql")]
     public void FlightSql_keys_fail_startup(string key)
     {

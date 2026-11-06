@@ -86,7 +86,6 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             b.UseSetting("Gateway:Arrow:Enabled", "true");
-            b.UseSetting("Gateway:Arrow:FlightTicketSigningKey", SigningKey);
             b.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
             b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
             b.ConfigureAppConfiguration((_, cfg) => cfg.Add(new ReloadableConfigSource(config)));

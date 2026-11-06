@@ -100,8 +100,8 @@ Autheris encompasses **57+ enterprise features**, documented in [`docs/features/
   - Native support for standard OData query options: `$select`, `$filter`, `$orderby` multi-column sorting, `$top`, `$skip`, and `$count` (`?$count=true` or `/table/$count`).
   - Mandatory `OData-Version: 4.0` response header for seamless Excel, PowerQuery, and Power BI compatibility.
   - Dynamic OpenAPI 3.1 specification (`/odata/v4/$openapi`) with integrated offline-capable Swagger UI (`/docs`, `/ui/swagger`).
-- **Arrow IPC over HTTP & Binary Egress ([`F-DATA-04`](docs/features/f-data-04-arrow-flight-sql.md))**:
-  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Arrow IPC over HTTP (`/api/v1/flight/sql/*`) and Arrow Binary Export (`/api/v1/export/arrow`).
+- **Arrow IPC over HTTP & Binary Egress**:
+  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Arrow Binary Export (`/api/v1/export/arrow`).
 - **Hierarchical Apache Parquet Binary Egress ([`F-DATA-01`](docs/features/f-data-01-parquet-egress.md))**:
   - On-the-fly serialization to authentic, Snappy-compressed Parquet files across all data channels (GraphQL, WebSQL, SQL endpoints, OData) when requested via `Accept: application/vnd.apache.parquet`.
   - Strict Zero-Trust guarantee: Parquet serialization occurs post-RLS, post-masking, and post-consent — files contain only authorized, sanitized data.

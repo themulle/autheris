@@ -70,7 +70,6 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
             b.UseSetting("Gateway:SqlEndpoints:Directory", queries);
             b.UseSetting("Gateway:SqlEndpoints:EnableHotReload", "false");
             b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
-            b.UseSetting("Gateway:Arrow:FlightTicketSigningKey", "0123456789abcdef0123456789abcdef");
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
         });

@@ -45,7 +45,6 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DATA-01** | Hierarchical Parquet Egress & Nested Query Serialization | [f-data-01-parquet-egress.md](f-data-01-parquet-egress.md) |
 | **F-DATA-02** | Governed WebSQL Engine | [f-data-02-governed-websql.md](f-data-02-governed-websql.md) |
 | **F-DATA-03** | Embedded In-Memory OLAP via DuckDB.NET | [f-data-03-duckdb-olap.md](f-data-03-duckdb-olap.md) |
-| **F-DATA-04** | HTTP endpoints returning Arrow IPC | [f-data-04-arrow-flight-sql.md](f-data-04-arrow-flight-sql.md) |
 | **F-DATA-05** | Apache Iceberg REST Catalog (IRC) & Dynamic STS Credential Vending | [f-data-05-iceberg-rest-catalog.md](f-data-05-iceberg-rest-catalog.md) |
 | **F-DATA-06** | Governed REST Data API & System Virtual Tables (`governance.system.*`) | [f-data-06-governed-rest-data-api.md](f-data-06-governed-rest-data-api.md) |
 | **F-DATA-07** | Asynchronous Query Job Engine & Sandbox Storage | [f-data-07-async-query-jobs.md](f-data-07-async-query-jobs.md) |

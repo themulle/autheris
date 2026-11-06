@@ -26,10 +26,4 @@ public sealed class ArrowExportOptions
     public bool Enabled { get; init; } = true;
     public int BatchSize { get; init; } = 64000;
     public int MaxExportRows { get; init; } = 1000000;
-
-    /// <summary>
-    /// SEC (Low): dedicated HMAC key (&gt;= 32 characters) for signing Flight SQL tickets. When empty, a random per-process key
-    /// is used (tickets do not survive restarts or work across replicas) and a warning is logged.
-    /// </summary>
-    public string? FlightTicketSigningKey { get; init; }
 }
