@@ -157,7 +157,7 @@ public sealed partial class CallerAttributeArchitectureTests
             ["src/Autheris.Application/VirtualFilters/Federation/VirtualFilterFederationPlanner.cs"] = "planner of the gateway-side enforcement: presence check only",
             ["src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs"] = "producer: marks CallerAttributesTextConstant",
             ["src/Autheris.Domain/Interfaces/TableAccessDecision.cs"] = "the decision itself",
-            ["src/Autheris.Application/Policy/IAccessDecisionPoint.cs"] = "forwards MandatoryRowPredicateSql into AccessDecision so transports without row-filter enforcement can deny"
+            ["src/Autheris.Application/Policy/AccessDecisionPoint.cs"] = "mandatory row filter presence check for Iceberg/data source access decisions"
         };
 
         var readers = Sources("src")

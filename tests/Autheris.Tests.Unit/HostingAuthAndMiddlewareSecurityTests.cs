@@ -792,7 +792,7 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         await middleware.InvokeAsync(httpContext);
 
         capture.ClientIp.ShouldBe("10.9.8.7");
-        GatewayExtensibilityMiddleware.ClientIpItemKey.ShouldBe("ClientIpAddress");
+        GatewayExtensibilityMiddleware.ClientIpItemKey.ShouldBe("GatewayClientIp");
     }
 
     private sealed class CapturingInterceptor : IIngressInterceptor

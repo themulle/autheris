@@ -50,7 +50,8 @@ public sealed class OptionsAuditTests
 
         foreach (var entry in removed)
         {
-            if (!SecurityKeyword.IsMatch(entry))
+            var relative = entry.StartsWith("Autheris.", StringComparison.Ordinal) ? entry["Autheris.".Length..] : entry;
+            if (!SecurityKeyword.IsMatch(relative))
             {
                 continue;
             }

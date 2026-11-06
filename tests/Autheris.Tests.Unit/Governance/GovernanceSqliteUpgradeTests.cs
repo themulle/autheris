@@ -106,10 +106,10 @@ public sealed class GovernanceSqliteUpgradeTests
         consents.ShouldBe(1);
         audit.ShouldBeGreaterThanOrEqualTo(25);
 
-        var step = ProbeStep(6);
+        var step = ProbeStep(7);
         await new SqliteGovernanceMigrationRunner(repository, options) { AdditionalSteps = [step] }.RunAsync();
 
-        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 6 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
+        Scalar(repository, $"SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 7 AND name = '{StepName}' AND checksum = '{step.Checksum}'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM pragma_table_info('CONSENTS') WHERE name = 'probe_388'").ShouldBe(1);
         Scalar(repository, "SELECT COUNT(*) FROM CONSENTS").ShouldBe(consents);
         Scalar(repository, "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(audit);

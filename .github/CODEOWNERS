@@ -151,7 +151,9 @@ src/Autheris.Application/Docs/  @themulle
 
 # Modules
 # subsystem: modules | primary: @themulle | backup: vacant
-# modules/<Name>/ @themulle
+modules/Autheris.Modules.Lakehouse/        @themulle
+modules/Autheris.Modules.Lakehouse.Tests/  @themulle
+src/Autheris.Modules.Abstractions/        @themulle
 
 # Security (SEC-SIMPL-71)
 # security: SEC-SIMPL-71 | primary: @themulle | backup: vacant

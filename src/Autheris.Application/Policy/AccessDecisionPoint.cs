@@ -34,6 +34,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
     private readonly IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
 
     public AccessDecisionPoint(
@@ -46,6 +47,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         IRebacEvaluator? rebacEvaluator = null,
         ITableMetadataRepository? metadataRepo = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        TimeProvider? timeProvider = null,
         ILogger<AccessDecisionPoint>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -58,6 +60,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         _rebacEvaluator = rebacEvaluator;
         _metadataRepo = metadataRepo;
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<AccessDecisionPoint>.Instance;
     }
 
@@ -110,7 +113,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         var groupSids = principal.GetGroupSids();
         var roles = principal.GetUserRoles();
         var allSubjects = groupSids.Append(userSid).ToList();
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var tenant = !string.IsNullOrWhiteSpace(request.Tenant.Value) ? request.Tenant : new TenantId(tenantId);
         var loaded = await _consentRepo.GetActiveConsentsForSubjectsAsync(allSubjects, tableId, now, tenant, cancellationToken).ConfigureAwait(false);
 

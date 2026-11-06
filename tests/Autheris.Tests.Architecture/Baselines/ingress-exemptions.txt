@@ -157,7 +157,6 @@ scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exem
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Caching/PolicyEpochGuard.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Services/CatalogVisibilityMetrics.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs | exempt: approval bookkeeping; reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
 scope src/Autheris.Application/Runtime/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Runtime/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data

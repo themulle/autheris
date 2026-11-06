@@ -203,8 +203,8 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         var response = await next(invocationContext).ConfigureAwait(false);
 
         // Emit audit entry when IAuditWriter is registered in RequestServices
-        var auditWriter = httpContext.RequestServices.GetService<IAuditWriter>();
-        if (auditWriter is not null)
+        var writer = httpContext.RequestServices.GetService<IAuditWriter>();
+        if (writer is not null)
         {
             var sidValue = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
                 ?? user.Identity?.Name
@@ -219,7 +219,7 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
                 Decision = "ALLOW",
                 DetailsJson = $"{{\"module\":\"{moduleId}\",\"path\":\"{httpContext.Request.Path.Value}\"}}",
             };
-            await auditWriter.RecordBestEffortAsync(entry, httpContext.RequestAborted).ConfigureAwait(false);
+            await writer.RecordBestEffortAsync(entry, httpContext.RequestAborted).ConfigureAwait(false);
         }
 
         return response;

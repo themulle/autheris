@@ -26,7 +26,8 @@ public sealed class AuditLineageEgressInterceptor : IEgressInterceptor
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["X-Governance-Status"] = "Evaluated"
+            ["X-Governance-Status"] = "Evaluated",
+            ["X-Governance-Mode"] = "Standard-Zero-Trust"
         };
 
         // F-OPS-02: Resolve distributed W3C TraceId for correlating APM traces with WORM audit

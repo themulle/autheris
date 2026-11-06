@@ -126,10 +126,10 @@ public static class IcebergRestCatalogEndpoints
         var (status, code, message) = ex switch
         {
             TransportNotAllowedException => (StatusCodes.Status403Forbidden, "TRANSPORT_NOT_ALLOWED", "This data source is not exposed on the requested transport."),
-            SecurityException or UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "ACCESS_DENIED", "Access to the requested Iceberg resource was denied."),
-            ArgumentException or FormatException or InvalidDataException => (StatusCodes.Status400BadRequest, "BAD_REQUEST", "The Iceberg catalog request is invalid."),
-            NotSupportedException => (StatusCodes.Status501NotImplemented, "NOT_IMPLEMENTED", "The requested Iceberg catalog operation is not supported."),
-            _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An internal error occurred.")
+            SecurityException or UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "ACCESS_DENIED", "Access denied."),
+            ArgumentException or FormatException or InvalidDataException => (StatusCodes.Status400BadRequest, "BAD_REQUEST", "The request is invalid."),
+            NotSupportedException => (StatusCodes.Status501NotImplemented, "NOT_IMPLEMENTED", "Not implemented."),
+            _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.")
         };
 
         LogFailure(context, status, code, ex);
