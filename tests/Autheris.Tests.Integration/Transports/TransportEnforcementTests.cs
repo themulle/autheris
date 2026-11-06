@@ -86,7 +86,6 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             b.UseSetting("Gateway:Arrow:Enabled", "true");
-            b.UseSetting("Gateway:Arrow:EnableFlightSql", "true");
             b.UseSetting("Gateway:Arrow:FlightTicketSigningKey", SigningKey);
             b.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
             b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
@@ -574,46 +573,6 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         (await client.GetAsync("/odata/v4/src_s/main/s_items/$count")).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
-    // ----------------------------------------------------------------------------------------------------------------- Flight
-
-    private static async Task<JsonElement> FlightTicketAsync(HttpClient client, string sql)
-    {
-        var info = await client.PostAsJsonAsync("/api/v1/flight/sql/info", new { query = sql });
-        info.StatusCode.ShouldBe(HttpStatusCode.OK, await BodyAsync(info));
-        using var doc = JsonDocument.Parse(await BodyAsync(info));
-        return doc.RootElement.GetProperty("ticket").Clone();
-    }
-
-    private static Task<HttpResponseMessage> FlightStreamAsync(HttpClient client, JsonElement ticket) =>
-        client.PostAsync("/api/v1/flight/sql/stream", new StringContent(ticket.GetRawText(), Encoding.UTF8, "application/json"));
-
-    [Fact]
-    public async Task Flight_Stream_Denied()
-    {
-        await EnsureSeededAsync();
-        using var client = Client();
-        const string sql = "SELECT id, name FROM src_s.main.s_items";
-
-        SourceSAllows("ArrowFlight");
-        var ticket = await FlightTicketAsync(client, sql);
-
-        SourceSAllows("WebSql, Rest, GraphQL, OData, Mcp, Trino");
-        var before = await TakeAsync();
-        await AssertForbiddenCodeAsync(await FlightStreamAsync(client, ticket));
-        await AssertDeniedOnceAsync(before);
-
-        SourceSAllows("ArrowFlight");
-        var control = await FlightStreamAsync(client, ticket);
-        control.StatusCode.ShouldBe(HttpStatusCode.OK);
-        Encoding.UTF8.GetString(await control.Content.ReadAsByteArrayAsync()).ShouldContain("row-one");
-    }
-
-    [Fact]
-    public async Task Flight_TicketRedeemAfterReload_Denied()
-    {
-        await Flight_Stream_Denied();
-    }
-
     // ------------------------------------------------------------------------------------------------------------------ MCP
 
     [Fact]
@@ -731,8 +690,6 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         var sField = await GraphQlRootFieldAsync(client, "s_items");
         var gql = (await GraphQlAsync(client, $"{{ {sField}(first: 1) {{ id }} }}")).ToString();
         Expect(gql.Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "GraphQL");
-        var ticket = await FlightTicketAsync(client, "SELECT id FROM src_s.main.s_items");
-        Expect((await BodyAsync(await FlightStreamAsync(client, ticket))).Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "ArrowFlight");
     }
 
     // ---------------------------------------------------------------------------------------- review round: sample rows, change detection

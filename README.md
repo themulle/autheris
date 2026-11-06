@@ -80,7 +80,7 @@ Autheris encompasses **57+ enterprise features**, documented in [`docs/features/
 - **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
   - Secure HTTP-based SQL execution (`POST /api/v1/sql` & `/api/sql`) modeled after Trino/Presto — eliminates open database ports (1433/5432) across the corporate network.
   - AST-Level Security Linter & Rewriter (ANTLR4-based): Enforces strict read-only semantics (`SELECT`), rejects multiple statements (`;`), comments, and system functions (`@@`).
-  - Granular Transport Row Limits (`RowLimits`): Fine-tuned default and maximum row budgets per transport (`Trino`, `Parquet`, `SqlEndpoints`, `ArrowExport`, `FlightSql`) with accurate truncation reporting (only reported as truncated when rows were actually severed).
+  - Granular Transport Row Limits (`RowLimits`): Fine-tuned default and maximum row budgets per transport (`Trino`, `Parquet`, `SqlEndpoints`, `ArrowExport`) with accurate truncation reporting (only reported as truncated when rows were actually severed).
   - DML Guardrails (`WebSql.AllowDml`): DML requires dedicated `WebSql.DmlWriterRoles`; unfiltered `UPDATE`/`DELETE` queries (`WHERE 1=1`, `WHERE true`) are strictly rejected (`RejectUnfilteredDml`); automated transaction limits with rollback on exceeding `WebSql.MaxAffectedRows` (default: 1,000 rows); cryptographic audit logging of all DML events.
 - **Declarative SQL-to-API REST Engine & Auto-OpenAPI 3.0 ([`F-SQL-01`](docs/features/f-sql-01-declarative-sql-endpoints.md))**:
   - Zero-code REST endpoints directly from versioned `.sql` files (`GET` / `POST /api/v1/queries/{name}`).

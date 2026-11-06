@@ -24,7 +24,7 @@ using Xunit;
 /// <summary>
 /// WP-X1 (M-7, plan section 28.2): every governed SQL-text entry point reaches the compiler and the binder, proven through the real DI
 /// container against a real SQLite file with two tenants: the caller of tenant <c>acme</c> receives acme rows only, whichever door the
-/// statement came through (WebSQL JSON, declared SQL endpoint, REST dataset, Arrow Flight SQL, Arrow export, async job). The text
+/// statement came through (WebSQL JSON, declared SQL endpoint, REST dataset, Arrow export, async job). The text
 /// <c>other-row</c> belongs to another tenant and must never appear in any answer. The per-dialect proof is
 /// <see cref="GovernedDialectEndToEndBase"/>.
 /// </summary>
@@ -236,32 +236,6 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         ShouldBeAcmeOnly(body, "REST dataset");
         await AssertCompiledAuditAsync(audited, "REST dataset");
-    }
-
-    [Fact]
-    public async Task ArrowFlightSql_ValidatesThroughCompile_AndStreamsTheCallersTenantOnly()
-    {
-        await RegisterAsync();
-        int audited = await CompiledAuditCountAsync();
-        var client = Client();
-
-        // G-6: GetFlightInfo validates through the governed pipeline (no SQL text comes back); a denied table never gets a ticket
-        var denied = await client.PostAsJsonAsync("/api/v1/flight/sql/info", new { query = "SELECT id FROM main.not_catalogued" });
-        denied.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        (await denied.Content.ReadAsStringAsync()).ShouldContain("SQL_POLICY_DENIED");
-
-        var info = await client.PostAsJsonAsync("/api/v1/flight/sql/info", new { query = "SELECT id, name FROM main.ep_orders ORDER BY id" });
-        info.StatusCode.ShouldBe(HttpStatusCode.OK, await info.Content.ReadAsStringAsync());
-        using var infoJson = JsonDocument.Parse(await info.Content.ReadAsStringAsync());
-        var ticket = infoJson.RootElement.GetProperty("ticket");
-
-        var stream = await client.PostAsync("/api/v1/flight/sql/stream", new StringContent(ticket.GetRawText(), Encoding.UTF8, "application/json"));
-        stream.StatusCode.ShouldBe(HttpStatusCode.OK, await stream.Content.ReadAsStringAsync());
-        var bytes = await stream.Content.ReadAsByteArrayAsync();
-        var text = Encoding.UTF8.GetString(bytes);
-        text.ShouldContain("acme-row-1");
-        text.ShouldNotContain("other-row");
-        await AssertCompiledAuditAsync(audited, "Arrow Flight SQL");
     }
 
     [Fact]

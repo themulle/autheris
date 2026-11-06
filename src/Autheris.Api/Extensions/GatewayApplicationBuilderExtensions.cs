@@ -255,10 +255,6 @@ public static class GatewayApplicationBuilderExtensions
         {
             app.MapArrowExportEndpoints();
         }
-        if (gatewayOptions.Arrow.Enabled && gatewayOptions.Arrow.EnableFlightSql)
-        {
-            app.MapArrowFlightSqlEndpoints();
-        }
         if (gatewayOptions.DuckDbOlap.Enabled)
         {
             app.MapDuckDbOlapEndpoints();
@@ -286,8 +282,10 @@ public static class GatewayApplicationBuilderExtensions
 
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
-        app.MapDevPortalEndpoints(gatewayOptions);
-        app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
+        if (app.Environment.IsDevelopment())
+        {
+            app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
+        }
         app.MapAsyncJobEndpoints();
 
         LoadSqlEndpoints(app.Services, gatewayOptions);

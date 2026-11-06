@@ -20,7 +20,6 @@ public static class SqlTransports
     public const string Rest = "Rest";
     public const string Mcp = "Mcp";
     public const string ArrowExport = "ArrowExport";
-    public const string FlightSql = "FlightSql";
     public const string SqlEndpoints = "SqlEndpoints";
     public const string AsyncJob = "AsyncJob";
 
@@ -36,7 +35,6 @@ public static class SqlTransports
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql => WebSql,
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino => Trino,
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp => Mcp,
-        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight => FlightSql,
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest
             or Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL
             or Autheris.Domain.Options.DataSources.DataSourceTransportFlags.OData => Rest,
@@ -45,7 +43,7 @@ public static class SqlTransports
 
     /// <summary>Every registered transport name; <c>WebSql:CrossSource:AllowedTransports</c> entries are validated against it at start-up.</summary>
     public static IReadOnlyList<string> All { get; } =
-        [WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob, Olap];
+        [WebSql, Trino, Rest, Mcp, ArrowExport, SqlEndpoints, AsyncJob, Olap];
 }
 
 /// <param name="PlannedTableRead">

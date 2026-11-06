@@ -61,7 +61,6 @@ public sealed class CatalogSurfaceCallSiteGuardTests
     [InlineData("AiDataGuardrailService.cs")]
     [InlineData("SemanticMcpCompiler.cs")]
     [InlineData("TrinoMetadataQueryHandler.cs")]
-    [InlineData("ArrowFlightSqlServer.cs")]
     [InlineData("IcebergRestCatalogFederationService.cs")]
     [InlineData("EffectiveAccessExplanationService.cs")]
     [Trait("Category", "Security")]

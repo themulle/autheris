@@ -330,7 +330,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             ? "Autheris"
             : _gatewayOptions.Authentication.BasicAuth.Realm;
 
-        // F-AUTH-DX: script requests (fetch/XHR from the DevPortal, Nitro, Swagger) get a plain 401 without the
+        // F-AUTH-DX: script requests (fetch/XHR from Nitro, Swagger) get a plain 401 without the
         // Basic challenge so the browser does not pop up its native login dialog in the middle of a page.
         if (!Request.Headers.ContainsKey("X-Requested-With"))
         {

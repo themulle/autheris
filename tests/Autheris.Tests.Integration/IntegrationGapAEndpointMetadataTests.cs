@@ -54,8 +54,6 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [Theory]
     [InlineData("GET", "/health/live")]
     [InlineData("GET", "/health/ready")]
-    [InlineData("GET", "/")]
-    [InlineData("GET", "/getting-started")]
     [InlineData("GET", "/odata/v4/$swagger")]
     [InlineData("GET", "/docs")]
     [InlineData("POST", "/api/webhooks/openmetadata")]

@@ -21,6 +21,12 @@ public static class DevEndpoints
 {
     public sealed record Persona(string Username, string Sid, string? Tenant, IReadOnlyList<string> Roles, string LoginUrl);
 
+    public static IEndpointRouteBuilder MapDevEndpoints(this IEndpointRouteBuilder app)
+    {
+        var options = app.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value ?? new GatewayOptions();
+        return app.MapDevEndpoints(options);
+    }
+
     public static IEndpointRouteBuilder MapDevEndpoints(this IEndpointRouteBuilder app, GatewayOptions options)
     {
         var env = app.ServiceProvider.GetRequiredService<IHostEnvironment>();

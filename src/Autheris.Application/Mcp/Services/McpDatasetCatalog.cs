@@ -1128,10 +1128,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         if (o.Arrow.Enabled)
         {
             endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
-            if (o.Arrow.EnableFlightSql)
-            {
-                endpoints.Add(new("Arrow Flight SQL", "POST", "/api/v1/flight/sql", "Arrow Flight SQL protocol for analytical clients."));
-            }
         }
 
         if (o.Lakehouse.Enabled)

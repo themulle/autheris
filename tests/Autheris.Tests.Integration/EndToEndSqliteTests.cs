@@ -342,10 +342,9 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
 
     // ---------- 10. Dev-Endpunkte ----------
     [Fact]
-    public async Task Dev_Info_And_GettingStarted_AreServedInDevelopment()
+    public async Task Dev_Docs_AreServedInDevelopment()
     {
         var c = Client(authenticated: false);
-        (await c.GetAsync("/getting-started")).StatusCode.ShouldBe(HttpStatusCode.OK);
         (await c.GetAsync("/docs")).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 }

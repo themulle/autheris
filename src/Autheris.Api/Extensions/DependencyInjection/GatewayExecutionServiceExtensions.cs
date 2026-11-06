@@ -101,9 +101,8 @@ public static class GatewayExecutionServiceExtensions
         // Hierarchical Parquet Egress (F-DATA-01)
         services.AddSingleton<IParquetExportService, ParquetExportService>();
 
-        // Native Apache Arrow Flight SQL & IPC Egress (F-DATA-04 & F-DATA-04-B)
+        // Native Apache Arrow IPC Egress (F-DATA-04 & F-DATA-04-B)
         services.AddSingleton<IArrowExportService, ArrowExportService>();
-        services.AddSingleton<IArrowFlightSqlServer, ArrowFlightSqlServer>();
 
         // Embedded In-Memory OLAP via DuckDB.NET (F-DATA-03)
         services.AddSingleton<IDuckDbOlapEngine>(sp =>

@@ -102,7 +102,7 @@ public static class AuditEventTypes
     public const string AsyncJobStatusRead = "ASYNC_JOB_STATUS_READ";
     public const string AsyncJobAccessDenied = "ASYNC_JOB_ACCESS_DENIED";
 
-    // Governance classification, access plans and DevPortal step-up consoles
+    // Governance classification, access plans and step-up consoles
     public const string ClassificationProposed = "CLASSIFICATION_PROPOSED";
     public const string ClassificationTransitioned = "CLASSIFICATION_TRANSITIONED";
     public const string GovernanceConfigHashRead = "GOVERNANCE_CONFIG_HASH_READ";

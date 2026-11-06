@@ -10,7 +10,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class RemovedConfigKeysTests
 {
-    private static IConfiguration Config(string key, string? value) =>
+    private static IConfiguration Config(string key, string? value = "true") =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { [key] = value })
             .Build();
@@ -32,6 +32,10 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:TrafficShadowing:ChannelCapacity", "1000")]
     [InlineData("Gateway:TrafficShadowing:TimeoutMs", "2000")]
     [InlineData("Gateway:TrafficShadowing:StripPiiHeaders", "true")]
+    [InlineData("Gateway:Arrow:EnableFlightSql", "true")]
+    [InlineData("Gateway:RowLimits:FlightSql", "true")]
+    [InlineData("Gateway:RowLimits:FlightSql:DefaultMaxRows", "1000")]
+    [InlineData("Gateway:RowLimits:FlightSql:MaxAllowedRows", "5000")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -74,5 +78,16 @@ public sealed class RemovedConfigKeysTests
         var configuration = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
         ex.Message.ShouldContain("Gateway:TrafficShadowing");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Arrow:EnableFlightSql")]
+    [InlineData("Gateway:RowLimits:FlightSql")]
+    public void FlightSql_keys_fail_startup(string key)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key)));
+
+        ex.Message.ShouldContain(key);
     }
 }

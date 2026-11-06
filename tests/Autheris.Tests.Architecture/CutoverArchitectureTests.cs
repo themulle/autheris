@@ -534,9 +534,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService", "ExecuteEndpointAsync", true),
         ("Autheris.Application.Jobs.Services.AsyncQueryJobBackgroundWorker", "ProcessJobItemAsync", true),
         ("Autheris.Api.Endpoints.ArrowExportEndpoints", "HandleArrowExportAsync", true),
-        // Flight SQL: GetFlightInfo only validates (compiles) the statement before it issues a ticket; DoGet executes it.
-        ("Autheris.Application.Serialization.ArrowFlightSqlServer", "GetFlightInfoAsync", false),
-        ("Autheris.Application.Serialization.ArrowFlightSqlServer", "DoGetStreamAsync", true),
         ("Autheris.Application.Mcp.Services.McpToolExecutionHandler", "ExecuteToolAsync", true),
         ("Autheris.Application.Mcp.Services.ApiDispatcherService", "InvokeApiAsync", true),
         ("Autheris.Application.Data.Services.GovernedDataQueryService", "ExecuteQueryAsync", true),

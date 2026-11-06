@@ -79,7 +79,6 @@ src/Autheris.Application/SchemaRegistry/RegisteredSchema.cs|1
 src/Autheris.Application/SchemaRegistry/SchemaRegistryService.cs|1
 src/Autheris.Application/Security/Totp/Services/TotpEnrollmentService.cs|2
 src/Autheris.Application/Security/Totp/Services/TotpVerificationService.cs|5
-src/Autheris.Application/Serialization/ArrowFlightSqlServer.cs|2
 src/Autheris.Application/Serialization/ParquetExportService.cs|1
 src/Autheris.Application/Services/CatalogColumnAccessResolver.cs|1
 src/Autheris.Application/Services/CatalogVisibility.cs|1

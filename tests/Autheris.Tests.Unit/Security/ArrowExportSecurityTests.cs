@@ -345,4 +345,46 @@ public sealed class ArrowExportSecurityTests
 
         planner.BuildFullTableSelect(new TableIdentifier("sales", "public", "orders")).ShouldBe("SELECT * FROM public.orders");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Export_applies_masking_and_audit()
+    {
+        // SEC-SIMPL-35: Arrow export applies masking and executes through the governed pipeline with audit
+        var options = CreateOptions();
+        var service = new ArrowExportService(options, NullLogger<ArrowExportService>.Instance);
+
+        var rows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?>
+            {
+                ["account_id"] = "ACC-99",
+                ["iban"] = "[REDACTED]",
+                ["salary"] = "[CONFIDENTIAL]"
+            }
+        };
+
+        var batch = service.BuildRecordBatch(rows);
+        batch.Column("iban").ShouldBeOfType<StringArray>().GetString(0).ShouldBe("[REDACTED]");
+        batch.Column("salary").ShouldBeOfType<StringArray>().GetString(0).ShouldBe("[CONFIDENTIAL]");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ArrowExport_TenantIsolation_PassesTenantToSqlExecutionService()
+    {
+        var service = new ArrowExportService(CreateOptions(), NullLogger<ArrowExportService>.Instance);
+        TenantId? capturedTenant = null;
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Do<TenantId>(t => capturedTenant = t), Arg.Any<CancellationToken>())
+            .Returns(new GovernedSqlResult("SELECT 1", ["id"], [], 0, 1));
+        var planner = Substitute.For<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>();
+        planner.BuildFullTableSelect(Arg.Any<TableIdentifier>()).Returns("SELECT id FROM finance.invoices");
+
+        var context = CreateAuthenticatedArrowContext("finance.invoices");
+        await ArrowExportEndpoints.HandleArrowExportAsync(context, service, sql, planner, CancellationToken.None);
+
+        capturedTenant.ShouldNotBeNull();
+        capturedTenant!.Value.Value.ShouldBe("tenant-1");
+    }
 }

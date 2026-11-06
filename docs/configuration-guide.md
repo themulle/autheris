@@ -939,7 +939,7 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 | Key | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `WebSql:CrossSource:Enabled` | `bool` | `true \| false` | `false` | Federation switch. When `false`, requests that join several data sources are denied on every transport, including OLAP. |
-| `WebSql:CrossSource:AllowedTransports` | `string[]` | `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`, `Olap` (case-insensitive) | `["WebSql", "Trino"]` | Transports that may run cross-source queries. A configured list replaces the default entirely (list every transport you need); an empty list allows none. `Olap` is never implied: add it explicitly to allow cross-source requests on `POST /api/v1/olap/query`. An unknown or blank name aborts the start. A start-up warning is logged when `Olap` is listed while `Enabled` is `false`. |
+| `WebSql:CrossSource:AllowedTransports` | `string[]` | `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `SqlEndpoints`, `AsyncJob`, `Olap` (case-insensitive) | `["WebSql", "Trino"]` | Transports that may run cross-source queries. A configured list replaces the default entirely (list every transport you need); an empty list allows none. `Olap` is never implied: add it explicitly to allow cross-source requests on `POST /api/v1/olap/query`. An unknown or blank name aborts the start. A start-up warning is logged when `Olap` is listed while `Enabled` is `false`. |
 | `WebSql:CrossSource:MaxTableCount` | `int` | `1 ..` | `5` | Maximum distinct tables of a cross-source request. |
 | `WebSql:CrossSource:MaxStagedRowsPerTable` / `MaxTotalStagedRows` | `int` | `1 ..` | `50000` / `200000` | Row budgets of the SQL federation. |
 | `WebSql:CrossSource:MaxStagedBytesPerTable` / `MaxTotalStagedBytes` | `long` | `1 ..` | `33554432` / `134217728` | Byte budgets; the OLAP endpoint uses the smaller of these and the `DuckDbOlap` values for cross-source requests. |
@@ -1057,7 +1057,6 @@ Alle SQL-Transporte laufen durch dieselbe WebSQL-Pipeline. Ohne eigene Werte gel
 | `RowLimits:Parquet:...` | WebSQL mit `Accept: application/vnd.apache.parquet` | `ParquetEgress:MaxRowsPerFile` |
 | `RowLimits:SqlEndpoints:...` | Deklarierte SQL-Endpunkte (`/api/v1/queries/...`) | – |
 | `RowLimits:ArrowExport:...` | Arrow-Export (`POST /api/v1/export/arrow`) | `Arrow:MaxExportRows` |
-| `RowLimits:FlightSql:...` | Arrow IPC over HTTP (`/api/v1/flight/sql/*`) | `Arrow:MaxExportRows` |
 
 Ergebnisse, die das Limit erreichen, werden als gekürzt gemeldet (`truncated`, `X-Autheris-Truncated`, bei Parquet zusätzlich `X-Export-Truncated`).
 

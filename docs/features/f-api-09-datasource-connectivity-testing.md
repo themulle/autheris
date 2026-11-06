@@ -27,7 +27,7 @@ When onboarding new upstream databases (PostgreSQL, SQL Server, Oracle, Snowflak
 
 ```mermaid
 flowchart TD
-    CLIENT["Admin / DevPortal Client<br/>POST /api/v1/catalog/datasources/{id}/test"] --> AUTH["Tenant & Role Check<br/>(ClusterAdmin or DomainOwner)"]
+    CLIENT["Admin Client<br/>POST /api/v1/catalog/datasources/{id}/test"] --> AUTH["Tenant & Role Check<br/>(ClusterAdmin or DomainOwner)"]
     AUTH --> SSRF{"EgressUrlPolicy<br/>Check Host/IP"}
     
     SSRF -- Loopback / Cloud Metadata --> BLOCKED["SecurityException<br/>HTTP 400 Bad Request<br/>'Target IP/host is prohibited by egress policy.'"]
