@@ -13,6 +13,7 @@ using Autheris.Application.Events;
 using Autheris.Application.Plugins;
 using Autheris.Domain.Events;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Modules.Trust;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -161,8 +162,20 @@ public sealed class PluginManager : IPluginManager, IDisposable
             return 0;
         }
 
-        var dllFiles = Directory.GetFiles(fullDirectoryPath, "*.dll", SearchOption.AllDirectories);
-        if (dllFiles.Length == 0)
+        var rawDllFiles = Directory.GetFiles(fullDirectoryPath, "*.dll", SearchOption.AllDirectories);
+        var dllFiles = new List<string>(rawDllFiles.Length);
+        foreach (var candidateDll in rawDllFiles)
+        {
+            if (IntegrityHashHelper.ContainsModuleManifestInHierarchy(fullDirectoryPath, candidateDll))
+            {
+                _logger.LogWarning("Skipping signed module assembly '{DllPath}' during customer plugin discovery.", candidateDll);
+                continue;
+            }
+
+            dllFiles.Add(candidateDll);
+        }
+
+        if (dllFiles.Count == 0)
         {
             return 0;
         }
@@ -410,40 +423,6 @@ public sealed class PluginManager : IPluginManager, IDisposable
     internal static Dictionary<string, string> LoadManifest(string manifestPath)
     {
         var json = File.ReadAllText(manifestPath);
-        using var doc = JsonDocument.Parse(json);
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        if (doc.RootElement.ValueKind == JsonValueKind.Object)
-        {
-            if (doc.RootElement.TryGetProperty("plugins", out var pluginsElem))
-            {
-                if (pluginsElem.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in pluginsElem.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("file", out var fileProp) && item.TryGetProperty("sha256", out var hashProp))
-                        {
-                            result[fileProp.GetString()!] = hashProp.GetString()!;
-                        }
-                    }
-                }
-                else if (pluginsElem.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var prop in pluginsElem.EnumerateObject())
-                    {
-                        result[prop.Name] = prop.Value.GetString()!;
-                    }
-                }
-            }
-            else
-            {
-                foreach (var prop in doc.RootElement.EnumerateObject())
-                {
-                    result[prop.Name] = prop.Value.GetString()!;
-                }
-            }
-        }
-
-        return result;
+        return IntegrityHashHelper.ParsePluginManifestJson(json);
     }
 }

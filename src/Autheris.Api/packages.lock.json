@@ -1110,6 +1110,12 @@
           "System.Security.Cryptography.Pkcs": "[10.0.14, )"
         }
       },
+      "autheris.modules.abstractions": {
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Domain": "[1.2.1, )"
+        }
+      },
       "FastSqlEngine": {
         "type": "Project",
         "dependencies": {

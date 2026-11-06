@@ -87,8 +87,31 @@ public static class GatewayConfigurationSchema
         "Gateway:Cluster:Secret",
         // DefaultEnvironmentSecretProvider resolves these well-known secret references from configuration.
         "Gateway:DataMasking:HmacSecret",
-        "Gateway:Secrets:VaultHostSuffixes"
+        "Gateway:Secrets:VaultHostSuffixes",
+        "Gateway:Modules:AllowUnsignedInDevelopment",
+        "Gateway:Modules:Enabled",
+        "Gateway:Modules:Path"
     ];
+
+    /// <summary>
+    /// Maps known external module configuration sections to the module ID that owns them.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> KnownModuleSections { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [GatewaySections.Lakehouse] = "lakehouse",
+            [GatewaySections.Dbt] = "dbt",
+            [GatewaySections.OpenMetadata] = "openmetadata",
+            [GatewaySections.CdcStream] = "cdc",
+            [GatewaySections.PostgreSqlCdc] = "cdc",
+            [GatewaySections.MssqlChangeTracking] = "cdc",
+            [Root + ":AiGateway"] = "ai-gateway",
+            [Root + ":SemanticLayer"] = "semantic-layer",
+            [Root + ":DataQuality"] = "data-quality",
+            [Root + ":AsyncExport"] = "async-export",
+            [Root + ":CatalogSync"] = "catalog-sync",
+            [Root + ":Scim"] = "scim",
+        };
 
     /// <summary>
     /// The only subtrees (configuration paths) whose content is not checked key by key (<c>object</c>, <c>IConfigurationSection</c>,

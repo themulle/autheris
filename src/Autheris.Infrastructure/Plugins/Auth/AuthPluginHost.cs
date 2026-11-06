@@ -15,6 +15,7 @@ using Autheris.Application.Plugins.Auth;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Plugins.Auth;
+using Autheris.Infrastructure.Modules.Trust;
 using Autheris.Infrastructure.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -128,8 +129,20 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
             return 0;
         }
 
-        var dllFiles = Directory.GetFiles(fullDirectoryPath, "*.dll", SearchOption.AllDirectories);
-        if (dllFiles.Length == 0)
+        var rawDllFiles = Directory.GetFiles(fullDirectoryPath, "*.dll", SearchOption.AllDirectories);
+        var dllFiles = new List<string>(rawDllFiles.Length);
+        foreach (var candidateDll in rawDllFiles)
+        {
+            if (IntegrityHashHelper.ContainsModuleManifestInHierarchy(fullDirectoryPath, candidateDll))
+            {
+                _logger.LogWarning("Skipping signed module assembly '{DllPath}' during auth plugin discovery.", candidateDll);
+                continue;
+            }
+
+            dllFiles.Add(candidateDll);
+        }
+
+        if (dllFiles.Count == 0)
         {
             return 0;
         }

@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Autheris.Application\Autheris.Application.csproj" />
     <ProjectReference Include="..\Autheris.Domain\Autheris.Domain.csproj" />
     <ProjectReference Include="..\Autheris.Extensions\Autheris.Extensions.csproj" />
+    <ProjectReference Include="..\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -43,6 +44,7 @@
   <ItemGroup>
     <!-- Swagger UI wird lokal ausgeliefert (offline-faehig, kein CDN) -->
     <EmbeddedResource Include="Assets\swagger-ui\*.css;Assets\swagger-ui\*.js;Assets\swagger-ui\*.png" LogicalName="swagger-ui/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Hosting\Keys\module-release-pub.pem" LogicalName="Autheris.Api.Hosting.Keys.module-release-pub.pem" />
   </ItemGroup>
 
   <ItemGroup>
