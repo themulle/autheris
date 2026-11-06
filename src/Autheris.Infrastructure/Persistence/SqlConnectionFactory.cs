@@ -282,7 +282,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     }
 
     /// <summary>
-    /// CR-ADG-08 / WP-SIMPL-13: outside Development a plaintext password in the connection string is refused (fail closed);
+    /// CR-ADG-08: outside Development a plaintext password in the connection string is refused (fail closed);
     /// when configured, the password is resolved from the Key Vault reference and never logged.
     /// </summary>
     private string ResolvePassword(DatabaseDialect dialect, DataSourceConnectionOptions options, string connectionString)

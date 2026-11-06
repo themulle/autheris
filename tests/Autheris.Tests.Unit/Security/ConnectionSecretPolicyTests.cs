@@ -100,6 +100,7 @@ public sealed class ConnectionSecretPolicyTests
     [InlineData(DatabaseDialect.Oracle, "Oracle", "User Id=app;Password=supersecret;Data Source=localhost:1521/FREEPDB1")]
     public void Plaintext_password_is_warned_not_rejected_in_development(DatabaseDialect dialect, string provider, string connectionString)
     {
+        ConnectionSecretPolicy.HasPlaintextPassword(dialect, connectionString).ShouldBeTrue();
         var logger = Substitute.For<ILogger>();
         logger.IsEnabled(LogLevel.Warning).Returns(true);
 

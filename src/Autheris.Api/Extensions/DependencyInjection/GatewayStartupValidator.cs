@@ -291,7 +291,7 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// WP-F1 / CR-ADG-08 / WP-SIMPL-13: outside Development a data source connection never carries a plaintext password.
+    /// WP-F1 / CR-ADG-08: outside Development a data source connection never carries a plaintext password.
     /// Outside Development, PostgreSQL, SQL Server and Oracle reject literal passwords. Oracle additionally enforces TCPS and
     /// mandatory PasswordKeyVaultRef.
     /// </summary>
