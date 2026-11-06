@@ -280,10 +280,10 @@ No WP-38..48 PR merges before its tests of 11.1 or 11.2 exist and are green; WP-
 
 - **SEC-VIEW-01** A view definition is one `SELECT` checked by the AST security visitor (no DML, DDL, system catalogs or functions outside the allow-list); no DDL is ever sent to a data source.
 - **SEC-VIEW-02** View columns come from the definition and catalog metadata, never from the source (OD-25); PII propagates by lineage; unresolved lineage counts as PII.
-- **SEC-VIEW-03** A view is readable only when the owners of every base object approved its current definition hash; the author never approves; any change requires re-approval.
+- **SEC-VIEW-03** A view is readable only when the owners of every base object approved its current definition hash, its product owners and the classification of its PII-derived columns; the author never approves; SQL changes and product-owner transfers require base-owner approval; after activation only the product owners (and their delegates) decide grants on the view.
 - **SEC-VIEW-04** The decision point decides the view with the caller's grants on the view only; no view grant means default deny; base-table grants are never an alternative path.
-- **SEC-VIEW-05** An explicit deny of the caller on any base object denies the view.
-- **SEC-VIEW-06** A PII view column is Clear only if the base owners approved it as Clear and the caller's view grant has Clear; masked view columns follow the mask guards.
+- **SEC-VIEW-05** Base-table grants, denies and hard row policies of the caller never affect a view decision (neither widen nor narrow it); denies and hard policies bound to the view itself apply; withdrawal of approval by a current base owner suspends the view.
+- **SEC-VIEW-06** A PII view column is Clear only if the base owners classified it as Clear-eligible and the caller's view grant has Clear; a column declassified as non-PII must be recorded with the approving base owner; masked view columns follow the mask guards.
 - **SEC-VIEW-07** Nested views are expanded with their own approved definitions and decided by the decision point; depth <= 3, cycles rejected.
 - **SEC-VIEW-08** Invalid, suspended, pending or retired views deny on every transport.
 - **SEC-VIEW-09** Discovery never reveals base objects hidden from the caller; the reserved source name `views` cannot be configured as a data source.

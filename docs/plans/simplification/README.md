@@ -98,7 +98,7 @@ New work package [WP-SIMPL-48](WP-SIMPL-48-row-policies-dynamic-coverage.md); am
 
 ## Owner decision OD-44 (2026-11-06)
 
-- **OD-44:** virtual views: data owners or GovernanceAdmins define read-only views as SQL in Autheris (nothing is created in the source); active only after the owners of every base object approved the exact definition; catalog objects in the reserved data source `views`, granted, discovered, audited and metered like tables on every transport; definer semantics (a view grant suffices); multi-source views run in the DuckDB federation; PII by lineage, Masked unless base owners approved Clear. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-virtual-views.md).
+- **OD-44:** virtual views: data owners or GovernanceAdmins define read-only views as SQL in Autheris (nothing is created in the source); active only after the owners of every base object approved the exact definition and the designated product owners, which delegates granting authority to the product owners (data products such as cubes); base-table denies do not propagate; catalog objects in the reserved data source `views`, granted, discovered, audited and metered like tables on every transport; definer semantics (a view grant suffices); multi-source views run in the DuckDB federation; PII by lineage, Masked unless base owners approved Clear. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-virtual-views.md).
 
 ## Security advisories
 
