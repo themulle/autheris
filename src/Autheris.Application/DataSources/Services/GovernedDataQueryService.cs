@@ -93,8 +93,8 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new TableNotFoundException(request.Table);
         }
 
-        // 2. Authorization stage (WP-ARC-B-03): unified PDP (ReBAC, ABAC, Consent, Virtual Filters) plus the non-canonical
-        // ClusterAdmin fail-closed check. The row policy is not spliced from this decision (WP-X0n / SEC-X1-17): the rewriter's own
+        // 2. Authorization stage: unified PDP (ReBAC, ABAC, Consent, Virtual Filters) plus the non-canonical
+        // ClusterAdmin fail-closed check. The row policy is not spliced from this decision (WP-X0n): the rewriter's own
         // decision is the only one that restricts rows, so both must be computed from the same inputs.
         var decision = await GovernedQueryStages.AuthorizeTableAsync(
             _pdp,
@@ -153,7 +153,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             }
         }
 
-        // WP-ARC-B-01: column authorization, the oracle-inference guard and the SQL formulation are the shared planner's job.
+        // column authorization, the oracle-inference guard and the SQL formulation are the shared planner's job.
         // No policy text is spliced: the decision above authorizes the request; the row policy is applied exactly once, by the
         // rewriter on the single-source branch and by the staging service from its own decision on the cross-source branch.
         TableFilterClause? filter = null;

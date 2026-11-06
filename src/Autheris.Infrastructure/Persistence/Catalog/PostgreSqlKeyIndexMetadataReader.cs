@@ -8,7 +8,7 @@ using TrinoSqlEngine.Governance;
 namespace Autheris.Infrastructure.Persistence.Catalog;
 
 /// <summary>
-/// PostgreSQL: every catalog relation and function is <c>pg_catalog</c>-qualified (SEC-X1-09). Only valid, ready, unfiltered,
+/// PostgreSQL: every catalog relation and function is <c>pg_catalog</c>-qualified. Only valid, ready, unfiltered,
 /// non-expression btree indexes, primary key and unique first, then non-unique (issue #404; other access methods have no order); key columns only (<c>ord &lt;= indnkeyatts</c>).
 /// <c>indoption</c> is a zero-based int2vector and bit 1 is DESC; the NULLS FIRST bit is ignored.
 /// </summary>

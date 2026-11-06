@@ -10,7 +10,7 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 
 /// <summary>
 /// Oracle: reads <c>SYS.ALL_TAB_COLUMNS</c>, never the unqualified public synonym, which a table of the same name in
-/// <c>CURRENT_SCHEMA</c> would shadow (SEC-X1-09). Owner and table are bound by name. <c>CHAR_USED</c> becomes the length
+/// <c>CURRENT_SCHEMA</c>would shadow. Owner and table are bound by name.<c>CHAR_USED</c> becomes the length
 /// semantics (<c>char</c> or <c>byte</c>); <c>COLLATION</c> is the column collation (null for non-character columns).
 /// </summary>
 public sealed class OracleColumnMetadataReader : IColumnMetadataReader

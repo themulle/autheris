@@ -16,7 +16,7 @@ using Microsoft.Extensions.Configuration;
 namespace Autheris.Api.Configuration;
 
 /// <summary>
-/// ARCH-MNT-06: the typed shape of the <c>Gateway</c> configuration root, used by <see cref="UnknownGatewayKeyGuard"/>. The root binds to
+/// the typed shape of the<c>Gateway</c> configuration root, used by <see cref="UnknownGatewayKeyGuard"/>. The root binds to
 /// <see cref="GatewayOptions"/>; a number of subsections are additionally bound to their own options types (side-bound), and several
 /// intermediate nodes (<c>Gateway:Startup</c>) exist only through those. A key is known when some type bound at its parent path declares it.
 /// </summary>
@@ -115,7 +115,7 @@ public static class GatewayConfigurationSchema
 
     /// <summary>
     /// The only subtrees (configuration paths) whose content is not checked key by key (<c>object</c>, <c>IConfigurationSection</c>,
-    /// dictionaries with scalar values). None may sit under a security root; <c>ARCH-MNT-06-T-08</c> pins this list.
+    /// dictionaries with scalar values). None may sit under a security root; <c>T-08</c> pins this list.
     /// </summary>
     public static IReadOnlyList<string> FreeFormSubtrees() => FindFreeForm();
 

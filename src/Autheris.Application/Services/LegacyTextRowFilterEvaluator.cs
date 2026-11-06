@@ -10,7 +10,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Legacy text path (WP-ARC-B-04): evaluates the rendered row-filter text of a decision that carries no typed <c>IRowPolicy</c> (the
+/// Legacy text path: evaluates the rendered row-filter text of a decision that carries no typed<c>IRowPolicy</c> (the
 /// listed text consumers, HTTP/non-SQL sources whose decisions are still string-only). A typed policy is never evaluated here; it goes
 /// through <see cref="PolicyPredicateRowEvaluator"/>. Enforces type-strict comparisons and fail-closed security invariants.
 /// </summary>

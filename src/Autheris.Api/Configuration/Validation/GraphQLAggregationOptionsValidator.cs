@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// SEC-112-19: <c>Gateway:GraphQL:Aggregation:MaxFieldsPerOperation</c> must be 1..10. An invalid value is a start-up failure; it is never
+/// <c>Gateway:GraphQL:Aggregation:MaxFieldsPerOperation</c> must be 1..10. An invalid value is a start-up failure; it is never
 /// clamped to a larger value.
 /// </summary>
 public sealed class GraphQLAggregationOptionsValidator : IValidateOptions<GatewayOptions>

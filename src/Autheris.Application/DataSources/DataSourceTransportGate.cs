@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options.DataSources;
 
-/// <summary>Why the transport gate allowed or denied a request (the sub-reason appears only in the audit event, SEC-ATR-08).</summary>
+/// <summary>Why the transport gate allowed or denied a request (the sub-reason appears only in the audit event).</summary>
 public enum TransportDecisionReason
 {
     Allowed = 0,
@@ -18,7 +18,7 @@ public enum TransportDecisionReason
     FlagNotSet,
     EvaluationFailed,
 
-    /// <summary>A persisted statement, job or ticket was presented over a different ingress than the one that created it (SEC-ATR-05).</summary>
+    /// <summary>A persisted statement, job or ticket was presented over a different ingress than the one that created it.</summary>
     IngressMismatch
 }
 
@@ -29,7 +29,7 @@ public readonly record struct TransportDecision(TransportDecisionReason Reason)
 }
 
 /// <summary>
-/// Issue #447 (REQ-ATR-01/02): the single place that enforces <c>AllowedTransports</c> per data source. Fail-closed: no switch, no
+/// Issue #447 (02): the single place that enforces<c>AllowedTransports</c> per data source. Fail-closed: no switch, no
 /// optional dependency, no swallowed error; an unset or invalid ingress, an unknown source and every evaluation failure deny.
 /// </summary>
 public interface IDataSourceTransportGate
@@ -43,7 +43,7 @@ public interface IDataSourceTransportGate
     /// <summary>
     /// The form for sources that come from the data catalog (a table's <c>SourceName</c> or domain), never from client input: such a source is
     /// known by definition, so one without an explicit profile is judged by <c>Defaults</c> (owner decision 1, 2026-11-03) instead of reading as
-    /// an unknown source. A blank name, an unset or invalid ingress and every evaluation failure still deny (SEC-ATR-01).
+    /// an unknown source. A blank name, an unset or invalid ingress and every evaluation failure still deny.
     /// </summary>
     Task EnsureCatalogSourcesAsync(IEnumerable<string?> catalogSourceNames, CancellationToken ct = default);
 
@@ -55,16 +55,16 @@ public interface IDataSourceTransportGate
 
     /// <summary>
     /// Logical names of the sources this scope's gate has allowed so far (complete by construction: every choke point calls the gate).
-    /// A statement keeps them to re-check a later page against the live configuration (REQ-ATR-10).
+    /// A statement keeps them to re-check a later page against the live configuration.
     /// </summary>
     IReadOnlyList<string> CheckedSources { get; }
 
-    /// <summary>The ingress transport of the current scope (for copying it into a derived scope or a persisted record, SEC-ATR-05).</summary>
+    /// <summary>The ingress transport of the current scope (for copying it into a derived scope or a persisted record).</summary>
     DataSourceTransportFlags Ingress { get; }
 }
 
 /// <summary>
-/// Fail-closed stand-in for a consumer constructed without a gate: every call denies as an unset ingress (SEC-ATR-01: there is no
+/// Fail-closed stand-in for a consumer constructed without a gate: every call denies as an unset ingress (there is no
 /// null or pass-through gate). Production wiring always supplies <see cref="DataSourceTransportGate"/>.
 /// </summary>
 public sealed class DenyAllTransportGate : IDataSourceTransportGate
@@ -189,7 +189,7 @@ public sealed class DataSourceTransportGate : IDataSourceTransportGate
         Decide(_resolver, Canonicalise(dataSourceName), _ingress.Current).IsAllowed;
 
     /// <summary>
-    /// SEC-ATR-01: the only decision point. Pure and total: any exception of the resolver is an <see cref="TransportDecisionReason.EvaluationFailed"/>
+    /// the only decision point. Pure and total: any exception of the resolver is an<see cref="TransportDecisionReason.EvaluationFailed"/>
     /// denial. Uses <c>TryResolve</c> only, so an unknown source never falls back to the default profile.
     /// </summary>
     public static TransportDecision Decide(IDataSourceOptionsResolver resolver, string? canonicalName, DataSourceTransportFlags transport) =>
@@ -256,7 +256,7 @@ public sealed class DataSourceTransportGate : IDataSourceTransportGate
 /// <summary>
 /// The gate a data-path service uses when it was constructed without one (hand-built instances). Always <see cref="DenyAllTransportGate"/>
 /// in production: the setter is <c>internal</c>, so only the test assemblies that see Application internals can install a different gate
-/// (SEC-ATR-01: there is no configuration, option or public API that turns the check off).
+/// (there is no configuration, option or public API that turns the check off).
 /// </summary>
 public static class TransportGateFallback
 {

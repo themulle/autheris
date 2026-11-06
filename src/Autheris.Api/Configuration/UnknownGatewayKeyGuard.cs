@@ -8,7 +8,7 @@ using Microsoft.Extensions.Configuration;
 namespace Autheris.Api.Configuration;
 
 /// <summary>
-/// ARCH-MNT-06: a key under the <c>Gateway</c> root that no options type declares is a typo or a removed option, and the binder would
+/// a key under the<c>Gateway</c> root that no options type declares is a typo or a removed option, and the binder would
 /// silently ignore it, leaving the intended control at its default. This guard fails startup instead, in every environment, with no bypass.
 /// It runs right after <see cref="DevConfiguration"/> (preset keys are injected there) and after <see cref="LegacySwitchGuard"/> and
 /// <see cref="SerilogSectionGuard"/>, whose specific messages win. The error names keys only, never values, sorted, at most

@@ -111,7 +111,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
         ArgumentNullException.ThrowIfNull(uri);
         ArgumentNullException.ThrowIfNull(session);
 
-        // PLAN-SEC-115 C-115-6: first statement; a closed resource never reaches a catalog or dispatcher call and answers like an unknown URI.
+        // 115 C-115-6: first statement; a closed resource never reaches a catalog or dispatcher call and answers like an unknown URI.
         if (!IsResourceEnabled(uri))
         {
             throw new McpResourceNotFoundException(uri);

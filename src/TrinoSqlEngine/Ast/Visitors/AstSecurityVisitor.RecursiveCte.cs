@@ -10,7 +10,7 @@ public sealed partial class AstSecurityVisitor
     private const int MaxRecursiveMaskRounds = 64;
 
     /// <summary>
-    /// SEC-277-10: the masked output columns of a recursive CTE. The CTE name is already in scope (the caller added it), so a
+    /// the masked output columns of a recursive CTE. The CTE name is already in scope (the caller added it), so a
     /// self-reference inherits the current set; the set is the least fixed point over every member (anchor and recursive members). A masked
     /// value that a member places at output position <c>i</c> marks the output column named at position <c>i</c> (the CTE column list, else
     /// the anchor's names), so renaming between members cannot hide a mask. A member whose positions cannot be resolved (wildcard) marks all

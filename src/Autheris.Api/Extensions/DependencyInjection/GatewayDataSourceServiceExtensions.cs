@@ -35,11 +35,11 @@ public static class GatewayDataSourceServiceExtensions
 
         services.TryAddSingleton<IDataSourceOptionsResolver, HierarchicalDataSourceOptionsResolver>();
 
-        // Issue #447: ingress stamping and the fail-closed transport gate (enforcement call sites arrive with WP-3).
+        // Issue #447: ingress stamping and the fail-closed transport gate (enforcement call sites arrive with ).
         services.TryAddScoped<IIngressTransportContext, IngressTransportContext>();
         services.TryAddScoped<ITransportDenialRecorder, TransportDenialRecorder>();
         services.TryAddScoped<IDataSourceTransportGate, DataSourceTransportGate>();
-        // Issue #447 REQ-ATR-09: warns about sources that allow no reachable transport (start and reload); never fails the start.
+        // Issue #447 warns about sources that allow no reachable transport (start and reload); never fails the start.
         services.AddHostedService(sp =>
         {
             var gateway = sp.GetRequiredService<IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();

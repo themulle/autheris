@@ -1,7 +1,7 @@
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// Durable, fenced storage of CDC watermarks in the governance database (WP-ARC-A-11). One row per source table; the row
+/// Durable, fenced storage of CDC watermarks in the governance database. One row per source table; the row
 /// remembers the highest fencing token that wrote it, so a writer that lost its lease can never move the watermark again.
 /// </summary>
 public interface ICdcWatermarkRepository

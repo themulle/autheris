@@ -46,7 +46,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
         ITableMetadataRepository? metadataRepository = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _connectorRegistry = connectorRegistry ?? throw new ArgumentNullException(nameof(connectorRegistry));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
@@ -100,7 +100,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 webSqlOptions, tenantId,
                 Autheris.Application.Sql.Services.DataSourceAllowlistGuard.EffectiveDataSource(webSqlOptions, req.Metadata));
 
-            // Issue #447 C5 (SEC-ATR-11): every staged table's source must allow the ingress, in this authorization pass before any read.
+            // Issue #447 C5: every staged table's source must allow the ingress, in this authorization pass before any read.
             await _transportGate.EnsureCatalogSourceAsync(
                 Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(req.Metadata), ct).ConfigureAwait(false);
 
@@ -275,7 +275,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     throw new GatewaySecurityException($"Federated query exceeds maximum allowed total staged bytes of {budget.MaxTotalStagedBytes}.", "TOTAL_BYTES_LIMIT_EXCEEDED");
                 }
 
-                // WP-123-4: Dual-Tier Audit Logging (SEC-DATA123-05)
+                // Dual-Tier Audit Logging
                 try
                 {
                     var subtreeAuditDetails = new Dictionary<string, object?>
@@ -393,7 +393,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 MaxRows: budget.MaxStagedRowsPerTable,
                 MaxBytes: budget.MaxStagedBytesPerTable,
                 // F-GOV-14 (C-6): the enforcement travels as a typed parameter, never through session.Items. A skipped
-                // upstream read (Tier 0) runs after the guards above and the connector resolution (SEC-13).
+                // upstream read (Tier 0) runs after the guards above and the connector resolution.
                 VirtualFilterEnforcement: req.VirtualFilterPlan?.Enforcement,
                 SkipUpstream: req.VirtualFilterPlan?.SkipUpstream == true);
 
@@ -506,7 +506,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                         if (batchResult.RlsPushdownExecuted) rlsPushedDown = true;
                         if (batchResult.InDbMaskingExecuted) inDbMaskingExecuted = true;
 
-                        // SEC-DATA124-04: Gateway Ordinal Deduplication
+                        // Gateway Ordinal Deduplication
                         foreach (var row in batchResult.Rows)
                         {
                             var fingerprint = ComputeRowFingerprint(row, req.Metadata.PrimaryKeyColumns);
@@ -575,12 +575,12 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 throw new GatewaySecurityException($"Federated query exceeds maximum allowed total staged bytes of {budget.MaxTotalStagedBytes}.", "TOTAL_BYTES_LIMIT_EXCEEDED");
             }
 
-            // Audit record for this source read (fail-closed, INV-17, SEC-DATA124-05)
+            // Audit record for this source read (fail-closed, INV-17)
             try
             {
                 var auditDetails = new Dictionary<string, object?>
                 {
-                    ["table"] = req.Metadata.Identifier.ToString(),   // with the domain: two sources may share schema.table (SEC-1)
+                    ["table"] = req.Metadata.Identifier.ToString(),   // with the domain: two sources may share schema.table
                     ["stagingName"] = req.StagingName,
                     ["dataSourceType"] = req.Metadata.Table.DataSourceType.ToString(),
                     ["sourceName"] = req.Metadata.Table.SourceName ?? req.Metadata.Identifier.Domain,
@@ -655,7 +655,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             stagedByStagingName[req.StagingName] = stagedSource;
         }
 
-        // Issue #132 (PLAN-DATA-132, WP-132-4, SEC-DATA132-07): Dual-tier co-located statement audit records
+        // Issue #132: Dual-tier co-located statement audit records
         var connectionMap = _gatewayOptions.Value.DataSources?.Connections;
         if (connectionMap != null)
         {

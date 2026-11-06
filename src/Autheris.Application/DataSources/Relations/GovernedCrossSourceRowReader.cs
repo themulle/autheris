@@ -16,7 +16,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #223 / WP-FED-06: Production implementation of <see cref="ICrossSourceRowReader"/> that executes
+/// Issue #223 / Production implementation of<see cref="ICrossSourceRowReader"/> that executes
 /// real parameterized queries against the target data source via <see cref="ISqlConnectionFactory"/>.
 /// <para>VF-02: the statement is built from catalog-checked identifiers only (quoted per dialect, no <c>SELECT *</c>), every value is bound
 /// with the dialect's marker style, a tenanted target always gets a bound tenant predicate, and the database session (tenant and user)

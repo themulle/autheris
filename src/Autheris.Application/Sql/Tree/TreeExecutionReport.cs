@@ -2,7 +2,7 @@ namespace Autheris.Application.Sql.Tree;
 
 /// <summary>
 /// Execution metrics and compilation metadata of a single tree statement and its relations.
-/// Internal only (SEC-LPP-10); not serialized to clients or external logs.
+/// Internal only; not serialized to clients or external logs.
 /// </summary>
 public sealed record TreeExecutionReport(
     TimeSpan StatementElapsed,

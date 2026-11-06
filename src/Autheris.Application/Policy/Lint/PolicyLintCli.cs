@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 /// <summary>
 /// Command line front end of the lint. Exit codes: 0 clean, 1 unparsable predicates, 2 usage or configuration error.
 /// The governance connection string is read from <see cref="ConnectionStringVariable"/> (a plain value or a <c>keyvault:&lt;ref&gt;</c>
-/// reference) and never from the arguments, where it would be visible in the process list and in shell history (SEC-X1-16).
+/// reference) and never from the arguments, where it would be visible in the process list and in shell history.
 /// The output lists table and policy ids and finding codes only; it never contains predicate text or values.
 /// </summary>
 public static class PolicyLintCli

@@ -141,7 +141,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         var groupSids = subscriber.GetGroupSids();
         var roles = subscriber.GetUserRoles();
 
-        // REQ-GOV-143 (SEC-GOV143-02/-13): the subscriber's token scopes (claims overload) decide whether a restricted scope is held. The scope
+        // 143 (-13): the subscriber's token scopes (claims overload) decide whether a restricted scope is held. The scope
         // set belongs to the token captured at subscribe time and must not outlive it: once the token has expired, nothing is delivered
         // (the subscriber re-subscribes with a fresh token).
         var scopes = TokenAccessScope.GetScopeSet(subscriber.Claims);
@@ -280,7 +280,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         // 7. In-Stream Row-Level Security Filtering (Fail-Closed, SQL three-valued logic)
         if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
-            // REQ-GOV-129 (A-8, BC-129-14): a consent filter with caller attributes is evaluated typed, per event, from the recipe; the text of such a
+            // 129 (A-8, BC-129-14): a consent filter with caller attributes is evaluated typed, per event, from the recipe; the text of such a
             // decision is only a constant. Null: no attribute leaves (or the feature is off), the text evaluator decides as before.
             bool? attributeVerdict = await EvaluateAttributeFilterAsync(decision, subscriber, tenantId, metadata, rawPayload, ct).ConfigureAwait(false);
             if (!(attributeVerdict ?? MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql, metadata.Dialect)))

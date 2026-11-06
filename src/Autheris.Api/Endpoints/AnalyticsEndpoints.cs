@@ -50,7 +50,7 @@ public static class AnalyticsEndpoints
 
     public static IEndpointRouteBuilder MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ingress.MapPost("/api/v1/analytics/aggregate", HandleAggregateAsync)
             .WithName("ExecuteGovernedAggregation")

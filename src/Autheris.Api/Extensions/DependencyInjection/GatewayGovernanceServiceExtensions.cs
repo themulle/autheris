@@ -35,7 +35,7 @@ using Microsoft.Extensions.DependencyInjection;
 public static partial class GatewayGovernanceServiceExtensions
 {
     /// <summary>
-    /// Registers the hosted service that migrates and initializes the governance store (WP-ARC-B-12, decision G-8). Must be called
+    /// Registers the hosted service that migrates and initializes the governance store (decision G-8). Must be called
     /// before any other hosted service is registered so <c>StartAsync</c> blocks the rest of the host until the schema is ready.
     /// </summary>
     public static IServiceCollection AddAutherisGovernanceMigrations(this IServiceCollection services)
@@ -65,10 +65,10 @@ public static partial class GatewayGovernanceServiceExtensions
 
     private static void AddGovernanceStateAndStores(IServiceCollection services, GatewayOptions gatewayOptions)
     {
-        // WP-ARC-A-03: the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
+        // the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
 
-        // WP-ARC-B-13: one state directory for the SQLite governance database and the audit anchor next to it.
+        // one state directory for the SQLite governance database and the audit anchor next to it.
         services.AddOptions<StateOptions>().BindConfiguration(StateOptions.SectionName).ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<StateOptions>, StateOptionsValidator>();
         services.AddSingleton<IGatewayStatePaths, GatewayStatePaths>();
@@ -101,7 +101,7 @@ public static partial class GatewayGovernanceServiceExtensions
                 cdcWebhooksEnabled);
         }
 
-        // WP-ARC-A-11: durable, fenced CDC watermarks live in the governance database (the extension registers no store).
+        // durable, fenced CDC watermarks live in the governance database (the extension registers no store).
         services.AddSingleton<IMssqlWatermarkStore, GovernanceDbMssqlWatermarkStore>();
 
         if (gatewayOptions.TenantIsolation.Registry.Enabled)
@@ -156,7 +156,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IGovernanceMigrationRunner, TMigrationRunner>();
         services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<TRepository>());
-        // REQ-GOV-129 (A-9): the one write seam for consents checks caller attribute filters against the registry; reads pass through.
+        // 129 (A-9): the one write seam for consents checks caller attribute filters against the registry; reads pass through.
         // GOV-12: one materialisation guard (A-10 + registry rules) shared by this write seam, the approval materialisation in the
         // governance repositories and the request creation services. The registry and the table repository are resolved lazily because
         // the repositories (which take the guard) are the backing store of both.
@@ -172,7 +172,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAuditPurgeKeyProvider>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // PLAN-GOV-158-INC1 (same validating decorator instance as IConsentRepository)
+        services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // INC1 (same validating decorator instance as IConsentRepository)
         services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam
         services.AddSingleton<IPhysicalIndexRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #404: physical non-unique index write seam
@@ -181,7 +181,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICallerAttributeRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ITrustedDocumentRepository>(sp => sp.GetRequiredService<TRepository>());
-        // WP-SC-03: every engine persists access profiles; the in-memory repository is a test double only.
+        // every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
@@ -191,7 +191,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
         // #112 A-9: per-tenant persisted semantic manifest.
         services.AddSingleton<Autheris.Application.Catalog.Semantic.ISemanticManifestStore>(sp => sp.GetRequiredService<TRepository>());
-        // SEC-SEC210-06: register durable CDC stream store and key store from the governance repository
+        // register durable CDC stream store and key store from the governance repository
         services.AddSingleton<Autheris.Application.Streaming.Interfaces.ICdcStreamStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore>(sp => sp.GetRequiredService<TRepository>());
         if (cdcWebhooksEnabled)

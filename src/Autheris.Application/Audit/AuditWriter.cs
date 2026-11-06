@@ -14,7 +14,7 @@ public sealed class AuditWriter : IAuditWriter
     private readonly ICallerContextProvider? _callerContextProvider;
 
     /// <param name="groupCommitSink">
-    /// WP-PF-04: when present, fail-closed (required / Tier-A) writes of concurrent requests are coalesced into one transaction, one
+    /// when present, fail-closed (required / Tier-A) writes of concurrent requests are coalesced into one transaction, one
     /// chain-tail read and one anchor per batch. Every caller still awaits the durable commit and anchor of its own batch.
     /// </param>
     /// <param name="callerContextProvider">

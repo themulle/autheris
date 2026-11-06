@@ -3,7 +3,7 @@ namespace Autheris.Application.Governance.TrustedDocuments;
 using System.Security.Cryptography;
 
 /// <summary>
-/// Exact-text document hash of the app-scoped path (Issue #281, owner decision 3, SEC-281-1): SHA-256 over the UTF-8 bytes of the
+/// Exact-text document hash of the app-scoped path (Issue #281, owner decision 3): SHA-256 over the UTF-8 bytes of the
 /// request's source text without any normalisation, rendered as 64 lower-case hex characters. Whitespace changes the hash.
 /// </summary>
 public static class TrustedDocumentHash

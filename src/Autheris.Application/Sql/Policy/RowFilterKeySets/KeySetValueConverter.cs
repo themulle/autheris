@@ -6,7 +6,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// SEC-RF107-07 (a)-(c), PLAN-GOV-107 A-9: converts the loaded primary key values of a dependent table to the type of the foreign key
+/// 07 (a)-(c), 107 A-9: converts the loaded primary key values of a dependent table to the type of the foreign key
 /// column of the target table. The pair must be on the closed allowlist (<see cref="KeySetKeyTypes.IsBindablePair"/>, also fed with the
 /// catalog collations); every value is converted with a checked conversion. A value that does not fit (overflow, longer than the declared
 /// length, scale, precision, not a canonical uuid, wrong CLR type, null) refuses the <b>whole site</b>: keys are never truncated, rounded

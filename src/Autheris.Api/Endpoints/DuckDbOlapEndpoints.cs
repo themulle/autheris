@@ -25,7 +25,7 @@ public static class DuckDbOlapEndpoints
 
     public static IEndpointRouteBuilder MapDuckDbOlapEndpoints(this IEndpointRouteBuilder app)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ingress.MapPost("/api/v1/olap/query", HandleOlapQueryAsync)
            .WithName("ExecuteDuckDbOlapQueryV1")
@@ -103,8 +103,8 @@ public static class DuckDbOlapEndpoints
             }
             catch (Exception ex)
             {
-                // A failure while writing the result is a 400 with a fixed problem body in every environment (ARCH-MNT-08).
-                // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote data values.
+                // A failure while writing the result is a 400 with a fixed problem body in every environment.
+                // type and trace id only above Debug; the message can quote data values.
                 logger.Error(ex, "Error executing DuckDB OLAP query. TraceId={TraceId}", httpContext.TraceIdentifier);
                 if (!httpContext.Response.HasStarted)
                 {

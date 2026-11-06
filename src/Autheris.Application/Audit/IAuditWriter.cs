@@ -3,7 +3,7 @@ using Autheris.Domain.Model;
 namespace Autheris.Application.Audit;
 
 /// <summary>
-/// WP-ARC-A-06: the single place that decides what happens when an audit write fails. Replaces hand-written
+/// the single place that decides what happens when an audit write fails. Replaces hand-written
 /// <c>GetService&lt;IAuditLogRepository&gt;()</c> / <c>if (repo != null)</c> blocks in endpoints and services.
 /// </summary>
 public interface IAuditWriter

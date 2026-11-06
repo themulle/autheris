@@ -9,7 +9,7 @@ using Autheris.Domain.Audit;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-8, SEC-RF107-14, SEC-RF107-06e): validation, persistence and audit of the row filter evaluation settings for the
+/// Issue #107 (107 A-8, 06e): validation, persistence and audit of the row filter evaluation settings for the
 /// REST endpoints and the MCP tools. The repository bumps the policy epoch in the transaction of the settings change and invalidates the epoch
 /// cache after the commit; this service records the domain audit entry (actor, tenant, target table, rule id, before/after, no data values)
 /// through the HMAC-chained audit writer with the dedicated event types. The caps are read per call, so a lowered cap applies at once.
@@ -121,7 +121,7 @@ public sealed class RowFilterEvaluationAdminService : IRowFilterEvaluationAdminS
         return change;
     }
 
-    // Not found and other tenant are indistinguishable (SEC-RF107-14a).
+    // Not found and other tenant are indistinguishable (14a).
     private async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> FindRuleAsync(
         Guid rowFilterId, TenantId tenant, CancellationToken ct)
     {

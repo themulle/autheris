@@ -97,7 +97,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
     }
 
     /// <summary>
-    /// CR-ADG-31 / SEC-X1-13: registers the tenant of an authenticated principal in the tenant registry (never for anonymous
+    /// CR-ADG-31 / registers the tenant of an authenticated principal in the tenant registry (never for anonymous
     /// requests; <see cref="SecurityContextFactory"/> has validated the id as a <c>TenantId</c>). Returns true when the request was answered:
     /// 403 for a collision, 429 when the issuer exhausted its budget for new tenants, 503 when the registry cannot decide.
     /// Without a registered <see cref="ITenantRegistry"/> the legacy behaviour is unchanged.
@@ -309,7 +309,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             context.Items[SecurityPrincipalContext.TenantIdItemKey] = resolvedTenant;
         }
 
-        // Issue #447 (REQ-ATR-05): a transport denial is audited while the request runs, before the access audit finalizer attributes the
+        // Issue #447: a transport denial is audited while the request runs, before the access audit finalizer attributes the
         // request; the caller and tenant are therefore recorded on the audit context as soon as they are resolved.
         if (context.RequestServices?.GetService<Autheris.Domain.Audit.AuditContext>() is { } requestAuditContext)
         {

@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
-/// <summary>Shared steps of the callers that bind caller attributes into a typed policy (REQ-GOV-129 A-1): which attributes a recipe names, and one resolution under the bind reserve.</summary>
+/// <summary>Shared steps of the callers that bind caller attributes into a typed policy (129 A-1): which attributes a recipe names, and one resolution under the bind reserve.</summary>
 public static class CallerAttributeRecipes
 {
     /// <summary>The attribute names of the simple-predicate <c>USER_ATTRIBUTE</c> leaves of <paramref name="recipe"/> (valid names only).</summary>

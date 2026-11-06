@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// REQ-CDC-99 D-A2: the change tracking producer. One fenced lease loop per tracked table (key <c>cdc:mssql:poll:{domain}.{schema}.{table}</c>,
+/// 99 D-A2: the change tracking producer. One fenced lease loop per tracked table (key<c>cdc:mssql:poll:{domain}.{schema}.{table}</c>,
 /// TTL <c>max(15 s, 3 x interval)</c>, per-table interval), so replicas share the tables and one slow table never delays another. The lease
 /// token is the fencing token of the append transaction; a lost lease cancels the poll. Persistent failures (failed activation, invalid
 /// configuration) back off exponentially and are logged once per streak with the stable code only.

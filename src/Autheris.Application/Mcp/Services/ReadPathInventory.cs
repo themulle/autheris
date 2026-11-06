@@ -4,7 +4,7 @@ using System.Globalization;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// PLAN-SEC-115 A-9 (FR-115-6): the one-line startup inventory of the read paths, so an operator can verify a hardened profile
+/// 115 A-9 (FR-115-6): the one-line startup inventory of the read paths, so an operator can verify a hardened profile
 /// (for example GraphQL only) from the log. Pure and secret-free: no tool names, no paths, only on/off flags and a count.
 /// </summary>
 public static class ReadPathInventory

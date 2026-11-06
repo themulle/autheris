@@ -29,7 +29,7 @@ public class IdentityRealmsScimOptionsValidator : IValidateOptions<IdentityRealm
             return ValidateOptionsResult.Fail("Options are null.");
         }
 
-        // ARCH-MNT-06 (SC-01): an invalid caller range fails the start; it never silently disables the allowlist.
+        //  (SC-01): an invalid caller range fails the start; it never silently disables the allowlist.
         var ranges = options.Scim?.AllowedIpRanges ?? [];
         for (var i = 0; i < ranges.Count; i++)
         {

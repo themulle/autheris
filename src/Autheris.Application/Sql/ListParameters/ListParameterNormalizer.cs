@@ -9,9 +9,9 @@ using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
 /// Turns a raw list value (a JSON array of a WebSQL request, or a CLR collection produced by the declared-endpoint layer) into a
-/// <see cref="ClientListValue"/> (REQ-SQL-128, PLAN-SQL-128 A-4). Throws <see cref="ClientListException"/> only: its message is the fixed
-/// message of the code, so neither an element nor a count can reach a response, a log or an audit record (SEC-128-07).
-/// Order of checks: raw length ceiling before any element is read (SEC-128-09), element rules, de-duplication (first occurrence kept),
+/// <see cref="ClientListValue"/>(128 A-4). Throws<see cref="ClientListException"/> only: its message is the fixed
+/// message of the code, so neither an element nor a count can reach a response, a log or an audit record.
+/// Order of checks: raw length ceiling before any element is read, element rules, de-duplication (first occurrence kept),
 /// distinct count against the configured maximum.
 /// </summary>
 public static class ListParameterNormalizer
@@ -50,7 +50,7 @@ public static class ListParameterNormalizer
         }
         catch (Exception ex) when (ex is FormatException or InvalidOperationException or OverflowException or ArgumentException and not ClientListException)
         {
-            // JsonElement accessors and parsers: never a 500 and never the inner message (SEC-128-08).
+            // JsonElement accessors and parsers: never a 500 and never the inner message.
             throw new ClientListException(GovernedSqlErrorCodes.ListParamType);
         }
     }
@@ -196,7 +196,7 @@ public static class ListParameterNormalizer
         }
     }
 
-    /// <summary>Int64 if it fits, else an exact decimal; a double only for a finite token with a fraction or exponent beyond decimal (SEC-128-08).</summary>
+    /// <summary>Int64 if it fits, else an exact decimal; a double only for a finite token with a fraction or exponent beyond decimal.</summary>
     private static object Number(JsonElement element)
     {
         if (element.TryGetInt64(out long integer))
@@ -352,7 +352,7 @@ public static class ListParameterNormalizer
 
             case SqlParameterType.TimestampTz:
             {
-                // AssumeUniversal: an offset-less date never depends on the host time zone (SEC-128-08; #130 owns the policy).
+                // AssumeUniversal: an offset-less date never depends on the host time zone (#130 owns the policy).
                 if (text is not null && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedDate)) return parsedDate;
                 break;
             }

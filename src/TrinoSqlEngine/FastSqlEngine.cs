@@ -55,7 +55,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     private int _parseThreadStackSize = DefaultParseThreadStackSize;
 
     /// <summary>
-    /// SEC-04: Maximum allowed SQL query length in characters to prevent algorithmic DoS and StackOverflow attacks.
+    /// Maximum allowed SQL query length in characters to prevent algorithmic DoS and StackOverflow attacks.
     /// SEC C-06: Default lowered from 512k to 64k.
     /// </summary>
     public int MaxQueryLength { get; set; } = 65_536;
@@ -131,7 +131,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     /// <summary>ARC-S-09: Maximum number of remembered syntax failures (default 256).</summary>
     public int SyntaxErrorCacheMaxEntries { get; set; } = 256;
 
-    // Created on the first remembered syntax error (SEC-LB-09): most engines never see one. A null cache is a miss on lookup, never a cached "ok".
+    // Created on the first remembered syntax error: most engines never see one. A null cache is a miss on lookup, never a cached "ok".
     private SyntaxErrorNegativeCache? _syntaxErrors;
 
     /// <summary>Number of remembered syntax failures (diagnostics and tests).</summary>
@@ -552,7 +552,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             // The text of the remaining tokens is read as a slice of the statement (same characters as IToken.Text, no string per token).
             var text = TokenText(token, source, out bool hasText);
 
-            // SEC-ADG-10: ${...} variable substitution sequences (Spark / Databricks)
+            // ${...} variable substitution sequences (Spark / Databricks)
             if (options.RejectVariableSubstitutionSequences && hasText && text.Contains("${", StringComparison.Ordinal)
                 && !CompilerHooks.IsDisabled(SecurityControl.VariableSubstitution)
                 )
@@ -793,7 +793,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     {
     }
 
-    /// <summary>ARCH-MNT-15: an engine whose parsers and lexers use the given ANTLR cache generations (a test seam; production uses the shared one).</summary>
+    /// <summary>an engine whose parsers and lexers use the given ANTLR cache generations (a test seam; production uses the shared one).</summary>
     public FastSqlEngine(AntlrCacheGenerations generations)
     {
         ArgumentNullException.ThrowIfNull(generations);
@@ -804,7 +804,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             () => new GovernedSqlCompiler(this, Ast.Capabilities.DialectCapabilityTable.Default, CompileCache));
     }
 
-    /// <summary>Cache of verified, value-free compile templates (SEC-ADG-01).</summary>
+    /// <summary>Cache of verified, value-free compile templates.</summary>
     public Ast.Emit.CompiledSqlTemplateCache CompileCache { get; } = new();
 
     /// <inheritdoc />
@@ -814,7 +814,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     private static readonly Governance.PolicyKeyQueryCompiler KeyQueryCompiler = new();
 
     /// <summary>
-    /// Issue #107 (PLAN-GOV-107 A-3): compiles the key query of a registered correlated EXISTS through the policy-subquery controls. The
+    /// Issue #107 (107 A-3): compiles the key query of a registered correlated EXISTS through the policy-subquery controls. The
     /// engine entry point delegates to the stateless <see cref="Governance.PolicyKeyQueryCompiler"/>.
     /// </summary>
     /// <inheritdoc />

@@ -14,7 +14,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PLAN-DATA-178 / SEC-DATA178-03 / SEC-BC-02: Implementation of deterministic keyset cursor encoder and decoder.
+/// Implementation of deterministic keyset cursor encoder and decoder.
 /// Generates opaque signed base64url JSON tuples of composite primary key values.
 /// Validates cursor integrity via HMAC-SHA256 signature and strong typing to prevent SQL injection or pagination desynchronization.
 /// </summary>

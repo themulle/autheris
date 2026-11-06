@@ -7,9 +7,9 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
 /// <summary>
-/// Issue #132 (PLAN-DATA-132, SEC-DATA132-02, SEC-ADG-02): Post-compile AST visitor asserting that
+/// Issue #132: Post-compile AST visitor asserting that
 /// every physical table reference in the generated SQL strictly maps to an authorized (database, schema, table) target.
-/// Any extraneous or injected table reference throws SecurityException (SEC-ADG-02).
+/// Any extraneous or injected table reference throws SecurityException.
 /// </summary>
 public sealed class PostCompileTableTargetAssertionVisitor : SqlAstRewriter
 {

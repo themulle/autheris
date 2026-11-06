@@ -39,7 +39,7 @@ internal static class McpDataTargetResolver
             var engine = sqlEngine ?? FastSqlEngine.Default;
             var metadata = engine.Analyze(sql.AsMemory());
 
-            // SEC-277-04: a keyword-less self-reference would be resolved as a table below (existence-dependent ABAC answer). It is refused
+            // a keyword-less self-reference would be resolved as a table below (existence-dependent ABAC answer). It is refused
             // from the analysis alone, with a fixed, catalog-independent marker the guardrail turns into SQL_CONSTRUCT_NOT_SUPPORTED.
             if (metadata.HasNonRecursiveSelfReference)
             {

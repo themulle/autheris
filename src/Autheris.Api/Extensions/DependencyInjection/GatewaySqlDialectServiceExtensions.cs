@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
-/// WP-ARC-B-09: Registers SQL dialect providers and <see cref="ISqlDialectRegistry"/> in the DI container.
+/// Registers SQL dialect providers and<see cref="ISqlDialectRegistry"/> in the DI container.
 /// </summary>
 public static class GatewaySqlDialectServiceExtensions
 {

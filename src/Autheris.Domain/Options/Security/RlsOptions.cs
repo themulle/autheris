@@ -13,7 +13,7 @@ public sealed class CasbinOptions
 }
 
 /// <summary>
-/// F-SEC-04: Relationship-Based Access Control (ReBAC) Options.
+/// F-Relationship-Based Access Control (ReBAC) Options.
 /// Configures Zanzibar/OpenFGA graph traversal depth, caching, and batch DataLoader settings.
 /// </summary>
 public sealed class RebacOptions
@@ -129,12 +129,12 @@ public sealed class RowFilterKeySetCacheOptions
     public long SizeLimitBytes { get; init; } = 64L * 1024 * 1024;
     public TimeSpan KeyQueryTimeout { get; init; } = TimeSpan.FromSeconds(5);
     public int BindParameterReserve { get; init; } = 256;
-    /// <summary>SEC-RF107-13: concurrent key query loads per node.</summary>
+    /// <summary>concurrent key query loads per node.</summary>
     public int MaxConcurrentKeyQueries { get; init; } = 4;
 }
 
 /// <summary>
-/// Issue #129 (PLAN-GOV-129 C-4): <c>Gateway:CallerAttributes</c>. With <see cref="Enabled"/> false (default) nothing changes: a
+/// Issue #129 (129 C-4):<c>Gateway:CallerAttributes</c>. With <see cref="Enabled"/> false (default) nothing changes: a
 /// <c>USER_ATTRIBUTE</c> consent leaf and a <c>{{caller.x}}</c> placeholder stay constants (no rows), and definitions are refused.
 /// </summary>
 public sealed class CallerAttributeOptions
@@ -148,7 +148,7 @@ public sealed class CallerAttributeOptions
 
     [Range(1, TtlCeilingSeconds)] public int DefaultTtlSeconds { get; init; } = 60;
 
-    /// <summary>Hard upper bound of every attribute TTL; never above 300 s (SEC-129-04: the bound for table and service-set providers).</summary>
+    /// <summary>Hard upper bound of every attribute TTL; never above 300 s (the bound for table and service-set providers).</summary>
     [Range(1, TtlCeilingSeconds)] public int MaxTtlSeconds { get; init; } = TtlCeilingSeconds;
 
     /// <summary>Negative cache TTL of a <c>Missing</c> result (a re-provisioned person waits at most this long).</summary>
@@ -201,7 +201,7 @@ public sealed class CallerAttributeCacheOptions
     [Range(1, int.MaxValue)] public long SizeLimitBytes { get; init; } = 8L * 1024 * 1024;
 }
 
-/// <summary>An issuer whose validated bearer tokens may supply claims; <see cref="SubjectKeyIsPerson"/> allows <c>sub</c> as a person key (SEC-129-01).</summary>
+/// <summary>An issuer whose validated bearer tokens may supply claims; <see cref="SubjectKeyIsPerson"/> allows <c>sub</c>as a person key.</summary>
 public sealed class CallerAttributeTrustedIssuer
 {
     public string Issuer { get; init; } = string.Empty;

@@ -22,13 +22,13 @@ public interface IDataSourceOptionsResolver
 
     /// <summary>
     /// Maps a caller-supplied (logical) data source name through <c>WebSql.DataSourceMappings</c> to the name a profile is keyed by.
-    /// An unmapped name is returned unchanged; a blank name yields an empty string (Issue #447, SEC-ATR-08).
+    /// An unmapped name is returned unchanged; a blank name yields an empty string (Issue #447).
     /// </summary>
     string CanonicalName(string? dataSourceName);
 
     /// <summary>
     /// Increases after every reload that swapped the profile snapshot. A cache of anything derived from the allowed transports keys on it,
-    /// so a reload that newly denies a source never serves a stale entry (Issue #447, REQ-ATR-10). Resolvers without reload report 0.
+    /// so a reload that newly denies a source never serves a stale entry (Issue #447). Resolvers without reload report 0.
     /// </summary>
     long Generation => 0;
 }

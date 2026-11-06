@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// WP-ARC-A-02: drains the webhook outbox. Workers claim leased batches (disjoint across workers and nodes), deliver through
+/// drains the webhook outbox. Workers claim leased batches (disjoint across workers and nodes), deliver through
 /// <see cref="WebhookDeliveryClient"/> and record the result. Retries use full-jitter backoff; permanent failures and exhausted
 /// attempt budgets go to dead letters. A node-local failure counter pauses (circuit) a persistently failing subscription cluster-wide
 /// by deferring its pending rows.

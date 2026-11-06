@@ -3,7 +3,7 @@ namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 using TrinoSqlEngine;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 D-WPC-3, SEC-RF107-18): pure helpers for the text budget of a statement with substituted key lists. The governed compiler
+/// Issue #107 (107 D-WPC-3): pure helpers for the text budget of a statement with substituted key lists. The governed compiler
 /// limits the emitted text to <c>MaxExpansionFactor * max(userSqlLength, 64)</c> characters; a padded <c>IN</c> list of a few thousand keys does not fit
 /// the budget of a short statement. Everything here is a pure function of the user SQL length, the normalized factor and the shape of a list: it never
 /// enters the cache key, never evicts or changes an entry, and a fallback it causes is never cached.

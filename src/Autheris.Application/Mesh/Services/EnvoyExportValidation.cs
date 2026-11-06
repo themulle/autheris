@@ -4,7 +4,7 @@ using System;
 using System.Buffers;
 
 /// <summary>
-/// Deterministic, allocation-free replacements for the former wall-clock-bounded regex checks (ARCH-MNT-27).
+/// Deterministic, allocation-free replacements for the former wall-clock-bounded regex checks.
 /// ASCII only, culture-free, never throws. Deliberate tightening versus the former regexes: the old <c>$</c>
 /// accepted one trailing <c>\n</c>; these checks reject it. The same tightening applies to <see cref="IsVersionSegment"/> (no effect there: segments come from a split path).
 /// </summary>

@@ -8,7 +8,7 @@ using TrinoSqlEngine.Ast.Nodes;
 /// <summary>
 /// Finds reads of masked columns of a DML target in the user part of a statement (SET right-hand sides, WHERE, MERGE ON and WHEN
 /// conditions, inserted values). A masked column must not be readable there: it would be a copy-out or comparison oracle
-/// (SEC-ADG-08 b, INV-10). Used by the injector and, independently, by the coverage verifier.
+/// (08 b, INV-10). Used by the injector and, independently, by the coverage verifier.
 /// </summary>
 internal static class DmlMaskedReadGuard
 {

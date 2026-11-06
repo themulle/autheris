@@ -5,7 +5,7 @@ using Autheris.Domain.Diagnostics;
 
 /// <summary>
 /// Safe exception wrapper preserving type name and call stack while value-redacting the message.
-/// Enforces SEC-OT06-06.
+/// Enforces 06.
 /// </summary>
 public sealed class RedactedException : Exception
 {

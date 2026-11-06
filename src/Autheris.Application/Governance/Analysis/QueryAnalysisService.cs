@@ -57,7 +57,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
         IRateLimiterService? rateLimiterService = null)
     {
-        // The default is the secure list (REQ-GOV-143), never "off".
+        // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -98,7 +98,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
         IRateLimiterService? rateLimiterService = null)
     {
-        // The default is the secure list (REQ-GOV-143), never "off".
+        // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));

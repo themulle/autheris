@@ -14,7 +14,7 @@ using Microsoft.Extensions.Options;
 /// Architecture Phase 2 / Issue #114: Periodic background hosted service that flushes in-memory consumer metrics
 /// to persistent storage (15s interval) and executes daily retention purges decoupled from the audit log trail.
 /// Issue #286: the worker never runs DDL; a missing table or a failing store is reported (not retried with DDL) and
-/// the repeated failure is logged without flooding the log (SEC-286-5/6).
+/// the repeated failure is logged without flooding the log (6).
 /// </summary>
 public sealed class ConsumerUsageFlushWorker : BackgroundService
 {
@@ -115,7 +115,7 @@ public sealed class ConsumerUsageFlushWorker : BackgroundService
         }
     }
 
-    // SEC-286-5: only the exception type and the provider message are logged, never the exception object (no parameter dumps),
+    // only the exception type and the provider message are logged, never the exception object (no parameter dumps),
     // and never tenant, application, client or actor values.
     private void RecordFailure(Exception ex)
     {

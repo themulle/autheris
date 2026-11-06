@@ -26,7 +26,7 @@ public sealed record SecurityEvaluationContext(
     public IReadOnlyList<string>? TableColumns { get; init; }
 
     /// <summary>
-    /// WP-PF-09 / SEC-SC-09: true when the data source evaluates access as the end user (delegated / OBO enforcement). Decisions for
+    /// true when the data source evaluates access as the end user (delegated / OBO enforcement). Decisions for
     /// such sources are never shared between users: the decision cache key always carries the user.
     /// </summary>
     public bool IsDelegatedSource { get; init; }

@@ -8,7 +8,7 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
-/// <summary>Governed CDC stream persistence (PLAN-CDC-99 CdcStreams) on the PostgreSql governance database; statements live in <see cref="CdcStreamSqlCore"/>.</summary>
+/// <summary>Governed CDC stream persistence (99 CdcStreams) on the PostgreSql governance database; statements live in<see cref="CdcStreamSqlCore"/>.</summary>
 public partial class PostgreSqlGovernanceRepository : ICdcStreamStore
 {
     public bool IsDurable => true;

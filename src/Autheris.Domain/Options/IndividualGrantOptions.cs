@@ -3,7 +3,7 @@ namespace Autheris.Domain.Options;
 using System.ComponentModel.DataAnnotations;
 
 /// <summary>
-/// WP-SC-16: realm profile of the time-bound individual grant policy, bound to <c>Gateway:Governance:IndividualGrants</c>.
+/// realm profile of the time-bound individual grant policy, bound to<c>Gateway:Governance:IndividualGrants</c>.
 /// Every value can only SHORTEN the built-in ceiling (<see cref="IndividualGrantCeilings"/>); the effective value is always
 /// <c>min(configured, ceiling)</c> and a value above the ceiling is rejected at startup.
 /// </summary>

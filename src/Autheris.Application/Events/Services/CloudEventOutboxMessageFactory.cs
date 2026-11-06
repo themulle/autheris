@@ -8,7 +8,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// Builds the durable webhook outbox row for one CloudEvent and one subscription (WP-ARC-A-02). The row carries the (already masked)
+/// Builds the durable webhook outbox row for one CloudEvent and one subscription. The row carries the (already masked)
 /// envelope JSON only: target URL, secret and custom headers are resolved from the subscription at delivery time.
 /// </summary>
 public static class CloudEventOutboxMessageFactory

@@ -12,7 +12,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
 /// <summary>
-/// Issue #132 (PLAN-DATA-132, SEC-DATA132-01): Client database qualification AST guard.
+/// Issue #132: Client database qualification AST guard.
 /// Asserts client SQL queries reference catalog/schema notation (catalog.schema.table or schema.table).
 /// Rejects explicit three-part or four-part physical database names with INVALID_IDENTIFIER_QUALIFICATION.
 /// </summary>

@@ -10,10 +10,10 @@ using Autheris.Application.Webhooks;
 using Autheris.Domain.Model;
 using Microsoft.Data.SqlClient;
 
-/// <summary>SQL Server <see cref="IWebhookOutbox"/> (WP-ARC-A-02): claims with <c>UPDLOCK, READPAST</c>, so workers on any node get disjoint batches.</summary>
+/// <summary>SQL Server <see cref="IWebhookOutbox"/>claims with<c>UPDLOCK, READPAST</c>, so workers on any node get disjoint batches.</summary>
 public partial class SqlServerGovernanceRepository : IWebhookOutbox
 {
-    /// <summary>Dialect SQL of the webhook outbox (ARCH-MNT-22). Literals are moved verbatim; binding and mapping live in <see cref="WebhookOutboxSqlCore"/>.</summary>
+    /// <summary>Dialect SQL of the webhook outbox. Literals are moved verbatim; binding and mapping live in<see cref="WebhookOutboxSqlCore"/>.</summary>
     internal static class WebhookOutboxSql
     {
         // UPDLOCK + HOLDLOCK serialises concurrent inserts of the same key; the unique index is the final guard.
@@ -97,7 +97,7 @@ public partial class SqlServerGovernanceRepository : IWebhookOutbox
             conn, WebhookOutboxSql.FencedUpdate(setClause), id, leaseOwner, new WebhookFencedValues(setClause, statusCode, errorCode, next, now), BindFencedUpdate, ct).ConfigureAwait(false);
     }
 
-    // D5 (ARCH-MNT-22): SQL Server binds only the parameters the set clause uses (SQLite binds all unconditionally).
+    // D5: SQL Server binds only the parameters the set clause uses (SQLite binds all unconditionally).
     internal static void BindFencedUpdate(DbCommand cmd, WebhookFencedValues v)
     {
         if (v.SetClause.Contains("@status", StringComparison.Ordinal))

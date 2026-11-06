@@ -134,7 +134,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         {
             try
             {
-                // WP-PF-05: issue every L2 read first (the multiplexer pipelines them), then await them together.
+                // issue every L2 read first (the multiplexer pipelines them), then await them together.
                 // Single-key commands only, so this is also safe on Redis Cluster.
                 var l2Keys = new RedisKey[missingTables.Count];
                 var l2Reads = new Task<RedisValue>[missingTables.Count];
@@ -303,7 +303,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table))
                 {
                     var isL2EpochValid = await _epochValidationService.IsEpochValidAsync(table, l2Env.Epoch, ct).ConfigureAwait(false);
-                    // SEC-GOV143-04: a legacy or foreign-fingerprint entry is a miss; L1 promotion only happens after this check.
+                    // a legacy or foreign-fingerprint entry is a miss; L1 promotion only happens after this check.
                     var decision = isL2EpochValid ? l2Env.ToDecision(_restrictionFingerprint) : null;
                     if (isL2EpochValid && decision != null)
                     {

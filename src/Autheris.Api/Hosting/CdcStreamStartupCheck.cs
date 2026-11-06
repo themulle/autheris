@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Startup diagnostic of the governed CDC stream (PLAN-CDC-99 D-A8, SEC-CDC99-14): with MSSQL Change Tracking enabled, a missing, short or
+/// Startup diagnostic of the governed CDC stream (99 D-A8): with MSSQL Change Tracking enabled, a missing, short or
 /// unresolvable active stream KEK makes every table activation fail with <c>CDC_KEY_UNAVAILABLE</c>, so the operator is warned early.
 /// Only the stable code is logged, never a secret name or key material.
 /// </summary>

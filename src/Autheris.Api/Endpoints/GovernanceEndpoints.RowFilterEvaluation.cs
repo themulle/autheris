@@ -19,7 +19,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-8, SEC-RF107-14): REST administration of the row filter key-set cache settings. Rule level:
+/// Issue #107 (107 A-8): REST administration of the row filter key-set cache settings. Rule level:
 /// <c>/api/v1/governance/row-filters/{id}/evaluation</c>; object level (mapped in <see cref="CatalogApiEndpoints"/>):
 /// <c>/api/v1/catalog/datasets/{id}/row-filter-strategy</c>. Everything is <c>GovernanceAdmin</c>; the rule level additionally requires the
 /// consent's tenant to equal the caller's tenant. Unknown id and foreign tenant produce the same fixed 404 body (no id echo).
@@ -243,7 +243,7 @@ public static partial class GovernanceEndpoints
 
 /// <summary>
 /// Body of the row filter evaluation PUT endpoints. Unknown properties are rejected; <see cref="Strategy"/> is a string, so a JSON number
-/// fails to bind, and only the exact names <c>Exists</c> and <c>KeySetCache</c> are accepted (SEC-RF107-14b). Omitted values mean "inherit".
+/// fails to bind, and only the exact names <c>Exists</c> and <c>KeySetCache</c>are accepted (14b). Omitted values mean "inherit".
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed class RowFilterEvaluationDto

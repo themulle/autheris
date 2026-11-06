@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 /// <summary>
-/// WP-ARC-A-13: Cluster-wide CDC event channel backed by Redis Pub/Sub (<c>autheris:cdc:events</c>)
+/// Cluster-wide CDC event channel backed by Redis Pub/Sub (<c>autheris:cdc:events</c>)
 /// with a local <see cref="InMemoryCdcEventChannel"/> for in-process fan-out and history.
 /// Uses a per-node instance identifier in the pub/sub envelope so events published on this node
 /// are delivered locally once and are not double-delivered when echoed back from Redis.

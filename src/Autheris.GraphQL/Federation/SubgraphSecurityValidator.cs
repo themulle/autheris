@@ -83,7 +83,7 @@ public static class SubgraphSecurityValidator
 
         if (clusterState != null)
         {
-            // WP-ARC-A-09: with a cluster-wide topology the shared nonce registry is the replay defense, so an unavailable
+            // with a cluster-wide topology the shared nonce registry is the replay defense, so an unavailable
             // store rejects the request (fail closed). Without it the process-local cache above is all there is.
             var failClosed = topology?.IsClusterWide == true;
             try
@@ -121,7 +121,7 @@ public static class SubgraphSecurityValidator
     {
         now = DateTimeOffset.UtcNow;
 
-        // SEC-MED-23: Disallow 4-field signature downgrade; target subgraph must be specified
+        // Disallow 4-field signature downgrade; target subgraph must be specified
         if (string.IsNullOrWhiteSpace(tenant) ||
             string.IsNullOrWhiteSpace(timestampStr) ||
             string.IsNullOrWhiteSpace(nonce) ||
@@ -166,7 +166,7 @@ public static class SubgraphSecurityValidator
 
     private static bool TryRegisterNonceLocal(string tenant, string nonce, DateTimeOffset now)
     {
-        // SEC-MED-23: Nonce replay defense within time-drift window
+        // Nonce replay defense within time-drift window
         var replayKey = $"{tenant}:{nonce}";
         if (!SeenNonces.TryAdd(replayKey, now))
         {

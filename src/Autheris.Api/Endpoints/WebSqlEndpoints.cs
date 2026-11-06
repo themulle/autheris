@@ -28,7 +28,7 @@ public static partial class WebSqlEndpoints
 
     public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {
-        // Issue #447 (SEC-ATR-02): the ingress transport comes from endpoint metadata only. /v1/statement* is Trino, everything else WebSql.
+        // Issue #447: the ingress transport comes from endpoint metadata only. /v1/statement* is Trino, everything else WebSql.
         var webSql = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.WebSql);
         var trino = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Trino);
 

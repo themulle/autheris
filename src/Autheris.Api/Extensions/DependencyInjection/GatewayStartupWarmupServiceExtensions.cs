@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
-/// <summary>PLAN-OPS-150 (D-150-7): registration of the startup warm-up and cold-path measurement pieces.</summary>
+/// <summary>150 (D-150-7): registration of the startup warm-up and cold-path measurement pieces.</summary>
 public static class GatewayStartupWarmupServiceExtensions
 {
     /// <summary>The cold-path timing switch as read from configuration while the services were being registered.</summary>
@@ -45,7 +45,7 @@ public static class GatewayStartupWarmupServiceExtensions
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<ColdPathTimingOptions>, ColdPathTimingOptionsValidator>();
 
-        // The listener is only registered when explicitly enabled (default off, SEC-OPS150-12).
+        // The listener is only registered when explicitly enabled (default off).
         var enabled = services.LastOrDefault(d => d.ServiceType == typeof(ColdPathTimingFlag))?.ImplementationInstance is ColdPathTimingFlag { Enabled: true };
         if (enabled)
         {

@@ -64,7 +64,7 @@ public static class SqlFunctionAllowlists
         "square", "pi", "degrees", "radians", "count_big", "stdev", "stdevp", "var", "varp", "translate",
     ];
 
-    // SEC-X1-10: closed list. printf/format (unbounded padding width) are excluded, like every name of SqlFunctionPolicy.DefaultDeniedFunctions.
+    // closed list. printf/format (unbounded padding width) are excluded, like every name of SqlFunctionPolicy.DefaultDeniedFunctions.
     private static readonly string[] SqliteFunctions =
     [
         "date", "time", "datetime", "julianday", "strftime", "unixepoch", "ifnull", "iif", "instr",
@@ -104,7 +104,7 @@ public static class SqlFunctionAllowlists
     private static readonly string[] TrinoDatePartFunctions = ["year", "quarter", "month", "day", "hour", "minute", "second", "date_part"];
 
     /// <summary>
-    /// SEC-PG-03: the allowlist of a governed request that sets <c>TranslateTrinoDateFunctions</c>: <paramref name="allowed"/> plus
+    /// the allowlist of a governed request that sets<c>TranslateTrinoDateFunctions</c>: <paramref name="allowed"/> plus
     /// the date functions the builder translates (<c>date_add</c>, <c>date_trunc</c>, <c>now</c>, the part functions); nothing else is added.
     /// </summary>
     public static IReadOnlySet<string> WithDateTranslation(IReadOnlySet<string> allowed)
@@ -165,7 +165,7 @@ public static class SqlFunctionAllowlists
     internal static IReadOnlySet<string> WithoutDateTranslation(TargetSqlDialect dialect, IReadOnlySet<string> names)
     {
         // G8: the result is a pure function of the (immutable) name set and the dialect, so it is computed once per name set
-        // instead of building a new frozen set on every compile. It contains no request value (SEC-ADG-01).
+        // instead of building a new frozen set on every compile. It contains no request value.
         var entry = WithoutDateCache.GetValue(names, static _ => new WithoutDateEntry());
         var cached = entry.Value;
         if (cached is not null && cached.Dialect == dialect)
@@ -262,7 +262,7 @@ public static class SqlFunctionAllowlists
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// REQ-SQL-130 (BC-130-9): true for the names of the time zone functions of the dialects and for <c>convert_timezone</c> itself, whatever the case,
+    /// 130 (BC-130-9): true for the names of the time zone functions of the dialects and for<c>convert_timezone</c> itself, whatever the case,
     /// quoting or qualification of the entry. A function of that family that is not <c>convert_timezone</c> has no closed zone set behind it, so neither
     /// <see cref="Build"/> nor the options validation lets configuration admit one.
     /// </summary>
@@ -291,7 +291,7 @@ public static class SqlFunctionAllowlists
         return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>Functions whose arguments are checked by a dedicated governed validator that policy predicates do not run (REQ-SQL-130).</summary>
+    /// <summary>Functions whose arguments are checked by a dedicated governed validator that policy predicates do not run.</summary>
     private static readonly string[] GovernedOnlyFunctions = ["convert_timezone"];
 
     private static FrozenSet<string> Create(params string[][] groups) => Create(groups, except: []);

@@ -74,37 +74,37 @@ public sealed record CompileRequest
     /// <summary>Test-only (an architecture test forbids setting it in <c>src</c>). Dialects without a production tier stay rejected.</summary>
     public bool AllowExperimentalDialect { get; init; }
 
-    /// <summary>Budget of one compile (SEC-ADG-05). Exceeding it is a typed <see cref="Ast.Capabilities.SqlLimitExceededException"/>.</summary>
+    /// <summary>Budget of one compile. Exceeding it is a typed<see cref="Ast.Capabilities.SqlLimitExceededException"/>.</summary>
     public TimeSpan CompileTimeout { get; init; } = TimeSpan.FromSeconds(2);
 
-    /// <summary>Maximum emitted length divided by the input length (floor 64 characters of input); SEC-ADG-05.</summary>
+    /// <summary>Maximum emitted length divided by the input length (floor 64 characters of input); 05.</summary>
     public int MaxExpansionFactor { get; init; } = 64;
 
-    /// <summary>Value-free shapes of the client list parameters the statement references (REQ-SQL-128); part of the cache key.</summary>
+    /// <summary>Value-free shapes of the client list parameters the statement references; part of the cache key.</summary>
     public Ast.Emit.ClientListShapes ClientLists { get; init; } = Ast.Emit.ClientListShapes.Empty;
 
     /// <summary>
-    /// REQ-SQL-130: true only when the application proved time zone conversion for <see cref="TargetDialect"/> (registry self-test, and for
+    /// true only when the application proved time zone conversion for<see cref="TargetDialect"/> (registry self-test, and for
     /// DuckDB the ICU probe). The default is false (fail closed): every caller that does not pass the proof rejects the function. It is part
     /// of the cache key because the compile cache key serializes every public property.
     /// </summary>
     public bool TimeZoneConversionAvailable { get; init; }
 
     /// <summary>
-    /// Issue #277 (SEC-277-03): <c>WITH RECURSIVE</c> compiles only when the caller opts in. The default is false (fail closed); a
+    /// Issue #277:<c>WITH RECURSIVE</c> compiles only when the caller opts in. The default is false (fail closed); a
     /// recursive WITH is rejected independent of this flag inside DML. Part of the cache key like every public property.
     /// </summary>
     public bool AllowRecursiveCte { get; init; }
 
     /// <summary>
-    /// Issue #277 (SEC-277-05): the SQL Server <c>OPTION (MAXRECURSION n)</c> value, 1..<see cref="CompileLimits.MaxRecursionDepthLimit"/>.
+    /// Issue #277: the SQL Server<c>OPTION (MAXRECURSION n)</c> value, 1..<see cref="CompileLimits.MaxRecursionDepthLimit"/>.
     /// It comes from validated options, never from SQL text; it is validated only when <see cref="AllowRecursiveCte"/> is set.
     /// </summary>
     public int MaxRecursionDepth { get; init; } = CompileLimits.DefaultMaxRecursionDepth;
 }
 
 /// <summary>
-/// CR-ADG-14 / CR-ADG-15 / SEC-ADG-05: bounds the caller-controlled compile knobs and forces the dialect-mandatory token guards.
+/// CR-ADG-14 / CR-ADG-15 / bounds the caller-controlled compile knobs and forces the dialect-mandatory token guards.
 /// A non-positive or infinite timeout and a non-positive expansion factor are rejected; larger values are clamped to the maximum.
 /// </summary>
 public static class CompileLimits
@@ -143,14 +143,14 @@ public static class CompileLimits
 
         if (request.AllowRecursiveCte && request.MaxRecursionDepth is < 1 or > MaxRecursionDepthLimit)
         {
-            // SEC-277-05: a zero, negative or oversized bound would disable or widen the runaway guard; a configuration error, fail closed.
+            // a zero, negative or oversized bound would disable or widen the runaway guard; a configuration error, fail closed.
             throw new SqlCompileConfigurationException("The governed SQL compiler requires a valid recursion depth bound.");
         }
 
         var timeout = request.CompileTimeout > MaxCompileTimeout ? MaxCompileTimeout : request.CompileTimeout;
         int factor = Math.Min(request.MaxExpansionFactor, MaxExpansionFactorLimit);
 
-        // Databricks resolves ${...} variable substitution in the engine: the guard is not optional (SEC-ADG-10, CR-ADG-15).
+        // Databricks resolves ${...} variable substitution in the engine: the guard is not optional (CR-ADG-15).
         var guards = request.TokenGuards;
         if (request.TargetDialect == TargetSqlDialect.Databricks && !guards.RejectVariableSubstitutionSequences)
         {

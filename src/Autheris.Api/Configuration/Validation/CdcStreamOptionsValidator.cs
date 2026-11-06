@@ -9,12 +9,12 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// REQ-CDC-99 (PLAN-CDC-99 section 3.4): validates the change tracking producer and the governed CDC stream options. Violations fail
+/// 99 (99 section 3.4): validates the change tracking producer and the governed CDC stream options. Violations fail
 /// start-up. Failure messages name option paths only, never values (a SecretRef is a secret name, but it is still not echoed).
 /// </summary>
 public sealed class CdcStreamOptionsValidator : IValidateOptions<GatewayOptions>
 {
-    /// <summary>Secret name of the webhook KEK; stream KEKs must be distinct secrets (SEC-CDC99-14).</summary>
+    /// <summary>Secret name of the webhook KEK; stream KEKs must be distinct secrets.</summary>
     public const string WebhookKekSecretName = "cdc-webhook-kek";
 
     private readonly IHostEnvironment _environment;
@@ -136,7 +136,7 @@ public sealed class CdcStreamOptionsValidator : IValidateOptions<GatewayOptions>
         CheckRange(c.HandlerTimeoutSeconds, 1, 3_600, $"{p}:Consumers:HandlerTimeoutSeconds", failures);
         CheckRange(c.MaxAbandonedHandlers, 0, 1_000, $"{p}:Consumers:MaxAbandonedHandlers", failures);
 
-        // SEC-CDC99-07: 0 (no expiry) is a Development convenience only.
+        // 0 (no expiry) is a Development convenience only.
         var minAge = _environment.IsDevelopment() ? 0 : 1;
         CheckRange(c.IdentityMaxAgeDays, minAge, 365, $"{p}:Consumers:IdentityMaxAgeDays", failures);
     }

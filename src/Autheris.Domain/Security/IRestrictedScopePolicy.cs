@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Autheris.Domain.Options;
 
-/// <summary>Which token scopes are restricted (REQ-GOV-143): their holders need a scope-specific <c>Clear</c> for sensitive columns.</summary>
+/// <summary>Which token scopes are restricted: their holders need a scope-specific<c>Clear</c> for sensitive columns.</summary>
 public interface IRestrictedScopePolicy
 {
     /// <summary>The restricted scope names (bare names, ordinal-ignore-case). Empty when the restriction is disabled.</summary>

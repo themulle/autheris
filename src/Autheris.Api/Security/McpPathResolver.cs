@@ -5,7 +5,7 @@ using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Centralizes MCP base path resolution and request path matching across middleware and endpoint wiring (WP-ARC-C-04 / ARC-A-19).
+/// Centralizes MCP base path resolution and request path matching across middleware and endpoint wiring (ARC-A-19).
 /// </summary>
 public interface IMcpPathResolver
 {

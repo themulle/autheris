@@ -65,7 +65,7 @@ public sealed class EpochValidationOptions
     [Range(1, 300)] public int DegradedMaxStalenessSeconds { get; init; } = 30;
     public bool PipelinedMGetEnabled { get; init; } = true;
     /// <summary>
-    /// WP-PF-07: how long a local epoch read may serve decisions of non-sensitive tables (epoch pub/sub pushes invalidations earlier).
+    /// how long a local epoch read may serve decisions of non-sensitive tables (epoch pub/sub pushes invalidations earlier).
     /// Always 0 for sensitive tables and delegated sources, regardless of this value. 0 disables the budget.
     /// </summary>
     [Range(0, 250)] public int LocalStalenessBudgetMilliseconds { get; init; } = 150;

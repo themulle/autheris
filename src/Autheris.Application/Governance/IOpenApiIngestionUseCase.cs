@@ -20,7 +20,7 @@ public enum OpenApiIngestionOutcomeKind
 public sealed record OpenApiIngestionOutcome(OpenApiIngestionOutcomeKind Kind, OpenApiIngestionResult? Result = null);
 
 /// <summary>
-/// WP-ARC-B-07: authorizes (role, tenant domain), ingests an OpenAPI specification and writes the success audit.
+/// authorizes (role, tenant domain), ingests an OpenAPI specification and writes the success audit.
 /// The endpoint keeps the bounded body read and the response mapping.
 /// </summary>
 public interface IOpenApiIngestionUseCase

@@ -37,7 +37,7 @@ public interface ICallerAttributeDefinitionValidator
 }
 
 /// <summary>
-/// The rules for changing the registry and the service sets (PLAN-GOV-129 A-7, BC-129-10): validated, four-eyes (the store enforces
+/// The rules for changing the registry and the service sets (129 A-7, BC-129-10): validated, four-eyes (the store enforces
 /// approver != creator and the reviewed hash), audited with hashes only, visible to enforcement on this instance at once.
 /// </summary>
 public sealed class CallerAttributeAdministrationService

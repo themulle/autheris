@@ -17,7 +17,7 @@ internal sealed record AggregateValueDto(
     DateTimeOffset? DateTimeValue = null,
     bool? BooleanValue = null);
 
-/// <summary>WP-112-3: Typed group row containing key fields, row count and aggregate results.</summary>
+/// <summary>Typed group row containing key fields, row count and aggregate results.</summary>
 internal record AutherisAggregationRow(
     IReadOnlyDictionary<string, object?> Key,
     long RowCount,
@@ -30,7 +30,7 @@ internal sealed record AggregateGroupDto(
     bool IsMergedOther,
     IReadOnlyList<AggregateValueDto> Aggregates) : AutherisAggregationRow(Key, RowCount, IsMergedOther, Aggregates);
 
-/// <summary>WP-112-3: The typed result. It deliberately has no suppressed-row count (#112 O-4, SEC-112-20).</summary>
+/// <summary>The typed result. It deliberately has no suppressed-row count (#112 O-4).</summary>
 internal record AutherisTypedAggregationResult(
     IReadOnlyList<AggregateGroupDto> Groups,
     long Count,
@@ -128,7 +128,7 @@ internal static class AggregateResultMapper
             var key = new Dictionary<string, object?>(groupColumns.Count, StringComparer.Ordinal);
             foreach (var column in groupColumns)
             {
-                // The merged OTHER row stands for many groups: its key is never filled (SEC-112-07).
+                // The merged OTHER row stands for many groups: its key is never filled.
                 bool isBucket = bucketColumns != null && (bucketColumns.Contains(column.ColumnName) || bucketColumns.Contains(column.FieldName));
                 key[column.FieldName] = row.IsMergedOther
                     ? null

@@ -25,7 +25,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     private readonly List<IDisposable> _subscriptions = new();
     private readonly object _syncRoot = new();
 
-    // SEC-ATR-10: profiles and the default profile are swapped together as one immutable snapshot.
+    // profiles and the default profile are swapped together as one immutable snapshot.
     private sealed record Snapshot(FrozenDictionary<string, EffectiveDataSourceProfile> Profiles, EffectiveDataSourceProfile DefaultProfile);
 
     private volatile Snapshot _snapshot = null!;
@@ -98,7 +98,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     }
 
     /// <summary>
-    /// SEC-ATR-10: a failed rebuild (for example an options source that throws) keeps the last good snapshot instead of failing open or
+    /// a failed rebuild (for example an options source that throws) keeps the last good snapshot instead of failing open or
     /// leaving a half-built map.
     /// </summary>
     private void RebuildKeepingLastGood()
@@ -166,7 +166,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
                 }
             }
 
-            // SEC-ATR-10 / decision 5: every configured WebSQL source name gets a profile built from Defaults, so a legitimately
+            // 10 / decision 5: every configured WebSQL source name gets a profile built from Defaults, so a legitimately
             // configured source never reads as unknown. Explicit profiles are never overwritten (the map is keyed by name).
             AddWebSqlSourceNames(gateway?.WebSql, names);
 
@@ -255,7 +255,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
         bool isGlobalDefault)
     {
         // -------------------------------------------------------------------------
-        // SEC-DS05-02: Dual administrative opt-in required for ceiling relaxation
+        // Dual administrative opt-in required for ceiling relaxation
         // -------------------------------------------------------------------------
         bool relaxed = (profileOptions?.AllowCeilingRelaxation == true) && ceilings.AllowGlobalCeilingRelaxation;
 
@@ -293,7 +293,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             parsedLogLevel = LogLevel.Information;
         }
 
-        // SEC-DS05-06: Telemetry redaction ceiling precedence
+        // Telemetry redaction ceiling precedence
         bool allowStatementText = (telemetry?.Redaction?.AllowStatementText ?? true) && (gateway?.Logging?.AllowStatementText ?? true);
         bool rawLogSql = profileOptions?.LogGeneratedSql
             ?? fallbackDefaults.LogGeneratedSql
@@ -341,7 +341,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             ?? fallbackDefaults.DefaultIsolationLevel
             ?? (connectionOptions?.ReadUncommitted == true ? IsolationLevel.ReadUncommitted : IsolationLevel.ReadCommitted);
 
-        // SEC-ATR-01 / decision 13: a profile without the key inherits Defaults, then All; an explicit None stays None.
+        // 01 / decision 13: a profile without the key inherits Defaults, then All; an explicit None stays None.
         DataSourceTransportFlags transports = profileOptions?.AllowedTransports
             ?? fallbackDefaults.AllowedTransports
             ?? DataSourceTransportFlags.All;

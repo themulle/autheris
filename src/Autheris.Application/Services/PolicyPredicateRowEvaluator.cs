@@ -10,7 +10,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// WP-ARC-B-04: evaluates the typed <see cref="PolicyPredicate"/> of a row policy against in-memory rows with SQL three-valued logic
+/// evaluates the typed<see cref="PolicyPredicate"/> of a row policy against in-memory rows with SQL three-valued logic
 /// (a row passes only when the predicate is TRUE). No SQL text is read or parsed. The evaluator is deliberately small and fail closed:
 /// a node it does not implement, a comparison between values of different kinds (no implicit coercion) or a value that has no
 /// comparable form makes the whole predicate unenforceable, and every row is denied. A row that lacks a column the predicate
@@ -301,7 +301,7 @@ internal static class PolicyPredicateRowEvaluator
             throw new UnsupportedPredicateException();
         }
 
-        // SEC-ADG-18: only an admin-authored pattern (a literal, or a parameter flagged IsLikePattern) keeps its wildcards.
+        // only an admin-authored pattern (a literal, or a parameter flagged IsLikePattern) keeps its wildcards.
         bool wildcards = like.Pattern switch
         {
             PolicyParameterExpression p => p.IsLikePattern,

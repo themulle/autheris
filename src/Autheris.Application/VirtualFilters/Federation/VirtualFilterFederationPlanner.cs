@@ -14,7 +14,7 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// F-GOV-14 (WI-6; M5; SEC-12, SEC-13, SEC-23): plans the protected HTTP tables of a cross-source query.
+/// F-GOV-14 (WI-6; M5): plans the protected HTTP tables of a cross-source query.
 /// <list type="number">
 /// <item>Every (filter, binding) pair of every protected table is validated (target columns exist, key types are
 /// comparable, structured filter without validity window) before any key is loaded.</item>
@@ -101,7 +101,7 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             prepared.Add(new PreparedTable(table.Metadata, pairs, keyTypes, columnsPerPair));
         }
 
-        // 2. Load all key sets; the caller's token bounds the whole step (SEC-12).
+        // 2. Load all key sets; the caller's token bounds the whole step.
         var plans = new Dictionary<TableIdentifier, VirtualFilterTablePlan>();
         foreach (var table in prepared)
         {
@@ -269,7 +269,7 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         }
         catch (Exception ex)
         {
-            // Includes cancellation and timeout; the inner exception is attached, never concatenated (SEC-11).
+            // Includes cancellation and timeout; the inner exception is attached, never concatenated.
             throw new GatewaySecurityException(
                 $"The key source of the Virtual Filter '{filter.Name}' is unavailable.", VirtualFilterErrorCodes.SourceUnavailable, ex);
         }

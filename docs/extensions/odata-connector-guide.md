@@ -32,9 +32,9 @@ graph TD
     Formatter --> Client
 ```
 
-- **[`IODataHandler`](../../src/Autheris.Extensions/OData/IODataHandler.cs) & [`ODataHandler`](../../src/Autheris.Extensions/OData/ODataHandler.cs)**: Verarbeitet eingehende OData v4 URL-Parameter (`$filter`, `$select`, `$top`, `$skip`, `$orderby`).
-- **[`ODataCsdlGenerator`](../../src/Autheris.Extensions/OData/ODataCsdlGenerator.cs)**: Erzeugt dynamisch konforme EDMX / CSDL XML-Metadatendokumente aus dem internen Schema.
-- **[`ODataResponseFormatter`](../../src/Autheris.Extensions/OData/ODataResponseFormatter.cs)**: Serialisiert Ergebnisse in standardkonformes OData v4 JSON mit `@odata.context` und `@odata.count`.
+- **[`IODataHandler`](../../src/Autheris.Application/OData/IODataHandler.cs) & [`ODataHandler`](../../src/Autheris.Application/OData/ODataHandler.cs)**: Verarbeitet eingehende OData v4 URL-Parameter (`$filter`, `$select`, `$top`, `$skip`, `$orderby`).
+- **[`ODataCsdlGenerator`](../../src/Autheris.Application/OData/ODataCsdlGenerator.cs)**: Erzeugt dynamisch konforme EDMX / CSDL XML-Metadatendokumente aus dem internen Schema.
+- **[`ODataResponseFormatter`](../../src/Autheris.Application/OData/ODataResponseFormatter.cs)**: Serialisiert Ergebnisse in standardkonformes OData v4 JSON mit `@odata.context` und `@odata.count`.
 
 ---
 

@@ -12,7 +12,7 @@ public static class DatabricksServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the Statement Execution client and OBO token provider as typed HttpClients with the hardened outbound stack
-    /// (no redirects, SSRF checks, IP pinning), bounded response buffers and <c>Authorization</c> header redaction in HttpClient logs (SEC-ADG-09, SEC-OBO238-02).
+    /// (no redirects, SSRF checks, IP pinning), bounded response buffers and <c>Authorization</c>header redaction in HttpClient logs.
     /// </summary>
     public static IServiceCollection AddDatabricksStatementExecution(this IServiceCollection services)
     {

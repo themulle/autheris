@@ -155,7 +155,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", request.ToolName, false, false);
             _logger.LogWarning("AI Agent attempted to call unauthorized or unknown MCP tool '{ToolName}'.", request.ToolName);
-            // PLAN-SEC-115 C-115-4: the internal audit row names the switch behind the denial; the caller-visible result below is
+            // 115 C-115-4: the internal audit row names the switch behind the denial; the caller-visible result below is
             // byte-identical to the one for a name that never existed. Only names a switch really closed get a reason and a count.
             var disabledReason = _switches?.DisabledReason(request.ToolName);
             var denyDetails = $"Tool '{request.ToolName}' is not registered or allowed.";
@@ -272,7 +272,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
         if (string.Equals(sqlSyntaxError, McpDataTargetResolver.ConstructNotSupportedMarker, StringComparison.Ordinal))
         {
-            // SEC-277-04: identical text for every table state (existing, forbidden, unknown); fixed message, no request text.
+            // identical text for every table state (existing, forbidden, unknown); fixed message, no request text.
             var constructMessage = $"{TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported}: " +
                                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported);
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");

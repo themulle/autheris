@@ -18,7 +18,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Application.Audit;
 
 /// <summary>
-/// SEC-AUD161-01 / SEC-AUD161-02 / SEC-AUD161-03: Fenced background worker that periodically purges
+/// Fenced background worker that periodically purges
 /// expired audit entries older than configured retention floors, maintaining tamper-evident cryptographic continuity.
 /// </summary>
 public sealed class AuditRetentionPurgeWorker : BackgroundService

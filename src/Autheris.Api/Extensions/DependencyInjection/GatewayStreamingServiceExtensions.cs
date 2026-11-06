@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 /// <summary>
-/// WP-ARC-A-13: Registers the CDC event channel (<see cref="RedisCdcEventChannel"/> in cluster-wide mode when
+/// Registers the CDC event channel (<see cref="RedisCdcEventChannel"/> in cluster-wide mode when
 /// <see cref="IConnectionMultiplexer"/> is available, falling back to <see cref="InMemoryCdcEventChannel"/> in single-node mode)
 /// and <see cref="CdcSubscriptionGovernor"/>.
 /// </summary>

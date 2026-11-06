@@ -7,7 +7,7 @@ using System.Text;
 
 /// <summary>
 /// High-performance, zero-allocation span-based BCP 47 / RFC 5646 language tag parser and canonicalizer.
-/// Guards against ReDoS by using linear parsing without regular expressions (SEC-CAT146-04).
+/// Guards against ReDoS by using linear parsing without regular expressions.
 /// </summary>
 public static class Bcp47LanguageTag
 {

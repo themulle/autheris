@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 public sealed record TimeZoneSelfTestResult(bool Passed, string? FailedCheck, bool CrossCheckSkipped);
 
 /// <summary>
-/// REQ-SQL-130 (A-2): the closed set of time zones the gateway admits. It is built once from the embedded resource
+/// 130 (A-2): the closed set of time zones the gateway admits. It is built once from the embedded resource
 /// <c>iana-windows-zones.txt</c> (lines <c>iana;windows</c>), loaded with <see cref="Assembly.GetManifestResourceStream(string)"/>; there is no
 /// runtime download and no file path configuration (BC-130-6e). The value that reaches a database is always registry-owned text, never the
 /// caller's string instance. Lookup is ordinal and case-sensitive, after a length cap of 64, and never trims or normalizes (BC-130-5e).

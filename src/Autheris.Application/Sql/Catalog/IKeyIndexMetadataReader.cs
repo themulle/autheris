@@ -19,7 +19,7 @@ public readonly record struct DbKeyIndexColumn(string IndexName, bool IsPrimaryK
 /// <summary>
 /// Reads the key columns (with direction) of the primary key, the unique indexes and (issue #404) the non-unique indexes from the system catalog of one dialect.
 /// Rows are ordered primary key, unique, non-unique, then index and key ordinal. One row per key column of each unfiltered, enabled, non-expression index; included columns are excluded. Implementations
-/// query fully qualified system catalogs with bound names only (SEC-X1-09, I403-SC-02).
+/// query fully qualified system catalogs with bound names only (I403-SC-02).
 /// </summary>
 public interface IKeyIndexMetadataReader
 {

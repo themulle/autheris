@@ -8,7 +8,7 @@ using Autheris.Api.Errors;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Enforces an optional IP allowlist on administrative endpoints when configured (WP-ARC-C-04).
+/// Enforces an optional IP allowlist on administrative endpoints when configured.
 /// </summary>
 public sealed class AdminIpAllowlistMiddleware
 {

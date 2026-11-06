@@ -103,7 +103,7 @@ public sealed class GraphQLAggregationOptions
     public bool Enabled { get; init; } = true;
 
     /// <summary>
-    /// Upper bound for aliased <c>T_aggregate</c> and <c>queryMetrics</c> fields in one operation (SEC-112-19). Out of range (1..10) is a
+    /// Upper bound for aliased <c>T_aggregate</c> and <c>queryMetrics</c>fields in one operation. Out of range (1..10) is a
     /// start-up failure, never clamped.
     /// </summary>
     public int MaxFieldsPerOperation { get; init; } = DefaultMaxFieldsPerOperation;

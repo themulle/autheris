@@ -3,7 +3,7 @@ namespace TrinoSqlEngine.Ast.Security;
 using System;
 
 /// <summary>
-/// REQ-SQL-130 (A-9): decides whether a catalog column type (or a CAST target) is a plain timestamp, that is a date and time without an offset,
+/// 130 (A-9): decides whether a catalog column type (or a CAST target) is a plain timestamp, that is a date and time without an offset,
 /// for the compile dialect. The table is dialect specific because the same word means different things: <c>timestamp</c> is a
 /// <c>rowversion</c> binary type in T-SQL and an offset-less time everywhere else, and <c>AT TIME ZONE</c> flips its meaning for
 /// <c>timestamptz</c>. Anything not listed, a null or an unparsable type is not plain (fail closed).

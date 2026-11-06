@@ -31,7 +31,7 @@ public enum TransportConfigurationFindingKind
 public readonly record struct TransportConfigurationFinding(string Source, TransportConfigurationFindingKind Kind, DataSourceTransportFlags Allowed);
 
 /// <summary>
-/// Issue #447 (REQ-ATR-09, decision 11): with the transport gate enforcing <c>AllowedTransports</c>, a source that allows no reachable
+/// Issue #447 (decision 11): with the transport gate enforcing<c>AllowedTransports</c>, a source that allows no reachable
 /// transport is a locked-out source. This service logs one warning per such source on start and on every options reload, and one
 /// warning that lists catalog sources without an explicit profile (they inherit <c>Defaults</c>, owner decision 1). It never fails the
 /// start (<c>DataSourceOptionsValidator</c> stays fail-only) and never changes a decision of the gate.

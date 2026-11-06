@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Governed multi-watermark query poller service running on distributed cluster leases (PLAN-CDC-101 D-5, D-6, WP-101-4).
+/// Governed multi-watermark query poller service running on distributed cluster leases (101 D-5, D-6).
 /// Fetches batches under read-only transaction semantics, classifies operations, and appends atomically to ICdcStreamStore.
 /// </summary>
 public class CustomQueryPollerService : ClusterPartitionedService
@@ -122,7 +122,7 @@ public class CustomQueryPollerService : ClusterPartitionedService
         var vectorRecord = await _streamStore.GetWatermarkVectorAsync(stream.Id, ct).ConfigureAwait(false);
         var vector = vectorRecord?.Vector ?? MultiWatermarkVector.Empty;
 
-        // 3. Prepare Command & Enforce Read-Only Isolation & Command Timeout (SEC-CDC101-03)
+        // 3. Prepare Command & Enforce Read-Only Isolation & Command Timeout
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = poller.QueryTemplate;
         var timeout = Math.Min(poller.QueryTimeoutSeconds > 0 ? poller.QueryTimeoutSeconds : 30, 60);
@@ -205,7 +205,7 @@ public class CustomQueryPollerService : ClusterPartitionedService
 
         var built = await _eventBuilder.BuildChangesAsync(activation, stream.HeadOffset, sourceRows, ct).ConfigureAwait(false);
 
-        // 8. Commit atomic append batch with vector state and fencing token (SEC-CDC101-04)
+        // 8. Commit atomic append batch with vector state and fencing token
         var appendBatch = new CdcAppendBatch(
             stream.Id,
             "query_poller",
@@ -363,7 +363,7 @@ public class CustomQueryPollerService : ClusterPartitionedService
     }
 
     /// <summary>
-    /// SEC-CDC101-03 / EXT-10: SQLite gets <c>query_only</c>; PostgreSQL runs the poll inside an explicit <c>READ ONLY</c> transaction
+    /// 03 / EXT-10: SQLite gets<c>query_only</c>; PostgreSQL runs the poll inside an explicit <c>READ ONLY</c> transaction
     /// (a bare <c>SET TRANSACTION</c> outside a transaction block is a warning and changes nothing). Failing to establish read-only mode
     /// is fatal. The statement shape itself (single SELECT) is enforced by <c>CustomQueryPollerValidator</c>. The returned transaction (if any)
     /// is already attached to <paramref name="cmd"/> and must be disposed by the caller.

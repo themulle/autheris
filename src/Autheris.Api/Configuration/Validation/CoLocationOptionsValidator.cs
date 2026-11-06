@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #132 (PLAN-DATA-132, SEC-DATA132-06): Fail-closed start-up validation of co-located SQL Server data sources.
+/// Issue #132: Fail-closed start-up validation of co-located SQL Server data sources.
 /// Enforces symmetric providers (SQL Server only), normalized server host, port, instance, credentials,
 /// and session isolation settings across all members of each administrative CoLocationGroup.
 /// Groups with fewer than 2 members or asymmetric configurations abort startup immediately.

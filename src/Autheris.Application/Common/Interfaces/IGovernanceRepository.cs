@@ -141,7 +141,7 @@ public interface IConsentRepository
         => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
 
     /// <summary>
-    /// WP-SC-02: active (non-revoked, in-window) consents of exactly one role grantee on one table within <paramref name="tenantId"/>.
+    /// active (non-revoked, in-window) consents of exactly one role grantee on one table within<paramref name="tenantId"/>.
     /// Role consents carry no subject SID, so the subject-based lookup never returns them. The default filters
     /// <see cref="GetAllActiveConsentsForSubjectsAsync(IEnumerable{Sid}, IEnumerable{string}?, DateTimeOffset?, TenantId?, CancellationToken)"/>;
     /// persistence overrides it with an indexed query.
@@ -160,7 +160,7 @@ public interface IConsentRepository
     }
 
     /// <summary>
-    /// WP-SC-10: one keyset page of the consents of a tenant (ordered by id), including role and group grants, optionally filtered by
+    /// one keyset page of the consents of a tenant (ordered by id), including role and group grants, optionally filtered by
     /// table and grantee. The tenant predicate is mandatory. Every persistence provider implements it with an indexed query; there is no
     /// default, so a consent listing can never load every consent into memory.
     /// </summary>
@@ -168,7 +168,7 @@ public interface IConsentRepository
         Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default);
 
     /// <summary>
-    /// WP-SC-02: atomically revokes <paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
+    /// atomically revokes<paramref name="revokeConsentIds"/> and creates <paramref name="create"/> in ONE transaction
     /// with ONE epoch bump per affected table. Either every change is applied or none. There is no non-atomic fallback and no default: every provider
     /// must implement it transactionally, so a partial manifest can never be applied. <paramref name="auditEntries"/> are written in the SAME transaction (chain-linked, Tier-A anchored), so a committed change always has its audit record.
     /// </summary>
@@ -205,13 +205,13 @@ public interface IAuditLogRepository
     Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// SEC-AUD161-02: Returns the newest persisted purge checkpoint anchor, or null if none exists.
+    /// Returns the newest persisted purge checkpoint anchor, or null if none exists.
     /// </summary>
     Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
         => Task.FromResult<AuditPurgeCheckpoint?>(null);
 
     /// <summary>
-    /// SEC-AUD161-02: Persists a signed purge checkpoint anchor to AUDIT_PURGE_CHECKPOINTS table.
+    /// Persists a signed purge checkpoint anchor to AUDIT_PURGE_CHECKPOINTS table.
     /// Enforces monotonic progression over existing checkpoints.
     /// </summary>
     Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
@@ -225,14 +225,14 @@ public interface IAuditLogRepository
         => Task.FromResult<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?>(null);
 
     /// <summary>
-    /// SEC-AUD161-03: Deletes up to <paramref name="batchSize"/> entries with sequence numbers &lt;= <paramref name="maxSequenceInclusive"/>.
+    /// Deletes up to<paramref name="batchSize"/> entries with sequence numbers &lt;= <paramref name="maxSequenceInclusive"/>.
     /// Uses transaction-scoped session context to bypass append-only triggers.
     /// </summary>
     Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
         => Task.FromResult(0);
 
     /// <summary>
-    /// WP-SC-10: one keyset page over the audit chain (newest first, by chain sequence). Rows without a sequence number are never
+    /// one keyset page over the audit chain (newest first, by chain sequence). Rows without a sequence number are never
     /// listed. The default fails closed; every governance repository overrides it.
     /// </summary>
     Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
@@ -314,14 +314,14 @@ public interface IConsentApprovalRepository
         => ActivateConsentAsync(requestId, ct);
 
     /// <summary>
-    /// SEC-GOV113-02: Atomically withdraws a pending consent request owned by <paramref name="requesterSid"/>.
+    /// Atomically withdraws a pending consent request owned by<paramref name="requesterSid"/>.
     /// Returns true if updated to WITHDRAWN, false if not found or no longer pending.
     /// </summary>
     Task<bool> WithdrawConsentRequestAsync(Guid requestId, Sid requesterSid, CancellationToken ct = default)
         => Task.FromResult(false);
 
     /// <summary>
-    /// SEC-GOV113-05: Atomically records the approval step, updates the request status to APPROVED, creates the active consent
+    /// Atomically records the approval step, updates the request status to APPROVED, creates the active consent
     /// and its column rules and row filters, and bumps the table policy epoch in a single database transaction.
     /// Security review (four-eyes on the atomic path): implementations must apply the same checks as
     /// <see cref="ApproveConsentRequestStepAsync(Guid, Sid, CancellationToken)"/> under the row lock (approver is not the requester, has not
@@ -366,7 +366,7 @@ public interface ITableRelationRepository
     Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default);
 }
 
-/// <summary>Outcome of <see cref="ITableRelationRepository.CreateRelationAsync"/>: the stored relation id, whether the row was inserted, and whether the ordered key pairs of an existing relation changed (SEC-REL151-04).</summary>
+/// <summary>Outcome of <see cref="ITableRelationRepository.CreateRelationAsync"/>the stored relation id, whether the row was inserted, and whether the ordered key pairs of an existing relation changed.</summary>
 public sealed record RelationWriteResult(Guid StoredId, bool Created, bool KeysChanged);
 
 public interface IGovernanceRepository :
@@ -382,7 +382,7 @@ public interface IGovernanceRepository :
 }
 
 /// <summary>
-/// PLAN-GOV-158-INC1 (SEC-GOV158I1-05/06): the single write seam of <c>setConsentDescription</c>. Implemented by every governance provider; deliberately not part
+/// INC1 (06): the single write seam of<c>setConsentDescription</c>. Implemented by every governance provider; deliberately not part
 /// of <see cref="IConsentRepository"/> so the attribute-validating decorator and consent fakes are untouched.
 /// </summary>
 public interface IConsentDescriptionRepository

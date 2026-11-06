@@ -44,15 +44,15 @@ public sealed record GovernedPolicyInput(
 }
 
 /// <summary>
-/// D-WPC-1 / SEC-RF107-17: <paramref name="IsRead"/> is <c>metadata.StatementType == Select</c> (the same classification as <c>isDml</c>),
+/// D-WPC-1 /<paramref name="IsRead"/> is <c>metadata.StatementType == Select</c> (the same classification as <c>isDml</c>),
 /// <paramref name="UserSqlLength"/> the length of the user statement, <paramref name="MaxExpansionFactor"/> the normalized factor of the compile
-/// request, <paramref name="Disabled"/> true on the one retry of SEC-RF107-15 (every site stays <c>EXISTS</c>).
+/// request, <paramref name="Disabled"/>true on the one retry of 15 (every site stays<c>EXISTS</c>).
 /// </summary>
 public sealed record RowFilterKeySetStatement(bool IsRead, int UserSqlLength, int MaxExpansionFactor, bool Disabled);
 
 /// <summary>
 /// WP-X0l: assembles the typed <see cref="GovernancePolicy"/> of one statement from its access decisions and the verified catalog
-/// (SEC-ADG-02, SEC-X1-04). Fail closed per table: a table is part of the policy's catalog only when its decision is allowed, its row
+/// . Fail closed per table: a table is part of the policy's catalog only when its decision is allowed, its row
 /// filter and masks exist as typed policies, and the string and typed forms agree. Every other table is unknown to the compiler, which
 /// rejects a reference to it with the same error as for a table that does not exist. The tenant predicate is not assembled here: the
 /// compiler builds it from the catalog's tenant column and its database type, with the tenant bound as
@@ -76,7 +76,7 @@ public sealed class GovernancePolicyFactory(
     /// <summary>
     /// The policy plus the key-set diagnostics of the statement (issue #107, A-2). After the admission loop the key-set stage may replace correlated
     /// <c>EXISTS</c> sites of the admitted predicates by cached key sets; only the compiler input (<c>rowPredicates</c>) changes, never a decision,
-    /// recipe or cache (SEC-RF107-04 a, -10 c). The policy catalog's dependents are computed from the final predicates.
+    /// recipe or cache (04 a, -10 c). The policy catalog's dependents are computed from the final predicates.
     /// </summary>
     /// <exception cref="SecurityException">The decisions carry row policies of different target dialects (a gateway defect).</exception>
     public async ValueTask<GovernedPolicyAssembly> CreateAssemblyAsync(GovernedPolicyInput input, CancellationToken ct)
@@ -185,7 +185,7 @@ public sealed class GovernancePolicyFactory(
             }
             else
             {
-                // D-WPC-2 / SEC-RF107-17: no epoch read, cache lookup or key query for a write or unknown statement type.
+                // D-WPC-2 / no epoch read, cache lookup or key query for a write or unknown statement type.
                 _keySetStage.ReportSkipped(context, rowPredicates, keySets, KeySetFallbackReason.WriteStatement);
             }
 
@@ -429,7 +429,7 @@ public sealed class GovernancePolicyFactory(
             return false;
         }
 
-        // SEC-ADG-02 item 3: a text-only (or drifted) row filter and a text-only mask never reach the compiler.
+        // 02 item 3: a text-only (or drifted) row filter and a text-only mask never reach the compiler.
         var typed = decision.RequireTypedRowPolicy().RequireTypedColumnMasks(metadata);
         if (!typed.IsAllowed)
         {
@@ -451,7 +451,7 @@ public sealed class GovernancePolicyFactory(
                 return false;
             }
 
-            // SEC-X1-05: a policy that reads a table the catalog cannot verify cannot be enforced, so its own table is denied (fail closed,
+            // a policy that reads a table the catalog cannot verify cannot be enforced, so its own table is denied (fail closed,
             // reported like every other "table not usable" cause) instead of failing inside the compiler with another code.
             if (PolicySubqueryTables.Names(predicateRowPolicy.Predicate).Any(name =>
                     catalog.Resolve(name) is not { } dependent || unusableDependents.Contains(dependent.Identity)))

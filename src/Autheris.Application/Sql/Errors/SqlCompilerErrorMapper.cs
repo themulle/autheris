@@ -23,7 +23,7 @@ using TrinoSqlEngine.Governance;
 public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null);
 
 /// <summary>
-/// WP-X0a (plan section 28.4.3, SEC-X1-01, SEC-X1-05): the one mapping of compiler and execution errors to a status, a stable code
+/// WP-X0a (plan section 28.4.3): the one mapping of compiler and execution errors to a status, a stable code
 /// and a fixed message, shared by every surface that returns or persists an error of a governed entry point (WebSQL, the global
 /// handler, Arrow Flight, MCP, async statements, async jobs). The message is always <see cref="GovernedSqlErrorCodes.FixedMessage"/>:
 /// never <c>Exception.Message</c>, driver text, values, object names or counts. Precedence is the row order of the plan table; a
@@ -103,7 +103,7 @@ public static class SqlCompilerErrorMapper
 
     private static readonly Func<Exception, SqlErrorMapping?>[] Rules =
     [
-        // Issue #447 (REQ-ATR-04): a transport denial keeps its own code and the fixed text (no source name); the row precedes every
+        // Issue #447: a transport denial keeps its own code and the fixed text (no source name); the row precedes every
         // SecurityException row, which would otherwise turn it into SQL_POLICY_DENIED / SQL_POLICY_VIOLATION and hide the cause.
         e => e is TransportNotAllowedException
             ? new SqlErrorMapping(403, TransportNotAllowedException.Code, "Access to the data source is not allowed over this transport.")
@@ -111,16 +111,16 @@ public static class SqlCompilerErrorMapper
         // A parser time budget overrun and parser-slot exhaustion are ParseCanceledExceptions with a TimeoutException cause (FastSqlEngine):
         // a limit, not a syntax error. This row precedes the syntax row, which would otherwise match first.
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
-        // #296 (SEC-PG-08): matched by type only, before the generic syntax row. Any other ParseCanceledException stays a syntax error.
+        // #296: matched by type only, before the generic syntax row. Any other ParseCanceledException stays a syntax error.
         e => e is LiteralTokenRejectedException ? Of(400, GovernedSqlErrorCodes.LiteralNotPermitted) : null,
         e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
-        // #310 (SEC-PG-09): a caller mistake (an aggregate over a type it does not accept), not a policy refusal.
+        // #310: a caller mistake (an aggregate over a type it does not accept), not a policy refusal.
         e => e is AggregateTypeInvalidException ? Of(400, GovernedSqlErrorCodes.AggregationInvalidFunctionForType) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
-        // REQ-SQL-128: a caller mistake with a list parameter. The code is stable, the message fixed, no count or name. The row precedes
+        // a caller mistake with a list parameter. The code is stable, the message fixed, no count or name. The row precedes
         // the generic SecurityException row (403), which a wrapped list error must never reach.
         e => e is ClientListException list ? Of(400, list.Code) : null,
-        // REQ-SQL-130 (A-10): a refused time zone conversion has its own stable code per cause. SqlTimeZoneException is not a SecurityException,
+        // 130 (A-10): a refused time zone conversion has its own stable code per cause. SqlTimeZoneException is not a SecurityException,
         // and this row precedes the generic 403 row, so a wrapped one never becomes a policy violation. The message is the fixed one of the code.
         e => e is SqlTimeZoneException zone ? MapTimeZone(zone.Code) : null,
         // Phase 5 L3: a user error (a reserved identifier), not a gateway defect: no invariant metric.
@@ -140,7 +140,7 @@ public static class SqlCompilerErrorMapper
             _ => null
         },
         e => e is UnfilteredDmlException ? Of(403, GovernedSqlErrorCodes.UnfilteredDml) : null,
-        // SEC-X1-05: one code for every "table not usable" cause, so a response never tells whether a table exists.
+        // one code for every "table not usable" cause, so a response never tells whether a table exists.
         e => e is PolicyParseException or PolicyConflictException or WebSqlTableDeniedException ? Of(403, GovernedSqlErrorCodes.PolicyDenied) : null,
         e => e is GatewaySecurityException { ErrorCode: GovernedSqlErrorCodes.TenantIdCollision } ? Of(403, GovernedSqlErrorCodes.TenantIdCollision) : null,
         // Gateway defects fail closed. They precede the generic SecurityException row because they derive from it.
@@ -176,13 +176,13 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.ConstraintViolation => Of(409, code),
         GovernedSqlErrorCodes.AffectedRowsLimit => Of(422, code),
         GovernedSqlErrorCodes.DataError => Of(422, code),
-        // Issue #277 (SEC-277-06): SQL Server MAXRECURSION (530) and Oracle cycle detection (ORA-32044) end a recursive statement; a limit, like the
+        // Issue #277: SQL Server MAXRECURSION (530) and Oracle cycle detection (ORA-32044) end a recursive statement; a limit, like the
         // compile-time limits (422), with the fixed message and no limit kind.
         GovernedSqlErrorCodes.LimitExceeded => Of(422, code),
         GovernedSqlErrorCodes.ProviderError => Of(502, code),
-        // #312 (SEC-PG-10): the executor classified an unknown identifier by provider code; it answers exactly like a denied column.
+        // #312: the executor classified an unknown identifier by provider code; it answers exactly like a denied column.
         GovernedSqlErrorCodes.PolicyDenied => Of(403, code),
-        // #321 (SEC-RG-03): a provider set-operation column-count error, classified by provider code in the sanitizer.
+        // #321: a provider set-operation column-count error, classified by provider code in the sanitizer.
         GovernedSqlErrorCodes.SyntaxError => Of(400, code),
         GovernedSqlErrorCodes.CheckedExecutionRequired => Of(500, code),
         // An unknown governed code is a gateway defect: fail closed.

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 D-15, SEC-RF107-16): startup validation of <see cref="RowFilterKeySetCacheOptions"/> (<c>ValidateOnStart</c>).
+/// Issue #107 (107 D-15): startup validation of<see cref="RowFilterKeySetCacheOptions"/> (<c>ValidateOnStart</c>).
 /// <c>1 s &lt;= DefaultDuration &lt;= MaxDuration &lt;= 24 h</c>, <c>1 &lt;= MaxKeys &lt;= 10,000</c>, <c>0 &lt;= BindParameterReserve &lt;= 1,000</c>,
 /// <c>1 &lt;= MaxConcurrentKeyQueries &lt;= 64</c>, <c>SizeLimitBytes &gt; 0</c> and <c>0 &lt; KeyQueryTimeout &lt;=</c> the smallest statement timeout
 /// of WebSQL and SQL endpoints. <c>DefaultStrategy = KeySetCache</c> is allowed but logs a startup Warning.

@@ -96,7 +96,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         CompiledSqlAuditDigester? auditDigester = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _auditDigester = auditDigester ?? new CompiledSqlAuditDigester(options);
         _typedPolicies = typedPolicies;
@@ -229,7 +229,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
-        // Issue #447 C2 (SEC-ATR-11): every routed source must allow the ingress transport; nothing is planned or staged otherwise.
+        // Issue #447 C2: every routed source must allow the ingress transport; nothing is planned or staged otherwise.
         await _transportGate.EnsureCatalogSourcesAsync(routing.Tables.Select(t => t.EffectiveDataSource), ct).ConfigureAwait(false);
 
         _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId);
@@ -310,7 +310,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         FederatedParameterContract? parameterContract = null;
         try
         {
-            // Budget and Timeout (INV-12, INV-13). SEC-12: the timeout also covers authorization, planning and key loading.
+            // Budget and Timeout (INV-12, INV-13). the timeout also covers authorization, planning and key loading.
             int timeoutSeconds = crossSourceOptions.TimeoutSeconds > 0
                 ? crossSourceOptions.TimeoutSeconds
                 : (_options.Value.WebSql?.ExecutionTimeoutSeconds > 0 ? _options.Value.WebSql.ExecutionTimeoutSeconds : 30);
@@ -321,10 +321,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
             var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, timeoutCts.Token).ConfigureAwait(false);
 
-            // Issue #447 C2 (SEC-ATR-11): all-or-nothing before key loading, planning, the start audit record and any staging.
+            // Issue #447 C2: all-or-nothing before key loading, planning, the start audit record and any staging.
             await _transportGate.EnsureCatalogSourcesAsync(routing.Tables.Select(t => t.EffectiveDataSource), timeoutCts.Token).ConfigureAwait(false);
 
-            // SEC-DATA131-01: parameter validation strictly follows table authorization (anti-oracle defense).
+            // parameter validation strictly follows table authorization (anti-oracle defense).
             var parameterLimits = ListParameterLimits.From(_options.Value.WebSql ?? new WebSqlOptions());
             parameterContract = FederatedParameterContract.Create(request.Parameters, parameterLimits);
 
@@ -433,7 +433,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         if (userSidNullable == null && _mandatoryFilters != null &&
             await _mandatoryFilters.HasActiveProfilesAsync(tenantId, ct).ConfigureAwait(false))
         {
-            // SEC-19: under the consent bypass the identity is synthetic and matches no grantee; Virtual Filters of the
+            // under the consent bypass the identity is synthetic and matches no grantee; Virtual Filters of the
             // tenant cannot be applied, so the query is denied instead of running unfiltered.
             throw new GatewaySecurityException(
                 "Virtual Filters are configured for this tenant but the caller has no subject identity.",
@@ -450,7 +450,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             ["action"] = isDml ? "write" : "read"
         };
 
-        // SEC-1 (F-GOV-14): one decision per source-qualified table (CrossSourcePlanner.DecisionKey); a table that occurs
+        //  (F-GOV-14): one decision per source-qualified table (CrossSourcePlanner.DecisionKey); a table that occurs
         // several times (self-join) is decided once and every occurrence uses that same decision.
         var decisions = new Dictionary<TableIdentifier, TableAccessDecision>();
 
@@ -504,7 +504,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {resolved.Target.FullName} is not a plain identifier; the query is refused (fail-closed).");
             }
 
-            // SEC-JOIN-01 & SEC-FILTER-01 Zero-Trust Guardrails (INV-4)
+            // 01 Zero-Trust Guardrails (INV-4)
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(resolved.Target, resolved.Metadata, decision, metadata);
 
             decisions[decisionKey] = decision;
@@ -529,7 +529,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         if (mandatory.CallerAttributesTextConstant)
         {
-            // REQ-GOV-129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
+            // 129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
             return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
         }
 
@@ -716,7 +716,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
         catch (Exception auditEx)
         {
-            // Do not mask the original failure, but never lose a denial silently (SEC-22).
+            // Do not mask the original failure, but never lose a denial silently.
             _logger?.Error(auditEx, "Failed to record the failure audit of a cross-source query; the original error is rethrown.");
         }
     }

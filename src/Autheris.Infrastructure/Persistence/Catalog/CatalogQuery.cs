@@ -2,7 +2,7 @@ using System.Data.Common;
 
 namespace Autheris.Infrastructure.Persistence.Catalog;
 
-/// <summary>Helpers shared by the metadata readers. Every name reaches the database as a bound parameter (SEC-X1-09).</summary>
+/// <summary>Helpers shared by the metadata readers. Every name reaches the database as a bound parameter.</summary>
 internal static class CatalogQuery
 {
     public static void Bind(DbCommand command, string name, string value)

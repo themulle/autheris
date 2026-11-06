@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Restarts a stream at the current source version after a gap (PLAN-CDC-99 D-A5, D-A14): one fenced append transaction writes a
+/// Restarts a stream at the current source version after a gap (99 D-A5, D-A14): one fenced append transaction writes a
 /// <see cref="CdcStreamEventKind.Resync"/> event and moves the watermark to the current change tracking version; a halted stream is
 /// re-activated. Implemented by the producer (I1-B) because it owns the source connection, the lease and the fencing token.
 /// </summary>

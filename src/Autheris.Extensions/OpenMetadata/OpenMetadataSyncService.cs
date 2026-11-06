@@ -160,7 +160,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
                 catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
                 {
-                    // SEC-94-01: never upserted as a new table; its stored masking rules stay untouched.
+                    // never upserted as a new table; its stored masking rules stay untouched.
                     var warning = $"Skipped OpenMetadata table {omTable.FullyQualifiedName}: its stored metadata is unavailable (invalid key or index definition).";
                     _logger.LogWarning("{Warning}", warning);
                     warnings.Add(warning);
@@ -554,7 +554,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
             }
             catch (ConsentNotExtendableException)
             {
-                // SEC-P4R-7: a consent revoked concurrently by a user or admin must stay revoked; only an expired or changed consent is recreated.
+                // a consent revoked concurrently by a user or admin must stay revoked; only an expired or changed consent is recreated.
                 var current = await _consentRepo.GetConsentByIdAsync(existing.Id, ct);
                 if (current is { IsRevoked: true })
                 {
@@ -577,7 +577,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
             ct);
         if (!revoked)
         {
-            // SEC-P4R-7: already revoked (concurrently); do not resurrect the consent.
+            // already revoked (concurrently); do not resurrect the consent.
             _logger.LogWarning("OpenMetadata-synced consent {ConsentId} was already revoked; not recreating it.", existing.Id);
             return;
         }
@@ -662,7 +662,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         bool ignoreTimestampTolerance = _options.Value.IsWebhookTimestampToleranceIgnored;
         if (!ignoreTimestampTolerance)
         {
-            // SEC-07: Enforce mandatory Id and Timestamp to prevent replay attacks (fail-closed)
+            // Enforce mandatory Id and Timestamp to prevent replay attacks (fail-closed)
             if (!webhookEvent.Id.HasValue || !webhookEvent.Timestamp.HasValue)
             {
                 _logger.LogWarning("Rejecting OpenMetadata webhook: mandatory event 'Id' or 'Timestamp' is missing (fail-closed replay defense).");
@@ -832,7 +832,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
                 catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
                 {
-                    // SEC-94-01: the webhook never upserts an unavailable table as a new one.
+                    // the webhook never upserts an unavailable table as a new one.
                     _logger.LogWarning("Ignoring OpenMetadata webhook table event for {Fqn}: the stored table metadata is unavailable.", omTable.FullyQualifiedName);
                     return false;
                 }

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// PLAN-SEC-115 A-8 / C-115-2: fail-closed start-up validation of the read-path switches. A switch the operator wrote to CLOSE a path
+/// 115 A-8 / C-115-2: fail-closed start-up validation of the read-path switches. A switch the operator wrote to CLOSE a path
 /// must never be silently ignored, so the raw configuration is checked, not only the bound options: unknown keys under the switch
 /// nodes, a scalar where a section is expected, null/empty switch values, anything but a strict <c>true</c>/<c>false</c>, a scalar
 /// or malformed <c>DisabledTools</c>, blank elements and unknown tool names. All checks run regardless of <c>Mcp:Enabled</c>.

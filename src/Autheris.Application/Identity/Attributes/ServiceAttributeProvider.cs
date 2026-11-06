@@ -8,7 +8,7 @@ using Autheris.Domain.Model;
 using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
-/// Static values per <c>(tenant, application id, attribute)</c> for application-only callers (PLAN-GOV-129 A-5.3, BC-129-02). Only an
+/// Static values per <c>(tenant, application id, attribute)</c>for application-only callers (129 A-5.3, BC-129-02). Only an
 /// <see cref="CallerSubjectKind.Application"/> subject reads it, and only an active (approved) set applies. The application id was
 /// taken from one fixed-precedence claim and canonicalised by the subject factory; conflicting candidates left it empty.
 /// </summary>

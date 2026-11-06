@@ -14,7 +14,7 @@ using TrinoSqlEngine.Ast.Nodes;
 /// Databricks SQL (Spark SQL) generator (plan section 6.1): backtick identifiers, named <c>:pN</c> markers, Unity Catalog
 /// three-part names and no string literals at all. Spark interprets backslash escapes in <c>'...'</c> literals and may
 /// substitute <c>${...}</c> before parsing, so every value is bound and identifiers containing <c>$</c>, <c>{</c> or <c>}</c>
-/// are rejected (SEC-ADG-10).
+/// are rejected.
 /// </summary>
 public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
 {
@@ -26,7 +26,7 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
 
     // ---- identifiers and literals ----
 
-    /// <summary>SEC-ADG-10: <c>$</c>, <c>{</c> and <c>}</c> start a variable substitution on Databricks; such an identifier is never emitted.</summary>
+    /// <summary><c>$</c>, <c>{</c> and <c>}</c> start a variable substitution on Databricks; such an identifier is never emitted.</summary>
     private static bool HasSubstitutionCharacters(string value)
     {
         if (CompilerHooks.IsDisabled(SecurityControl.VariableSubstitution))
@@ -41,7 +41,7 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
         string value = identifier.Value;
         if (HasSubstitutionCharacters(value))
         {
-            // SEC-ADG-10: variable substitution (${...}) could change the statement after the gateway checked it.
+            // variable substitution (${...}) could change the statement after the gateway checked it.
             throw new SecurityException("A Databricks identifier must not contain '$', '{' or '}'.");
         }
 

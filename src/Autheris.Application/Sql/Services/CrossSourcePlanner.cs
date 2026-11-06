@@ -62,7 +62,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
     }
 
     /// <summary>
-    /// SEC-1 (F-GOV-14): the one key of the access decision of a cross-source table: the full, source-qualified
+    ///  (F-GOV-14): the one key of the access decision of a cross-source table: the full, source-qualified
     /// identifier (<c>domain.schema.table</c>, case-insensitive). Never the schema-qualified name, which collides for
     /// tables of different sources.
     /// </summary>
@@ -125,7 +125,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
-        // 2. Every table has its own decision (SEC-1, fail closed); guardrails SEC-JOIN-01 and SEC-FILTER-01 (INV-4)
+        // 2. Every table has its own decision (fail closed); guardrails 01 (INV-4)
         var tableDecisions = new TableAccessDecision[tables.Count];
         for (int i = 0; i < tables.Count; i++)
         {
@@ -232,7 +232,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             tableNameCounts[t.Target.TableName] = tableNameCounts.GetValueOrDefault(t.Target.TableName) + 1;
         }
 
-        // Short names (schema.table, table) are only usable when exactly one distinct table carries them (SEC-1).
+        // Short names (schema.table, table) are only usable when exactly one distinct table carries them.
         var shortNameOwners = new Dictionary<string, HashSet<TableIdentifier>>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in plannedTables)
         {
@@ -262,7 +262,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             statement = new SqlAstBuilder().BuildStatement(tree);
         }
 
-        // Issue #123 (WP-123-1): AST Subtree Graph Partitioning
+        // Issue #123: AST Subtree Graph Partitioning
         var partitionResult = SubtreeGraphPartitioner.Partition(statement, tables, options.MaxTablesPerSubtree);
         var subtreePlans = new List<SubtreeExecutionPlan>();
 
@@ -278,7 +278,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             subtreePlans.Add(plan);
         }
 
-        // SEC-DATA123-03: Validate that cross-source joins do not target masked subtree output columns (SEC-FED-19)
+        // Validate that cross-source joins do not target masked subtree output columns
         if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
         {
             foreach (var stPlan in subtreePlans)
@@ -297,7 +297,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         var stagingNames = new List<string>();
         int stagingIndex = 0;
 
-        // Process Subtrees first (WP-123-3)
+        // Process Subtrees first
         foreach (var stPlan in subtreePlans)
         {
             string stagingName = $"s{stagingIndex++}";
@@ -337,7 +337,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 Subtree: stPlan));
         }
 
-        // PARITY-GAP-018: the staged projection comes from the AST (SEC-PG-21..24), never from the text of the select list.
+        // PARITY-GAP-018: the staged projection comes from the AST (21..24), never from the text of the select list.
         var statementColumns = StatementColumnReferences.Collect(statement);
 
         // Process remaining single tables
@@ -379,7 +379,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
             foreach (var col in t.Metadata.Columns)
             {
-                // SEC-PG-21: a Deny column is never staged; a Mask column is staged by the governed read, already masked.
+                // a Deny column is never staged; a Mask column is staged by the governed read, already masked.
                 if (dec.GetEffectiveColumnAccess(col.ColumnName, t.Metadata) == ColumnAccessLevel.Deny)
                     continue;
 
@@ -484,7 +484,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         }
 
         // 5. AST rewrite to target s0, s1, etc. (the user query is not touched for Virtual Filters)
-        // REQ-SQL-130 (BC-130-4): the governed compiler does not run for the DuckDB statement, so the time zone calls are validated here, for a supplied and
+        // 130 (BC-130-4): the governed compiler does not run for the DuckDB statement, so the time zone calls are validated here, for a supplied and
         // a built statement alike (CTEs, subqueries and set operations are traversed), before the AST is rewritten. A masked or denied column is never a timestamp.
         var timeZoneProof = TimeZoneConversion.ValidateFederated(
             statement,
@@ -499,7 +499,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             rewrittenAst = TrinoSqlEngine.Ast.Visitors.ClientListExpansion.Apply(rewrittenAst, listShapes);
         }
 
-        // WP-X3: every query value is bound ($n); the staged rows are the only data DuckDB sees.
+        // every query value is bound ($n); the staged rows are the only data DuckDB sees.
         var compiled = TimeZoneConversion.GenerateFederated(rewrittenAst, timeZoneProof);
 
         return new CrossSourcePlan(compiled, stagingRequests, stagingNames);
@@ -552,8 +552,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
     /// <summary>
     /// Whether the statement reads <paramref name="colName"/> of <paramref name="target"/>: a qualified reference is attributed through
     /// <c>ReferencesColumn</c> only (a qualifier that names no table stages nothing); an unqualified reference counts for every table that has the
-    /// column (SEC-PG-22; an ambiguous one still fails in the final query). A wildcard stages every allowed column; an unclassifiable
-    /// node stages every allowed column of every table (SEC-PG-23).
+    /// column (an ambiguous one still fails in the final query). A wildcard stages every allowed column; an unclassifiable
+    /// node stages every allowed column of every table.
     /// </summary>
     private static bool IsReferenced(StatementColumnReferences references, string colName, TableAccessTarget target)
     {
@@ -623,7 +623,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         }
 
         /// <summary>
-        /// #327 / SEC-RG-15: a join node is a subtree only when its table sources are exactly the members of the plan. Each source is matched
+        /// #327 / a join node is a subtree only when its table sources are exactly the members of the plan. Each source is matched
         /// on its qualified identity (catalog, schema, table) and alias, one member per source, never on the last name part alone: in
         /// <c>((a JOIN r) JOIN b)</c> with <c>a</c> and <c>b</c> both named <c>parity_sales</c> the outer node holds one more source than the
         /// subtree <c>{a, r}</c> and must not be replaced by it.

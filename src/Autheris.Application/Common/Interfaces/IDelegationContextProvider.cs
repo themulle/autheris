@@ -3,7 +3,7 @@ namespace Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Connectors;
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, WP-SC-15): Contract for resolving ambient delegation context (caller JWT assertion, principal, correlation).
+/// Issue #238: Contract for resolving ambient delegation context (caller JWT assertion, principal, correlation).
 /// </summary>
 public interface IDelegationContextProvider
 {

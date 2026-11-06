@@ -87,7 +87,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.TryAddSingleton<IConfiguration>(static _ => new ConfigurationBuilder().Build());
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
-        // WP-ARC-B-12: must stay the first hosted service so the governance schema is migrated before anything else starts.
+        // must stay the first hosted service so the governance schema is migrated before anything else starts.
         services.AddAutherisGovernanceMigrations();
         services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
@@ -230,7 +230,7 @@ public static partial class GatewayServiceCollectionExtensions
         var entraConfig = gatewayOptions.Authentication.EntraId;
         var adfsConfig = gatewayOptions.Authentication.Adfs;
 
-        // API-14: with Entra ID and AD FS both enabled a single JwtBearer scheme could only load the signing keys of one
+        // with Entra ID and AD FS both enabled a single JwtBearer scheme could only load the signing keys of one
         // authority (Entra), so every AD FS token failed. Each IdP then gets its own scheme with its own metadata;
         // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
         bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
@@ -353,7 +353,7 @@ public static partial class GatewayServiceCollectionExtensions
                 var authHeader = context.Request.Headers.Authorization.ToString();
 
                 // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
-                // API-07: the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
+                // the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
                 // before the unauthenticated-bearer IP budget and do not produce JwtBearer failures.
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && GatewayAuthSchemes.IsScimPath(context.Request.Path))
                 {

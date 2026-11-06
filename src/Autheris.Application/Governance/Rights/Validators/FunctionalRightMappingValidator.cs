@@ -14,7 +14,7 @@ public static class FunctionalRightMappingValidator
         ArgumentException.ThrowIfNullOrWhiteSpace(mapping.GroupOrRole);
         ArgumentException.ThrowIfNullOrWhiteSpace(mapping.CreatedBy);
 
-        // SEC-SC-22: Customer Realm Ceiling
+        // Customer Realm Ceiling
         if (realm != null && (realm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer))
         {
             if (mapping.FunctionalRight.IsPrivileged ||
@@ -33,7 +33,7 @@ public static class FunctionalRightMappingValidator
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentException.ThrowIfNullOrWhiteSpace(approverId);
 
-        // SEC-SC-22: Four-Eyes Principle: approver != creator for privileged rights
+        // Four-Eyes Principle: approver != creator for privileged rights
         if (mapping.FunctionalRight.IsPrivileged)
         {
             if (string.Equals(approverId.Trim(), mapping.CreatedBy.Trim(), StringComparison.OrdinalIgnoreCase))

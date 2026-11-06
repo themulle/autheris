@@ -15,9 +15,9 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// AES-256-GCM envelope encryption of stream events and row images (PLAN-CDC-99 D-A8). Events are bound by AAD to stream id, offset,
-/// kind, tenant scope, tenant id and prior tenant id (SEC-CDC99-01): a payload moved to another position or tenant fails authentication.
-/// An authentication failure is an integrity incident (SEC-CDC99-16): counted, logged with stream id and offset only, and surfaced as
+/// AES-256-GCM envelope encryption of stream events and row images (99 D-A8). Events are bound by AAD to stream id, offset,
+/// kind, tenant scope, tenant id and prior tenant id: a payload moved to another position or tenant fails authentication.
+/// An authentication failure is an integrity incident: counted, logged with stream id and offset only, and surfaced as
 /// <see cref="CdcStreamKeyUnavailableException"/> so that consumers fail closed without advancing.
 /// </summary>
 public sealed class CdcStreamCrypto : ICdcStreamCrypto

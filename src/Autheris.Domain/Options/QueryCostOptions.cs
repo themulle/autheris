@@ -29,7 +29,7 @@ public sealed class QueryCostOptions
     public int DefaultListMultiplier { get; set; } = 10;
 
     /// <summary>
-    /// REQ-COST-419: Relative weight for plain scalar columns selected on a list (default 1.0).
+    /// Relative weight for plain scalar columns selected on a list (default 1.0).
     /// Lower values (e.g. 0.2) discount scalar fields to allow realistic page sizes on wide tables.
     /// </summary>
     [Range(0.01, 1.0)]

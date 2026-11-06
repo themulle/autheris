@@ -80,7 +80,7 @@ public sealed record TableFilterClause(
         DialectSqlFactory?.Invoke(dialect) ?? SqlPredicate;
 
     /// <summary>
-    /// WP-ARC-B-01: dialect-neutral predicate builder. The argument maps a column name as written in the request to the
+    /// dialect-neutral predicate builder. The argument maps a column name as written in the request to the
     /// catalog spelling; the factory returns Trino syntax (delimited identifiers, named client parameters <c>@name</c>
     /// whose values are in <see cref="Parameters"/>). The governed compile path translates that text per dialect.
     /// </summary>

@@ -128,7 +128,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             }
         }
 
-        // WP-SC-16: a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
+        // a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
         var now = DateTimeOffset.UtcNow;
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
             GranteeType.User,

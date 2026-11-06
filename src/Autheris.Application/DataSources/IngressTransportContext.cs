@@ -5,7 +5,7 @@ using System.Numerics;
 using Autheris.Domain.Options.DataSources;
 
 /// <summary>
-/// Issue #447 (REQ-ATR-06, SEC-ATR-02): the ingress transport of the current request or background scope. Set only by server code
+/// Issue #447: the ingress transport of the current request or background scope. Set only by server code
 /// (endpoint metadata middleware or an explicit non-HTTP entry point), never from client input. The default is
 /// <see cref="DataSourceTransportFlags.None"/>, which the transport gate denies.
 /// </summary>
@@ -24,7 +24,7 @@ public interface IIngressTransportContext
 /// <summary>Scoped, set-once implementation of <see cref="IIngressTransportContext"/>.</summary>
 public sealed class IngressTransportContext : IIngressTransportContext
 {
-    /// <summary>Key under which a caller stores its ingress in <c>ConnectorSessionContext.Items</c> so a connector that opens a new scope can copy it (SEC-ATR-05).</summary>
+    /// <summary>Key under which a caller stores its ingress in <c>ConnectorSessionContext.Items</c>so a connector that opens a new scope can copy it.</summary>
     public const string SessionItemKey = "__IngressTransport";
 
     private readonly object _gate = new();

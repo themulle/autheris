@@ -4,7 +4,7 @@ using System;
 using System.Threading;
 
 /// <summary>
-/// WP-SC-16 rule 5: read-time clamp of legacy individual grants. The effective expiry of an individual grant is
+/// 16 rule 5: read-time clamp of legacy individual grants. The effective expiry of an individual grant is
 /// <c>min(ValidTo, ValidFrom + max)</c>; nothing is rewritten in storage. The class of a stored grant is not known at read time,
 /// so the clamp uses the largest class maximum as a backstop (regular data for users, 365 days for service principals); the write
 /// paths enforce the exact class maximum through the grant policy. Group and role grants are standing and never clamped.

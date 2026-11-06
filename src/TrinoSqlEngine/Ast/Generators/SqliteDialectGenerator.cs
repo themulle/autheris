@@ -82,7 +82,7 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
         FormatInstr(ref builder, position, context);
 
     /// <summary>
-    /// Appends a generator-owned text token as an argument. SEC-PG-01/-02: on the governed path the token (strftime format,
+    /// Appends a generator-owned text token as an argument. 01/-02: on the governed path the token (strftime format,
     /// datetime modifier) is a bound string parameter, so the emitted SQL contains no string literal; it never comes from client text.
     /// </summary>
     private static void AppendToken(ref ValueStringBuilder builder, string token, SqlEmitterContext context)
@@ -163,7 +163,7 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     {
         if (context.IsBound)
         {
-            // SEC-PG-04: the validated value is bound in its canonical ISO text form (the stored form of SQLite dates).
+            // the validated value is bound in its canonical ISO text form (the stored form of SQLite dates).
             var (value, _) = ParseTypedLiteralValue(literal);
             string text = value switch
             {
@@ -189,7 +189,7 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
         (long value, string name) = unit == DateUnit.Week ? (checked(amount * 7), "day") : (amount, DateUnitName(unit));
         if (context.IsBound)
         {
-            // SEC-PG-01: the amount is a bound number, the unit a bound generator token; the modifier is their concatenation ('5' || ' days').
+            // the amount is a bound number, the unit a bound generator token; the modifier is their concatenation ('5' || ' days').
             builder.Append("datetime(");
             GenerateExpression(source, ref builder, context);
             builder.Append(", ");

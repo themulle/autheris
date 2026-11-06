@@ -16,7 +16,7 @@ public static partial class GovernanceEndpoints
 
     public static IEndpointRouteBuilder MapGovernanceEndpoints(this IEndpointRouteBuilder app)
     {
-        // F-API-04: Declarative Web API OpenAPI/Swagger Schema & Doc Ingestion
+        // F-Declarative Web API OpenAPI/Swagger Schema & Doc Ingestion
         app.MapPost("/api/governance/catalog/ingest-openapi", (HttpContext context, IOpenApiIngestionUseCase ingestionUseCase) =>
             IngestOpenApiAsync(context, ingestionUseCase))
           .RequireAuthorization()

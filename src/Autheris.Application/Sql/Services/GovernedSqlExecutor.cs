@@ -46,7 +46,7 @@ using TrinoSqlEngine.Ast.Emit;
 public sealed partial class GovernedSqlExecutor
 {
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
-    // SEC-RF107-07(e): the parameters of a substituted row-filter key-set subquery; user SQL and request parameters cannot use the prefix.
+    // 07(e): the parameters of a substituted row-filter key-set subquery; user SQL and request parameters cannot use the prefix.
     private const string KeySetParameterPrefix = "__rls_ks";
     private const int ThrottledRetryAfterSeconds = 2;
 
@@ -77,7 +77,7 @@ public sealed partial class GovernedSqlExecutor
         CompiledSqlAuditDigester? auditDigester = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
-        // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+        // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -264,8 +264,8 @@ public sealed partial class GovernedSqlExecutor
         IReadOnlyDictionary<string, object?> clientValues;
         try
         {
-            // Scalars, and (REQ-SQL-128) lists on the transports that may carry them; an object is a 400. The binder reads a client
-            // value only by the name the statement uses. A list the statement does not reference is dropped here (SEC-128-04).
+            // Scalars, and lists on the transports that may carry them; an object is a 400. The binder reads a client
+            // value only by the name the statement uses. A list the statement does not reference is dropped here.
             var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
             clientValues = BuildClientValues(request, referenced);
             var shapes = ClientListParameters.Shapes(clientValues, referenced);
@@ -274,7 +274,7 @@ public sealed partial class GovernedSqlExecutor
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
-            // SEC-ADG-23: only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
+            // only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
             // L-4: the same holds for the engine errors that the error mapper owns (unsupported construct, reserved identifier, syntax
             // error, limits): the stable code is stored, never the message, and the exception is rethrown for the error surface to map.
             string reason = DeniedReason(policyEx);
@@ -299,7 +299,7 @@ public sealed partial class GovernedSqlExecutor
                     .WithField("error", reason);
                 if (dmlContext.HasRecursiveCte)
                 {
-                    deniedDetails.WithField("recursiveCte", true);   // SEC-277-09
+                    deniedDetails.WithField("recursiveCte", true);   // 09
                 }
 
                 var detailsJson = deniedDetails.Build();
@@ -391,7 +391,7 @@ public sealed partial class GovernedSqlExecutor
             return compiled.Sql;
         }
 
-        // SEC-X1-14: the binder dialect comes from the connection provider and must be the dialect the statement was compiled for.
+        // the binder dialect comes from the connection provider and must be the dialect the statement was compiled for.
         // An unmapped provider no longer skips the session initializer silently: it fails closed before a connection or command exists.
         if (!DataSourceProvider.TryResolveDialect(connOptions.Provider, out var connectionDialect) ||
             !SqlDialectMapper.TryToTargetDialect(connectionDialect, out var binderDialect) ||
@@ -466,7 +466,7 @@ public sealed partial class GovernedSqlExecutor
 
             if (dmlContext.IsDml)
             {
-                // SEC-X1-06: the session initializer gives no transaction on SQL Server, Oracle and SQLite, so one is begun here. From the
+                // the session initializer gives no transaction on SQL Server, Oracle and SQLite, so one is begun here. From the
                 // call on, the checked executor is the single owner of the completion (commit or rollback); this method only disposes it.
                 tx ??= await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 txCompleted = true;
@@ -518,7 +518,7 @@ public sealed partial class GovernedSqlExecutor
             command.CommandTimeout = commandTimeout;
             binder.Bind(command, compiled, clientValues);
 
-            // SEC-X1-10: the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+            // the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
             await _executionGuard.RunAsync(
                 connection,
                 TimeSpan.FromSeconds(commandTimeout),
@@ -557,7 +557,7 @@ public sealed partial class GovernedSqlExecutor
             {
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
                 var userSid = user.GetUserSid() ?? new Sid("anonymous");
-                // SEC-X1-12: the stable code and the exception type, never ex.Message (a driver message can carry key values).
+                // the stable code and the exception type, never ex.Message (a driver message can carry key values).
                 var failureDetails = new AuditDetailsBuilder()
                     .WithField("originalSql", redactedOriginalSql)
                     .WithField("originalSqlHash", originalSqlHash)
@@ -567,7 +567,7 @@ public sealed partial class GovernedSqlExecutor
                     .WithField("errorType", ex.GetType().Name);
                 if (compiled.HasRecursiveCte)
                 {
-                    failureDetails.WithField("recursiveCte", true);   // SEC-277-09: failure, timeout and limit audits carry the flag too
+                    failureDetails.WithField("recursiveCte", true);   // failure, timeout and limit audits carry the flag too
                 }
 
                 var detailsJson = failureDetails.Build();
@@ -621,7 +621,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// True when the statement binds a client list (SEC-128-07) or a caller attribute value (BC-129-16): a driver message can quote such a value, so
+    /// True when the statement binds a client list or a caller attribute value (BC-129-16): a driver message can quote such a value, so
     /// the exception text is not logged for it.
     /// </summary>
     internal static bool BindsValueFromTheCaller(CompiledSql compiled, IReadOnlyDictionary<string, object?> clientValues) =>
@@ -647,10 +647,10 @@ public sealed partial class GovernedSqlExecutor
 
         var mapped = DmlErrorSanitizer.Map(dialect, error);
 
-        // SEC-277-06: a recursion limit (SQL Server 530, Oracle ORA-32044) is logged by type and number only, never with the driver message.
+        // a recursion limit (SQL Server 530, Oracle ORA-32044) is logged by type and number only, never with the driver message.
         if (clientListsBound || mapped.Code == GovernedSqlErrorCodes.LimitExceeded)
         {
-            // SEC-128-07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
+            // 07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
             // the exception object (message, inner exceptions) is not logged when a client list is bound; its type and number are.
             var driver = error as DbException;
             _logger?.LogWarning("WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. ErrorType={ErrorType} ErrorCode={ErrorCode} TraceId={TraceId}",
@@ -738,7 +738,7 @@ public sealed partial class GovernedSqlExecutor
             string trimmed = name.TrimStart('@');
             if (Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(trimmed))
             {
-                // REQ-GOV-129 (BC-129-16, ST-129-14): a client parameter never uses the reserved name of a caller attribute slot (any case).
+                // 129 (BC-129-16, ST-129-14): a client parameter never uses the reserved name of a caller attribute slot (any case).
                 throw new ArgumentException("A client parameter must not use a reserved gateway parameter name.");
             }
 
@@ -753,7 +753,7 @@ public sealed partial class GovernedSqlExecutor
                 continue;
             }
 
-            // SEC-128-05: admission by allowlist, before any element is read.
+            // admission by allowlist, before any element is read.
             AdmitList(request, value);
             if (++lists > limits.MaxListParameters)
             {
@@ -776,7 +776,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// SEC-128-05: a list value is admitted only on WebSql and Trino (a JSON array) or SqlEndpoints (an already normalized
+    /// a list value is admitted only on WebSql and Trino (a JSON array) or SqlEndpoints (an already normalized
     /// <see cref="ClientListValue"/>), never on a planned table read, never with another transport or none, never as a loose collection.
     /// </summary>
     private static void AdmitList(GovernedSqlQueryRequest request, object? value)
@@ -795,7 +795,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// REQ-SQL-128 (C-4, C-15): <c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
+    /// 128 (C-4, C-15):<c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
     /// binder slots of the SQL's own identifiers, never from a client key) and the counts are the compiled counts; no value. A list that
     /// expanded to nothing (an empty list) has no slot and is not listed here; <c>list_params_empty</c> names it (names only).
     /// </summary>
@@ -838,7 +838,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// REQ-GOV-129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
+    /// 129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
     /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
     /// </summary>
     private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
@@ -855,7 +855,7 @@ public sealed partial class GovernedSqlExecutor
         fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
     }
 
-    /// <summary>X1.2 / SEC-ADG-23: compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
+    /// <summary>X1.2 / compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
     private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
     {
         fields["compiler_version"] = compiled.CompilerVersion;
@@ -863,7 +863,7 @@ public sealed partial class GovernedSqlExecutor
         fields["bind_count"] = compiled.Parameters.Length;
         if (compiled.HasRecursiveCte)
         {
-            fields["recursiveCte"] = true;   // SEC-277-09: written only for recursive statements (also on a template cache hit)
+            fields["recursiveCte"] = true;   // written only for recursive statements (also on a template cache hit)
         }
 
         AddListAuditField(fields, compiled, clientValues);
@@ -875,7 +875,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// Issue #107 (A-14, SEC-RF107-09): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
+    /// Issue #107 (A-14): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
     /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
     /// </summary>
     private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
@@ -924,7 +924,7 @@ public sealed partial class GovernedSqlExecutor
         };
         if (compiled is null && dmlContext.HasRecursiveCte)
         {
-            fields["recursiveCte"] = true;   // SEC-277-09: a rejection before the compile still carries the flag
+            fields["recursiveCte"] = true;   // a rejection before the compile still carries the flag
         }
 
         if (compiled is not null)

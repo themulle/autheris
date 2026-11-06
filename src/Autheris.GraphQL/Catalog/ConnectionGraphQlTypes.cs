@@ -49,7 +49,7 @@ public sealed record GraphQlConnection(
     int? TotalCount = null);
 
 /// <summary>
-/// REQ-GQL-420: Relay-compliant keyset cursor connections for governed catalog tables.
+/// Relay-compliant keyset cursor connections for governed catalog tables.
 /// Generates and validates cryptographic HMAC keyset cursors binding tenant, table,
 /// key columns, directions, and query shape to prevent full sorts on the underlying database.
 /// </summary>
@@ -366,7 +366,7 @@ internal static class ConnectionGraphQlTypes
             pkCols,
             defaultOrdering);
 
-        // Pre-execution SEC-412 masked columns check and registration
+        // Pre-execution masked columns check and registration
         var maskedColumns = treeService.GetMaskedColumns(principal, queryNode, opId);
         if (maskedColumns != null)
         {
@@ -385,7 +385,7 @@ internal static class ConnectionGraphQlTypes
             RegisterMaskedColumns(ctx, maskedColumns);
         }
 
-        // SEC-RG-08: Execute tree query
+        // Execute tree query
         JsonDocument doc;
         try
         {

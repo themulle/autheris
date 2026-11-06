@@ -20,7 +20,7 @@ public readonly record struct TextCheck(bool IsValid, string? Value, TextCheckFa
 }
 
 /// <summary>
-/// PLAN-GOV-158-INC1 decision 2 (SEC-GOV158I1-01/02): normaliser for free text that is authored by a person and later shown to other
+/// INC1 decision 2 (02): normaliser for free text that is authored by a person and later shown to other
 /// users or LLM clients. NFC, trim (U+0020 only), empty becomes <c>null</c>; rejects by Unicode category (controls, format characters
 /// such as bidi and zero-width marks, surrogates, private use, unassigned, line/paragraph separators, every space except U+0020, tag
 /// characters and variation selectors) instead of a code point list. Never echoes the value.
@@ -63,7 +63,7 @@ public static class UntrustedText
             return TextCheck.Ok(null);
         }
 
-        // Second pass on the trimmed value (SEC-GOV158I1-01) and the length cap in UTF-16 units (SEC-GOV158I1-02).
+        // Second pass on the trimmed value and the length cap in UTF-16 units.
         if (!AllCharactersAcceptable(trimmed, allowLineFeed))
         {
             return TextCheck.Fail(TextCheckFailure.InvalidCharacters);

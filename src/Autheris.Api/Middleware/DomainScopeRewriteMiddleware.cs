@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Rewrites domain-scoped GraphQL requests (<c>/graphql/{domain}</c>) to <c>/graphql</c> and populates
 /// <c>HttpContext.Items["Autheris.DomainScope"]</c> and <c>X-Autheris-Domain</c>
-/// BEFORE authentication, authorization, rate limiting, and audit middlewares execute (WP-ARC-C-04 / ARC-A-10).
+/// BEFORE authentication, authorization, rate limiting, and audit middlewares execute (ARC-A-10).
 /// </summary>
 public sealed partial class DomainScopeRewriteMiddleware
 {

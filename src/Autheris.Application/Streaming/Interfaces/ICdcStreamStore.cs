@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Durable, ordered, per-table CDC stream (PLAN-CDC-99 D-A1, D-A4). Implemented per governance engine and in memory.
+/// Durable, ordered, per-table CDC stream (99 D-A1, D-A4). Implemented per governance engine and in memory.
 /// Offsets are dense and immutable; safety rests on the fenced watermark upsert and the head-offset compare-and-swap, not on leases.
 /// </summary>
 public interface ICdcStreamStore

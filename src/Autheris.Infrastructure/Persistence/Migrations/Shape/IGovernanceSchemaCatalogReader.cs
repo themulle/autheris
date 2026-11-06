@@ -4,7 +4,7 @@ namespace Autheris.Infrastructure.Persistence.Migrations.Shape;
 
 /// <summary>
 /// Reads the shape of the governance schema from the engine's system catalog. Read-only. Every table or index name is bound as a
-/// parameter (SEC-94-08c). An object the login cannot see is reported as missing (SEC-94-08e). When the verifier runs inside a step
+/// parameter (08c). An object the login cannot see is reported as missing (08e). When the verifier runs inside a step
 /// transaction, every command enlists it (<c>transaction</c>), as required by SQL Server and PostgreSQL.
 /// </summary>
 internal interface IGovernanceSchemaCatalogReader

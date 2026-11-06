@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// Hands out short-lived, pooled SQLite connections for the governance repository (WP-ARC-B-13) instead of one shared connection. The
+/// Hands out short-lived, pooled SQLite connections for the governance repository instead of one shared connection. The
 /// constructor performs no I/O; the first <see cref="OpenAsync"/> creates the directory, keeps the in-memory database alive and applies
 /// the journal mode. A file database never uses a shared cache; an in-memory database always does (one named, shared-cache database per
 /// provider that lives as long as the provider).

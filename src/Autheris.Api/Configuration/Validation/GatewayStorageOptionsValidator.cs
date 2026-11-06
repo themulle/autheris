@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// WP-ARC-C-02 / WP-SIMPL-15: Validates storage and cluster state options (GovernanceDb provider, SQLite in multi-node, Redis in multi-node).
+/// Validates storage and cluster state options (GovernanceDb provider, SQLite in multi-node, Redis in multi-node).
 /// </summary>
 public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOptions>
 {
@@ -49,7 +49,7 @@ public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOpt
             failures.Add("DataSources.MaxConcurrentReadsPerUserAndTable must be between 0 (disabled) and 1000.");
         }
 
-        // Nested data annotations are not evaluated (SEC-PROC152I2-14): the scan cap must cover the row limit and stay bounded.
+        // Nested data annotations are not evaluated: the scan cap must cover the row limit and stay bounded.
         var procedures = opts.SqlEndpoints.Procedures;
         int effectiveScanRows = procedures.EffectiveMaxScanRows;
         if (effectiveScanRows < procedures.MaxRows || effectiveScanRows is < 1 or > 100000)

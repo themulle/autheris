@@ -7,7 +7,7 @@ using OpenTelemetry;
 using OpenTelemetry.Logs;
 
 /// <summary>
-/// Single point of log redaction enforcing SEC-OT06-05, SEC-OT06-06, and SEC-OT06-15:
+/// Single point of log redaction enforcing 05, and
 /// - Replaces exceptions with value-free <see cref="RedactedException"/>.
 /// - Strips query strings from URI attributes and scope values.
 /// - Redacts sensitive keywords from unapproved attribute keys.

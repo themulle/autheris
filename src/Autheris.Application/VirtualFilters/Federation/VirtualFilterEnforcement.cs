@@ -10,7 +10,7 @@ using Autheris.Domain.Exceptions;
 /// target columns (after the binding's column map), their key types (from the catalog) and the authorized key set.
 /// <see cref="Apply"/> keeps a row only if, for every pair, the row's key tuple is in that pair's set (AND, AC-3.3).
 /// Only Autheris.Application can create it; it is passed to the governed read path explicitly, never through
-/// <c>session.Items</c> (C-6, SEC-14).
+/// <c>session.Items</c>(C-6).
 /// </summary>
 public sealed class VirtualFilterEnforcement
 {

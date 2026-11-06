@@ -12,7 +12,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// #112 A1-2 / A1-12 (SEC-112-12, -21, -26): canonical, collision-free key of the noisy-result cache and the fingerprint
+/// #112 A1-2 / A1-12 (-21, -26): canonical, collision-free key of the noisy-result cache and the fingerprint
 /// of the access decision behind it. Every field is length-prefixed, parameters are sorted by name and typed, and the
 /// outputs are SHA-256 digests so neither the key nor any log line ever carries a bound value.
 /// </summary>

@@ -16,8 +16,8 @@ using Microsoft.AspNetCore.Routing;
 /// <summary>
 /// Issue #281: runtime administration of app-scoped trusted GraphQL documents under <c>/api/admin/trusted-documents</c>. Mapped only while
 /// <c>GraphQL:AppScopedTrustedDocuments:Enabled</c> is true. Every route needs the ClusterAdmin policy (401 without authentication) plus a
-/// delegated scope (403 without it): <c>trusted-documents:write</c> for PUT/DELETE, read or write for GET (SEC-281-6). Route values are validated
-/// with the same rules as the app header and never echoed (SEC-281-5); the PUT body is capped at 1 MiB (SEC-281-8).
+/// delegated scope (403 without it): <c>trusted-documents:write</c>for PUT/DELETE, read or write for GET. Route values are validated
+/// with the same rules as the app header and never echoed; the PUT body is capped at 1 MiB.
 /// </summary>
 public static class TrustedDocumentAdminEndpoints
 {
@@ -44,7 +44,7 @@ public static class TrustedDocumentAdminEndpoints
         return app;
     }
 
-    /// <summary>Routes exist only while the feature is enabled (SEC-281-6); a disabled gateway answers 404.</summary>
+    /// <summary>Routes exist only while the feature is enabled; a disabled gateway answers 404.</summary>
     public static IEndpointRouteBuilder MapTrustedDocumentAdminEndpointsWhenEnabled(this IEndpointRouteBuilder app, Autheris.Domain.Options.GatewayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

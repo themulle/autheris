@@ -17,7 +17,7 @@ public sealed class CasbinDecisionCacheOptions
     public int Capacity { get; init; } = 100_000;
 
     /// <summary>
-    /// WP-PF-09: lets users that match exactly the same policy rules share one cached decision, when no rule reads a user-specific
+    /// lets users that match exactly the same policy rules share one cached decision, when no rule reads a user-specific
     /// input. Never applies to delegated sources. Turn off to key every decision by user.
     /// </summary>
     public bool ShareAcrossUsers { get; init; } = true;

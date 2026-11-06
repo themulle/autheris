@@ -18,7 +18,7 @@ public enum DmlConstraintKind
 }
 
 /// <summary>
-/// A DML or MERGE statement violated a constraint. SEC-ADG-08 d / R-12: a unique-key violation caused by another tenant's row is
+/// A DML or MERGE statement violated a constraint. 08 d / R-12: a unique-key violation caused by another tenant's row is
 /// the one side channel that tenant-scoped DML cannot remove (it reveals that the key exists), so the error that reaches the caller
 /// is this typed exception with a fixed message: no driver text, no key value, no constraint, table or schema name, and no inner
 /// exception (the inner exception would carry the driver message). The original error stays in the server-side log only.
@@ -69,17 +69,17 @@ public static class DmlErrorSanitizer
         if (TryMap(dialect, error) is { } constraint) return constraint;
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
-            // SEC-277-06: the recursion bound of a recursive CTE (SQL Server 530, Oracle ORA-32044) is a resource limit with a fixed message.
+            // the recursion bound of a recursive CTE (SQL Server 530, Oracle ORA-32044) is a resource limit with a fixed message.
             if (IsRecursionLimit(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.LimitExceeded, dialect);
         }
 
-        // #312 (SEC-PG-10): an unknown identifier is answered like a denied column (SEC-X1-05): no oracle for column names.
+        // #312: an unknown identifier is answered like a denied column: no oracle for column names.
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
             if (IsUnknownIdentifier(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, dialect);
         }
 
-        // #321 (SEC-RG-03): a set-operation column-count mismatch is a caller mistake (a syntax-class error), not a provider outage.
+        // #321: a set-operation column-count mismatch is a caller mistake (a syntax-class error), not a provider outage.
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
             if (IsSetOperationDegreeError(dialect, current)) return new GovernedSqlException(GovernedSqlErrorCodes.SyntaxError, dialect);

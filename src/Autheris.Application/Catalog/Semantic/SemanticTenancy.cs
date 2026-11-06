@@ -8,7 +8,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Tenancy rules of the persisted semantic catalog (#112 A1-3, SEC-112-13). The catalog is always keyed by tenant (DT-A-7); the default
+/// Tenancy rules of the persisted semantic catalog (#112 A1-3). The catalog is always keyed by tenant (DT-A-7); the default
 /// tenant is the catalog owner and is only different in that its importer sees every physical table (metadata only, DT-SC-08).
 /// </summary>
 public sealed class SemanticTenancy

@@ -32,7 +32,7 @@ using TrinoSqlEngine.Analysis;
 
 /// <summary>
 /// Default <see cref="IOlapStagingService"/>. Audit failures reject the request (fail closed, 503).
-/// Request flow (PLAN-SEC-OLAP-01): the SQL text is validated first (DuckDB parser), then every requested table is resolved and
+/// Request flow: the SQL text is validated first (DuckDB parser), then every requested table is resolved and
 /// authorized (no source is touched), the request is classified, a cross-source request passes the federation gate and the SQL
 /// guardrails, and only then are admission, the governed reads, the required audits and the query executed.
 /// </summary>
@@ -50,7 +50,7 @@ public sealed class OlapStagingService(
     IOlapRequestLimiter requestLimiter,
     Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null) : IOlapStagingService
 {
-    // Issue #447 SEC-ATR-01: no gate means deny, never pass-through.
+    // Issue #447 no gate means deny, never pass-through.
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
 
     // Throttle for capacity-refusal audit records: one per tenant per minute (a refusal flood must not flood the audit store).
@@ -133,7 +133,7 @@ public sealed class OlapStagingService(
                     TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing),
                     ErrorCode: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing);
             case TransportNotAllowedException:
-                // Issue #447 (REQ-ATR-04): the stable code and the fixed text of every transport denial.
+                // Issue #447: the stable code and the fixed text of every transport denial.
                 logger.LogWarning("OLAP read refused: the data source does not allow this transport.");
                 return new OlapStagingOutcome(403, "Access to the data source is not allowed over this transport.", ErrorCode: TransportNotAllowedException.Code);
             case GatewayForbiddenException:
@@ -645,7 +645,7 @@ public sealed class OlapStagingService(
             return (null, new Denial(new OlapStagingOutcome(403, $"Access denied to table '{rawTableName}'.")));
         }
 
-        // SEC-OLAP-05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
+        // 05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
         // without leaking internal policy details.
         var decision = await accessResolver.ResolveAccessAsync(user, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
@@ -656,7 +656,7 @@ public sealed class OlapStagingService(
                 isDev ? $"Access denied to table '{meta.Identifier}': {string.Join("; ", decision.DeniedReasons)}" : $"Access denied to table '{rawTableName}'.")));
         }
 
-        // Issue #447 C5 (SEC-ATR-08): after the tenant allowlist and the access decision, before any source is touched.
+        // Issue #447 C5: after the tenant allowlist and the access decision, before any source is touched.
         await _transportGate.EnsureCatalogSourceAsync(DataSourceAllowlistGuard.LogicalDataSource(meta), ct).ConfigureAwait(false);
 
         // MISC-03: the rule that GraphQL/WebSQL/streams enforce also holds for OLAP staging. The client SQL runs after staging, so it never
@@ -739,7 +739,7 @@ public sealed class OlapStagingService(
 
     /// <summary>
     /// BC-OLAP-02/03/17: the DuckDB AST policy (function allowlist, construct blocklist, staged tables only) AND the gateway analyzer
-    /// (join/filter column references for SEC-JOIN-01 / SEC-FILTER-01). The column guardrail is a policy-consistency control; the
+    /// (join/filter column references for 01). The column guardrail is a policy-consistency control; the
     /// confidentiality boundary is masking before staging.
     /// </summary>
     private void EnforceSqlGuardrails(

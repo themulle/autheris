@@ -9,7 +9,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// PLAN-SEC-115 A-2/A-7: startup snapshot of the read-path switches (the switch values are immutable; only the bounded set of dropped tool names is filled during startup registration). Built once from the bound options; never reloads
+/// 115 A-2/A-7: startup snapshot of the read-path switches (the switch values are immutable; only the bounded set of dropped tool names is filled during startup registration). Built once from the bound options; never reloads
 /// (no <c>IOptionsMonitor</c>), so tools/list and the mapped routes can never disagree within one process.
 /// </summary>
 public sealed class ReadPathSwitches : IReadPathSwitches

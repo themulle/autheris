@@ -51,7 +51,7 @@ public interface ICdcTableActivator
 }
 
 /// <summary>
-/// PLAN-CDC-99 D-A3 / FR-P2: activates one tracked table. Checks run in a fixed order, each with a stable code, the first failure wins
+/// 99 D-A3 / FR-P2: activates one tracked table. Checks run in a fixed order, each with a stable code, the first failure wins
 /// and is stored on the stream (<c>activation_code</c>). The primary key is the DECLARED one (never read from the source catalog); the
 /// change table's key columns are compared with it. Needs only <c>SELECT</c> and <c>VIEW CHANGE TRACKING</c> on the source.
 /// </summary>

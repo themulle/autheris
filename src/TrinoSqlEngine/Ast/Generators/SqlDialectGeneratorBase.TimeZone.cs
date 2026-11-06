@@ -5,7 +5,7 @@ using TrinoSqlEngine.Ast.Nodes;
 namespace TrinoSqlEngine.Ast.Generators;
 
 /// <summary>
-/// REQ-SQL-130 (A-6, BC-130-3/11/12): the single interception point of <c>convert_timezone</c>. The call is selected by its normalized simple name
+/// 130 (A-6, BC-130-3/11/12): the single interception point of<c>convert_timezone</c>. The call is selected by its normalized simple name
 /// before the function name is formatted, so no spelling can become a pass-through call. Only <see cref="FormatConvertTimeZone"/> of a dialect
 /// emits the conversion text; the zone arguments go through <see cref="AppendZoneArgument"/>, which accepts only a registry literal or a zone
 /// parameter slot. This is a second, independent check next to the validator.

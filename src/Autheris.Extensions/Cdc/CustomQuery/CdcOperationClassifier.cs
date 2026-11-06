@@ -9,7 +9,7 @@ using Autheris.Domain.Options;
 
 /// <summary>
 /// Classifies query polled rows into discrete CDC operations (Insert, Update, Delete)
-/// with soft-delete evaluation and constant-time deduplication (PLAN-CDC-101 D-4, SEC-CDC101-05).
+/// with soft-delete evaluation and constant-time deduplication (101 D-4).
 /// </summary>
 public static class CdcOperationClassifier
 {

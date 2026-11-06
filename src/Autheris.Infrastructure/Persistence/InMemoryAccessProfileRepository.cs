@@ -65,7 +65,7 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
         return Task.FromResult(removed);
     }
 
-    // WP-SC-03: the typed assignment API of the in-memory test double. It applies the same rules as the persisted stores for the explicit
+    // the typed assignment API of the in-memory test double. It applies the same rules as the persisted stores for the explicit
     // API; the Production registers the persisted repositories.
 
     public Task<IReadOnlyList<AccessProfile>> GetProfilesForSubjectsAsync(

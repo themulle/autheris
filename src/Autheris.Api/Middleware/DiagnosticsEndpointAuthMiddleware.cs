@@ -7,7 +7,7 @@ using Autheris.Api.Security;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Guards diagnostics and operational scrape routes when accessed outside standard endpoint authorization (WP-ARC-C-04).
+/// Guards diagnostics and operational scrape routes when accessed outside standard endpoint authorization.
 /// </summary>
 public sealed class DiagnosticsEndpointAuthMiddleware
 {

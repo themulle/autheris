@@ -11,7 +11,7 @@ internal enum ConsumerAggregationDialect
 }
 
 /// <summary>
-/// Issue #286, SEC-286-3: dialect specific upsert statements for the CONSUMER_APP_* tables. The builder takes only the
+/// Issue #286, dialect specific upsert statements for the CONSUMER_APP_* tables. The builder takes only the
 /// dialect, never caller data: every value reaches the statement as a bound parameter, and every key (including
 /// <c>tenant_id</c> first) takes part in the conflict target / MERGE match.
 /// </summary>
@@ -119,7 +119,7 @@ internal sealed class ConsumerAggregationSql
                 s.calls, s.rows_returned, s.rows_measured_calls, s.rej_access, s.rej_rate_limit, s.rej_cost, s.rej_other);
         ";
 
-        // SEC-286-8: insert-if-absent only (no WHEN MATCHED branch).
+        // insert-if-absent only (no WHEN MATCHED branch).
         const string actorInsert = @"
             MERGE dbo.CONSUMER_APP_ACTOR_DAILY WITH (HOLDLOCK) AS t
             USING (SELECT @tenant_id AS tenant_id, @table_id AS table_id, @day AS day, @application AS application,

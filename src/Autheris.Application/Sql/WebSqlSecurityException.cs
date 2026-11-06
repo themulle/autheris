@@ -4,7 +4,7 @@ using System;
 using System.Security;
 
 /// <summary>
-/// SEC-DATA131-01 / SEC-FED-37: Security exception raised by WebSQL parameter validation,
+/// Security exception raised by WebSQL parameter validation,
 /// anti-oracle checks, or forbidden control characters.
 /// </summary>
 public class WebSqlSecurityException : SecurityException

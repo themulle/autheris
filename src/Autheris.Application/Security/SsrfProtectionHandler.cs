@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// DelegatingHandler enforcing strict SSRF validation with asynchronous DNS resolution
-/// across all outbound HTTP requests made by ITSM, Catalog, Lineage, Lakehouse and CDN purge clients (HIGH-03 / SEC-02).
+/// across all outbound HTTP requests made by ITSM, Catalog, Lineage, Lakehouse and CDN purge clients (HIGH-03).
 /// Lives in Application so that both the core (Api/Infrastructure) and Autheris.Extensions can attach it (EX-12).
 /// Explicitly trusted internal hosts/networks (<see cref="OutboundEgressOptions"/>) are exempt from the private-address
 /// check so that on-premises integrations keep working – but only for the integration this handler instance was created

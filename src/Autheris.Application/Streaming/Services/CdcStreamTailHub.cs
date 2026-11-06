@@ -44,7 +44,7 @@ public sealed class CdcResyncRequiredException : Exception
 }
 
 /// <summary>
-/// Node-local shared tail reader (PLAN-CDC-99 D-A13, D-B7): one reader per stream with at least one local listener, started at the
+/// Node-local shared tail reader (99 D-A13, D-B7): one reader per stream with at least one local listener, started at the
 /// head, decrypting each event once and fanning the immutable <see cref="CdcStreamDelivery"/> out to bounded per-subscriber buffers.
 /// A full buffer completes that subscriber with <see cref="CdcResyncRequiredException"/>; it never blocks the reader or other
 /// subscribers. Readers wake on <see cref="ICdcStreamSignal"/> and also poll, so a lost signal only adds latency. An event that cannot
@@ -200,7 +200,7 @@ public sealed class CdcStreamTailHub : ICdcStreamTailHub, IAsyncDisposable
         CdcStreamId id, Autheris.Domain.Common.TableIdentifier table, long from, long joinPoint, Subscriber subscriber,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        // SEC-CDC99-17: bounded number of concurrent catch-up readers per node.
+        // bounded number of concurrent catch-up readers per node.
         if (Interlocked.Increment(ref _activeCatchUps) > Math.Max(1, Opt.MaxConcurrentCatchUps))
         {
             Interlocked.Decrement(ref _activeCatchUps);
@@ -216,7 +216,7 @@ public sealed class CdcStreamTailHub : ICdcStreamTailHub, IAsyncDisposable
                 var result = await _store.ReadAsync(id, next, ReadPageSize, ct).ConfigureAwait(false);
                 if (result.TailOffset > next)
                 {
-                    // Retention removed the requested range: an explicit gap, never silent (SEC-CDC99-18).
+                    // Retention removed the requested range: an explicit gap, never silent.
                     yield return GapDelivery(id, table, next, result.TailOffset);
                     next = result.TailOffset;
                     continue;
@@ -234,7 +234,7 @@ public sealed class CdcStreamTailHub : ICdcStreamTailHub, IAsyncDisposable
                         yield break;
                     }
 
-                    // SEC-CDC99-02: only events within the resume window may be replayed.
+                    // only events within the resume window may be replayed.
                     if (_time.GetUtcNow() - record.ProducedAt > window)
                     {
                         throw new CdcResyncRequiredException(record.Offset - 1);

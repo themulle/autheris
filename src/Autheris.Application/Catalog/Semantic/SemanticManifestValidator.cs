@@ -19,7 +19,7 @@ public sealed record SemanticManifestValidationResult(bool IsValid, IReadOnlyLis
 }
 
 /// <summary>
-/// Validates a parsed semantic manifest before any side effect (#112 SI-112-5, M-2, SEC-112-08/-14/-16/-17). Pure: no store, no catalog,
+/// Validates a parsed semantic manifest before any side effect (#112 SI-112-5, M-2, 08/-14/-16/-17). Pure: no store, no catalog,
 /// no table write. Metric filter templates are parsed with the engine's policy parser against the columns of the model's base table;
 /// the parse context has no catalog (no subqueries) and no parameters (no <c>:name</c> placeholders, no caller attributes).
 /// </summary>
@@ -333,7 +333,7 @@ public sealed partial class SemanticManifestValidator
 
     /// <summary>
     /// The one parse of a metric filter template: policy parser, base-table columns, the row-policy function list, no parameters, no catalog.
-    /// Used at import (here) and again at query time so a manifest stored before a schema change still fails closed (SEC-112-16 d).
+    /// Used at import (here) and again at query time so a manifest stored before a schema change still fails closed (16 d).
     /// </summary>
     internal static class TemplateParser
     {

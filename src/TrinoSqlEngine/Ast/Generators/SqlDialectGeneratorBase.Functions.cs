@@ -582,7 +582,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     }
 
     /// <summary>
-    /// SEC-ADG-16 item 2: the catalog type a literal binds with, or null when the literal is not compared with a catalog column. A
+    /// 16 item 2: the catalog type a literal binds with, or null when the literal is not compared with a catalog column. A
     /// numeric literal against a text column is rejected (the database would convert the column and could raise a data-dependent
     /// error such as ORA-01722). On Oracle a comparison with a column of unknown type is rejected as well; the other dialects
     /// keep the literal type for it.

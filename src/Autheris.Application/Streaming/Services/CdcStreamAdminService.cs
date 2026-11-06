@@ -9,7 +9,7 @@ using Autheris.Application.Streaming.Crypto;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Model;
 
-/// <summary>Admin view of a stream: no payload, fingerprint, wrapped key or key material (SEC-CDC99-11).</summary>
+/// <summary>Admin view of a stream: no payload, fingerprint, wrapped key or key material.</summary>
 public sealed record CdcStreamAdminView(
     string Id, string Source, string Table, string Status, string? ActivationCode, long HeadOffset, long TailOffset,
     long? SourceWatermark, DateTimeOffset? LastPolledAt, long? SourceLagVersions);
@@ -26,7 +26,7 @@ public enum CdcResyncStatus
 
 public sealed record CdcResyncOutcome(CdcResyncStatus Status, int DiscardedEvents);
 
-/// <summary>Operations behind the stream admin endpoints (PLAN-CDC-99 D-A14, SEC-CDC99-21).</summary>
+/// <summary>Operations behind the stream admin endpoints (99 D-A14).</summary>
 public sealed class CdcStreamAdminService(
     ICdcStreamStore store, ICdcStreamKeyStore keyStore, CdcStreamKeyring keyring, ICdcStreamRestarter? restarter = null)
 {
@@ -43,7 +43,7 @@ public sealed class CdcStreamAdminService(
 
     /// <summary>
     /// Restarts the stream at the current source version. With <paramref name="discardUnreadable"/> the events, images and keys that can no
-    /// longer be decrypted (KEK loss) are removed first; consumers then observe a gap (SEC-CDC99-18).
+    /// longer be decrypted (KEK loss) are removed first; consumers then observe a gap.
     /// </summary>
     public async Task<CdcResyncOutcome> ResyncAsync(CdcStreamId id, bool discardUnreadable, CancellationToken ct = default)
     {
@@ -116,7 +116,7 @@ public sealed class CdcStreamAdminService(
     }
 
     /// <summary>
-    /// SEC-CDC101-06: Resets the multi-watermark vector state of a governed stream with an audited administrative justification.
+    /// Resets the multi-watermark vector state of a governed stream with an audited administrative justification.
     /// </summary>
     public async Task<bool> ResetWatermarkAsync(
         CdcStreamId id, IReadOnlyDictionary<string, string> dimensions, string justification, CancellationToken ct = default)

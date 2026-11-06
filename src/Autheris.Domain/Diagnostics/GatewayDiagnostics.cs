@@ -38,7 +38,7 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
-    /// <summary>PLAN-SEC-115: calls to a read path the operator switched off. Tag <c>path</c> is a closed set (no tool names, no ids).</summary>
+    /// <summary>calls to a read path the operator switched off. Tag<c>path</c> is a closed set (no tool names, no ids).</summary>
     public static readonly Counter<long> DisabledPathRequestCounter =
         Meter.CreateCounter<long>("autheris_disabled_path_requests_total", description: "Requests or tool calls that reached a read path switched off by configuration");
 

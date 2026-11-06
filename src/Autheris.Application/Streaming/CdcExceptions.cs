@@ -98,7 +98,7 @@ public sealed class CdcStreamKeyUnavailableException : Exception
 }
 
 /// <summary>
-/// Thrown when governed CDC configuration or AST DQL safety validation fails closed (REQ-CDC-101 AC-1.2, SEC-CDC101-01).
+/// Thrown when governed CDC configuration or AST DQL safety validation fails closed (101 AC-1.2).
 /// </summary>
 public sealed class GovernedCdcConfigurationException : Exception
 {

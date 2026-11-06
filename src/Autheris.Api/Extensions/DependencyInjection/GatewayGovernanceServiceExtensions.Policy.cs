@@ -43,7 +43,7 @@ public static partial class GatewayGovernanceServiceExtensions
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
-        // REQ-GOV-129: caller attribute registry and its administration (four-eyes).
+        // caller attribute registry and its administration (four-eyes).
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ClaimsAttributeProvider>();
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ServiceAttributeProvider>();
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.AttributeTableProvider>();
@@ -69,7 +69,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
         services.AddSingleton<IEffectiveFilterInspector, EffectiveFilterInspector>();
         services.AddScoped<Autheris.Application.Governance.IOpenApiIngestionUseCase, Autheris.Application.Governance.OpenApiIngestionUseCase>();
-        // F-GOV-14 (M4, SEC-10): authorized key sets from the SQL key source, in a dedicated size-limited cache.
+        // F-GOV-14 (M4): authorized key sets from the SQL key source, in a dedicated size-limited cache.
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.VirtualFilterKeySetCache>();
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();
         // F-GOV-14 (WI-6): without this registration a WebSQL cross-source query over a protected HTTP table is denied.

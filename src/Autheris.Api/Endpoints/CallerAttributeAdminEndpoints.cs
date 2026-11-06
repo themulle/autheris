@@ -20,7 +20,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Caller attributes (REQ-GOV-129, PLAN-GOV-129 A-7, A-11): administration API under <c>/api/v1/governance/caller-attributes</c>. GovernanceAdmin
+/// Caller attributes (129 A-7, A-11): administration API under<c>/api/v1/governance/caller-attributes</c>. GovernanceAdmin
 /// submits, requests deletion and reads; GovernanceAdmin or CallerAttributeApprover approves by hash (an attribute-table or service-set change
 /// needs the approver role, BC-129-03); the simulation needs GovernanceAdmin or FilterAdmin, and revealing values the CallerAttributeInspector
 /// role. Every response omits attribute values; callers stay within their tenant, only ClusterAdmin acts across tenants.

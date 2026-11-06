@@ -7,7 +7,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// WP-SC-16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
+/// 16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
 /// always need an explicit <c>ValidTo</c> within the maximum of their class; group and role grants are standing and unaffected.
 /// Renewal is a new approval, never by the grantee. Any unexpected state denies.
 /// </summary>

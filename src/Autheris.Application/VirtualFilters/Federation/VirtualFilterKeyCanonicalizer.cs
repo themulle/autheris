@@ -21,7 +21,7 @@ public enum VirtualFilterKeyType
 }
 
 /// <summary>
-/// F-GOV-14 (M2, SEC-18): converts key values from the key source and from upstream rows into one canonical value per
+/// F-GOV-14 (M2): converts key values from the key source and from upstream rows into one canonical value per
 /// key type. A value that cannot be converted exactly is rejected (the key is dropped, the row never matches). Floating
 /// point values only count when they prove their value: integral and below 2^53 for integers, exact round trip for
 /// decimals. Case-insensitive columns are not supported (always ordinal, the stricter choice).

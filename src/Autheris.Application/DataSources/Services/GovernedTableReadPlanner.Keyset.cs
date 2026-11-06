@@ -65,7 +65,7 @@ public sealed partial class GovernedTableReadPlanner
             ?? throw new KeysetStreamingUnavailableException("KEYSET_STREAMING_UNAVAILABLE: Table requires a primary key or unique index.");
         IReadOnlyList<string> pkCols = streamKey.Columns;
 
-        // SEC-DATA178-04 / SEC-DATA178-07: Masked or denied PK columns fail closed
+        // Masked or denied PK columns fail closed
         foreach (var pk in pkCols)
         {
             var access = decision.GetEffectiveColumnAccess(pk, metadata);
@@ -114,7 +114,7 @@ public sealed partial class GovernedTableReadPlanner
             }
         }
 
-        // 3. Enforce Required Filter Columns & Groups (#163 / #221 / #236 / SEC-DATA178-04)
+        // 3. Enforce Required Filter Columns & Groups (#163 / #221 / #236)
         if (metadata.RequiredFilterColumns.Length > 0 || metadata.RequiredFilterColumnGroups.Length > 0)
         {
             // MISC-04: the row filter text counts only through whole identifiers (shared rule); the typed client filter keeps its own check.

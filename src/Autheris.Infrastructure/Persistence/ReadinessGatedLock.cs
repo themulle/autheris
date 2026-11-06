@@ -3,7 +3,7 @@ using Autheris.Infrastructure.Persistence.Migrations;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// A mutual-exclusion gate that refuses to be entered while its owning governance store is not ready (WP-ARC-B-12).
+/// A mutual-exclusion gate that refuses to be entered while its owning governance store is not ready.
 /// Only the migration runner and initialization code use <see cref="WaitUnguardedAsync"/>.
 /// </summary>
 internal sealed class ReadinessGatedLock(Func<bool> isReady, string store) : IDisposable

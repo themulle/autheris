@@ -20,7 +20,7 @@ public sealed class InMemorySemanticCatalog : ISemanticCatalogService
     private readonly ConcurrentDictionary<string, SemanticCatalogPartition> _partitions = new(StringComparer.Ordinal);
     private readonly SemanticTenancy _tenancy;
 
-    /// <param name="gatewayOptions">Source of <c>Gateway:Tenancy:DefaultTenantId</c>; unset means no default tenant (SEC-112-13).</param>
+    /// <param name="gatewayOptions">Source of <c>Gateway:Tenancy:DefaultTenantId</c>unset means no default tenant.</param>
     public InMemorySemanticCatalog(IOptions<GatewayOptions>? gatewayOptions = null)
     {
         _tenancy = SemanticTenancy.FromOptions(gatewayOptions);

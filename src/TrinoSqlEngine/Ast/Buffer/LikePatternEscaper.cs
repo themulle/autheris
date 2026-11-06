@@ -4,7 +4,7 @@ using System;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// SEC-ADG-18 / SQLE-10: escapes a gateway value that is used as (part of) a LIKE pattern, so the value never acts as a pattern
+/// 18 / SQLE-10: escapes a gateway value that is used as (part of) a LIKE pattern, so the value never acts as a pattern
 /// (%, _, [ and the escape character). Shared by the emitter (cache miss) and the template rebind (cache hit).
 /// </summary>
 internal static class LikePatternEscaper

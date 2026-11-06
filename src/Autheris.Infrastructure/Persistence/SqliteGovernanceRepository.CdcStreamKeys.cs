@@ -8,7 +8,7 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
-/// <summary>Governed CDC stream persistence (PLAN-CDC-99 CdcStreamKeys) on the Sqlite governance database; statements live in <see cref="CdcStreamSqlCore"/>.</summary>
+/// <summary>Governed CDC stream persistence (99 CdcStreamKeys) on the Sqlite governance database; statements live in<see cref="CdcStreamSqlCore"/>.</summary>
 public partial class SqliteGovernanceRepository : ICdcStreamKeyStore
 {
     public Task<IReadOnlyList<CdcWrappedKey>> GetKeysAsync(CdcStreamId id, CancellationToken ct = default) =>

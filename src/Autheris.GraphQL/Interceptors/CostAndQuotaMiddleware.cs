@@ -184,7 +184,7 @@ public sealed class CostAndQuotaMiddleware
         var gatewayOptions = services?.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
         if (gatewayOptions?.IsRateLimitingDisabled == true)
         {
-            // SEC-RG-05: the validation pass prices a variable page size without its value, so the runtime pass must still bound it here.
+            // the validation pass prices a variable page size without its value, so the runtime pass must still bound it here.
             if (RejectIfOverGatewayComplexity(context, doc, gatewayOptions, httpContext))
             {
                 return;
@@ -194,7 +194,7 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        // SEC-GOV177-06: Zero Unauthenticated Allocation
+        // Zero Unauthenticated Allocation
         // Unauthenticated requests, requests with invalid tokens, or rejected requests MUST NEVER touch rate limiter buckets.
         var principal = httpContext.User ?? (context.ContextData.TryGetValue("ClaimsPrincipal", out var cpObj) && cpObj is System.Security.Claims.ClaimsPrincipal cp ? cp : null);
         string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
@@ -205,7 +205,7 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        // SEC-GOV177-08: only a validated identity (authenticated principal) passes this gate. The X-API-Key header is
+        // only a validated identity (authenticated principal) passes this gate. The X-API-Key header is
         // never validated here (unregistered keys fall back to the anonymous IP bucket in the tier resolver), so its mere
         // presence must not count as authenticated; a registered key only selects the quota tier.
         bool isAuthenticated = principal?.Identity?.IsAuthenticated == true;
@@ -268,7 +268,7 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        // 4. SEC-GOV177-01: Phase 1 Pre-Admission Reservation via ReserveCostQuotaAsync
+        // 4. Phase 1 Pre-Admission Reservation via ReserveCostQuotaAsync
         var limitResult = await _rateLimiter.ReserveCostQuotaAsync(
             clientContext.SubjectId,
             calculatedCost,
@@ -316,8 +316,8 @@ public sealed class CostAndQuotaMiddleware
                 context.Result is not OperationResult op ||
                 (op.Errors is not null && op.Errors.Count > 0))
             {
-                // SEC-GOV177-03: Mandatory minimum fee on client abort or execution failure.
-                // SEC-GOV177-07: the failure fee is only a floor. A partial result (e.g. a successful 1000-row root field next
+                // Mandatory minimum fee on client abort or execution failure.
+                // the failure fee is only a floor. A partial result (e.g. a successful 1000-row root field next
                 // to a deliberately failing one) is charged for the data it produced, so an error cannot refund real work.
                 actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
             }
@@ -328,7 +328,7 @@ public sealed class CostAndQuotaMiddleware
         }
         catch
         {
-            // SEC-GOV177-03: Mandatory minimum fee on exception (SEC-GOV177-07: rows already produced are still charged).
+            // Mandatory minimum fee on exception (rows already produced are still charged).
             actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
             throw;
         }
@@ -373,7 +373,7 @@ public sealed class CostAndQuotaMiddleware
     }
 
     /// <summary>
-    /// SEC-GOV177-03 / SEC-GOV177-07: settlement of a failed, aborted or partially failed request. The failure fee
+    /// settlement of a failed, aborted or partially failed request. The failure fee
     /// (at least BaseCost) is the floor; when data was produced, the actual cost of that data is charged if it is higher.
     /// </summary>
     internal static int ComputeFailedCost(

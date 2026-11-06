@@ -18,7 +18,7 @@ public record TableAccessDecision(
     public const string VirtualFilterEnforcementIncompleteCode = "VF_ENFORCEMENT_INCOMPLETE";
 
     /// <summary>
-    /// The typed row policy (SEC-ADG-02 item 3, SEC-ADG-25). When set, <see cref="CombinedRowFilterSql"/> is its text projection and
+    /// The typed row policy (02 item 3). When set,<see cref="CombinedRowFilterSql"/> is its text projection and
     /// <see cref="RowFilterParameters"/> carries its values. It is only ever changed through the typed helpers below.
     /// </summary>
     public IRowPolicy? RowPolicy { get; init; }
@@ -29,11 +29,11 @@ public record TableAccessDecision(
     /// </summary>
     public Autheris.Domain.Model.ConsentRowFilterRecipe? ConsentFilterRecipe { get; init; }
 
-    /// <summary>REQ-GOV-129 (BC-129-15): the caller attributes resolved for this decision (audit only; ids, outcomes and reason codes, no values).</summary>
+    /// <summary>129 (BC-129-15): the caller attributes resolved for this decision (audit only; ids, outcomes and reason codes, no values).</summary>
     public IReadOnlyList<Autheris.Domain.Model.CallerAttributeAuditEntry>? CallerAttributes { get; init; }
 
     /// <summary>
-    /// REQ-GOV-143: set for a caller that holds a restricted scope. A catalog-sensitive column is then only in clear when the clearance permits it
+    /// set for a caller that holds a restricted scope. A catalog-sensitive column is then only in clear when the clearance permits it
     /// (see <see cref="GetEffectiveColumnAccess"/>); <c>null</c> = unrestricted caller. Init-only, so <c>with</c> copies keep it.
     /// </summary>
     public Autheris.Domain.Model.RestrictedScopeClearance? ScopeClearance { get; init; }
@@ -119,7 +119,7 @@ public record TableAccessDecision(
     }
 
     /// <summary>
-    /// SEC-ADG-02 item 3: the decision as the AST compiler may consume it. A decision whose row filter exists only as text, or whose text
+    /// 02 item 3: the decision as the AST compiler may consume it. A decision whose row filter exists only as text, or whose text
     /// no longer equals the projection of its typed policy, is denied (no drift by construction). A decision without any row filter,
     /// and a denied decision, are returned unchanged.
     /// </summary>
@@ -436,7 +436,7 @@ public record TableAccessDecision(
             return ColumnAccessLevel.Deny;
         }
 
-        // REQ-GOV-143: a restricted-scope caller also needs the scope-specific clearance, not only the base Clear.
+        // a restricted-scope caller also needs the scope-specific clearance, not only the base Clear.
         if (IsCatalogSensitive(columnName, metadata)
             && (!HasExplicitClear(columnName) || (ScopeClearance is { } clearance && !clearance.Permits(columnName))))
         {
@@ -461,7 +461,7 @@ public record TableAccessDecision(
     }
 
     /// <summary>
-    /// REQ-GOV-143: true when the column is catalog-sensitive with an explicit <c>Clear</c> that the restricted-scope clearance does not
+    /// true when the column is catalog-sensitive with an explicit<c>Clear</c> that the restricted-scope clearance does not
     /// permit, so the effective level is <c>Mask</c> only because of the scope restriction (used to tell a caller what to request).
     /// </summary>
     public bool IsMaskedByScopeRestriction(string columnName, TableMetadata? metadata) =>

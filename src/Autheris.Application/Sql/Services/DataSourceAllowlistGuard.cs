@@ -6,7 +6,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// SR-H-06 / SEC-HIGH-13: the single enforcement point for <c>WebSql.AllowedDataSources</c> and
+/// SR-H-06 / the single enforcement point for<c>WebSql.AllowedDataSources</c> and
 /// <c>WebSql.TenantDataSourceAllowlist</c>. Every path that reads a data source (single-catalog SQL,
 /// cross-source routing, HTTP-declarative tables, OLAP staging) must call this before any data is read.
 /// Fails closed when the data source name is empty or unknown.
@@ -25,7 +25,7 @@ public static class DataSourceAllowlistGuard
     }
 
     /// <summary>
-    /// SEC-RG-01: non-throwing form of <see cref="EnsureAllowed"/> with the identical decision (shared core). In-memory only, never
+    /// non-throwing form of<see cref="EnsureAllowed"/> with the identical decision (shared core). In-memory only, never
     /// touches a repository, so callers can answer a denied source uniformly before any metadata lookup.
     /// </summary>
     public static bool IsAllowed(WebSqlOptions webSqlOptions, TenantId tenantId, string? dataSourceName) =>

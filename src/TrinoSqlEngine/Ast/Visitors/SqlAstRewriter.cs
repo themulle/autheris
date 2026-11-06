@@ -16,7 +16,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     private int _visits;
 
     /// <summary>
-    /// Cooperative cancellation (compile budget, SEC-ADG-05): observed every 256 visited nodes. Defaults to none.
+    /// Cooperative cancellation (compile budget): observed every 256 visited nodes. Defaults to none.
     /// </summary>
     public CancellationToken CancellationToken { get; set; }
 
@@ -24,7 +24,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     {
         ArgumentNullException.ThrowIfNull(node);
 
-        // SEC-ADG-05: a StackOverflowException cannot be caught and would end the process for every tenant. Deep trees raise
+        // a StackOverflowException cannot be caught and would end the process for every tenant. Deep trees raise
         // InsufficientExecutionStackException here, which the compiler maps to a typed limit error.
         ExecutionStackGuard.Ensure();
         if ((++_visits & 255) == 0)

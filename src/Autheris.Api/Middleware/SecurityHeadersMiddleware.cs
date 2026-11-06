@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 
 /// <summary>
 /// Applies HTTP security response headers (CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy),
-/// OData v4 protocol version headers, and Development insecure-mode diagnostic headers (WP-ARC-C-04).
+/// OData v4 protocol version headers, and Development insecure-mode diagnostic headers.
 /// </summary>
 public sealed class SecurityHeadersMiddleware
 {

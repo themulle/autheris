@@ -1,7 +1,7 @@
 namespace Autheris.Domain.Audit;
 
 /// <summary>
-/// Canonical catalog of all audit event types in Autheris (PLAN-AUDIT-02-LUECKENLOSES-ZUGRIFFS-AUDIT §3.3).
+/// Canonical catalog of all audit event types in Autheris (AUDIT §3.3).
 /// </summary>
 public static class AuditEventTypes
 {
@@ -40,7 +40,7 @@ public static class AuditEventTypes
     public const string CdcWebhookDeliveryBatch = "CDC_WEBHOOK_DELIVERY_BATCH";
     public const string EgressShadowCopy = "EGRESS_SHADOW_COPY";
 
-    // Governed CDC fan-out (issue #99, PLAN-CDC-99 D-B8): the batch event is Tier B; lifecycle/admin events are individually audited.
+    // Governed CDC fan-out (issue #99, 99 D-B8): the batch event is Tier B; lifecycle/admin events are individually audited.
     public const string CdcDeliveryBatch = "CDC_DELIVERY_BATCH";
     public const string CdcConsumerRegistered = "CDC_CONSUMER_REGISTERED";
     public const string CdcConsumerRejected = "CDC_CONSUMER_REJECTED";
@@ -62,7 +62,7 @@ public static class AuditEventTypes
     public const string AuditPipelineFault = "AUDIT_PIPELINE_FAULT";
     public const string AuditRetentionPurge = "AUDIT_RETENTION_PURGE";
 
-    // Catalog definition changes (Tier A, issue #94 SEC-94-06): declared primary key / index replacement with before and after.
+    // Catalog definition changes (Tier A, issue #94 06): declared primary key / index replacement with before and after.
     public const string CatalogKeyDefinitionChanged = "CATALOG_KEY_DEFINITION_CHANGED";
 
     /// <summary>Issue #404: the sync replaced the physical non-unique index list of a table (table id and counts only).</summary>

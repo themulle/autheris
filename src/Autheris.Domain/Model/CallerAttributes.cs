@@ -9,7 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 
-/// <summary>Value type of a caller attribute (PLAN-GOV-129 C-1). <see cref="Uuid"/> attributes are bound as canonical lower-case strings.</summary>
+/// <summary>Value type of a caller attribute (129 C-1).<see cref="Uuid"/> attributes are bound as canonical lower-case strings.</summary>
 public enum CallerAttributeType
 {
     Text = 0,
@@ -41,7 +41,7 @@ public sealed record CallerAttributeProviderBinding(string Kind, IReadOnlyDictio
 }
 
 /// <summary>
-/// One registered caller attribute (REQ-GOV-129). The definition decides what the attribute is and where it comes from; values never
+/// One registered caller attribute. The definition decides what the attribute is and where it comes from; values never
 /// live here. <see cref="ComputeDefinitionHash"/> covers everything that changes the meaning (provider configuration included), so a
 /// cached value can never outlive a definition change (BC-129-08).
 /// </summary>

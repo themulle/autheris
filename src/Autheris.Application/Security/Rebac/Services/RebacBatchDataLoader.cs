@@ -11,7 +11,7 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// F-SEC-04: Batch DataLoader implementation for ReBAC authorization checks.
+/// F-Batch DataLoader implementation for ReBAC authorization checks.
 /// Batches incoming requests within a request scope and executes them via IRebacEvaluator.BatchCheckAsync.
 /// </summary>
 public sealed class RebacBatchDataLoader : IRebacBatchDataLoader

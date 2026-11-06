@@ -23,7 +23,7 @@ internal enum CdcSqlDialect
 }
 
 /// <summary>
-/// Engine-neutral SQL of the governed CDC stream store and key store (PLAN-CDC-99 D-A4). The three governance repositories hand a
+/// Engine-neutral SQL of the governed CDC stream store and key store (99 D-A4). The three governance repositories hand a
 /// connection (and own connection lifetime, gating and pooling); this class owns the statements and the append transaction. Only the
 /// few statements that genuinely differ per engine (insert-if-absent, the fenced watermark upsert, row limits) are dialect branches.
 /// All values are parameters; identifiers are constants.

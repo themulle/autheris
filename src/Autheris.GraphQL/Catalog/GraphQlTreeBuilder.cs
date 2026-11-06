@@ -11,7 +11,7 @@ namespace Autheris.GraphQL.Catalog;
 
 public static class GraphQlTreeBuilder
 {
-    /// <summary>Builds the tree; a page size or offset out of range throws <see cref="GatewayPageRangeException"/> (#330, SEC-RG-07).</summary>
+    /// <summary>Builds the tree; a page size or offset out of range throws <see cref="GatewayPageRangeException"/>(#330).</summary>
     public static TreeQueryNode BuildTree(
         IResolverContext context,
         CatalogTableType rootTable,
@@ -29,7 +29,7 @@ public static class GraphQlTreeBuilder
 
     /// <summary>
     /// Builds the tree and reports an out-of-range page size or offset instead of throwing: the violating node is clamped to a zero-row page,
-    /// so the caller can run table authorization first and only then answer with <see cref="GatewayPageRangeException"/> (SEC-RG-08: a denied
+    /// so the caller can run table authorization first and only then answer with <see cref="GatewayPageRangeException"/>(a denied
     /// table must answer identically for every page size).
     /// </summary>
     public static TreeQueryNode BuildTree(
@@ -260,7 +260,7 @@ public static class GraphQlTreeBuilder
         bool pageRangeViolated = false;
 
         // #318: a null or absent first is the default page (never unbounded); a null offset is 0. Coerced variable values of any
-        // stored representation are read. #330 (SEC-RG-07): the range check covers literals and variables alike and saturates on
+        // stored representation are read. #330: the range check covers literals and variables alike and saturates on
         // overflow, so an out-of-range value is a fixed page-range error, never an exception.
         if (currentSelection.Arguments.TryGetValue("first", out var firstArg) && firstArg?.ValueLiteral != null)
         {
@@ -309,7 +309,7 @@ public static class GraphQlTreeBuilder
                 throw new GatewayPageRangeException();
             }
 
-            // Clamp to a zero-row page so the caller can authorize before it answers (SEC-RG-08).
+            // Clamp to a zero-row page so the caller can authorize before it answers.
             tracker.Violated = true;
             limit = 0;
             offset = 0;
@@ -436,7 +436,7 @@ public static class GraphQlTreeBuilder
                         var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
                         if (itemLiteral is NullValueNode)
                         {
-                            // SEC-RG-11: a null member is rejected, never silently dropped.
+                            // a null member is rejected, never silently dropped.
                             throw new GatewayInvalidQueryException("The 'and' filter members cannot be null.");
                         }
 
@@ -473,7 +473,7 @@ public static class GraphQlTreeBuilder
                             var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
                             if (itemLiteral is NullValueNode)
                             {
-                                // SEC-RG-11: a null member is rejected like 'or: null', never silently dropped.
+                                // a null member is rejected like 'or: null', never silently dropped.
                                 throw new GatewayInvalidQueryException("The 'or' filter members cannot be null.");
                             }
 

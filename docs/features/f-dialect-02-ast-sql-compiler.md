@@ -1,6 +1,6 @@
 # F-DIALECT-02: Governed AST SQL Compiler (DQL and DML)
 
-Supersedes [F-DIALECT-01](f-dialect-01-ast-target-dialect-pushdown.md) and the SQL plan cache of [F-PERF-11](f-perf-11-query-plan-cache.md). Implementation: [`src/TrinoSqlEngine`](../../src/TrinoSqlEngine) (entry point `ISqlEngine.Compile`) and the governed pipeline in [`src/Autheris.Application/Sql`](../../src/Autheris.Application/Sql). Decision record: [ADR-017 amendments](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md).
+Supersedes the legacy dialect pushdown and application-level SQL plan cache. Implementation: [`src/TrinoSqlEngine`](../../src/TrinoSqlEngine) (entry point `ISqlEngine.Compile`) and the governed pipeline in [`src/Autheris.Application/Sql`](../../src/Autheris.Application/Sql). Decision record: [ADR-017 amendments](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md).
 
 ## 1. Executive Summary
 

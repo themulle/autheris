@@ -7,7 +7,7 @@ using Autheris.Application.State.Caching;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// F-GOV-14 (SEC-10): dedicated, size-limited cache of authorized key sets. Separate from the shared
+/// F-GOV-14: dedicated, size-limited cache of authorized key sets. Separate from the shared
 /// <see cref="Microsoft.Extensions.Caching.Memory.IMemoryCache"/> so large key sets cannot evict access profiles; every entry carries its estimated size.
 /// Loads are single-flight per cache key (CR-07): concurrent cold calls of one key share one in-flight load, and a slow
 /// key source of one filter or tenant never delays the load of another cache key. A failed load is seen by its waiters

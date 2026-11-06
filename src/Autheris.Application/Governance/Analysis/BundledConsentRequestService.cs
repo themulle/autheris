@@ -176,7 +176,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                     ? request.Purpose
                     : item.SuggestedPurpose;
 
-                // WP-SC-16: bundled requests are individual grants for the requester; the default duration (90 days) and any
+                // bundled requests are individual grants for the requester; the default duration (90 days) and any
                 // requested expiry must respect the class maximum of the table.
                 var bundledNow = DateTimeOffset.UtcNow;
                 GrantPolicyViolationException.ThrowIfDenied(_grantPolicy.Evaluate(new GrantRequest(

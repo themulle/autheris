@@ -10,7 +10,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
 
 /// <summary>
-/// WP-ARC-B-09: Central registry for SQL dialect providers. Fail-closed on unknown or unsupported dialect names.
+/// Central registry for SQL dialect providers. Fail-closed on unknown or unsupported dialect names.
 /// </summary>
 public interface ISqlDialectRegistry
 {

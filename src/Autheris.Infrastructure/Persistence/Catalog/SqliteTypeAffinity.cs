@@ -12,7 +12,7 @@ public enum SqliteAffinity
 
 /// <summary>
 /// SQLite declared types are free text. The affinity rules decide how values compare: with NUMERIC or INTEGER affinity,
-/// <c>'007'</c> and <c>'7'</c> compare equal, so such a column must not carry the tenant (SEC-X1-09).
+/// <c>'007'</c> and <c>'7'</c>compare equal, so such a column must not carry the tenant.
 /// </summary>
 public static class SqliteTypeAffinity
 {

@@ -190,7 +190,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
                 continue;
             }
 
-            // SEC M-27 / SEC-BL08-01: Hash and load the SAME bytes (zero TOCTOU window)
+            // SEC M-27 / Hash and load the SAME bytes (zero TOCTOU window)
             var verifiedBytes = trustList != null
                 ? trustList.ReadVerifiedBytes(fullDllPath)
                 : File.ReadAllBytes(fullDllPath);
@@ -341,7 +341,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
 
                 if (!execResult.Success)
                 {
-                    // SEC-BL08-04: Multi-provider fail-closed
+                    // Multi-provider fail-closed
                     return PluginRoleEnrichmentExecutionResult.Failed(execResult.ErrorCode ?? "AUTH_PLUGIN_FAILED", execResult.ErrorMessage);
                 }
 
@@ -414,7 +414,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
 
                 if (hookResult.Outcome == PluginAuthorizationOutcome.Deny)
                 {
-                    // SEC-BL08-04: Short circuit on first Deny
+                    // Short circuit on first Deny
                     RecordHookDecisionAudit(context, hook.HookName, "DENY", hookResult.ReasonCode, hookResult.ClientMessage);
                     return hookResult;
                 }

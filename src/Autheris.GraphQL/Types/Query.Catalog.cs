@@ -215,7 +215,7 @@ public sealed partial class Query
         }
 
         // #138 INC-1: the one visibility service decides the row set (caller scope, consent, tier, shape, ReBAC); a missing service is empty.
-        // Scope, admin view and shape come from the returned set; this channel never recomputes them (SEC-CAT138-13).
+        // Scope, admin view and shape come from the returned set; this channel never recomputes them.
         if (visibilityService == null)
         {
             return [];
@@ -226,7 +226,7 @@ public sealed partial class Query
             .ConfigureAwait(false);
         var isAdmin = visible.Scope is CallerScope.Global or CallerScope.CatalogOwner or CallerScope.Tenant;
 
-        // SEC-CAT138-19: consents and pending requests are loaded only to compute AccessStatus; they never add or remove a row.
+        // consents and pending requests are loaded only to compute AccessStatus; they never add or remove a row.
         IReadOnlyList<Consent> activeConsents = Array.Empty<Consent>();
         IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
         if (!isAdmin && visible.Tables.Count > 0)
@@ -247,7 +247,7 @@ public sealed partial class Query
             }
         }
 
-        // Second line of defence (SEC-CAT138-16): ToCatalogDtos re-applies the shaping rule with the set's admin view.
+        // Second line of defence: ToCatalogDtos re-applies the shaping rule with the set's admin view.
         var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang);
 
         return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);

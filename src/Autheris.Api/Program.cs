@@ -73,7 +73,7 @@ builder.Services.AddGatewayModules(builder.Configuration, builder.Environment, g
 // 4. Build and Pipeline Configuration
 var app = builder.Build();
 
-// WP-ARC-B-12: init-job mode. Applies the governance schema migrations (honoring GovernanceDb:Migrations) and exits without serving.
+// init-job mode. Applies the governance schema migrations (honoring GovernanceDb:Migrations) and exits without serving.
 if (Array.IndexOf(args, "--migrate-governance") >= 0 || Array.IndexOf(args, "--verify-governance") >= 0)
 {
     // Issue #388: --migrate-governance always applies (Migrations:Mode is ignored and logged); --verify-governance only verifies (no DDL, no write).

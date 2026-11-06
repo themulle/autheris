@@ -130,7 +130,7 @@ public sealed class ScimService : IScimService
 
         if (existing.Active && !activeStatus)
         {
-            // SEC-SC-14: Deprovisioning Lock flow
+            // Deprovisioning Lock flow
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PATCH", ct).ConfigureAwait(false);
@@ -301,7 +301,7 @@ public sealed class ScimService : IScimService
             }
         }
 
-        // SEC-SC-14: Quarantine check on mass member removal
+        // Quarantine check on mass member removal
         if (_membershipValidator != null && membersToRemove.Count > 0)
         {
             await _membershipValidator.ValidateMembershipChangeAsync(

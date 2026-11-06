@@ -68,7 +68,7 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
         }
         catch (Antlr4.Runtime.Misc.ParseCanceledException)
         {
-            // ARCH-MNT-15-SC-05: an unavailable parser cache rejects the input; it never falls back to "no excluded ranges".
+            // SC-05: an unavailable parser cache rejects the input; it never falls back to "no excluded ranges".
             throw;
         }
         catch
@@ -267,7 +267,7 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
     }
 
     /// <summary>
-    /// REQ-SQL-128 (FR-128-7): <c>column [NOT] IN (@list)</c> describes the list parameter by its column and the operator <c>IN</c> / <c>NOT IN</c>.
+    /// 128 (FR-128-7):<c>column [NOT] IN (@list)</c> describes the list parameter by its column and the operator <c>IN</c> / <c>NOT IN</c>.
     /// Only the sole item of the list is associated: the compiler accepts a list parameter in no other form.
     /// </summary>
     public override void EnterInList(SqlBaseParser.InListContext context)

@@ -38,7 +38,7 @@ public sealed class SqlDataSourceResolver
     }
 
     /// <summary>
-    /// SEC-RG-01: non-throwing form of <see cref="ResolveAllowedDataSource"/> (one shared decision, in memory only) so a statement that
+    /// non-throwing form of<see cref="ResolveAllowedDataSource"/> (one shared decision, in memory only) so a statement that
     /// names a source the caller may not use can be answered exactly like an unknown table.
     /// </summary>
     public bool TryResolveAllowedDataSource(string? requested, TenantId tenantId, out string resolved) =>

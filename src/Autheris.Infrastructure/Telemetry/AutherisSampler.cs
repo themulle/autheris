@@ -5,7 +5,7 @@ using System.Diagnostics;
 using OpenTelemetry.Trace;
 
 /// <summary>
-/// Custom head sampler enforcing SEC-OT06-09:
+/// Custom head sampler enforcing
 /// Remote parent sampled flag is ignored unless TrustParentSampling is explicitly configured.
 /// Ratio sampling is applied to roots and untrusted remote parents.
 /// </summary>

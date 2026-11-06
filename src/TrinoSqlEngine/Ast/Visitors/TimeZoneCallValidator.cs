@@ -26,7 +26,7 @@ internal sealed record TimeZoneValidationOptions(
     Func<string?, string, bool>? IsMaskedByName = null);
 
 /// <summary>
-/// REQ-SQL-130 (A-3, BC-130-1/3/5c/8/12): checks every call of <c>convert_timezone</c> of the user tree, in this fixed order and with fixed messages:
+/// 130 (A-3, BC-130-1/3/5c/8/12): checks every call of<c>convert_timezone</c> of the user tree, in this fixed order and with fixed messages:
 /// dialect, availability, call and nesting caps, shape, zone arguments, timestamp argument. It selects the call by the simple name, compared
 /// case-insensitively and independent of quoting; a qualified name ending in that name is the function too and fails validation. It is built on the
 /// common traversal base, so every call in every clause, window, subquery, CTE, set operation and DML statement is reached.

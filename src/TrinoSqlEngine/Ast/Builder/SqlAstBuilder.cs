@@ -917,7 +917,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                     bool isNot = inList.NOT() != null;
                     if (items.Count == 0)
                     {
-                        // SEC-PG-05: x IN () is FALSE and x NOT IN () is TRUE. The operand stays in the tree, so the security visitor still checks it:
+                        // x IN is FALSE and x NOT IN is TRUE. The operand stays in the tree, so the security visitor still checks it:
                         // "x IS NULL AND x IS NOT NULL" is exactly FALSE and "x IS NULL OR x IS NOT NULL" exactly TRUE (never unknown). A constant
                         // such as "x IS NULL AND FALSE" would be folded by the simplifier before the visitor ran and drop the operand.
                         return new BinaryExpression(
@@ -1063,7 +1063,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         "week" => DateUnit.Week,
         "month" => DateUnit.Month,
         "year" => DateUnit.Year,
-        // #333 (SEC-PGP-04): quarter is accepted for date_trunc only; date_add and INTERVAL keep rejecting it.
+        // #333: quarter is accepted for date_trunc only; date_add and INTERVAL keep rejecting it.
         "quarter" when function == "date_trunc" => DateUnit.Quarter,
         _ => throw Unsupported($"{function} unit '{unit}' (expected second, minute, hour, day, week, month or year)")
     };
@@ -1342,7 +1342,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         if (!pattern.IsMatch(value))
         {
-            // SEC-PG-04: the submitted text is not echoed.
+            // the submitted text is not echoed.
             throw Unsupported($"{type} literal (expected ISO format without time zone)");
         }
 

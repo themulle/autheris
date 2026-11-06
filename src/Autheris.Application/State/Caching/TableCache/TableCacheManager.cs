@@ -25,7 +25,7 @@ public interface ITableCacheUpstreamLoader
 
 /// <summary>
 /// Orchestrates table cache life-cycle, single-flight request coalescing, and quota management.
-/// Conforms to SEC-BL04-10, SEC-BL04-12, and WP-TC-03.
+/// Conforms to 10, and 03.
 /// </summary>
 public sealed class TableCacheManager : ITableCacheManager
 {
@@ -79,7 +79,7 @@ public sealed class TableCacheManager : ITableCacheManager
                 var staleDuration = now - existing.LastRefreshedAt;
                 var maxStale = TimeSpan.FromSeconds(_options.MaxStaleSurvivalSeconds);
 
-                // SEC-BL04-10 Max Stale Survival Boundary Ceiling
+                // 10 Max Stale Survival Boundary Ceiling
                 if (staleDuration > maxStale)
                 {
                     _logger?.LogWarning("SEC-BL04-10: Stale survival ceiling exceeded for table '{Table}' ({StaleDuration} > {MaxStale}). Fails closed with 503.", table, staleDuration, maxStale);
@@ -97,7 +97,7 @@ public sealed class TableCacheManager : ITableCacheManager
 
         Interlocked.Increment(ref _totalMisses);
 
-        // SEC-BL04-12 Single-Flight Request Coalescing
+        // 12 Single-Flight Request Coalescing
         while (true)
         {
             if (_inFlightLoads.TryGetValue(table, out var inFlightTask))

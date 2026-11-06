@@ -19,15 +19,15 @@ public enum RowFilterKeySetCacheStatus
 public sealed record RowFilterKeySetCacheResult(RowFilterKeySetCacheStatus Status, RowFilterKeySetEntry? Entry, int? AgeSeconds);
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-5): the dedicated cache of <see cref="RowFilterKeySetEntry"/> over <see cref="SingleFlightKeySetCache{TValue}"/>.
+/// Issue #107 (107 A-5): the dedicated cache of<see cref="RowFilterKeySetEntry"/> over <see cref="SingleFlightKeySetCache{TValue}"/>.
 /// <list type="bullet">
-/// <item>Own size limit; the entry expires absolutely at <c>LoadedAt + duration</c>, never sliding, never relative to load completion (SEC-RF107-04 b).</item>
+/// <item>Own size limit; the entry expires absolutely at <c>LoadedAt + duration</c>never sliding, never relative to load completion (04 b).</item>
 /// <item>On every hit the stored tenant and data source are compared ordinally and <c>now - LoadedAt &lt; currentDuration</c> must hold strictly
-/// (<see cref="TimeProvider"/>); a mismatch is a miss, the entry is removed and one Warning without values is logged (SEC-RF107-02, -04 c).</item>
-/// <item>A waiter of an in-flight load receives the new result or the failure, never a stale entry (SEC-RF107-04 d).</item>
-/// <item>An entry larger than <c>SizeLimit / 8</c> is stored as a small overflow sentinel instead of keys (SEC-RF107-13 b).</item>
+/// (<see cref="TimeProvider"/>); a mismatch is a miss, the entry is removed and one Warning without values is logged (-04 c).</item>
+/// <item>A waiter of an in-flight load receives the new result or the failure, never a stale entry (04 d).</item>
+/// <item>An entry larger than <c>SizeLimit / 8</c>is stored as a small overflow sentinel instead of keys (13 b).</item>
 /// <item>At most <c>MaxConcurrentKeyQueries</c> loads run at once per node; a slot is taken only immediately, otherwise the call returns
-/// <see cref="RowFilterKeySetCacheStatus.Throttled"/> without loading. Joining an in-flight load is never throttled (SEC-RF107-13 d).</item>
+/// <see cref="RowFilterKeySetCacheStatus.Throttled"/>without loading. Joining an in-flight load is never throttled (13 d).</item>
 /// </list>
 /// Failures are never cached and propagate to every waiter.
 /// </summary>
@@ -77,7 +77,7 @@ public sealed class RowFilterKeySetCache : IDisposable
         {
             if (!Matches(cached, tenant, dataSource))
             {
-                // SEC-RF107-02: never serve it, never log the values.
+                // never serve it, never log the values.
                 _logger?.LogWarning("A cached row-filter key set did not match the tenant or data source of the request and was discarded.");
                 _inner.Remove(cacheKey);
             }
@@ -107,7 +107,7 @@ public sealed class RowFilterKeySetCache : IDisposable
         }
         catch (TimeoutException ex)
         {
-            // The shared load exceeded its timeout: the same denial as a failed key query (SEC-RF107-08), nothing cached.
+            // The shared load exceeded its timeout: the same denial as a failed key query, nothing cached.
             throw RowFilterKeySetErrorCodes.Unavailable(ex);
         }
     }
@@ -118,7 +118,7 @@ public sealed class RowFilterKeySetCache : IDisposable
         _slots.Dispose();
     }
 
-    /// <summary>Test hook: stores an entry as if a load had produced it (forced-collision test, SEC-RF107-02).</summary>
+    /// <summary>Test hook: stores an entry as if a load had produced it (forced-collision test).</summary>
     internal void InsertForTest(string cacheKey, RowFilterKeySetEntry entry, TimeSpan lifetime)
         => _inner.InsertForTest(cacheKey, entry, _time.GetUtcNow() + lifetime, entry.EstimateBytes());
 
@@ -127,7 +127,7 @@ public sealed class RowFilterKeySetCache : IDisposable
     private async Task<SingleFlightLoadResult<RowFilterKeySetEntry>> LoadAsync(
         string tenant, string dataSource, TimeSpan duration, Func<CancellationToken, Task<RowFilterKeySetEntry>> load, CancellationToken ct)
     {
-        // The slot is taken immediately or not at all: a throttled statement keeps EXISTS instead of queueing on a source (SEC-RF107-13 d).
+        // The slot is taken immediately or not at all: a throttled statement keeps EXISTS instead of queueing on a source (13 d).
         if (!_slots.Wait(0, CancellationToken.None))
         {
             throw new LoadThrottledException();

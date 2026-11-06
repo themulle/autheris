@@ -5,7 +5,7 @@ using System.Threading;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
-/// <summary>Node-local shared tail reader per stream; decrypts each event once (PLAN-CDC-99 D-A13, D-B7).</summary>
+/// <summary>Node-local shared tail reader per stream; decrypts each event once (99 D-A13, D-B7).</summary>
 public interface ICdcStreamTailHub
 {
     IAsyncEnumerable<CdcStreamDelivery> AttachAsync(CdcStreamId id, long? fromOffset, CancellationToken ct);

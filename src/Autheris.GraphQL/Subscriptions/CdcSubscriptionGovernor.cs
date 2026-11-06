@@ -17,7 +17,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// GQL-3 / GQL-4 / GQL-10 / WP-ARC-A-13: admission, audit and distributed slot leasing for CDC subscriptions.
+/// GQL-3 / GQL-4 / GQL-10 / admission, audit and distributed slot leasing for CDC subscriptions.
 /// <list type="bullet">
 /// <item><c>cdc_all</c> is reserved for global governance administrators.</item>
 /// <item>A table topic requires a catalog table the caller may read (same decision as table queries).</item>

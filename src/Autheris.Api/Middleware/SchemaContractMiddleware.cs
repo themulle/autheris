@@ -36,7 +36,7 @@ public sealed class SchemaContractMiddleware
             return;
         }
 
-        // API-3: a contract bound to the identity (claim) takes precedence. Header and query string may only select a
+        // a contract bound to the identity (claim) takes precedence. Header and query string may only select a
         // contract when the identity carries none, or repeat the bound one; they can never widen a partner's view.
         string? claimContract = context.User.FindFirst("contract")?.Value?.Trim();
         string? requestedContract = null;

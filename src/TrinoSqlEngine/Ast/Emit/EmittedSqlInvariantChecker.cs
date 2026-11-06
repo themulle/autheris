@@ -14,11 +14,11 @@ public enum EmittedRangeKind
     /// <summary>Constant text of a reviewed generator template (for example the HASHBYTES algorithm literal). Fully skipped.</summary>
     ConstantFragment,
 
-    /// <summary>The single statement-terminating semicolon that SQL Server requires after MERGE (SEC-ADG-08 c).</summary>
+    /// <summary>The single statement-terminating semicolon that SQL Server requires after MERGE (08 c).</summary>
     StatementTerminator,
 
     /// <summary>
-    /// The single final <c>OPTION (MAXRECURSION n)</c> tail of a SQL Server recursive SELECT (SEC-277-05). Skipped after it is proved to be
+    /// The single final <c>OPTION (MAXRECURSION n)</c>tail of a SQL Server recursive SELECT. Skipped after it is proved to be
     /// exactly this text with the validated depth.
     /// </summary>
     RecursionOptionTail
@@ -48,7 +48,7 @@ public static class EmittedSqlInvariantChecker
 {
     public const int MaxEmittedSqlLength = 1 << 20;
 
-    /// <summary>The text before n of the only query hint the gateway emits (SQL Server, recursive SELECT; SEC-277-05).</summary>
+    /// <summary>The text before n of the only query hint the gateway emits (SQL Server, recursive SELECT).</summary>
     public const string MaxRecursionTailPrefix = " OPTION (MAXRECURSION ";
 
     public static void Check(
@@ -118,7 +118,7 @@ public static class EmittedSqlInvariantChecker
                 var token = sql.AsSpan(start, i - start);
                 if (token.Equals("OPTION", StringComparison.OrdinalIgnoreCase) || token.Equals("MAXRECURSION", StringComparison.OrdinalIgnoreCase))
                 {
-                    // SEC-277-05: a query hint is never emitted except as the registered recursion tail (skipped above).
+                    // a query hint is never emitted except as the registered recursion tail (skipped above).
                     throw new EmittedSqlInvariantViolationException("unregistered-query-hint", start);
                 }
 
@@ -178,7 +178,7 @@ public static class EmittedSqlInvariantChecker
     }
 
     /// <summary>
-    /// SEC-ADG-08 c: a semicolon is allowed only as the registered final character of a SQL Server MERGE (T-SQL requires it).
+    /// 08 c: a semicolon is allowed only as the registered final character of a SQL Server MERGE (T-SQL requires it).
     /// Every other registration is rejected, so the rule cannot be widened by a generator bug.
     /// </summary>
     private static void VerifyTerminator(string sql, TargetSqlDialect dialect, SqlStatementClass statementClass, EmittedRange[] ranges)
@@ -197,7 +197,7 @@ public static class EmittedSqlInvariantChecker
     }
 
     /// <summary>
-    /// SEC-277-05: the only accepted query hint is one final <c>OPTION (MAXRECURSION n)</c> on a SQL Server SELECT, registered by the
+    /// the only accepted query hint is one final<c>OPTION (MAXRECURSION n)</c> on a SQL Server SELECT, registered by the
     /// generator, with n equal to the validated depth (1..<see cref="CompileLimits.MaxRecursionDepthLimit"/>). A second tail, another
     /// dialect, another n or text that does not end the statement is rejected.
     /// </summary>

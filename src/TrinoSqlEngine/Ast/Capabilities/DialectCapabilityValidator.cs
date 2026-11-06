@@ -46,7 +46,7 @@ public static class DialectCapabilityValidator
 
                     break;
                 case LikeExpression lk when capabilities.LikeIsCaseInsensitive && LikePatternEscaper.ContainsPolicyParameter(lk.Pattern):
-                    // SEC-ADG-18: the dialect LIKE is looser than the policy author expects (SQLite: ASCII case-insensitive).
+                    // the dialect LIKE is looser than the policy author expects (SQLite: ASCII case-insensitive).
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "policy LIKE on a case-insensitive LIKE dialect");
                 case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max
                                                     && !CompilerHooks.IsDisabled(SecurityControl.InListLimit)

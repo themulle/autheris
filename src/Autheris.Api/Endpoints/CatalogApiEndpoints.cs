@@ -424,7 +424,7 @@ public static class CatalogApiEndpoints
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
-    /// <summary>One mapping for all four routes; NotFound has one fixed body so unknown, inactive and non-manageable datasets cannot be told apart (SEC-111-08).</summary>
+    /// <summary>One mapping for all four routes; NotFound has one fixed body so unknown, inactive and non-manageable datasets cannot be told apart.</summary>
     private static IResult MapCatalogResult(Autheris.Application.Governance.Interfaces.DatasetCatalogResult result)
     {
         switch (result.Outcome)
@@ -601,7 +601,7 @@ public static class CatalogApiEndpoints
             return DatasetKeysNotFound();
         }
 
-        // SEC-94-06: a changed definition is traceable in the HMAC-chained audit log (identifiers only, no data). Post-commit: a client
+        // a changed definition is traceable in the HMAC-chained audit log (identifiers only, no data). Post-commit: a client
         // disconnect must not drop the record; an unavailable audit store surfaces as 503 through the exception handler (fail closed).
         await auditWriter.RecordRequiredAsync(new AuditLogEntry
         {

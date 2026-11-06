@@ -41,7 +41,7 @@ public class WebSqlPolicyException : SecurityException
 }
 
 /// <summary>
-/// SEC-X1-05: a table is not usable for the caller (not registered, inactive, no columns, denied, case-spelling conflict). Every such
+/// a table is not usable for the caller (not registered, inactive, no columns, denied, case-spelling conflict). Every such
 /// cause maps to the one stable code <c>SQL_POLICY_DENIED</c>, so a response never tells whether the table exists. Statement-level
 /// rejections that do not depend on the table stay plain <see cref="WebSqlPolicyException"/> (<c>SQL_POLICY_VIOLATION</c>).
 /// </summary>

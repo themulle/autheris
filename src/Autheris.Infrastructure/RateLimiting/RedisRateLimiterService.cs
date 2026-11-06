@@ -387,7 +387,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
     }
 
     /// <summary>
-    /// SEC-GOV175B-01 &amp; SEC-GOV175B-03: Non-destructive probe of Redis bucket state via read-only HMGET.
+    /// 01 &amp; Non-destructive probe of Redis bucket state via read-only HMGET.
     /// </summary>
     public async Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
     {

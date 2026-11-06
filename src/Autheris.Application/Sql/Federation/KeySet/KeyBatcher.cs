@@ -7,8 +7,8 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// WP-124-2: Key batching, distinct key streaming, and bounds clamping.
-/// Enforces SEC-DATA124-03: MaxKeySetKeys <= 2000, MaxKeySetBatches <= 10, SQL Server parameter ceiling <= 2090.
+/// Key batching, distinct key streaming, and bounds clamping.
+/// Enforces MaxKeySetKeys <= 2000, MaxKeySetBatches <= 10, SQL Server parameter ceiling <= 2090.
 /// </summary>
 public static class KeyBatcher
 {
@@ -55,7 +55,7 @@ public static class KeyBatcher
     }
 
     /// <summary>
-    /// Resolves the effective batch size clamped against dialect parameter ceilings (SEC-DATA124-03).
+    /// Resolves the effective batch size clamped against dialect parameter ceilings.
     /// </summary>
     public static int ResolveBatchSize(DatabaseDialect dialect, int configuredBatchSize, int columnsPerKey = 1)
     {
@@ -75,7 +75,7 @@ public static class KeyBatcher
     }
 
     /// <summary>
-    /// SEC-DATA124-03: Checks whether extracted key count and resulting batch count stay within bounds.
+    /// Checks whether extracted key count and resulting batch count stay within bounds.
     /// </summary>
     public static bool IsWithinBounds(
         int keyCount,

@@ -9,7 +9,7 @@ using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 
-// DML post-conditions (WP-A7, INV-2, INV-10, SEC-ADG-06, SEC-ADG-08). The verifier does not trust the injector: it proves on the
+// DML post-conditions (INV-2, INV-10). The verifier does not trust the injector: it proves on the
 // final tree that every DML target carries its required security predicates as top-level conjuncts, that every write carries the
 // gateway-bound tenant, that masked and policy columns are never written, and that masked columns are never read by the user part.
 public sealed partial class SecurityCoverageVerifier
@@ -75,7 +75,7 @@ public sealed partial class SecurityCoverageVerifier
         }
 
         /// <summary>
-        /// The user part of a DML statement must not read a masked column of the target (no copy-out oracle, SEC-ADG-08 b). Injected
+        /// The user part of a DML statement must not read a masked column of the target (no copy-out oracle, 08 b). Injected
         /// predicates are skipped: they may reference masked columns of the table they secure.
         /// </summary>
         private static void NoMaskedReads(TableCoverageRequirement requirement, ICollection<string> targetNames, params object?[] userParts)
@@ -471,7 +471,7 @@ public sealed partial class SecurityCoverageVerifier
                         {
                             break;
                         }
-                        // The clause set is closed (SEC-ADG-08 a): an unknown clause such as BY SOURCE is never emitted.
+                        // The clause set is closed (08 a): an unknown clause such as BY SOURCE is never emitted.
                         throw new SecurityCoverageException($"MERGE clause '{clause.GetType().Name}' is not covered.");
                 }
             }

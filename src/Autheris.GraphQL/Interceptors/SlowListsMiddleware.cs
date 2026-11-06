@@ -14,7 +14,7 @@ using RequestDelegate = HotChocolate.Execution.RequestDelegate;
 
 /// <summary>
 /// Hot Chocolate request pipeline middleware that attaches extensions.slowLists containing
-/// ranked nested list paths that exceeded execution thresholds (REQ-LPP-09..11).
+/// ranked nested list paths that exceeded execution thresholds (09..11).
 /// </summary>
 public sealed class SlowListsMiddleware
 {

@@ -147,13 +147,13 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
         await unlockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>SEC-94-09: the INSTEAD OF UPDATE/DELETE trigger exists, is enabled and covers both events.</summary>
+    /// <summary>the INSTEAD OF UPDATE/DELETE trigger exists, is enabled and covers both events.</summary>
     internal const string AuditTriggerPostConditionSql =
         "SELECT COUNT(*) FROM sys.triggers tr WHERE tr.name = N'trg_audit_append_only' AND tr.parent_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES') " +
         "AND tr.is_disabled = 0 AND tr.is_instead_of_trigger = 1 " +
         "AND (SELECT COUNT(DISTINCT te.type) FROM sys.trigger_events te WHERE te.object_id = tr.object_id AND te.type IN (2, 3)) = 2";
 
-    /// <summary>SEC-94-09: the foreign key of the truncate guard table (it blocks TRUNCATE of the audit table) exists and is enabled.</summary>
+    /// <summary>the foreign key of the truncate guard table (it blocks TRUNCATE of the audit table) exists and is enabled.</summary>
     internal const string TruncateGuardPostConditionSql =
         "SELECT COUNT(*) FROM sys.foreign_keys fk WHERE fk.name = N'fk_audit_truncate_guard' " +
         "AND fk.parent_object_id = OBJECT_ID(N'dbo.AUDIT_LOG_TRUNCATE_GUARD') AND fk.referenced_object_id = OBJECT_ID(N'dbo.AUDIT_LOG_ENTRIES') AND fk.is_disabled = 0";

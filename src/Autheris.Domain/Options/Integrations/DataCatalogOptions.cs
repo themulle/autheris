@@ -100,13 +100,13 @@ public sealed class DbtOptions
     public bool CreateMissingTables { get; init; } = true;
 
     /// <summary>
-    /// Issue #282 (SEC-282-2): newly registered tables are inactive (invisible) until an administrator activates them. true makes
+    /// Issue #282: newly registered tables are inactive (invisible) until an administrator activates them. true makes
     /// them live without masks or consents; configuration only, never a request parameter.
     /// </summary>
     public bool ActivateNewTables { get; init; }
 
     /// <summary>
-    /// Issue #282 (SEC-282-3): dbt database name to <c>DataSources.Connections</c> key. A database without an entry resolves to the
+    /// Issue #282: dbt database name to<c>DataSources.Connections</c> key. A database without an entry resolves to the
     /// connection of the same name (case-insensitive); there is no wildcard and no default connection.
     /// </summary>
     public Dictionary<string, string> DatabaseMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);

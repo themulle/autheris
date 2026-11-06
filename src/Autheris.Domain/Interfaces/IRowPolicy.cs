@@ -7,7 +7,7 @@ namespace Autheris.Domain.Interfaces;
 public sealed record RowPolicyText(string Sql, IReadOnlyDictionary<string, object?> Parameters);
 
 /// <summary>
-/// Opaque typed row policy carried by a <see cref="TableAccessDecision"/> (SEC-ADG-25). Domain must not reference the SQL engine, so the
+/// Opaque typed row policy carried by a <see cref="TableAccessDecision"/>. Domain must not reference the SQL engine, so the
 /// typed predicate stays behind this abstraction and is implemented in Application. There is deliberately no factory from text: a
 /// policy is built from a typed predicate or not at all, so a string and a typed policy cannot drift apart.
 /// </summary>

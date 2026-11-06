@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using TrinoSqlEngine;
 
 /// <summary>
-/// REQ-SQL-130 (A-7): evaluates once per process whether the closed zone registry is intact (self-test) and, for DuckDB, whether the ICU probe passes.
+/// 130 (A-7): evaluates once per process whether the closed zone registry is intact (self-test) and, for DuckDB, whether the ICU probe passes.
 /// Before <see cref="Evaluate"/> has run, and after any failure, the answer is false; a failure is logged once as a Warning with a check id and no data
 /// and stays until restart (BC-130-7). SQL Server and PostgreSQL convert in the database, so they depend on the registry only.
 /// </summary>

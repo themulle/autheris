@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
 
-/// <summary>Resolves the local gateway state locations from <see cref="StateOptions"/> (WP-ARC-B-13).</summary>
+/// <summary>Resolves the local gateway state locations from <see cref="StateOptions"/>.</summary>
 public interface IGatewayStatePaths
 {
     /// <summary>Full path of the state directory.</summary>

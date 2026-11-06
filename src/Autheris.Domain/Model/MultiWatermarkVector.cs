@@ -7,7 +7,7 @@ using System.Text.Json;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// Immutable multi-dimensional watermark vector state (PLAN-CDC-101 D-2, WP-101-2).
+/// Immutable multi-dimensional watermark vector state (101 D-2).
 /// Tracks independent monotonic high-water marks for each dimension column.
 /// </summary>
 public sealed record MultiWatermarkVector

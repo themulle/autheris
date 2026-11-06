@@ -43,7 +43,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
         IsDepthError(error) || string.Equals(error.Code, ComplexCode, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// #330 (SEC-RG-08/09): the one resolver error that is not shielded outside Development, because it carries no schema information:
+    /// #330 (09): the one resolver error that is not shielded outside Development, because it carries no schema information:
     /// code <c>INVALID_QUERY_OPTION</c> (or legacy <c>INVALID_QUERY</c>) with exactly the fixed page-range message (ordinal compare) of <see cref="GatewayPageRangeException"/>.
     /// </summary>
     internal static bool IsPageRangeError(IError error) =>
@@ -71,7 +71,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
         bool isDevelopment = environment?.IsDevelopment() == true;
         bool validationFailed = result.ContextData.ContainsKey(ExecutionContextData.ValidationErrors);
 
-        // SEC-PG-12 (#294): an invalid document answers the same single error in every environment (stable classified code,
+        // 12 (#294): an invalid document answers the same single error in every environment (stable classified code,
         // fixed message, no locations, path or extensions), whether or not the named field or type exists. Denied tables and
         // columns (resolver errors) get that same error outside Development; Development keeps their detail for debugging.
         //

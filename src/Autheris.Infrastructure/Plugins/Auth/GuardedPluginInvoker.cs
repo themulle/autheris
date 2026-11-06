@@ -50,7 +50,7 @@ public sealed class GuardedPluginInvoker
 
         try
         {
-            // SEC-BL08-03: Asynchronous timeout protection with guaranteed pipeline unblocking
+            // Asynchronous timeout protection with guaranteed pipeline unblocking
             var task = invocation(linkedCts.Token).AsTask();
             var result = await task.WaitAsync(timeout, _timeProvider, callerCt).ConfigureAwait(false);
             return result;

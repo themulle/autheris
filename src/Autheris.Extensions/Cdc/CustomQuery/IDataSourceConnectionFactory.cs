@@ -9,7 +9,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Abstraction for creating database connections to heterogeneous source databases (PLAN-CDC-101 D-A).
+/// Abstraction for creating database connections to heterogeneous source databases (101 D-A).
 /// </summary>
 public interface IDataSourceConnectionFactory
 {

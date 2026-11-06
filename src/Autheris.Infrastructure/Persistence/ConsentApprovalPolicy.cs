@@ -110,7 +110,7 @@ internal static class ConsentApprovalPolicy
     }
 
     /// <summary>
-    /// WP-0 (P-3 part 2, SEC-113-R2-03): the guarded status transition of the approve step and the reject path on every engine. <c>@expected</c>
+    ///  (P-3 part 2): the guarded status transition of the approve step and the reject path on every engine.<c>@expected</c>
     /// is the status read under the row lock of the same transaction (never a literal), so <c>PENDING_SECOND_APPROVAL</c> and the ITSM
     /// <c>PENDING_EXTERNAL_APPROVAL</c> step keep working and a status changed in between matches no row.
     /// </summary>

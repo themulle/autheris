@@ -10,7 +10,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// The one production configuration of the policy predicate parser (SEC-X1-16): the per-dialect function allowlist of the secured
+/// The one production configuration of the policy predicate parser: the per-dialect function allowlist of the secured
 /// table's own data source, the catalog columns with their types, the catalog for correlated subqueries and the target dialect.
 /// The lint and the enforcement path build their <see cref="PolicyParseContext"/> here, so the lint cannot pass while production denies.
 /// </summary>

@@ -80,7 +80,7 @@ public sealed class ClientTierResolver : IClientTierResolver
             var canonicalScope = GetCanonicalScopeIdentifier(principal);
             var subjectId = BuildAuthenticatedSubjectId(principal, canonicalScope);
 
-            // Determine user/role ceiling (anti-escalation maximum tier, SEC-GOV29-01)
+            // Determine user/role ceiling (anti-escalation maximum tier)
             var tierClaim = principal.FindFirst("tier")?.Value ??
                             principal.FindFirst("client_tier")?.Value ??
                             principal.FindFirst("urn:autheris:tier")?.Value;
@@ -94,7 +94,7 @@ public sealed class ClientTierResolver : IClientTierResolver
                 }
                 else
                 {
-                    // SEC-GOV29-01: Any unrecognized or unparseable tier string specified in configuration or claims MUST fail closed to the lowest safe default
+                    // Any unrecognized or unparseable tier string specified in configuration or claims MUST fail closed to the lowest safe default
                     explicitClaimTier = ClientTier.Standard;
                 }
             }
@@ -157,7 +157,7 @@ public sealed class ClientTierResolver : IClientTierResolver
                         }
                         else
                         {
-                            // SEC-GOV29-01: unparseable fails closed to lowest safe default
+                            // unparseable fails closed to lowest safe default
                             matchedScopeTier ??= ClientTier.Standard;
                         }
                     }
@@ -172,7 +172,7 @@ public sealed class ClientTierResolver : IClientTierResolver
             ClientTier effectiveTier;
             if (matchedScopeTier.HasValue)
             {
-                // SEC-GOV29-01: Clamped to caller's maximum permitted user/role tier (anti-escalation)
+                // Clamped to caller's maximum permitted user/role tier (anti-escalation)
                 effectiveTier = matchedScopeTier.Value > maxPermittedTier ? maxPermittedTier : matchedScopeTier.Value;
             }
             else
@@ -208,7 +208,7 @@ public sealed class ClientTierResolver : IClientTierResolver
     }
 
     /// <summary>
-    /// SEC-GOV29-02: Scope canonicalization, delimiter sanitization, DoS bounds and ordinal sorting.
+    /// Scope canonicalization, delimiter sanitization, DoS bounds and ordinal sorting.
     /// </summary>
     internal static string? GetCanonicalScopeIdentifier(ClaimsPrincipal? principal)
     {
@@ -224,7 +224,7 @@ public sealed class ClientTierResolver : IClientTierResolver
             var bare = Autheris.Domain.Security.ScopeNames.ToBareName(raw.Trim());
             if (string.IsNullOrWhiteSpace(bare)) continue;
 
-            // SEC-GOV29-02: Sanitize delimiters (:, +, {, }, \r, \n) to prevent subject key or Redis injection
+            // Sanitize delimiters (:, +, {, }, \r, \n) to prevent subject key or Redis injection
             var sb = new StringBuilder(bare.Length);
             foreach (var ch in bare)
             {
@@ -238,7 +238,7 @@ public sealed class ClientTierResolver : IClientTierResolver
             if (!string.IsNullOrEmpty(clean))
             {
                 sanitizedScopes.Add(clean);
-                if (sanitizedScopes.Count >= 32) // SEC-GOV29-02: DoS guard, max 32 distinct scopes
+                if (sanitizedScopes.Count >= 32) // DoS guard, max 32 distinct scopes
                 {
                     break;
                 }
@@ -249,7 +249,7 @@ public sealed class ClientTierResolver : IClientTierResolver
 
         var sorted = sanitizedScopes.OrderBy(s => s, StringComparer.Ordinal).ToList();
         var canonical = string.Join("+", sorted);
-        if (canonical.Length > 256) // SEC-GOV29-02: Max 256 characters
+        if (canonical.Length > 256) // Max 256 characters
         {
             canonical = canonical[..256];
         }
@@ -258,7 +258,7 @@ public sealed class ClientTierResolver : IClientTierResolver
     }
 
     /// <summary>
-    /// SEC M-16 &amp; PLAN-GOV-29: Quota-Subjekt eines angemeldeten Aufrufers = Tenant + Benutzer-SID + client_id + canonicalScope.
+    /// SEC M-16 &amp; Quota-Subjekt eines angemeldeten Aufrufers = Tenant + Benutzer-SID + client_id + canonicalScope.
     /// </summary>
     internal static string BuildAuthenticatedSubjectId(ClaimsPrincipal principal)
     {

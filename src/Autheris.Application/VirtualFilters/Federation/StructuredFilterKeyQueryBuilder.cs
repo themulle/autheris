@@ -9,7 +9,7 @@ using System.Linq;
 internal sealed record VirtualFilterKeyQuery(string Sql, IReadOnlyList<KeyValuePair<string, object>> Parameters);
 
 /// <summary>
-/// F-GOV-14 (M4, SEC-4, SEC-5, SEC-6): the query that reads the authorized key tuples of a structured Virtual Filter in its
+/// F-GOV-14 (M4): the query that reads the authorized key tuples of a structured Virtual Filter in its
 /// key source:
 /// <c>SELECT DISTINCT [TOP (n)] &lt;alias.key&gt; AS &lt;key&gt;, ... FROM ... [INNER JOIN ...] WHERE &lt;conditions&gt;
 /// AND &lt;alias.tenant&gt; = @vf_tenant ... AND &lt;alias.key&gt; IS NOT NULL ... [LIMIT n]</c>.
@@ -58,7 +58,7 @@ internal static class StructuredFilterKeyQueryBuilder
 
         var where = definition.Where.Select(c => StructuredFilterSqlParts.Condition(c, dialect, Bind)).ToList();
 
-        // WI-19 (SEC-6): every tenanted table of the definition is restricted to the caller's tenant.
+        // WI-19: every tenanted table of the definition is restricted to the caller's tenant.
         var aliases = new[] { definition.FromAlias }.Concat(definition.Joins.Select(j => j.Alias));
         foreach (var alias in aliases)
         {

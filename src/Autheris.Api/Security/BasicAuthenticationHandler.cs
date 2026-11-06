@@ -224,7 +224,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
             string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal);
 
-        // WP-PF-08: cluster-shared marker (keyed HMAC bound to the credential version). Lock-outs were checked above, a removed user has no
+        // cluster-shared marker (keyed HMAC bound to the credential version). Lock-outs were checked above, a removed user has no
         // configuredUser and a changed password has another credential version, so none of them can be revived by a marker.
         string? credentialVersion = null;
         if (configuredUser != null)

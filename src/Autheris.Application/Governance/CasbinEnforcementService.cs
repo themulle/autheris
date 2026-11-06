@@ -102,7 +102,7 @@ public sealed partial class CasbinEnforcementService : IPolicyEnforcementService
         public Enforcer WildcardEnforcer { get; } = wildcardEnforcer;
         public long Epoch { get; } = epoch;
 
-        /// <summary>WP-PF-09: candidate rules per (tenant, table, action); a snapshot is immutable, so entries never go stale.</summary>
+        /// <summary>candidate rules per (tenant, table, action); a snapshot is immutable, so entries never go stale.</summary>
         public Autheris.Application.State.Caching.BoundedCache<CandidateKey, CandidateSet> Candidates { get; } = new(20_000);
 
         public FrozenDictionary<string, FrozenSet<string>> GetRoleClosure(string tenant) =>

@@ -76,7 +76,7 @@ public static partial class WebSqlEndpoints
 
             default:
                 // SEC M-10: Never echo exception/database messages to the client
-                // SEC-FED-DELTA-01: type and trace id only above Debug; the message can quote staged data values.
+                // type and trace id only above Debug; the message can quote staged data values.
                 logger.Error(ex, "WebSQL Execution Failed. TraceId={TraceId}", httpContext.TraceIdentifier);
                 await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, GenericServerErrorMessage, ct);
                 break;
@@ -98,7 +98,7 @@ public static partial class WebSqlEndpoints
     }
 
     /// <summary>
-    /// D-11 / SEC-94-13: the execution timeout as RFC 9457 problem details (<c>application/problem+json</c>), written explicitly
+    /// D-11 / the execution timeout as RFC 9457 problem details (<c>application/problem+json</c>), written explicitly
     /// so that no problem-details service or developer exception page can add the query, the exception type or a stack trace.
     /// <c>code</c> is the stable extension member of the former body.
     /// </summary>
@@ -376,7 +376,7 @@ public static partial class WebSqlEndpoints
 
             if (string.Equals(status.ErrorCode, Autheris.Domain.Exceptions.TransportNotAllowedException.Code, StringComparison.Ordinal))
             {
-                // Issue #447 (REQ-ATR-04): fixed text and code; no source name, no sub-reason.
+                // Issue #447: fixed text and code; no source name, no sub-reason.
                 trinoError = new
                 {
                     message = "Access to the data source is not allowed over this transport.",

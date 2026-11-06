@@ -25,7 +25,7 @@ internal sealed class AccessProfileStoreScope(DbConnection connection, Func<Valu
 }
 
 /// <summary>
-/// WP-SC-03: the persisted access profiles (<c>ACCESS_PROFILES</c>, <c>ACCESS_PROFILE_ASSIGNMENTS</c>) shared by the three governance repositories.
+/// the persisted access profiles (<c>ACCESS_PROFILES</c>, <c>ACCESS_PROFILE_ASSIGNMENTS</c>) shared by the three governance repositories.
 /// The SQL differs only in the upsert statements and the timestamp representation. A store failure always propagates (never an empty result),
 /// so a database outage denies. Which assignments are effective, and in what order, is decided by <see cref="AccessProfileAssignmentRules"/>.
 /// </summary>

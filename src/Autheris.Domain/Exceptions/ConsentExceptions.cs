@@ -4,7 +4,7 @@ using System;
 
 /// <summary>
 /// PERS-04: an expiry extension was rejected because the consent does not exist, is revoked, is already expired (server time) or the new
-/// expiry is not later than the current one. The message is fixed and carries no id, state or timestamp (SEC-P4R-6);
+/// expiry is not later than the current one. The message is fixed and carries no id, state or timestamp;
 /// <see cref="ConsentId"/> is for structured logs only.
 /// </summary>
 public sealed class ConsentNotExtendableException(Guid consentId)

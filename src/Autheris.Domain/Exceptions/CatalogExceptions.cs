@@ -3,7 +3,7 @@ namespace Autheris.Domain.Exceptions;
 using System;
 
 /// <summary>
-/// Thrown when catalog metadata validation fails (SEC-GOV163-01, fail closed).
+/// Thrown when catalog metadata validation fails (fail closed).
 /// </summary>
 public class CatalogValidationException : Exception
 {

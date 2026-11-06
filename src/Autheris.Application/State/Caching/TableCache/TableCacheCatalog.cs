@@ -9,7 +9,7 @@ using Autheris.Domain.Common;
 /// <summary>
 /// Thread-safe in-memory table cache catalog backed by immutable FrozenDictionary snapshots.
 /// Provides zero-allocation, lock-free O(1) reads for query routing and inspection.
-/// Conforms to WP-TC-01.
+/// Conforms to 01.
 /// </summary>
 public sealed class TableCacheCatalog : ITableCacheCatalog
 {

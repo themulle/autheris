@@ -8,7 +8,7 @@ public enum CorrelatedFilterSource
 }
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-1): metadata registered for one correlated <c>EXISTS</c> node created by
+/// Issue #107 (107 A-1): metadata registered for one correlated<c>EXISTS</c> node created by
 /// <c>AdvancedRlsPredicateBuilder.CorrelatedExpression</c>. <see cref="StructurallyEligible"/> is false when temporal columns are set.
 /// </summary>
 public sealed record CorrelatedFilterSite(

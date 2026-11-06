@@ -13,7 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Extracted startup banner and authentication configuration logging helper (WP-ARC-C-04).
+/// Extracted startup banner and authentication configuration logging helper.
 /// </summary>
 public static class GatewayStartupBannerLog
 {

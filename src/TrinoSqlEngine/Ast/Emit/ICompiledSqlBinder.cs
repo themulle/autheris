@@ -34,13 +34,13 @@ public sealed class MissingClientParameterException : SecurityException
 /// <summary>
 /// Shared binder logic for ADO.NET providers that bind by parameter name. Written against <see cref="DbCommand"/> so the
 /// engine needs no provider reference. Only client named parameters read client values, and only by their own source name
-/// (SEC-ADG-19); every other parameter carries the gateway-bound value of the compiled SQL.
+/// every other parameter carries the gateway-bound value of the compiled SQL.
 /// </summary>
 public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 {
     private const int DefaultStringSize = 4000;
 
-    /// <summary>SEC-X1-07: <c>private protected</c>, so no binder can be derived outside the engine (a subclass could drop the refusals).</summary>
+    /// <summary><c>private protected</c>, so no binder can be derived outside the engine (a subclass could drop the refusals).</summary>
     private protected DbCommandCompiledSqlBinder()
     {
     }
@@ -186,7 +186,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             throw new InvalidOperationException("The command already has parameters; the binder owns all parameters of a governed command.");
         }
 
-        // REQ-SQL-130 (BC-130-5a): every time zone slot is checked and mapped before the command is touched; a refusal leaves it as it was.
+        // 130 (BC-130-5a): every time zone slot is checked and mapped before the command is touched; a refusal leaves it as it was.
         string?[]? zones = ResolveZoneSlots(compiled, clientParameterValues);
 
         PrepareCommand(command);
@@ -205,7 +205,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 value = mappedZone;
                 type = SqlParameterType.String;
             }
-            else if (bound.Origin == ParameterOrigin.ClientNamed)   // Only client named parameters read client values, and only by their own source name (SEC-ADG-19).
+            else if (bound.Origin == ParameterOrigin.ClientNamed)   // Only client named parameters read client values, and only by their own source name.
             {
                 if (bound.SourceName is null || !clientParameterValues.TryGetValue(bound.SourceName, out value))
                 {
@@ -215,7 +215,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 if (bound.ListIndex is { } listIndex)
                 {
                     // List element slot: the value must be a list of exactly the compiled count (a longer list is refused, never
-                    // cut), and the element type comes from the list, never from one value (SEC-128-10).
+                    // cut), and the element type comes from the list, never from one value.
                     if (value is not ClientListValue list || bound.ListCount is not { } expectedCount
                         || (list.Count != expectedCount && !CompilerHooks.IsDisabled(SecurityControl.ClientListCount))
                         || (uint)listIndex >= (uint)list.Count)
@@ -228,7 +228,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 }
                 else
                 {
-                    // A list in a scalar slot is refused before InferType can fail by accident (SEC-128-10 b).
+                    // A list in a scalar slot is refused before InferType can fail by accident (10 b).
                     if (value is ClientListValue)
                     {
                         throw new ClientListException(GovernedSqlErrorCodes.ListParamType);
@@ -461,9 +461,9 @@ public sealed class PostgreSqlCompiledSqlBinder : DbCommandCompiledSqlBinder
 
 /// <summary>
 /// Oracle binder (<c>Oracle.ManagedDataAccess</c>). ODP.NET binds by POSITION unless <c>BindByName</c> is true; with reused
-/// markers and out-of-order parameters positional binding would bind a tenant value to a user slot (SEC-ADG-03). The binder sets
+/// markers and out-of-order parameters positional binding would bind a tenant value to a user slot. The binder sets
 /// <c>BindByName = true</c> and verifies it; a command without that property is rejected. An empty tenant or policy string is
-/// rejected because Oracle treats it as NULL (SEC-ADG-17). Markers are <c>:p1..:pN</c>, parameter names <c>p1..pN</c>.
+/// rejected because Oracle treats it as NULL. Markers are<c>:p1..:pN</c>, parameter names <c>p1..pN</c>.
 /// </summary>
 public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
 {
@@ -499,7 +499,7 @@ public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
             throw new SecurityException("An empty tenant or policy string is rejected on Oracle (it would be NULL).");
         }
 
-        // SEC-128-06: Oracle stores '' as NULL, which would turn NOT IN (.., '') into a predicate that matches nothing.
+        // Oracle stores '' as NULL, which would turn NOT IN (.., '') into a predicate that matches nothing.
         if (parameter.ListIndex is not null && value is string { Length: 0 })
         {
             throw new ClientListException(GovernedSqlErrorCodes.ListParamNull);

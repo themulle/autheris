@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using BitFaster.Caching.Lru;
 
 /// <summary>
-/// WP-PF-06: size-bounded cache for per-user and per-table memo structures (BitFaster <c>ConcurrentLru</c>: lock-free reads,
+/// size-bounded cache for per-user and per-table memo structures (BitFaster<c>ConcurrentLru</c>: lock-free reads,
 /// O(1) eviction). Eviction only ever produces a miss, so callers must treat a miss as "recompute from the authoritative source".
 /// An optional absolute TTL uses the injected <see cref="TimeProvider"/> so expiry is deterministic in tests.
 /// <see cref="GetOrAddAsync"/> is single-flight per key: concurrent misses share one factory call; a failed factory is not cached.

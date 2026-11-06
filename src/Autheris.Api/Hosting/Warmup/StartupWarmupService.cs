@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PLAN-OPS-150 (D-150-7, SEC-OPS150-08): runs the best-effort steps sequentially after the host started. Yields first, gives each
+/// 150 (D-150-7): runs the best-effort steps sequentially after the host started. Yields first, gives each
 /// step the remaining budget through a token plus a hard <c>WaitAsync</c> bound, honours the host stopping token and logs the step
-/// name and the exception type only (SEC-OPS150-09).
+/// name and the exception type only.
 /// </summary>
 public sealed partial class StartupWarmupService(
     IEnumerable<IStartupWarmup> steps,
@@ -29,7 +29,7 @@ public sealed partial class StartupWarmupService(
             state.Set(WarmupPhase.Ready);
         }
 
-        // Names are resolved once, guarded: a misbehaving step must never stop the host (SEC-OPS150-08).
+        // Names are resolved once, guarded: a misbehaving step must never stop the host.
         var named = new List<(IStartupWarmup Step, string Name)>();
         foreach (var step in steps)
         {

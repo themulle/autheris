@@ -166,7 +166,7 @@ public static partial class GatewayServiceCollectionExtensions
 
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateSqlRewriterEngine(configuration);
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateRemovedWebSqlSettings(configuration);
-        // ARCH-MNT-06-FU-03: the telemetry section is outside GatewayOptions; bind it here so the startup report can list insecure OTLP transport.
+        // FU-03: the telemetry section is outside GatewayOptions; bind it here so the startup report can list insecure OTLP transport.
         ValidateGatewayOptions(
             gatewayOptions,
             environment,

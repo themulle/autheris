@@ -34,7 +34,7 @@ public static class SqlDialectMapper
         }
     }
 
-    /// <summary>SEC-X1-14: never defaults. A dialect without a mapping throws, so a new enum value cannot be mapped silently.</summary>
+    /// <summary>never defaults. A dialect without a mapping throws, so a new enum value cannot be mapped silently.</summary>
     public static TargetSqlDialect ToTargetDialect(DatabaseDialect dialect) =>
         TryToTargetDialect(dialect, out var target)
             ? target

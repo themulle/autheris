@@ -33,9 +33,9 @@ public sealed class CdcPayloadCodecException : Exception
 }
 
 /// <summary>
-/// Type-tagged JSON codec for stream payloads (PLAN-CDC-99 D-A7, SEC-CDC99-16). The tag set is closed: decoding never instantiates a type
+/// Type-tagged JSON codec for stream payloads (99 D-A7). The tag set is closed: decoding never instantiates a type
 /// named by the data, never uses polymorphic deserialisation, and is bounded in size and depth. Decoded dictionaries are immutable
-/// (SEC-CDC99-05).
+/// .
 /// </summary>
 public sealed class CdcPayloadCodec : ICdcPayloadCodec
 {

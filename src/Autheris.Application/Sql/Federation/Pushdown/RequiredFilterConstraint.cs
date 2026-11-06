@@ -11,7 +11,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
 /// <summary>
-/// WP-F review (SEC): which columns of a federated table a set of pushed conjuncts really constrain. Mirrors the single-source rule
+///  review (SEC): which columns of a federated table a set of pushed conjuncts really constrain. Mirrors the single-source rule
 /// (<c>AstSecurityVisitor.RequiredFilters.IsColumnConstrained</c>) exactly: a top-level conjunct <c>column op value</c> (=, &lt;, &lt;=, &gt;,
 /// &gt;=), BETWEEN, IN (list), LIKE and IS NULL with no column reference on the other side; OR only when every branch constrains the column;
 /// never <c>&lt;&gt;</c>, NOT, <c>col = col</c>, IS NOT NULL or a subquery; a column reference that more than one table of the query could

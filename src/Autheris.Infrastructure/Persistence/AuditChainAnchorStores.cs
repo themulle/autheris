@@ -266,7 +266,7 @@ public sealed class InMemoryAuditChainAnchorStore : IAuditChainAnchorStore
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
 
-        // SEC-AUD161-02: monotonic purge checkpoint
+        // monotonic purge checkpoint
         while (true)
         {
             var current = Volatile.Read(ref _purgeCheckpoint);

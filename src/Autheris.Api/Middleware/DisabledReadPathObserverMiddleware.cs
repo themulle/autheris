@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// PLAN-SEC-115 A-9 / C-115-5: registered only when the REST data switch is off. For a request to the closed REST data family
+/// 115 A-9 / C-115-5: registered only when the REST data switch is off. For a request to the closed REST data family
 /// (<c>/api/v1/data</c> and below, plus the dataset sample-rows route) it increments <c>autheris_disabled_path_requests_total{path="rest_data"}</c>
 /// and, for an authenticated principal only, writes a rate-limited warning (the "leaked token tried the closed path" signal).
 /// State is fixed-size (one global per-minute budget, a capped per-principal table), the principal is identified by a per-process

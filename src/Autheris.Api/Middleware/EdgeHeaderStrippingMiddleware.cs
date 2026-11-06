@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 
 /// <summary>
 /// SEC C-1 Edge Stripping: Strips any client-supplied <c>x-autheris-*</c> headers from untrusted clients
-/// and strips <c>X-Forwarded-*</c> headers when the connection has no remote IP address (WP-ARC-C-04).
+/// and strips <c>X-Forwarded-*</c>headers when the connection has no remote IP address.
 /// </summary>
 public sealed class EdgeHeaderStrippingMiddleware
 {
@@ -36,7 +36,7 @@ public sealed class EdgeHeaderStrippingMiddleware
 
 /// <summary>
 /// Drops <c>X-Forwarded-*</c> headers on connections without a remote IP address (Unix domain socket / in-process host)
-/// before <c>UseForwardedHeaders</c> runs so an unknown peer cannot spoof host, scheme, or client IP (WP-ARC-C-04).
+/// before <c>UseForwardedHeaders</c>runs so an unknown peer cannot spoof host, scheme, or client IP.
 /// </summary>
 public sealed class UntrustedProxyHeaderStrippingMiddleware
 {

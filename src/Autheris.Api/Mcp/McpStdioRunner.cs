@@ -39,7 +39,7 @@ public sealed class McpStdioRunner(
             throw new InvalidOperationException("The MCP stdio session has no tenant: pass one or configure Gateway:Tenancy:DefaultTenantId.");
         }
 
-        // Issue #447 (SEC-ATR-02): stdio has no endpoint metadata and no ingress middleware, so this entry point stamps Mcp itself,
+        // Issue #447: stdio has no endpoint metadata and no ingress middleware, so this entry point stamps Mcp itself,
         // in the DI scope that also serves the protocol handler. A runner built without a context leaves the ingress unset (denied).
         ingressTransport?.Set(DataSourceTransportFlags.Mcp);
 

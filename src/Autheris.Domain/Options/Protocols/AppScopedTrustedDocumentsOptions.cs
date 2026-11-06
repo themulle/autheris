@@ -16,7 +16,7 @@ public sealed class AppScopedTrustedDocumentsOptions
     [RegularExpression("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$")]
     public string HeaderName { get; init; } = DefaultHeaderName;
 
-    /// <summary>Maximum number of document hashes of one app version (SEC-281-8).</summary>
+    /// <summary>Maximum number of document hashes of one app version.</summary>
     [Range(1, 5000)] public int MaxHashesPerVersion { get; init; } = 500;
 
     [Range(1, 200)] public int MaxActiveVersionsPerApp { get; init; } = 20;

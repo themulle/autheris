@@ -522,7 +522,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
                 }
 
                 var strVal = v?.ToString() ?? string.Empty;
-                // SEC-5: Disallow directory traversal sequences in path placeholder parameters
+                // Disallow directory traversal sequences in path placeholder parameters
                 if (strVal.Contains("..") || strVal.Contains('/') || strVal.Contains('\\'))
                 {
                     throw new System.Security.SecurityException($"Potential path traversal attack in parameter '{k}': path separators and '..' are not allowed.");
@@ -538,7 +538,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         {
             if (!usedArgs.Contains(k) && v != null && v is not IEnumerable<object>)
             {
-                // SEC-5 / SEC M-26: only well-formed argument names; reserved (gateway-set) names are dropped.
+                // SEC M-26: only well-formed argument names; reserved (gateway-set) names are dropped.
                 if (!IsAllowedArgumentName(k) || IsReservedParameter(k, reservedNames))
                 {
                     _logger.LogWarning("Security: Dropped caller argument '{Argument}' (reserved or malformed parameter name).", k);

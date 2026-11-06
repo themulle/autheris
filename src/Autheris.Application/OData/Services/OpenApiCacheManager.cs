@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Application.OData.Interfaces;
 
 /// <summary>
-/// High-performance in-memory cache manager storing pre-serialized OpenAPI UTF-8 byte payloads (F-API-03).
+/// High-performance in-memory cache manager storing pre-serialized OpenAPI UTF-8 byte payloads (F-).
 /// </summary>
 public sealed class OpenApiCacheManager : IOpenApiCacheManager
 {
@@ -20,7 +20,7 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
 
     /// <summary>
     /// <paramref name="transportResolver"/>: the documents list only tables whose source allows OData, so the cache is dropped whenever a
-    /// data-source options reload swapped the profiles (Issue #447, REQ-ATR-08/10); a newly denied source never stays in a cached document.
+    /// data-source options reload swapped the profiles (Issue #447, 08/10); a newly denied source never stays in a cached document.
     /// </summary>
     public OpenApiCacheManager(Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
     {

@@ -26,7 +26,7 @@ namespace Autheris.GraphQL.Types;
 public sealed partial class Mutation
 {
     /// <summary>
-    /// WP-0 (SEC-113-R2-02): decision services are resolved from the request services with <c>GetRequiredService</c>; a missing registration
+    /// decision services are resolved from the request services with<c>GetRequiredService</c>; a missing registration
     /// (or missing request services) fails the call and never falls back to a permissive default.
     /// </summary>
     private static T RequireDecisionService<T>(IHttpContextAccessor? httpContextAccessor) where T : notnull
@@ -37,7 +37,7 @@ public sealed partial class Mutation
     }
 
     /// <summary>
-    /// WP-0 (P-4): the first step of every consent request decision. Only a person may approve or reject; read-only tokens, application
+    ///  (P-4): the first step of every consent request decision. Only a person may approve or reject; read-only tokens, application
     /// principals (<c>idtyp=app</c>, app id without delegated scope), certificate subjects and unauthenticated callers are refused with
     /// <c>DECISION_NOT_PERMITTED</c> before any repository access. The denial is audited per principal and minute; an audit failure never
     /// changes the answer (the recorder does not throw and is optional by design: only the guard is a hard dependency).
@@ -66,7 +66,7 @@ public sealed partial class Mutation
     }
 
     /// <summary>
-    /// WP-0 residual until the activation is atomic with the final step: the request is <c>APPROVED</c> without a consent. It is recoverable by the
+    ///  residual until the activation is atomic with the final step: the request is<c>APPROVED</c> without a consent. It is recoverable by the
     /// existing <c>ActivateConsentAsync</c> (status 'APPROVED' path). Logged at Error with ids and the exception type only, never request content.
     /// </summary>
     private static void LogConsentCreationFailed(IHttpContextAccessor? httpContextAccessor, ConsentRequest approved, Exception ex)
@@ -135,7 +135,7 @@ public sealed partial class Mutation
         .Build());
 
     /// <summary>
-    /// PLAN-GOV-158-INC1 decision 7: sets or clears the owner-authored description of a consent. Order (SEC-GOV158I1-04): decision guard (a person only),
+    /// INC1 decision 7: sets or clears the owner-authored description of a consent. Order: decision guard (a person only),
     /// tenant-scoped load, table-scoped admin/owner/delegate check, then text validation, then the write. Every refusal before the text is judged (unknown,
     /// foreign tenant, revoked, expired, not permitted, ownership lookup failure) is the same fixed <c>NOT_FOUND</c>, so there is no validation or
     /// existence oracle. The description never influences a decision; it is stored with a Tier-A audit row (length and hash prefix only) in one transaction.
@@ -509,7 +509,7 @@ public sealed partial class Mutation
             }
         }
 
-        // WP-0 (P-3 part 1): the individual grant policy is evaluated on the loaded pending request BEFORE the step, on every approve call
+        //  (P-3 part 1): the individual grant policy is evaluated on the loaded pending request BEFORE the step, on every approve call
         // (first and second step), so a denial writes nothing and leaves the request pending and rejectable. Unknown metadata classifies as
         // Sensitive (fail closed). Role and group grantees are standing grants and skip the policy.
         if (req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal)

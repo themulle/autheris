@@ -74,7 +74,7 @@ public static class ConsumerFolding
 
             if (!identified || unionActors < minActors)
             {
-                // SEC-AUD114-03 / Differencing Attack Defense: the union of folded actors is still < k (or unknown): suppress the counts.
+                // 03 / Differencing Attack Defense: the union of folded actors is still < k (or unknown): suppress the counts.
                 suppressedSmallGroups = true;
                 keptUsages.Add(new CallingApplicationUsage(
                     Application: otherBucketName,

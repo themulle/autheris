@@ -92,7 +92,7 @@ public sealed record InsertStatement(
 
 /// <summary>
 /// MERGE (grammar: SqlBase.g4 #merge / mergeCase). The grammar has no <c>WHEN NOT MATCHED BY SOURCE</c> and no <c>BY TARGET</c>
-/// form, and the clause types below are closed (SEC-ADG-08 a): a new clause type needs a security review.
+/// form, and the clause types below are closed (08 a): a new clause type needs a security review.
 /// </summary>
 public sealed record MergeStatement(
     NamedTableSource Target,

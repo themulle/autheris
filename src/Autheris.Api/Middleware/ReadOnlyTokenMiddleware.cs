@@ -82,7 +82,7 @@ public sealed class ReadOnlyTokenMiddleware
             return false;
         }
 
-        // SEC-GOV175-01: Pre-flight query analysis is a zero-side-effect read operation permitted for read-only tokens
+        // Pre-flight query analysis is a zero-side-effect read operation permitted for read-only tokens
         if (request.Path.Equals(GovernanceQueryAnalyzePath, StringComparison.OrdinalIgnoreCase) ||
             request.Path.Equals(GovernanceQueryAnalyzePath + "/", StringComparison.OrdinalIgnoreCase))
         {
@@ -94,7 +94,7 @@ public sealed class ReadOnlyTokenMiddleware
             return true;
         }
 
-        // SEC-DATA178-01: Bulk table keyset streaming is a governed single-table read permitted for read-only tokens
+        // Bulk table keyset streaming is a governed single-table read permitted for read-only tokens
         if (IsDataBulkStreamPath(request.Path.Value))
         {
             return true;
@@ -107,7 +107,7 @@ public sealed class ReadOnlyTokenMiddleware
     private const string ProceduresPrefix = "/api/v1/procedures";
 
     /// <summary>
-    /// D-6 / SEC-PROC152I2-09: POST to exactly <c>/api/v1/procedures/{one non-empty segment}</c>. Works on the raw path value
+    /// D-6 / POST to exactly<c>/api/v1/procedures/{one non-empty segment}</c>. Works on the raw path value
     /// (no decoding, no trimming); only the prefix and <c>openapi.json</c> compare case-insensitively. Governed procedures
     /// are read-only by contract (the service refuses write-mode definitions), so executing one is a read.
     /// </summary>
@@ -135,7 +135,7 @@ public sealed class ReadOnlyTokenMiddleware
     private const string DataPrefix = "/api/v1/data";
 
     /// <summary>
-    /// SEC-DATA178-01: Permits POST /api/v1/data/{domain}/{schema}/{table}/(stream|bulk) for read-only tokens.
+    /// Permits POST /api/v1/data/{domain}/{schema}/{table}/(stream|bulk) for read-only tokens.
     /// Strict segment count, fail-closed against traversal, encoded characters, and mutation endpoints.
     /// </summary>
     internal static bool IsDataBulkStreamPath(string? path)

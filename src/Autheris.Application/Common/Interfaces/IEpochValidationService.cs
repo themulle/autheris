@@ -3,7 +3,7 @@ namespace Autheris.Application.Common.Interfaces;
 /// <param name="Table">Table whose policy epoch is validated.</param>
 /// <param name="CachedEpoch">Epoch stored with the cached entry.</param>
 /// <param name="IsHighlySensitive">Sensitive tables are never served from the local staleness budget.</param>
-/// <param name="IsDelegatedSource">Delegated (OBO) sources never use the staleness budget (WP-PF-07, SEC-SC-05).</param>
+/// <param name="IsDelegatedSource">Delegated (OBO) sources never use the staleness budget.</param>
 public record EpochCheck(TableIdentifier Table, long CachedEpoch, bool IsHighlySensitive, bool IsDelegatedSource = false);
 
 public interface IEpochValidationService
@@ -11,7 +11,7 @@ public interface IEpochValidationService
     Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default);
 
     /// <summary>
-    /// Single-table validation that honours <see cref="EpochCheck.IsDelegatedSource"/> (WP-PF-07, SEC-SC-05): a delegated (OBO) source gets zero staleness budget.
+    /// Single-table validation that honours <see cref="EpochCheck.IsDelegatedSource"/>a delegated (OBO) source gets zero staleness budget.
     /// TODO(callers): <c>ConsentCacheService</c> still validates with the overload above because the cached envelope does not carry the delegation flag; pass it once it does.
     /// </summary>
     async Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, bool isDelegatedSource, CancellationToken ct = default)
@@ -29,7 +29,7 @@ public interface IEpochValidationService
     Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default);
     /// <summary>
-    /// Issue #107 (SEC-RF107-05): all-or-nothing authoritative epoch read. Null when Redis is configured but not connected, when any read
+    /// Issue #107: all-or-nothing authoritative epoch read. Null when Redis is configured but not connected, when any read
     /// fails or when not every table can be confirmed; never throws. The default is null (not authoritative, callers fall back to exact evaluation).
     /// </summary>
     ValueTask<IReadOnlyDictionary<TableIdentifier, long>?> TryGetAuthoritativeEpochsAsync(

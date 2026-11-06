@@ -37,7 +37,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
     /// <summary>
     /// Oracle connections must use TCPS and a Key Vault password everywhere except in Development
-    /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>, WP-F1). <paramref name="services"/> resolves the Databricks REST
+    /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>).<paramref name="services"/> resolves the Databricks REST
     /// client (WP-X0j); without it a Databricks data source is refused (fail closed).
     /// </summary>
     public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null, TimeProvider? timeProvider = null)
@@ -54,7 +54,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
     public const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
-    /// <summary>WP-X0h (SEC-X1-10): executed on every SQLite connection right after it is opened.</summary>
+    /// <summary>WP-X0h: executed on every SQLite connection right after it is opened.</summary>
     public const string SqliteTrustedSchemaOffSql = "PRAGMA trusted_schema = OFF";
 
     /// <summary>Dirty read for SQL Server sessions of data sources with <c>ReadUncommitted</c> (reads take no shared locks).</summary>
@@ -79,7 +79,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw UnsupportedProvider(options.Provider);
         }
 
-        // WP-X0b (SEC-X1-08): checked on every rental and before any network traffic, so a reloaded or incomplete data source never
+        // WP-X0b: checked on every rental and before any network traffic, so a reloaded or incomplete data source never
         // connects unpinned. A present value must always be valid, even when the source does not require one.
         bool schemaPinned = dialect is DatabaseDialect.PostgreSql or DatabaseDialect.Oracle;
         if (schemaPinned && options.DefaultSchema is not null && !DefaultSchemaPolicy.IsValid(options.DefaultSchema))
@@ -96,7 +96,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         SspiContextProvider? sqlServerSspiProvider = null;
         if (dialect == DatabaseDialect.Oracle)
         {
-            // WP-F1: validated before any network traffic.
+            // validated before any network traffic.
             OracleConnectionStringPolicy.Validate(connectionString, _requireOracleTcps);
             connectionString = ResolvePassword(dialect, options, connectionString);
         }
@@ -165,7 +165,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
             if (connection is BindByNameOracleConnection)
             {
-                // WP-F2: pinned and verified on every pool rental, so one tenant's session state never reaches another.
+                // pinned and verified on every pool rental, so one tenant's session state never reaches another.
                 await using var pinCmd = connection.CreateCommand();
                 pinCmd.CommandText = OracleSessionInitialization.PinAndVerifyBlock;
                 await pinCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -202,7 +202,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
             if (connection is SqliteConnection sqliteConn)
             {
-                // WP-X0h (SEC-X1-10): extension loading stays off and the schema is untrusted, so a view, trigger or default in the
+                // WP-X0h: extension loading stays off and the schema is untrusted, so a view, trigger or default in the
                 // database cannot call a function that is not marked innocuous.
                 sqliteConn.EnableExtensions(false);
                 await using var hardenCmd = connection.CreateCommand();
@@ -335,7 +335,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         new($"SQL provider '{provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql', 'Oracle', 'Databricks'.");
 
     /// <summary>
-    /// Issue #132 (PLAN-DATA-132, SEC-DATA132-05): Verifies physical SQL Server instance identity
+    /// Issue #132: Verifies physical SQL Server instance identity
     /// via SELECT @@SERVERNAME. Returns the runtime server name string.
     /// </summary>
     public static async Task<string?> VerifyServerIdentityAsync(DbConnection connection, string? expectedHost = null, CancellationToken ct = default)

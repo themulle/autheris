@@ -195,7 +195,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         }
         catch (TableNotFoundException notFound)
         {
-            // WP-0 (W0-4): a missing backing table and a denied one are one indistinguishable error for the caller; the true reason stays in the audit.
+            //  (W0-4): a missing backing table and a denied one are one indistinguishable error for the caller; the true reason stays in the audit.
             await RecordMetricAuditAsync(
                 tenantId,
                 userSid,
@@ -242,7 +242,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
                 },
                 ct).ConfigureAwait(false);
 
-            // WP-0 (W0-4): fixed message without metric names, table name or denial reasons (those are in the audit entry above).
+            //  (W0-4): fixed message without metric names, table name or denial reasons (those are in the audit entry above).
             throw new GatewayForbiddenException(DeniedMessage);
         }
 
@@ -271,7 +271,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
             }
         }
 
-        // SEC-112-16 (d): the stored filter template is parsed again here against the current base table, so a manifest stored before a
+        // 16 (d): the stored filter template is parsed again here against the current base table, so a manifest stored before a
         // schema change (a column removed, a function disallowed) fails closed at query time instead of reaching the compile path.
         EnsureStoredTemplatesStillParse(resolvedMetrics.Values, tableMetadata);
 
