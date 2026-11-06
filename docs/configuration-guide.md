@@ -738,13 +738,12 @@ Für deklarative HTTP-Datenquellen (`DeclarativeHttpDataSourceExecutor`) gelten 
 
 ### 2.13 `Catalog` (Enterprise Data Catalog Integration & DSGVO-Klassifizierung)
 
-Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Microsoft Purview**, **Collibra**, **Alation**, **OpenMetadata**) zur automatisierten Spiegelung von Metadaten und Sensitivitäts-Klassifizierungen.
+Ermöglicht die zentrale Anbindung an **OpenMetadata** zur automatisierten Spiegelung von Metadaten und Sensitivitäts-Klassifizierungen.
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `Enabled` | `bool` | `true \| false` | `false` | Aktiviert die Data-Catalog-Integration. |
-| `Provider` | `string` | `OpenMetadata \| MicrosoftPurview \| Collibra \| Alation` | `"OpenMetadata"` | Aktiver Datenkatalog-Provider. |
-| `SyncMode` | `string` | `Mirror \| Reference` | `"Mirror"` | `Mirror`: Synct Tabellen/Spalten periodisch in den lokalen Store. `Reference`: Führt On-Demand-Lookups durch. |
+| `Provider` | `string` | `OpenMetadata` | `"OpenMetadata"` | Aktiver Datenkatalog-Provider. |
 | `SyncIntervalMinutes` | `int` | `1 .. 1440` | `60` | Synchronisationsintervall des Hintergrunddienstes in Minuten. |
 | `TagToMaskingRuleMap` | `Dictionary<string, string>` | Key-Value Paare | *(Standard-Map)* | Mappt Katalog-Tags auf Maskierungsregeln (`REDACT`, `MASK_EMAIL`, `HMAC_SHA256`). |
 | `GdprArticle9Tags` | `List<string>` | Tag-Namen | *(Art. 9 Tags)* | Tags für besondere Kategorien (Gesundheit, Biometrie, Genetik, Religion). Erzwingt `HIGH`, Four-Eyes und `REDACT`. |
@@ -765,23 +764,11 @@ Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Micr
 > - Tables classified as `MEDIUM` are **not** treated as high-sensitivity.
 > - High-sensitivity triggers mandatory Four-Eyes approval (`RequiresFourEyes = true`), shorter consent cache TTL, and fail-closed behavior in degraded mode.
 
-#### Provider-Konfigurationen:
-- **`Catalog.Purview`**: Azure Purview / Apache Atlas (`Endpoint`, `TenantId`, `ClientId`, `ClientSecretKeyVaultRef`).
-- **`Catalog.Collibra`**: Collibra Data Intelligence Cloud Core API v2 (`BaseUrl`, `Username`, `PasswordKeyVaultRef`).
-- **`Catalog.Alation`**: Alation Integration API v2 (`BaseUrl`, `ApiRefreshTokenKeyVaultRef`, `DefaultDataSourceId`).
-
 ```json
 "Catalog": {
   "Enabled": true,
-  "Provider": "MicrosoftPurview",
-  "SyncMode": "Mirror",
+  "Provider": "OpenMetadata",
   "SyncIntervalMinutes": 60,
-  "Purview": {
-    "Endpoint": "https://corp-purview.purview.azure.com",
-    "TenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
-    "ClientId": "a820c78a-f326-4d1d-91b4-2195f1342618",
-    "ClientSecretKeyVaultRef": "PURVIEW-SP-SECRET"
-  },
   "TagToMaskingRuleMap": {
     "PII.Sensitive": "REDACT",
     "PII.Email": "MASK_EMAIL",
@@ -804,18 +791,15 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 - **`danger_` (Kritischer Impact)**: Deaktiviert Authentifizierung, Autorisierung oder Zertifikatsprüfungen vollständig.
 
 > [!CAUTION]
-> **Production & Staging Warning (DANGER Switches & R-API-1 Migration Notice)**:
+> **Production & Staging Warning (DANGER Switches)**:
 > All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `Catalog.OpenSchema`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
-> 
-> **Migration Notice (R-API-1 / API-1)**:
-> The shared global ITSM webhook secret is no longer accepted in any environment; webhooks are verified with instance-specific secrets (`itsm:webhook-secret:<instanceId>`) only, configured via Key Vault or environment variables. An ITSM instance without a tenant mapping (`Itsm:InstanceToTenantMap`) is always rejected.
 
 | Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `danger_allow_anonymous_access` | `bool` | `false` | **CRITICAL** | Erlaubt GraphQL-Abfragen ohne jegliche Authentifizierung (anonymer Benutzer). |
 | `danger_bypass_consent_checks` | `bool` | `false` | **CRITICAL** | Umgeht die Zero-Trust Consent-Prüfung (`ALLOW` für alle Tabellen). |
-| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Erlaubt ungesignete Webhook-Aufrufe (z. B. ServiceNow, Jira, OpenMetadata ohne HMAC-Prüfung). |
-| `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Akzeptiert selbstsignierte oder abgelaufene SSL/TLS-Zertifikate bei ausgehenden HTTP-Aufrufen (Purview, Collibra, APIs). |
+| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Erlaubt ungesignete Webhook-Aufrufe (z. B. OpenMetadata ohne HMAC-Prüfung). |
+| `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Akzeptiert selbstsignierte oder abgelaufene SSL/TLS-Zertifikate bei ausgehenden HTTP-Aufrufen. |
 | `danger_allow_anonymous_webhooks` | `bool` | `false` | **CRITICAL** | Akzeptiert eingehende Webhook-Payloads ohne Auth-Token oder Secret. |
 | `warn_allow_all_cors_origins` | `bool` | `false` | **WARN** | Setzt `Access-Control-Allow-Origin: *` und deaktiviert CSRF-Preflight. |
 | `warn_disable_rate_limiting` | `bool` | `false` | **WARN** | Deaktiviert IP- und SID-basiertes Rate-Limiting (keine `429 Too Many Requests`). |

@@ -1,4 +1,4 @@
-namespace Autheris.Infrastructure.Itsm;
+namespace Autheris.Infrastructure.Governance;
 
 using System;
 using System.Threading;
@@ -13,6 +13,8 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class ConsentRecertificationHostedService : BackgroundService
 {
+    public const string ScanLockKey = "governance:recertification:scan";
+
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ConsentRecertificationHostedService> _logger;
     private readonly TimeSpan _checkInterval;
@@ -41,7 +43,7 @@ public sealed class ConsentRecertificationHostedService : BackgroundService
                 IAsyncDisposable? scanLock = null;
                 if (clusterState != null)
                 {
-                    scanLock = await clusterState.TryAcquireLockAsync("itsm:recertification:scan", TimeSpan.FromMinutes(30), stoppingToken).ConfigureAwait(false);
+                    scanLock = await clusterState.TryAcquireLockAsync(ScanLockKey, TimeSpan.FromMinutes(30), stoppingToken).ConfigureAwait(false);
                     if (scanLock == null)
                     {
                         _logger.LogDebug("Consent recertification scan lock held by another cluster replica; skipping cycle.");

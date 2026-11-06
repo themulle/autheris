@@ -32,7 +32,6 @@ public sealed class ConsentRequestPayload
     public Guid RequestId { get; init; }
     public string Status { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;
-    public ItsmTicketReference? ItsmTicketReference { get; init; }
     public string? Description { get; init; }
 }
 

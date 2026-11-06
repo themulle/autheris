@@ -171,7 +171,7 @@ public sealed partial class AiDataGuardrailService
 
     /// <summary>
     /// Protocol-mandated error bodies that an MCP-reachable tool may relay (NL-SC-29): an object-valued <c>error</c> member with a string
-    /// <c>message</c> (JSON-RPC, OData, Iceberg, Backstage) or the Envoy pass-through <c>{ "error": "...", "status": 4xx }</c>.
+    /// <c>message</c> (JSON-RPC, OData, Iceberg) or the Envoy pass-through <c>{ "error": "...", "status": 4xx }</c>.
     /// </summary>
     private static bool IsProtocolErrorShape(JsonElement root, out string? errorCode)
     {

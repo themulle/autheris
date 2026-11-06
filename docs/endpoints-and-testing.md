@@ -42,7 +42,6 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **DuckDB In-Memory OLAP** | `POST /api/v1/olap/query` | Authenticated | `DuckDbOlap.Enabled` | Unit tests |
 | **Apache Iceberg Lakehouse** | `/v1/{prefix}/namespaces/...` | Authenticated | `Lakehouse:Enabled` | `LakehouseIntegration` |
 | **Envoy ext_authz** | `/api/v1/envoy/{authz,check,export/*.yaml}` | Authenticated | Always active | Unit tests |
-| **Backstage Integration** | `/api/integrations/backstage/catalog-entities[/{name}]`, `catalog-info.yaml` | Authenticated | `Backstage.Enabled` | `BackstageIntegration` |
 
 Total: **135+ mapped endpoints** across REST, GraphQL, OData, MCP, Arrow IPC, and WebSockets.
 
@@ -60,7 +59,7 @@ Autheris maintains a comprehensive test suite of **5,600+ automated tests** veri
 | [`TrinoSqlEngine.Tests`](../tests/TrinoSqlEngine.Tests) | Parser & Compiler | **1,421** | SQL AST generation, dialect pushdown (T-SQL, PostgreSQL, SQLite, DuckDB, Oracle, Snowflake), constant folding, keyword support, and injection prevention. |
 | [`Autheris.Tests.Architecture`](../tests/Autheris.Tests.Architecture) | Architecture & Layering | **13** | Clean / Onion Architecture constraints, zero-dependency domain, no foreign SDK leaks into core, and isolation rules. |
 | [`Autheris.Tests.Integration`](../tests/Autheris.Tests.Integration) | End-to-End Integration | **239** | HTTP endpoints via `WebApplicationFactory<Program>`, SQLite/PostgreSQL flows, OData, WebSQL, and ForwardAuth. |
-| [`Autheris.Extensions.Tests`](../tests/Autheris.Extensions.Tests) | Foreign Connectors | **117** | Iceberg Lakehouse, Data Catalogs (Purview, Collibra, OpenMetadata), dbt Cloud, and ITSM webhooks. |
+| [`Autheris.Extensions.Tests`](../tests/Autheris.Extensions.Tests) | Foreign Connectors | **90+** | Iceberg Lakehouse, OpenMetadata Data Catalog, and dbt Cloud. |
 
 ### 2.2 Executing Tests Locally
 

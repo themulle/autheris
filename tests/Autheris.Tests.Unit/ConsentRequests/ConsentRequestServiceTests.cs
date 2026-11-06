@@ -123,41 +123,6 @@ public sealed class ConsentRequestServiceTests
     }
 
     [Fact]
-    public async Task Submit_ItsmDispatchFails_DeletesRequestAndThrows()
-    {
-        var (metadata, approvals, created) = Repositories();
-        var dispatcher = Substitute.For<IConsentRequestDispatcher>();
-        dispatcher.DispatchAsync(Arg.Any<ItsmTicketRequest>(), Arg.Any<ItsmSystemType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ItsmTicketResult(false, null, "ITSM_DOWN", "down")));
-        var options = Options.Create(new GatewayOptions { Itsm = new ItsmOptions { Enabled = true } });
-        var service = new ConsentRequestService(metadata, approvals, null, dispatcher, options);
-
-        var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
-            service.SubmitAsync(Command(Principal("tenant-a"), "tenant-a")));
-
-        ex.Code.ShouldBe("ITSM_DOWN");
-        await approvals.Received(1).DeleteConsentRequestAsync(created[0].Id, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Submit_ItsmDispatchSucceeds_StoresTicketAndReturnsPendingExternal()
-    {
-        var (metadata, approvals, created) = Repositories();
-        var reference = new ItsmTicketReference(ItsmSystemType.ServiceNow, "INC1", "https://itsm/INC1");
-        var dispatcher = Substitute.For<IConsentRequestDispatcher>();
-        dispatcher.DispatchAsync(Arg.Any<ItsmTicketRequest>(), Arg.Any<ItsmSystemType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ItsmTicketResult(true, reference, null, null)));
-        var options = Options.Create(new GatewayOptions { Itsm = new ItsmOptions { Enabled = true } });
-        var service = new ConsentRequestService(metadata, approvals, null, dispatcher, options);
-
-        var result = await service.SubmitAsync(Command(Principal("tenant-a"), "tenant-a"));
-
-        result.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        result.ItsmTicketReference.ShouldBe(reference);
-        await approvals.Received(1).UpdateConsentRequestTicketIdAsync(created[0].Id, "INC1", Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
     public async Task CreateRequest_OnAttributeSource_Refused()
     {
         // GOV-12: the request is refused at creation (no request stored) for a table that cannot carry consents.

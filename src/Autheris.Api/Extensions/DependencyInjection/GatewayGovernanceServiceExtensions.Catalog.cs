@@ -25,7 +25,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -102,7 +101,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
     }
 
-    private static void AddTriageContractsAndDataHub(IServiceCollection services)
+    private static void AddTriageAndContracts(IServiceCollection services)
     {
         // AI Assisted Governance (Triage)
         services.AddScoped<IJustificationTriageService, JustificationTriageService>();
@@ -114,8 +113,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddAutherisDataClassification();
         services.AddAutherisTenancy();
 
-        // DataHub & Data Contract Engine (REQ-DATAHUB-01)
+        // Data Contract Engine
         services.AddSingleton<IDataContractEngine, InMemoryDataContractEngine>();
-        services.AddScoped<IDataHubCatalogClient, DataHubCatalogClient>();
     }
 }

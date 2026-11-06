@@ -597,13 +597,4 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         body.IndexOf("policy.Evaluate(", StringComparison.Ordinal)
             .ShouldBeLessThan(body.IndexOf("ApproveConsentRequestStepAsync(", StringComparison.Ordinal));
     }
-
-    [Fact]
-    public void W7_ItsmWebhookHandler_DoesNotUseTheDecisionGuard()
-    {
-        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.Extensions", "Itsm", "ItsmWebhookHandler.cs"));
-
-        source.ShouldNotContain("IConsentDecisionGuard");
-        source.ShouldNotContain("ConsentDecisionGuard");
-    }
 }

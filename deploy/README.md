@@ -15,7 +15,7 @@
 >   honoured by nginx for loopback and the pinned compose subnet `10.89.77.0/24`; other clients always get `FinanceUser`.
 > - Gateway trust lists (`TrustedNetworks`, `KnownNetworks`) are limited to the compose subnet.
 > - No secrets are baked into the container images; they are injected at runtime from `.env`.
-> - Remaining mock tokens in `appsettings.Benchmark.json` (OpenMetadata/Collibra/Alation/Purview) are dummy values
+> - Remaining mock tokens in `appsettings.Benchmark.json` (OpenMetadata) are dummy values
 >   for the local mock server only.
 
 Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Projekt **GqlGateway** (.NET 8/10 GraphQL-Gateway mit Consent-, RLS- und Column-Masking-Governance-Schicht) auf Basis von **Podman Compose**.
@@ -53,8 +53,7 @@ Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Proj
 6. **`minio` & `lakehouse-seed`**: MinIO S3 Object Storage (`minio/minio`) und Ingestion-Container zur Bereitstellung von **Apache Iceberg v2** Metadaten (`v2.metadata.json`), Manifest-Listen und Parquet-Dateien für die Lakehouse-Extension.
 7. **`azurite`**: Offizieller Microsoft Azure Storage Emulator (`mcr.microsoft.com/azure-storage/azurite`) zur Bereitstellung von Azure Blob Storage / ADLS Gen2 für den Lakehouse-Konnektor.
 8. **`mock-extensions`**: Schlanker Mock-Container (< 20 MB RAM) für alle externen Enterprise-Systeme aus `gql_extensions`:
-   - **Multi-Catalog Governance**: **Microsoft Purview** (Apache Atlas REST), **Collibra Data Intelligence** (REST Core v2), **Alation** (Integration API v2), **OpenMetadata** (REST v1 & Realtime-Webhooks) sowie automatisierte DSGVO Art. 9 Tag-Erkennung.
-   - **ITSM Two-Phase Approvals**: **ServiceNow** Table API (`/api/now/table/...`) & **Jira Service Management** REST API (`/rest/api/2/issue`) inkl. HMAC-SHA256 Webhook Verification.
+   - **OpenMetadata Catalog Governance**: **OpenMetadata** (REST v1 & Realtime-Webhooks) sowie automatisierte DSGVO Art. 9 Tag-Erkennung.
    - **dbt Integration**: Streaming-Auslieferung von `manifest.json`, Model Contract Enforcement & Breaking-Change CI Gate (`/api/extensions/dbt/validate-contract`), Governance Proposal Lifecycle und Exposures Publishing (`/api/extensions/dbt/exposures`).
 9. **`reverse-proxy`**: Nginx ForwardAuth Gateway auf Host-Port 8082. Injiziert `X-Forwarded-Secret` und leitet Benutzeridentitäten (`X-Forwarded-User`, `X-Forwarded-Roles`, `X-Forwarded-Groups`) unter echten Netzwerkbedingungen an das Gateway weiter.
 10. **`load-generator`**: k6-Container mit parametrisierbarem Lastprofil (Ramp-up → Steady State → Ramp-down) und dynamischem Query-Mix (PostgreSQL + SQLite + SQL Server + Apache Iceberg Lakehouse).
@@ -71,7 +70,7 @@ Um Ressourcen auf Entwicklungsrechnern und CI/CD-Runnern zu schonen, stehen **6 
 | **`minimal`** | `-Scenario minimal` | Postgres, Redis, Governance-Seed, Gateway, Reverse-Proxy | **~1.5 GB** | Kern-RLS, Consent-Cache, Token Bucket Rate Limiter, Invoices & HR, OData v4 |
 | **`lakehouse`**| `-Scenario lakehouse`| Minimal + MinIO + Lakehouse-Seed (Iceberg S3) | **~1.8 GB** | Apache Iceberg v2 Scans, Vectorized Partition Pruning, S3 SigV4 Streaming |
 | **`azure`** | `-Scenario azure` | Minimal + Azurite + Mock-Extensions (Azure Blob Storage) | **~1.7 GB** | Apache Iceberg v2 auf Azure Blob Storage / ADLS Gen2 |
-| **`enterprise`**| `-Scenario enterprise`| Minimal + Mock-Extensions (Purview, Collibra, Alation, OpenMetadata, ITSM, dbt) | **~1.8 GB** | Multi-Catalog Sync & Webhooks, ServiceNow/Jira Two-Phase Approvals, dbt Contracts |
+| **`enterprise`**| `-Scenario enterprise`| Minimal + Mock-Extensions (OpenMetadata, dbt) | **~1.8 GB** | OpenMetadata Sync & Webhooks, dbt Contracts |
 | **`relational`**| `-Scenario relational`| Minimal + Azure SQL Edge (`sqlserver`) | **~2.0 GB** | 3-Way Cross-Database Queries (PostgreSQL + SQLite + MS SQL Server) |
 | **`openmetadata-real`**| `-Scenario openmetadata-real`| Minimal + Echter OpenMetadata Server + OpenSearch Cluster | **~4.5 GB** | Echter OpenMetadata 1.5 Server Stack inkl. Web-UI (`http://localhost:8585`) |
 | **`full`** *(Default)* | `-Scenario full` | **Alle Container**: Minimal + SQL Server + MinIO + Mock-Extensions + Monitoring | **~3.5 GB** | Vollständiger E2E-Benchmark aller relationalen Quellen, Extensions und Dashboards |

@@ -503,12 +503,7 @@ public sealed class OutboundEgressAllowlistHardeningTests
 
     [Theory]
     [InlineData("IOpenMetadataClient")]
-    [InlineData("ServiceNowTableApiClient")]
-    [InlineData("JiraCloudRestClient")]
     [InlineData("OpenLineageClient")]
-    [InlineData("PurviewDataCatalogClient")]
-    [InlineData("CollibraDataCatalogClient")]
-    [InlineData("AlationCatalogClient")]
     [InlineData("OpenJev")]
     [InlineData("S3LakehouseStorageProvider")]
     [InlineData("AzureBlobStorageProvider")]
@@ -521,20 +516,5 @@ public sealed class OutboundEgressAllowlistHardeningTests
         var primary = GetPrimaryHandler(handler).ShouldBeOfType<SocketsHttpHandler>(clientName);
         primary.AllowAutoRedirect.ShouldBeFalse(clientName);
         primary.ConnectCallback.ShouldNotBeNull(clientName);
-    }
-
-    // =========================================================================
-    // E-04: Alation TOKEN header cannot follow a redirect
-    // =========================================================================
-
-    [Fact]
-    public void E04_AlationClient_DoesNotFollowRedirects()
-    {
-        var provider = BuildGatewayServices();
-        var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(nameof(AlationCatalogClient));
-
-        // Without automatic redirects a 3xx is returned to the Alation client (EnsureSuccessStatusCode -> error) and the
-        // custom TOKEN header is never re-sent to the redirect target.
-        GetPrimaryHandler(handler).ShouldBeOfType<SocketsHttpHandler>().AllowAutoRedirect.ShouldBeFalse();
     }
 }

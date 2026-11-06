@@ -24,7 +24,7 @@ using Microsoft.Extensions.Options;
 
 public sealed class DataCatalogSyncService : IDataCatalogSyncService
 {
-    private readonly IDataCatalogClientFactory _clientFactory;
+    private readonly IDataCatalogClient _client;
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IEpochValidationService _epochService;
     private readonly IOptions<GatewayOptions> _options;
@@ -35,7 +35,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly PhysicalIndexSync _physicalIndexSync;
 
     public DataCatalogSyncService(
-        IDataCatalogClientFactory clientFactory,
+        IDataCatalogClient client,
         ITableMetadataRepository metadataRepo,
         IEpochValidationService epochService,
         IOptions<GatewayOptions> options,
@@ -45,7 +45,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IRebacStore? rebacStore = null,
         IPhysicalIndexRepository? physicalIndexes = null)
     {
-        _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
+        _client = client ?? throw new ArgumentNullException(nameof(client));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -58,7 +58,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
     public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
-        var client = _clientFactory.GetActiveClient();
+        var client = _client;
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
 
         var tables = await client.GetTablesAsync(null, ct).ConfigureAwait(false);
@@ -205,7 +205,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             bool finalRequiresFourEyes = isArt9 || (existing?.Table?.RequiresFourEyes == true);
             var finalDataSourceType = existing?.Table?.DataSourceType ?? DataSourceType.Sql;
 
-            // D-1: catalogs such as Alation, Collibra or Purview report themselves as source type. A supported dialect on
+            // D-1: external catalogs may report themselves as source type. A supported dialect on
             // the table is kept; a SQL table without one stays unqueryable (fail-closed) until an administrator sets it.
             var finalSourceType = DatabaseDialectExtensions.ResolveCatalogSourceType(tableAsset.SourceType, existing?.Table?.SourceType, out var dialectSupported);
             if (!dialectSupported && finalDataSourceType == DataSourceType.Sql)
@@ -366,8 +366,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
     public async Task<TableMetadata?> EnrichOrReferenceTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        var client = _clientFactory.GetActiveClient();
-        var asset = await client.GetTableAsync(table, ct).ConfigureAwait(false);
+        var asset = await _client.GetTableAsync(table, ct).ConfigureAwait(false);
         if (asset == null) return null;
 
         var existing = await _metadataRepo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);

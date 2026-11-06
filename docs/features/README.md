@@ -73,14 +73,13 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-15** | Declarative Consent GitOps, Effective Access Introspection & Scope Governance | [f-gov-15-declarative-consents-scopes.md](f-gov-15-declarative-consents-scopes.md) |
 | **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
 | **F-GOV-17** | GraphQL Cursor Pagination, Temporal Types & dbt Column Semantics | [f-gov-17-graphql-temporal-dbt-semantics.md](f-gov-17-graphql-temporal-dbt-semantics.md) |
-| **F-GOV-18** | Dual-Mode DataHub Integration, Declarative Contracts & SLA Circuit Breakers | [f-gov-18-datahub-integration-contracts.md](f-gov-18-datahub-integration-contracts.md) |
+| **F-GOV-18** | Declarative Data Contracts & SLA Circuit Breakers | [f-gov-18-datahub-integration-contracts.md](f-gov-18-datahub-integration-contracts.md) |
 | **F-GOV-19** | GraphQL Relation Exposure and Data Source Boundaries | [f-gov-19-cross-source-graphql-relations.md](f-gov-19-cross-source-graphql-relations.md) |
 | **F-GOV-20** | Zero-Read Static Query Analysis, Bundled Consents & Field Deprecation | [f-gov-20-static-query-analysis-and-bundled-consents.md](f-gov-20-static-query-analysis-and-bundled-consents.md) |
 | **F-GOV-21** | Declared Table Keys & Indexes, Deterministic Read Ordering & Least-Privilege Grants | [f-gov-21-declared-table-keys-and-read-ordering.md](f-gov-21-declared-table-keys-and-read-ordering.md) |
 | **F-GOV-22** | Time-Bound Individual Grants (Grant Policy, Class Maxima, Renewal & Read-Time Clamp) | [f-gov-22-time-bound-individual-grants.md](f-gov-22-time-bound-individual-grants.md) |
 | **F-GOV-23** | Row Filter Key-Set Cache (Evaluation Strategy Settings, Persistence & Administration, Key Query Compiler, Key-Set Substitution) | [f-gov-23-row-filter-key-set-cache.md](f-gov-23-row-filter-key-set-cache.md) |
 | **F-GOV-24** | Self-Service Access Requests & Read-Only Token Gating | [f-gov-24-access-requests-and-readonly-tokens.md](f-gov-24-access-requests-and-readonly-tokens.md) |
-| **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
 | **F-OPS-02** | Enterprise High Availability, Kubernetes Helm & Distributed Concurrency | [f-ops-02-high-availability-kubernetes-helm.md](f-ops-02-high-availability-kubernetes-helm.md) |
@@ -93,7 +92,6 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-SEC-06** | Casbin Decision Cache & Cluster Policy Epoch | [f-sec-06-casbin-decision-cache-policy-epoch.md](f-sec-06-casbin-decision-cache-policy-epoch.md) |
 | **F-SQL-01** | Declarative SQL-to-API Engine & Auto-OpenAPI | [f-sql-01-declarative-sql-endpoints.md](f-sql-01-declarative-sql-endpoints.md) |
 | **F-SQL-02** | Governed Stored Procedures & Multi-DB TVFs | [f-sql-02-governed-stored-procedures.md](f-sql-02-governed-stored-procedures.md) |
-| **P1** | Enterprise Data Catalog Connectors (Purview, Collibra, OpenMetadata) | [p01-data-catalog-connectors.md](p01-data-catalog-connectors.md) |
 | **P4** | Modern Lakehouse Connector (Apache Iceberg v2) | [p04-lakehouse-connector.md](p04-lakehouse-connector.md) |
 | **P5** | Subscriptions, Realtime Events & In-Stream RLS | [p05-subscriptions-realtime.md](p05-subscriptions-realtime.md) |
 | **P7** | Subgraph Federation Router (Hot Chocolate Fusion) | [p07-subgraph-federation.md](p07-subgraph-federation.md) |

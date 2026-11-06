@@ -19,7 +19,6 @@ public readonly record struct FunctionalRight(string Value)
     public static readonly FunctionalRight GovernanceApprove = new("Governance.Approve");
     public static readonly FunctionalRight GovernanceAdminRight = new("Governance.Admin");
     public static readonly FunctionalRight DataUnmaskSensitive = new("Data.UnmaskSensitive");
-    public static readonly FunctionalRight SecurityBreakGlass = new("Security.BreakGlass");
     public static readonly FunctionalRight SecurityAdmin = new("Security.Admin");
     public static readonly FunctionalRight DataExportClearText = new("Data.ExportClearText");
 
@@ -36,7 +35,6 @@ public readonly record struct FunctionalRight(string Value)
         GovernanceApprove.Value,
         GovernanceAdminRight.Value,
         DataUnmaskSensitive.Value,
-        SecurityBreakGlass.Value,
         SecurityAdmin.Value,
         DataExportClearText.Value,
         ClusterAdmin.Value
@@ -46,7 +44,6 @@ public readonly record struct FunctionalRight(string Value)
         this == GovernanceApprove ||
         this == GovernanceAdminRight ||
         this == DataUnmaskSensitive ||
-        this == SecurityBreakGlass ||
         this == SecurityAdmin ||
         this == DataExportClearText ||
         this == ClusterAdmin;

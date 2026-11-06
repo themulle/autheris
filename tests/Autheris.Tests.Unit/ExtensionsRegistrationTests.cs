@@ -11,7 +11,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Integrations.Backstage;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.Streaming.Interfaces;
@@ -21,7 +20,6 @@ using Autheris.Domain.Options;
 using Autheris.Extensions;
 using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
-using Autheris.Extensions.Itsm;
 using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.Configuration;
@@ -35,8 +33,7 @@ using Xunit;
 
 /// <summary>
 /// EXT-MOVE: all connectors to foreign systems live in Autheris.Extensions and are registered exactly once via
-/// <c>AddGatewayExtensions</c> (called by <c>AddGatewayInfrastructure</c>). Also covers the EX-12 handler fix and the
-/// Alation client hardening.
+/// <c>AddGatewayExtensions</c> (called by <c>AddGatewayInfrastructure</c>). Also covers the EX-12 handler fix.
 /// </summary>
 public sealed class ExtensionsRegistrationTests
 {
@@ -58,15 +55,6 @@ public sealed class ExtensionsRegistrationTests
         services.AddGatewayExtensions(options);
         return services;
     }
-
-    private static ItsmTicketRequest CreateTicketRequest() => new(
-        new TenantId("tenant-a"),
-        new Sid("S-1-5-21-1234"),
-        new TableIdentifier("finance", "dbo", "invoices"),
-        "Need access for the annual audit",
-        7,
-        null,
-        null);
 
     private static int HostedServiceCount<THostedService>(IServiceCollection services) =>
         services.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(THostedService));
@@ -108,10 +96,6 @@ public sealed class ExtensionsRegistrationTests
         Type[] typeBasedServices =
         [
             typeof(IDataCatalogSyncService),
-            typeof(IDataCatalogClientFactory),
-            typeof(IDataCatalogWebhookHandler),
-            typeof(IItsmWebhookHandler),
-            typeof(IBackstageCatalogExportService),
             typeof(IMssqlChangeTrackingPoller)
         ];
 
@@ -133,34 +117,14 @@ public sealed class ExtensionsRegistrationTests
     }
 
     [Fact]
-    public void EXT_ItsmWorkflowClients_AreExactlyServiceNowAndJira_WithoutDuplicates()
+    public void EXT_DataCatalogClient_IsOpenMetadataAdapter()
     {
         var services = CreateServices(new GatewayOptions());
-
-        services.Count(d => d.ServiceType == typeof(IItsmWorkflowClient)).ShouldBe(2);
-
         var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
-        var clients = scope.ServiceProvider.GetServices<IItsmWorkflowClient>().ToList();
+        var client = scope.ServiceProvider.GetRequiredService<IDataCatalogClient>();
 
-        clients.Count.ShouldBe(2);
-        clients.Select(c => c.GetType()).ShouldBe(new[] { typeof(ServiceNowTableApiClient), typeof(JiraCloudRestClient) }, ignoreOrder: true);
-        clients.Select(c => c.SystemType).ShouldBe(new[] { ItsmSystemType.ServiceNow, ItsmSystemType.Jira }, ignoreOrder: true);
-        clients.ShouldAllBe(c => c.GetType().Assembly == ExtensionsAssembly);
-    }
-
-    [Fact]
-    public void EXT_DataCatalogClientFactory_ProvidesOneClientPerCatalog_IncludingAlation()
-    {
-        var services = CreateServices(new GatewayOptions());
-        var provider = services.BuildServiceProvider();
-        var factory = provider.GetRequiredService<IDataCatalogClientFactory>();
-
-        factory.ShouldBeOfType<DataCatalogClientFactory>();
-        factory.CreateClient(DataCatalogProviderType.Alation).ShouldBeOfType<AlationCatalogClient>();
-        factory.CreateClient(DataCatalogProviderType.MicrosoftPurview).ShouldBeOfType<PurviewDataCatalogClient>();
-        factory.CreateClient(DataCatalogProviderType.Collibra).ShouldBeOfType<CollibraDataCatalogClient>();
-        factory.CreateClient(DataCatalogProviderType.OpenMetadata).ShouldBeOfType<OpenMetadataCatalogAdapter>();
+        client.ShouldBeOfType<OpenMetadataCatalogAdapter>();
     }
 
     [Fact]
@@ -173,12 +137,7 @@ public sealed class ExtensionsRegistrationTests
         string[] clientNames =
         [
             "IOpenMetadataClient",
-            nameof(ServiceNowTableApiClient),
-            nameof(JiraCloudRestClient),
             nameof(OpenLineageClient),
-            nameof(PurviewDataCatalogClient),
-            nameof(CollibraDataCatalogClient),
-            nameof(AlationCatalogClient),
             LineageExportServiceCollectionExtensions.OpenJevHttpClientName
         ];
 
@@ -218,35 +177,6 @@ public sealed class ExtensionsRegistrationTests
     }
 
     [Fact]
-    public async Task EXT_EX12_ItsmWorkflowClientsFromDi_UseSsrfProtectedHttpClient()
-    {
-        // Before EX-12 the IEnumerable<IItsmWorkflowClient> instances were built with the default HttpClient (no SSRF handler).
-        var options = new GatewayOptions
-        {
-            Itsm = new ItsmOptions
-            {
-                ServiceNowBaseUrl = "http://169.254.169.254",
-                JiraBaseUrl = "http://169.254.169.254"
-            }
-        };
-
-        var provider = CreateServices(options).BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var clients = scope.ServiceProvider.GetServices<IItsmWorkflowClient>().ToList();
-        clients.Count.ShouldBe(2);
-
-        foreach (var client in clients)
-        {
-            var result = await client.CreateAccessTicketAsync(CreateTicketRequest());
-            result.Success.ShouldBeFalse();
-            result.TicketReference.ShouldBeNull();
-            result.ErrorCode.ShouldBe("ITSM_UNAVAILABLE");
-            result.ErrorMessage.ShouldNotBeNull();
-            result.ErrorMessage.ShouldContain("strictly forbidden");
-        }
-    }
-
-    [Fact]
     public void EXT_BackgroundWorkers_AreOnlyRegisteredWhenEnabled()
     {
         var disabled = CreateServices(new GatewayOptions());
@@ -273,136 +203,5 @@ public sealed class ExtensionsRegistrationTests
         services.Count(d => d.ServiceType == typeof(IDataSourceExecutor) &&
                             d.ImplementationType == typeof(Autheris.Extensions.Lakehouse.Services.LakehouseDataSourceExecutor))
             .ShouldBe(1);
-    }
-
-    // ------------------------------------------------------------------ Alation hardening
-
-    private static AlationCatalogClient CreateAlationClient(
-        StubHttpMessageHandler handler,
-        string baseUrl = "https://alation.corp.example",
-        string apiToken = "alation-token-ref",
-        IKeyVaultSecretProvider? secretProvider = null,
-        IHostEnvironment? environment = null)
-    {
-        // SEC E-08: the Alation client fails closed without a resolvable token secret; tests that do not focus on the
-        // token use a provider that resolves the reference.
-        if (secretProvider == null)
-        {
-            secretProvider = Substitute.For<IKeyVaultSecretProvider>();
-            secretProvider.GetSecretBytes(apiToken).Returns(Encoding.UTF8.GetBytes("resolved-alation-token"));
-        }
-
-        var options = Options.Create(new GatewayOptions
-        {
-            Catalog = new DataCatalogOptions
-            {
-                Provider = DataCatalogProviderType.Alation,
-                Alation = new AlationOptions
-                {
-                    BaseUrl = baseUrl,
-                    ApiToken = apiToken,
-                    DataSourceToDomainMap = new Dictionary<string, string> { ["7"] = "clinic" }
-                }
-            }
-        });
-
-        return new AlationCatalogClient(new HttpClient(handler), options, NullLogger<AlationCatalogClient>.Instance, secretProvider, environment);
-    }
-
-    [Fact]
-    public async Task EXT_Alation_SendsTokenResolvedViaSecretProvider_AndMapsTables()
-    {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(
-                """[{"id":42,"name":"patients","schema_name":"clinical","ds_id":7,"tags":["gdpr_art9"]}]""",
-                Encoding.UTF8,
-                "application/json")
-        });
-
-        var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
-        secretProvider.GetSecretBytes("alation-token-ref").Returns(Encoding.UTF8.GetBytes("resolved-alation-token"));
-
-        var client = CreateAlationClient(handler, secretProvider: secretProvider);
-        var tables = await client.GetTablesAsync();
-
-        handler.Requests.Count.ShouldBe(1);
-        handler.Requests[0].RequestUri!.AbsolutePath.ShouldBe("/integration/v2/table/");
-        handler.Requests[0].Headers.GetValues("TOKEN").Single().ShouldBe("resolved-alation-token");
-
-        tables.Count.ShouldBe(1);
-        tables[0].Identifier.ShouldBe(new TableIdentifier("clinic", "clinical", "patients")); // SEC E-08: explicit ds_id -> domain map
-        tables[0].ExternalAssetId.ShouldBe("42");
-        tables[0].Tags.ShouldContain("gdpr_art9");
-        tables[0].SourceType.ShouldBe("Alation");
-    }
-
-    [Fact]
-    public async Task EXT_Alation_HttpError_IsPropagated_NotAnEmptyCatalog()
-    {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
-        var client = CreateAlationClient(handler);
-
-        var ex = await Should.ThrowAsync<HttpRequestException>(() => client.GetTablesAsync());
-        ex.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    public async Task EXT_Alation_OversizedResponse_IsRejected()
-    {
-        var handler = new StubHttpMessageHandler(_ =>
-        {
-            var content = new StringContent("[]", Encoding.UTF8, "application/json");
-            content.Headers.ContentLength = 11L * 1024 * 1024;
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
-        });
-        var client = CreateAlationClient(handler);
-
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => client.GetTablesAsync());
-        ex.Message.ShouldContain("exceeds maximum allowed limit");
-    }
-
-    [Fact]
-    public async Task EXT_Alation_UnresolvableSecretOutsideDevelopment_FailsClosed()
-    {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") });
-        var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
-        secretProvider.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("not found"));
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
-
-        var client = CreateAlationClient(handler, secretProvider: secretProvider, environment: prodEnv);
-
-        await Should.ThrowAsync<System.Security.SecurityException>(() => client.GetTablesAsync());
-        handler.Requests.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task EXT_Alation_MissingBaseUrl_Throws()
-    {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
-        var client = CreateAlationClient(handler, baseUrl: string.Empty);
-
-        await Should.ThrowAsync<InvalidOperationException>(() => client.GetTablesAsync());
-        handler.Requests.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task EXT_Collibra_OversizedResponse_IsRejected()
-    {
-        var handler = new StubHttpMessageHandler(_ =>
-        {
-            var content = new StringContent("{\"results\":[]}", Encoding.UTF8, "application/json");
-            content.Headers.ContentLength = 11L * 1024 * 1024;
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
-        });
-        var options = Options.Create(new GatewayOptions
-        {
-            Catalog = new DataCatalogOptions { Collibra = new CollibraOptions { BaseUrl = "https://collibra.corp.example" } }
-        });
-        var client = new CollibraDataCatalogClient(new HttpClient(handler), options, NullLogger<CollibraDataCatalogClient>.Instance);
-
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => client.GetTablesAsync());
-        ex.Message.ShouldContain("exceeds maximum allowed limit");
     }
 }

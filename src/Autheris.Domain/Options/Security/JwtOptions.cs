@@ -268,8 +268,6 @@ public sealed class HitLStepUpOptions
     public bool Enabled { get; init; } = true;
     public int ApprovalTimeoutSeconds { get; init; } = 15;
     public bool RequireDifferentApprover { get; init; } = true;
-    public bool AutoCreateItsmTicket { get; init; } = true;
-    public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
     public bool RequireTotp2Fa { get; init; } = true;
     public bool FailClosedOnClusterPartition { get; init; } = false;
 }

@@ -40,7 +40,7 @@ public sealed class Issue403DataCatalogSyncDirectionTests
 
     public Issue403DataCatalogSyncDirectionTests()
     {
-        _client.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
+        _client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         _repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>()).Returns(c =>
         {
             _calls.Add("upsert");
@@ -62,10 +62,8 @@ public sealed class Issue403DataCatalogSyncDirectionTests
 
     private DataCatalogSyncService Sut()
     {
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(_client);
-        return new DataCatalogSyncService(factory, _repo, _epoch,
-            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.MicrosoftPurview } }),
+        return new DataCatalogSyncService(_client, _repo, _epoch,
+            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
             _physical, _audit, NullLogger<DataCatalogSyncService>.Instance);
     }
 

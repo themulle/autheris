@@ -117,14 +117,9 @@ public sealed class DialectSqlGoldenArchitectureTests
     [Trait("Category", "Security")]
     [Theory]
     [MemberData(nameof(DialectNames))]
-    public void Itsm_Outbox_SystemQueue_Is_Only_TenantFilter_Exemption(string dialect)
+    public void ConsentGrants_Revoke_By_Id_Is_Only_TenantFilter_Exemption(string dialect)
     {
-        // ARCH-MNT-22-T-06 / SC-04: the ITSM outbox statements are the only statements of the three areas on a tenant-bearing table that are
-        // allowed to carry no tenant predicate besides the revoke-by-id pair. Explicit allow-list; a new tenant-less statement breaks it.
-        var itsm = LoadGolden(dialect, "ItsmOutbox").Set.Where(f => f.Contains("ITSM_OUTBOX", StringComparison.Ordinal)).ToList();
-        itsm.ShouldNotBeEmpty();
-        itsm.ShouldAllBe(f => !f.Contains("tenant_id =", StringComparison.Ordinal));
-
+        // ARCH-MNT-22-T-06 / SC-04: only the revoke-by-id pair is allowed to carry no tenant predicate on CONSENTS.
         var consentStatements = LoadGolden(dialect, "ConsentGrants").Set
             .Where(f => f.Contains("CONSENTS", StringComparison.Ordinal) && (f.Contains("SELECT", StringComparison.Ordinal) || f.Contains("UPDATE", StringComparison.Ordinal) || f.Contains("DELETE", StringComparison.Ordinal)))
             .ToList();
@@ -141,9 +136,9 @@ public sealed class DialectSqlGoldenArchitectureTests
     [Trait("Category", "Security")]
     [Theory]
     [MemberData(nameof(DialectNames))]
-    public void Webhook_And_Itsm_Outbox_Claim_Is_Exclusive_And_Tenant_Scoped_Unchanged(string dialect)
+    public void Webhook_Outbox_Claim_Is_Exclusive_And_Tenant_Scoped_Unchanged(string dialect)
     {
-        // ARCH-MNT-22-T-08: the claim keeps its exclusive-lock hint per dialect; list dead letters keeps its owner scope; ITSM reads stay plain.
+        // ARCH-MNT-22-T-08: the claim keeps its exclusive-lock hint per dialect; list dead letters keeps its owner scope.
         var webhook = LoadGolden(dialect, "WebhookOutbox").Set;
         var hint = dialect switch
         {
@@ -155,10 +150,6 @@ public sealed class DialectSqlGoldenArchitectureTests
         webhook.ShouldContain(f => f.Contains("owner_tenant_id = @tenant", StringComparison.Ordinal));
         webhook.ShouldContain(f => f.Contains("owner_tenant_id IS NULL", StringComparison.Ordinal));
         webhook.ShouldContain(f => f.Contains("state = 1 AND lease_owner = @owner", StringComparison.Ordinal));
-
-        var itsm = LoadGolden(dialect, "ItsmOutbox").Set;
-        itsm.ShouldContain(f => f.Contains("WHERE status IN (0, 1)", StringComparison.Ordinal));
-        itsm.ShouldNotContain(f => f.Contains("SKIP LOCKED", StringComparison.Ordinal) || f.Contains("UPDLOCK", StringComparison.Ordinal) || f.Contains("READPAST", StringComparison.Ordinal));
     }
 
     [Trait("Category", "Security")]

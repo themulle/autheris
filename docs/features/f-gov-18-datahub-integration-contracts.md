@@ -1,15 +1,14 @@
-# F-GOV-18: Enterprise Data Contracts & DataHub Governance Integration
+# F-GOV-18: Enterprise Data Contracts & SLA Circuit Breakers
 
 ## Executive Summary & Problem Statement
 
 Modern enterprise data architectures require clear operational boundaries, verifiable schemas, and active quality enforcement between data producers and downstream consumers:
-1. **Passive vs. Active Governance Dilemma:** Traditional data catalogs (e.g. DataHub, Collibra) passively observe and display broken freshness or schema mismatch alerts on a dashboard, while corrupt or stale data continues to flow to downstream consumers and AI agents.
-2. **Heavyweight Infrastructure Barriers:** Operating a full multi-container data catalog stack (Kafka, Elasticsearch, GMS, Neo4j) is often prohibited in edge, air-gapped, or lean enterprise environments.
+1. **Passive vs. Active Governance Dilemma:** Traditional external governance systems passively observe and display broken freshness or schema mismatch alerts on a dashboard, while corrupt or stale data continues to flow to downstream consumers and AI agents.
+2. **Heavyweight Infrastructure Barriers:** Operating a full multi-container external data catalog stack (Kafka, Elasticsearch, GMS, Neo4j) is often prohibited in edge, air-gapped, or lean enterprise environments.
 3. **Audit & Circuit-Breaking Gap:** When a data contract or SLA is breached, organizations need an automated in-gateway circuit breaker that fails closed or flags degradation at the API gateway layer before queries reach production backends.
 
-**F-GOV-18** addresses these challenges through a **Dual-Mode Enterprise Data Governance Suite**:
-- **Mode A (Embedded Standalone):** Self-sufficient in-gateway data contract engine managing schema expectations, assertions (`Freshness`, `RowCount`, `SqlExpression`, `Completeness`, `SchemaCompliance`), and SLAs in local governance storage without external dependencies.
-- **Mode B (Federated Enterprise):** Seamless integration with external DataHub deployments, consuming Metadata Change Log (MCL) webhook events, synchronizing tags, and updating contract statuses.
+**F-GOV-18** addresses these challenges through an **Embedded Enterprise Data Contract Suite**:
+- **Embedded Standalone Engine:** Self-sufficient in-gateway data contract engine managing schema expectations, assertions (`Freshness`, `RowCount`, `SqlExpression`, `Completeness`, `SchemaCompliance`), and SLAs in local governance storage without external dependencies.
 - **Active Governance Enforcement:** Direct integration with gateway health checks to fail closed when assertions fail.
 
 ---
@@ -18,22 +17,15 @@ Modern enterprise data architectures require clear operational boundaries, verif
 
 ```mermaid
 flowchart TD
-    subgraph External ["External Enterprise Platforms (Mode B)"]
-        DataHub["DataHub GMS / Actions"]
-    end
-
     subgraph Gateway ["Autheris Gateway Layer 7 (.NET 10)"]
-        Webhook["POST /api/v1/catalog/datahub/events"]
         ApplyApi["POST /api/v1/governance/contracts/apply"]
         QueryApi["GET /api/v1/governance/contracts"]
 
         Engine["IDataContractEngine / InMemoryDataContractEngine"]
-        Client["IDataHubCatalogClient / DataHubCatalogClient"]
         
         Enforcer["Gateway Health & Health Circuit Breaker"]
     end
 
-    DataHub --> Webhook --> Client --> Engine
     ApplyApi --> Engine
     QueryApi --> Engine
     Engine --> Enforcer
@@ -42,8 +34,7 @@ flowchart TD
 ### Affected Domain Models & Components
 - **`DataContract` & `DataContractAssertion` (`Autheris.Domain.Model`):** Strongly-typed representation of table contracts, versions, schema column requirements, SLAs, and evaluation results.
 - **`IDataContractEngine` (`Autheris.Application.Governance.Interfaces`):** Service interface for contract registration, retrieval, assertion status updates, and dataset health checks.
-- **`IDataHubCatalogClient` (`Autheris.Application.Governance.Interfaces`):** Ingests DataHub Metadata Change Log (MCL) events and resolves external platform tags.
-- **`DataContractEndpoints` (`Autheris.Api.Endpoints`):** Exposes declarative apply API (`/api/v1/governance/contracts/apply`), contract query endpoint (`/api/v1/governance/contracts`), and webhook receiver (`/api/v1/catalog/datahub/events`).
+- **`DataContractEndpoints` (`Autheris.Api.Endpoints`):** Exposes declarative apply API (`/api/v1/governance/contracts/apply`) and contract query endpoint (`/api/v1/governance/contracts`).
 
 ---
 
@@ -94,31 +85,6 @@ Response:
   "table": "sales.crm.orders",
   "assertionsCount": 1,
   "isHealthy": true
-}
-```
-
-### 2. Ingesting DataHub Assertion MCL Webhook Events
-
-External DataHub Actions emit assertion results to Autheris:
-
-```http
-POST /api/v1/catalog/datahub/events
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "entityType": "assertion",
-  "entityUrn": "urn:li:assertion:orders_freshness_check",
-  "aspect": {
-    "type": "SUCCESS"
-  }
-}
-```
-
-Response:
-```json
-{
-  "received": true
 }
 ```
 

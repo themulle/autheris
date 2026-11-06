@@ -32,7 +32,6 @@ public class JsonListBindingTests
                 "ForwardAuth":{"AllowedRoles":["Analyst"]},
                 "EntraId":{"ReadOnlyScopes":["Custom.Read"]},
                 "BasicAuth":{"Session":{"AllowedEnvironments":["Staging"]}}},
-              "Extensibility":{"BreakGlassAllowedRoles":["SecurityAdmin"]},
               "SystemMetrics":{"AllowedRoles":["GovernanceAdmin"]},
               "WebSql":{"CrossSource":{"AllowedHttpAuthModes":["None"]}}
             }}
@@ -42,7 +41,6 @@ public class JsonListBindingTests
         o.Authentication.ForwardAuth.GetEffectiveAllowedRoles().ToArray().ShouldBe(["Analyst"]);
         o.Authentication.EntraId.GetEffectiveReadOnlyScopes().ToArray().ShouldBe(["Custom.Read"]);
         o.Authentication.BasicAuth.Session.GetEffectiveAllowedEnvironments().ToArray().ShouldBe(["Staging"]);
-        o.Extensibility.GetEffectiveBreakGlassAllowedRoles().ToArray().ShouldBe(["SecurityAdmin"]);
         o.SystemMetrics.GetEffectiveAllowedRoles().ToArray().ShouldBe(["GovernanceAdmin"]);
         o.WebSql.CrossSource.GetEffectiveAllowedHttpAuthModes().ToArray().ShouldBe(["None"]);
     }
@@ -57,7 +55,6 @@ public class JsonListBindingTests
                 "ForwardAuth":{"AllowedRoles":[]},
                 "EntraId":{"ReadOnlyScopes":[]},
                 "BasicAuth":{"Session":{"AllowedEnvironments":[]}}},
-              "Extensibility":{"BreakGlassAllowedRoles":[]},
               "SystemMetrics":{"AllowedRoles":[]},
               "WebSql":{"CrossSource":{"AllowedHttpAuthModes":[]}}
             }}
@@ -67,7 +64,6 @@ public class JsonListBindingTests
         o.Authentication.ForwardAuth.AllowedRoles.ShouldBeNull();
         o.Authentication.EntraId.ReadOnlyScopes.ShouldBeNull();
         o.Authentication.BasicAuth.Session.AllowedEnvironments.ShouldBeNull();
-        o.Extensibility.BreakGlassAllowedRoles.ShouldBeNull();
         o.SystemMetrics.AllowedRoles.ShouldBeNull();
         o.WebSql.CrossSource.AllowedHttpAuthModes.ShouldBeNull();
 
@@ -95,11 +91,6 @@ public class JsonListBindingTests
     [InlineData("""{"ReadOnlyScopes":[]}""")]
     public void EntraId_EmptyJsonArray_BindsToNull(string json)
         => BindSection<EntraIdAuthOptions>(json).ReadOnlyScopes.ShouldBeNull();
-
-    [Theory]
-    [InlineData("""{"BreakGlassAllowedRoles":[]}""")]
-    public void Extensibility_EmptyJsonArray_BindsToNull(string json)
-        => BindSection<ExtensibilityOptions>(json).BreakGlassAllowedRoles.ShouldBeNull();
 
     [Theory]
     [InlineData("""{"AllowedRoles":[]}""")]

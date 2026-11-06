@@ -241,7 +241,6 @@ public static class GatewayApplicationBuilderExtensions
             app.MapODataEndpoints(gatewayOptions);
         }
         app.MapMcpEndpoints(gatewayOptions);
-        app.MapBackstageEndpoints(gatewayOptions);
         app.MapHitLEndpoints();
         app.MapGovernanceApiEndpoints();
         app.MapGovernancePlanEndpoints();

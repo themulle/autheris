@@ -68,7 +68,6 @@ public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Pr
             b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
 
             b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Backstage:Enabled", "true");
         });
     }
 
@@ -291,20 +290,6 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
         var ok = await c.PostAsync("/graphql", content());
         ok.StatusCode.ShouldBe(HttpStatusCode.OK);
         (await ok.Content.ReadAsStringAsync()).ShouldContain("Query");
-    }
-
-    // ---------- 7. Governance-DB / Backstage-Export ----------
-    [Fact]
-    public async Task Backstage_Export_ListsCatalogedTable()
-    {
-        await RegisterCatalogAsync();
-        var c = Client(roles: "CatalogSync,Reader");
-        var r = await c.GetAsync("/api/integrations/backstage/catalog-entities");
-        r.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await r.Content.ReadAsStringAsync()).ShouldContain("e2e_cranes");
-
-        var yaml = await c.GetAsync("/api/integrations/backstage/catalog-info.yaml");
-        yaml.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     // ---------- 8. MCP ----------

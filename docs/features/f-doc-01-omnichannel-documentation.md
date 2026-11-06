@@ -6,7 +6,7 @@
 
 ## 1. Overview & Problem Statement
 
-Documentation entered by data engineers in dbt model doc-blocks or catalog stewards in Microsoft Purview is traditionally lost when data is exposed through GraphQL or REST. F-DOC-01 implements lossless, omnichannel documentation passthrough: rich markdown definitions, column descriptions, and business glossary terms are automatically propagated across all gateway protocols—GraphQL Banana Cake Pop tooltips, OpenAPI Swagger descriptions, OData CSDL annotations, and MCP tool signatures.
+Documentation entered by data engineers in dbt model doc-blocks or catalog stewards in OpenMetadata is traditionally lost when data is exposed through GraphQL or REST. F-DOC-01 implements lossless, omnichannel documentation passthrough: rich markdown definitions, column descriptions, and business glossary terms are automatically propagated across all gateway protocols—GraphQL Banana Cake Pop tooltips, OpenAPI Swagger descriptions, OData CSDL annotations, and MCP tool signatures.
 
 ---
 
@@ -20,7 +20,7 @@ Documentation entered by data engineers in dbt model doc-blocks or catalog stewa
 
 ## 3. Architecture & Capabilities
 
-- Ingests markdown descriptions from dbt `manifest.json`, Purview, Collibra, and OpenMetadata.
+- Ingests markdown descriptions from dbt `manifest.json` and OpenMetadata.
 - Preserves markdown formatting in GraphQL schema descriptions (`@GraphQLDescription`).
 - Injects doc-strings into OpenAPI schemas and OData `$metadata` XML documentation tags.
 

@@ -6,7 +6,7 @@
 
 ## 1. Overview & Problem Statement
 
-Setting up complex enterprise infrastructure (Active Directory, Kerberos, Redis cluster, Purview, multiple SQL instances) slows down local developer onboarding. F-DX-01 provides a zero-external-dependency local developer quickstart: an embedded in-memory SQLite governance catalog seeded with 10 realistic enterprise domains, an in-process Garnet cache, and test authentication simulation allowing developers to run the entire gateway with a single `dotnet run` command.
+Setting up complex enterprise infrastructure (Active Directory, Kerberos, Redis cluster, external catalogs, multiple SQL instances) slows down local developer onboarding. F-DX-01 provides a zero-external-dependency local developer quickstart: an embedded in-memory SQLite governance catalog seeded with 10 realistic enterprise domains and test authentication simulation allowing developers to run the entire gateway with a single `dotnet run` command.
 
 ---
 

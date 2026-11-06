@@ -16,7 +16,6 @@ FinOps
 Governance
 Hosting
 Identity
-Integrations
 Interfaces
 Jobs
 Lineage

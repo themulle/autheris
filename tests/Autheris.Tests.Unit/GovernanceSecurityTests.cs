@@ -624,30 +624,6 @@ public class GovernanceSecurityTests : IDisposable
         });
     }
 
-    [Fact]
-    public async Task ServiceNowClient_WithoutConfiguredBaseUrl_ReturnsError()
-    {
-        // EXT-MOVE: the former extension duplicate ServiceNowClient was removed; the remaining ServiceNowTableApiClient
-        // must fail closed (no request, no invented ticket) when no ServiceNow base URL is configured.
-        using var httpClient = new System.Net.Http.HttpClient();
-        var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
-        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Extensions.Itsm.ServiceNowTableApiClient>.Instance;
-        var client = new Autheris.Extensions.Itsm.ServiceNowTableApiClient(httpClient, options, logger);
-
-        var result = await client.CreateAccessTicketAsync(new ItsmTicketRequest(
-            new TenantId("tenant-a"),
-            new Sid("S-1-5-21-1234"),
-            new TableIdentifier("finance", "dbo", "invoices"),
-            "Need access",
-            7,
-            null,
-            null));
-
-        result.Success.ShouldBeFalse();
-        result.TicketReference.ShouldBeNull();
-        result.ErrorCode.ShouldBe("CONFIGURATION_ERROR");
-    }
-
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

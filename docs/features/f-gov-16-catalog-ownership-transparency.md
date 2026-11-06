@@ -5,11 +5,11 @@
 Enterprise data architectures require transparent, federated data discovery without compromising confidentiality or creating existence oracles. Autonomous agents and data analysts need to discover datasets, know who owns them, understand their current access posture, and inspect response masking metadata:
 
 1. **Tag-Driven Discovery Gaps:** Modern data estates host thousands of datasets across disparate domains. Without categorization tags (e.g. `finance`, `pii`, `core-banking`, `esg`), clients and AI agents struggle to discover relevant data products and cannot filter tools efficiently.
-2. **Missing Ownership Attribution:** Decentralized data governance (Data Mesh) requires clear data ownership. Consumers discovering an ungranted dataset must know the designated data owner or delegate to request approval. Moreover, developer portals such as Spotify Backstage require entity ownership (`spec.owner`) synchronized directly with the enterprise governance authority.
+2. **Missing Ownership Attribution:** Decentralized data governance (Data Mesh) requires clear data ownership. Consumers discovering an ungranted dataset must know the designated data owner or delegate to request approval.
 3. **Binary Discovery vs. Access Status:** In traditional systems, catalog discovery is either binary-closed (users cannot see what they do not have access to, preventing access requests) or binary-open (users see sensitive metadata for all tables). A graduated access status model (`GRANTED`, `PENDING`, `NONE`) is intended to be combined with dataset visibility tiers (`Hidden`, `Summary`, `Full`) to allow controlled discovery while eliminating existence oracles for confidential assets. The tiers are part of the catalog model but are not persisted in the governance database, see the limitation in section 2.
 4. **Opaque Masked Responses in GraphQL:** When column-level masking (e.g., hash, redaction, partial email masking) is applied, consumers cannot distinguish between genuine database `null`/blank values and intentionally masked sensitive fields. Standardized response extensions (`extensions.maskedFields`) provide machine-readable transparency without leaking raw values or salt keys.
 
-`F-GOV-16` resolves these challenges by introducing tag-based catalog discovery, automated data owner resolution across MCP, GraphQL, and Spotify Backstage, graduated access status calculation, and transparent GraphQL response masking metadata in .NET 10.
+`F-GOV-16` resolves these challenges by introducing tag-based catalog discovery, automated data owner resolution across MCP and GraphQL, graduated access status calculation, and transparent GraphQL response masking metadata in .NET 10.
 
 ---
 
@@ -20,13 +20,11 @@ flowchart TD
     subgraph DiscoveryLayer ["Client & Discovery Surface"]
         McpAgent["AI Agent (MCP Client)"]
         GqlClient["Frontend / GraphQL Client"]
-        BackstagePortal["Spotify Backstage Catalog"]
     end
 
     subgraph GovernanceGateway ["Autheris Governance Gateway"]
         McpCatalog["McpDatasetCatalog<br/>(list_datasets / describe_dataset)"]
         GqlCatalog["Query.GetCatalogAsync<br/>(GraphQL catalog query)"]
-        BackstageService["BackstageCatalogExportService<br/>(/api/integrations/backstage)"]
         VisibilityEngine["CatalogVisibility<br/>(FilterForSubject / ComputeAccessStatus)"]
         MaskingMiddleware["MaskedFieldsMiddleware<br/>(Hot Chocolate Request Pipeline)"]
         DynamicResolver["CatalogGraphQlTypeModule<br/>(ColumnAccessLevel.Mask)"]
@@ -42,12 +40,9 @@ flowchart TD
     McpAgent -->|list_datasets(tag) / describe_dataset| McpCatalog
     GqlClient -->|catalog(tag)| GqlCatalog
     GqlClient -->|GraphQL Queries| MaskingMiddleware
-    BackstagePortal -->|Sync entities| BackstageService
 
     McpCatalog --> VisibilityEngine
     GqlCatalog --> VisibilityEngine
-    BackstageService --> OwnerRepo
-    BackstageService --> MetaRepo
 
     VisibilityEngine --> MetaRepo
     VisibilityEngine --> ConsentRepo
@@ -73,10 +68,6 @@ flowchart TD
     - `Hidden`: Omitted completely when caller has no consent (Zero Existence Oracle).
     - `Summary`: Included with `accessStatus: "NONE"` or `"PENDING"`, with column schema hidden (`Columns: []`).
     - `Full`: Included with schema metadata regardless of access status.
-- **`BackstageCatalogExportService`:**
-  - Synchronizes governed table entities (`data-{schema}-{table}`) into Backstage `API` entities (`backstage.io/v1alpha1`).
-  - Injects `IDataOwnershipRepository` to map active data owners directly into `spec.owner` (e.g. `steward@corp.internal`), falling back to `GatewayOptions.Backstage.DefaultOwner` only when unowned.
-  - Emits annotations (`autheris.io/data-owner`) and tags (`tags`) corresponding to dataset tags.
 - **`MaskedFieldsMiddleware` & `DynamicTableType`:**
   - Catalog-based schema (`CatalogGraphQlTypeModule`): the governed tree query compiles masked columns as SQL literals. After executing a root field, `IGovernedTreeQueryService.GetMaskedColumns` reports which selected columns (including columns of nested relations, identified by their relation path) are masked for the caller. When a column resolver then returns a value for such a column, it records its response path as a pointer (`/root/0/relation/1/column`, list indexes included) into the request-scoped `ConcurrentBag<string>` stored in `context.ContextData["MaskedFields"]`, one entry per row. Clear columns are never recorded.
   - `MaskedFieldsMiddleware`: Registered in the Hot Chocolate execution pipeline. When masked fields are recorded, attaches `extensions.maskedFields` containing a distinct, sorted list of field paths. Omitted completely when no masking occurs.
@@ -249,44 +240,6 @@ query GetOrderDetails {
     ]
   }
 }
-```
-
----
-
-### 3.3 Spotify Backstage Catalog Synchronization
-
-When exported to Backstage via `GET /api/integrations/backstage/catalog-entities`, table entities automatically resolve their active data owners from the governance repository:
-
-```yaml
-apiVersion: backstage.io/v1alpha1
-kind: API
-metadata:
-  name: data-public-orders
-  namespace: default
-  title: public.orders
-  description: Enterprise customer orders and checkout events.
-  tags:
-    - data-product
-    - table
-    - postgresql
-    - pii
-    - four-eyes-required
-    - sensitivity-high
-    - financial
-    - sales
-  annotations:
-    backstage.io/managed-by-location: url:/api/integrations/backstage/catalog-entities/data-public-orders
-    autheris.io/source-type: PostgreSQL
-    autheris.io/schema-name: public
-    autheris.io/table-name: orders
-    autheris.io/sensitivity: HIGH
-    autheris.io/requires-four-eyes: "true"
-    autheris.io/data-owner: alice.johnson@corp.internal
-spec:
-  type: openapi
-  lifecycle: production
-  owner: alice.johnson@corp.internal
-  system: data-mesh
 ```
 
 ---

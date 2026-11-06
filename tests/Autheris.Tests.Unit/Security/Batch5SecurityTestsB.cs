@@ -320,9 +320,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
     [Fact]
     public async Task DataCatalogSync_CrossTenantOverwrite_Prevented()
     {
-        var clientFactory = Substitute.For<IDataCatalogClientFactory>();
         var client = Substitute.For<IDataCatalogClient>();
-        clientFactory.GetActiveClient().Returns(client);
         client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
 
         var tableId = new TableIdentifier("finance", "dbo", "invoices");
@@ -346,7 +344,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var options = Options.Create(new GatewayOptions());
 
         var syncService = new DataCatalogSyncService(
-            clientFactory,
+            client,
             metadataRepo,
             epochService,
             options,

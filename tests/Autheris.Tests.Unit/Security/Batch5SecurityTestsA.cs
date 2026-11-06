@@ -190,8 +190,7 @@ public sealed class Batch5SecurityTestsA
                 Enabled = true,
                 ApprovalTimeoutSeconds = 30,
                 RequireDifferentApprover = false,
-                RequireTotp2Fa = false, // Explicitly false!
-                AutoCreateItsmTicket = false
+                RequireTotp2Fa = false // Explicitly false!
             }
         });
 

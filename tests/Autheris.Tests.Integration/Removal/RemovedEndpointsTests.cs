@@ -61,6 +61,18 @@ public sealed class RemovedEndpointsTests : IClassFixture<WebApplicationFactory<
     [InlineData("GET", "/api/schema-registry/services")]
     [InlineData("GET", "/api/schema-registry/accounts/latest")]
     [InlineData("GET", "/api/schema-registry/accounts/history")]
+    [InlineData("GET", "/api/integrations/backstage/catalog-entities")]
+    [InlineData("GET", "/api/integrations/backstage/entities/Component/default/sales")]
+    [InlineData("GET", "/api/integrations/backstage/catalog-info.yaml")]
+    [InlineData("POST", "/api/webhooks/itsm/status-change")]
+    [InlineData("POST", "/api/webhooks/servicenow")]
+    [InlineData("POST", "/api/webhooks/jira")]
+    [InlineData("POST", "/api/webhooks/catalog")]
+    [InlineData("POST", "/api/v1/governance/catalog/webhook/purview")]
+    [InlineData("POST", "/api/v1/governance/catalog/webhook/collibra")]
+    [InlineData("POST", "/api/v1/governance/catalog/webhook/alation")]
+    [InlineData("POST", "/api/v1/governance/catalog/webhook/datahub")]
+    [InlineData("POST", "/api/webhooks/datahub")]
     public async Task Removed_routes_return_404_for_admin_and_anonymous(string method, string route)
     {
         using var admin = CreateAdminClient();
@@ -114,7 +126,14 @@ public sealed class RemovedEndpointsTests : IClassFixture<WebApplicationFactory<
             "/portal/2fa",
             "/portal/approvals",
             "/api/v1/governance/dp",
-            "/api/schema-registry"
+            "/api/schema-registry",
+            "/api/integrations/backstage",
+            "/api/webhooks/itsm",
+            "/api/webhooks/servicenow",
+            "/api/webhooks/jira",
+            "/api/webhooks/catalog",
+            "/api/v1/governance/catalog/webhook",
+            "/api/webhooks/datahub"
         };
 
         foreach (var pattern in removedPatterns)

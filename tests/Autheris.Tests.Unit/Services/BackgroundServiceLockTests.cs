@@ -15,7 +15,7 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.OpenMetadata;
-using Autheris.Infrastructure.Itsm;
+using Autheris.Infrastructure.Governance;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;

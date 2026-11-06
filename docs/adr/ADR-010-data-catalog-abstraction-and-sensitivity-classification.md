@@ -1,7 +1,7 @@
 # ADR-010: Multi-Catalog Provider-Abstraktion & automatisierte Sensitivitätsklassifizierung
 
 ## Status
-Akzeptiert
+Akzeptiert (teilweise abgelöst durch WP-SIMPL-12: Purview, Collibra und Alation entfernt; OpenMetadata verbleibt)
 
 ## Kontext
 Unternehmen verwalten Metadaten, Schemabeschreibungen und Sensitivitäts-Klassifizierungen (PII, DSGVO Art. 9) zunehmend in spezialisierten Data-Governance- und Datenkatalog-Lösungen wie Microsoft Purview, Collibra, Alation oder OpenMetadata. Die manuelle Pflege von Tabellenmetadaten und Schutzklassen direkt im Gateway führt zu Redundanzen, Drift und erhöhtem Pflegeaufwand für Data Stewards.

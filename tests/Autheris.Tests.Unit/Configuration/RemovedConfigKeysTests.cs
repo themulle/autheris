@@ -42,6 +42,31 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Caching:Cdn:Cloudflare:ApiToken", "x")]
     [InlineData("Gateway:SchemaRegistry", "true")]
     [InlineData("Gateway:SchemaRegistry:Enabled", "false")]
+    [InlineData("Gateway:Itsm:Enabled", "true")]
+    [InlineData("Gateway:Itsm:Enabled", "false")]
+    [InlineData("Gateway:Itsm:Provider", "ServiceNow")]
+    [InlineData("Gateway:Itsm:ServiceNowBaseUrl", "https://example.service-now.com")]
+    [InlineData("Gateway:Itsm:JiraBaseUrl", "https://example.atlassian.net")]
+    [InlineData("Gateway:Itsm:WebhookSecret", "secret")]
+    [InlineData("Gateway:Backstage:Enabled", "true")]
+    [InlineData("Gateway:Backstage:Enabled", "false")]
+    [InlineData("Gateway:Backstage:SystemName", "autheris")]
+    [InlineData("Gateway:Catalog:Purview:Endpoint", "https://purview.azure.com")]
+    [InlineData("Gateway:Catalog:Collibra:BaseUrl", "https://collibra.example.com")]
+    [InlineData("Gateway:Catalog:Alation:BaseUrl", "https://alation.example.com")]
+    [InlineData("Gateway:Catalog:DataHub:GmsUrl", "https://datahub.example.com")]
+    [InlineData("Gateway:DataHub:Enabled", "false")]
+    [InlineData("Gateway:Purview:Enabled", "false")]
+    [InlineData("Gateway:Collibra:Enabled", "false")]
+    [InlineData("Gateway:Alation:Enabled", "false")]
+    [InlineData("Gateway:Extensibility:EnableBreakGlass", "false")]
+    [InlineData("Gateway:Extensibility:RequireRoleForBreakGlass", "true")]
+    [InlineData("Gateway:Extensibility:BreakGlassAllowedRoles:0", "BreakGlassOperator")]
+    [InlineData("Gateway:Extensibility:RequireJustificationForHighSensitivity", "true")]
+    [InlineData("Gateway:Extensibility:BreakGlassHeader", "X-Break-Glass")]
+    [InlineData("Gateway:Extensibility:JustificationHeader", "X-Access-Justification")]
+    [InlineData("Gateway:AccessProfiles:MaxBreakGlassDurationHours", "72")]
+    [InlineData("Gateway:IndividualGrants:BreakGlassMaxHours", "72")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -96,5 +121,72 @@ public sealed class RemovedConfigKeysTests
             UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key)));
 
         ex.Message.ShouldContain(key);
+    }
+
+    [Theory]
+    [InlineData("Gateway:Itsm:Enabled", "true")]
+    [InlineData("Gateway:Itsm:Enabled", "false")]
+    [InlineData("Gateway:Itsm:Provider", "ServiceNow")]
+    [InlineData("Gateway:Itsm:ServiceNowBaseUrl", "https://example.service-now.com")]
+    [InlineData("Gateway:Itsm:JiraBaseUrl", "https://example.atlassian.net")]
+    [InlineData("Gateway:Itsm:WebhookSecret", "secret")]
+    public void Itsm_keys_fail_startup(string key, string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+
+        ex.Message.ShouldContain("Gateway:Itsm");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Backstage:Enabled", "true")]
+    [InlineData("Gateway:Backstage:Enabled", "false")]
+    [InlineData("Gateway:Backstage:SystemName", "autheris")]
+    public void Backstage_keys_fail_startup(string key, string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+
+        ex.Message.ShouldContain("Gateway:Backstage");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Catalog:Purview:Endpoint", "https://purview.azure.com")]
+    [InlineData("Gateway:Catalog:Collibra:BaseUrl", "https://collibra.example.com")]
+    [InlineData("Gateway:Catalog:Alation:BaseUrl", "https://alation.example.com")]
+    [InlineData("Gateway:Catalog:DataHub:GmsUrl", "https://datahub.example.com")]
+    [InlineData("Gateway:DataHub:Enabled", "false")]
+    [InlineData("Gateway:Purview:Enabled", "false")]
+    [InlineData("Gateway:Collibra:Enabled", "false")]
+    [InlineData("Gateway:Alation:Enabled", "false")]
+    public void Catalog_vendor_keys_fail_startup(string key, string value)
+    {
+        var config = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
+
+        var unknown = UnknownGatewayKeyGuard.FindUnknownKeys(config);
+        unknown.ShouldContain(u => key.Equals(u, StringComparison.OrdinalIgnoreCase) || key.StartsWith(u + ":", StringComparison.OrdinalIgnoreCase));
+        ex.Message.ShouldContain(unknown[0]);
+    }
+
+    [Theory]
+    [InlineData("Gateway:Extensibility:EnableBreakGlass", "false")]
+    [InlineData("Gateway:Extensibility:RequireRoleForBreakGlass", "true")]
+    [InlineData("Gateway:Extensibility:BreakGlassAllowedRoles:0", "BreakGlassOperator")]
+    [InlineData("Gateway:Extensibility:RequireJustificationForHighSensitivity", "true")]
+    [InlineData("Gateway:Extensibility:BreakGlassHeader", "X-Break-Glass")]
+    [InlineData("Gateway:Extensibility:JustificationHeader", "X-Access-Justification")]
+    [InlineData("Gateway:AccessProfiles:MaxBreakGlassDurationHours", "72")]
+    [InlineData("Gateway:IndividualGrants:BreakGlassMaxHours", "72")]
+    public void Breakglass_interceptor_keys_fail_startup(string key, string value)
+    {
+        var config = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
+
+        var unknown = UnknownGatewayKeyGuard.FindUnknownKeys(config);
+        unknown.ShouldContain(u => key.Equals(u, StringComparison.OrdinalIgnoreCase) || key.StartsWith(u + ":", StringComparison.OrdinalIgnoreCase));
+        ex.Message.ShouldContain(unknown[0]);
     }
 }

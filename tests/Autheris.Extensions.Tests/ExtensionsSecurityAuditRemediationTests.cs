@@ -103,23 +103,4 @@ public sealed class ExtensionsSecurityAuditRemediationTests
         // Valid inside table location
         IcebergMetadataReader.ValidateManifestLocation("/data/my_table/metadata.json", "/data/my_table");
     }
-
-    [Fact]
-    public void CatalogWebhookHandler_VerifiesBase64HmacSha256Signature()
-    {
-        // SEC-EXT-07: CatalogWebhookHandler must correctly parse and verify 44-character Base64 SHA256 signatures
-        var secret = "super-secret-webhook-key-2026!";
-        var payload = "{\"event\":\"table_updated\",\"table\":\"sales.invoices\"}";
-
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-        var base64Sig = Convert.ToBase64String(hashBytes); // 44 characters!
-        var hexSig = Convert.ToHexString(hashBytes);       // 64 characters!
-
-        CatalogWebhookHandler.VerifyHmacSignature(payload, base64Sig, secret).ShouldBeTrue();
-        CatalogWebhookHandler.VerifyHmacSignature(payload, $"sha256={base64Sig}", secret).ShouldBeTrue();
-        CatalogWebhookHandler.VerifyHmacSignature(payload, hexSig, secret).ShouldBeTrue();
-        CatalogWebhookHandler.VerifyHmacSignature(payload, $"sha256={hexSig}", secret).ShouldBeTrue();
-        CatalogWebhookHandler.VerifyHmacSignature(payload, "invalid_signature", secret).ShouldBeFalse();
-    }
 }

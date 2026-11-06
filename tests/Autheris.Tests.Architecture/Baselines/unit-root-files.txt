@@ -149,4 +149,3 @@ tests/Autheris.Tests.Unit/WebSqlRequestValidationTests.cs
 tests/Autheris.Tests.Unit/WebSqlStatementManagerTests.cs
 tests/Autheris.Tests.Unit/WebSqlTimeoutProblemDetailsTests.cs
 tests/Autheris.Tests.Unit/WebSqlTrinoProtocolTests.cs
-tests/Autheris.Tests.Unit/WebhookValidationHandshakeTests.cs

@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 /// <list type="bullet">
 /// <item>Primary handler is a <see cref="SocketsHttpHandler"/> with <c>AllowAutoRedirect = false</c>: redirects are never
 /// followed, a 3xx response is returned to the client and treated as an error there (none of the integrations relies on
-/// redirects). This also prevents custom credential headers (e.g. Alation <c>TOKEN</c>) from reaching foreign origins.</item>
+///redirects). This also prevents custom credential headers from reaching foreign origins.</item>
 /// <item>Its <c>ConnectCallback</c> resolves the host itself, applies the same decision as <see cref="SsrfProtectionHandler"/>
 /// (integration allowlist + never-allowed ranges + private-address rule outside Development) to EVERY candidate address and
 /// connects only to a checked address (IP pinning, no second DNS lookup, defeats DNS rebinding).</item>

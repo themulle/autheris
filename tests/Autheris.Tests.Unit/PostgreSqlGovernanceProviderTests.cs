@@ -158,7 +158,6 @@ public class PostgreSqlGovernanceProviderTests
         services.Any(d => d.ServiceType == typeof(IGovernanceRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ITableMetadataRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IConsentRepository)).ShouldBeTrue();
-        services.Any(d => d.ServiceType == typeof(IItsmOutboxRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IAuditChainExportSource)).ShouldBeTrue();
     }
 

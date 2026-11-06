@@ -42,8 +42,7 @@ public class HitLEndpointsTests
                 Enabled = true,
                 ApprovalTimeoutSeconds = 5,
                 RequireDifferentApprover = true,
-                RequireTotp2Fa = true,
-                AutoCreateItsmTicket = false
+                RequireTotp2Fa = true
             }
         });
     }

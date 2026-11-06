@@ -24,7 +24,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Itsm;
+using Autheris.Infrastructure.Governance;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -55,9 +55,9 @@ public static partial class GatewayGovernanceServiceExtensions
         AddTypedRowPolicy(services);
         AddRestrictedScopesAndConsentResolution(services);
         AddOpenApiCatalogAndEnterpriseMoats(services);
-        AddItsmConsentRequests(services, gatewayOptions);
+        AddConsentRequests(services);
         AddLineageGdprAndConsumerUsage(services);
-        AddTriageContractsAndDataHub(services);
+        AddTriageAndContracts(services);
         AddIdentityAndAccessGovernance(services);
 
         return services;
@@ -135,7 +135,6 @@ public static partial class GatewayGovernanceServiceExtensions
             IDataOwnerAssignmentRepository,
             IPhysicalIndexRepository,
             ITableRelationRepository,
-            IItsmOutboxRepository,
             IWebhookOutbox,
             IVirtualFilterRepository,
             ICallerAttributeRepository,
@@ -178,7 +177,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam
         services.AddSingleton<IPhysicalIndexRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #404: physical non-unique index write seam
         services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICallerAttributeRepository>(sp => sp.GetRequiredService<TRepository>());

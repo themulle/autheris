@@ -27,10 +27,6 @@ public sealed class IndividualGrantOptions
     [Range(1, IndividualGrantCeilings.PrivilegedDays)]
     public int PrivilegedMaxDays { get; set; } = IndividualGrantCeilings.PrivilegedDays;
 
-    /// <summary>Break-glass exception.</summary>
-    [Range(1, IndividualGrantCeilings.BreakGlassHours)]
-    public int BreakGlassMaxHours { get; set; } = IndividualGrantCeilings.BreakGlassHours;
-
     /// <summary>Service principal (direct grantee).</summary>
     [Range(1, IndividualGrantCeilings.ServicePrincipalDays)]
     public int ServicePrincipalMaxDays { get; set; } = IndividualGrantCeilings.ServicePrincipalDays;
@@ -61,7 +57,6 @@ public static class IndividualGrantCeilings
     public const int SensitiveDays = 90;
     public const int UnmaskedDays = 30;
     public const int PrivilegedDays = 7;
-    public const int BreakGlassHours = 72;
     public const int ServicePrincipalDays = 365;
     public const int CustomerRegularDays = 90;
 }

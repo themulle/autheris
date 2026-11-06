@@ -20,8 +20,6 @@ public sealed class GatewayEmptyListConfigurationValidator : IValidateOptions<Ga
     [
         new("Authentication:ForwardAuth:AllowedRoles", true,
             "To accept no header roles, set Gateway:Authentication:ForwardAuth:Enabled to false, or list a role name that no proxy asserts."),
-        new("Extensibility:BreakGlassAllowedRoles", true,
-            "To disable break-glass, set Gateway:Extensibility:EnableBreakGlass to false."),
         new("SystemMetrics:AllowedRoles", true,
             "To switch the system metrics endpoints off, set Gateway:SystemMetrics:Enabled to false."),
         new("Authentication:BasicAuth:Session:AllowedEnvironments", true,

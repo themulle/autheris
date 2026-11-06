@@ -351,8 +351,7 @@ public sealed partial class Mutation
             {
                 RequestId = result.RequestId,
                 Status = result.Status,
-                Message = result.Message,
-                ItsmTicketReference = result.ItsmTicketReference
+                Message = result.Message
             };
         }
         catch (ConsentRequestException ex)

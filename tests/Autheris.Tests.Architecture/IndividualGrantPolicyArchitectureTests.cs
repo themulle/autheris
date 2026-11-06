@@ -21,8 +21,6 @@ public class IndividualGrantPolicyArchitectureTests
             "Decorator of IConsentRepository (REQ-GOV-129): validates caller attribute row filters and forwards unchanged; it neither creates nor extends a validity window.",
         ["Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"] =
             "System reconcile of consents derived from OpenMetadata rules; short validity refreshed on each run and covered by the read-time clamp.",
-        ["Autheris.Extensions/Itsm/ItsmWebhookHandler.cs"] =
-            "Activates a request whose duration was validated by IGrantPolicy at submission; no new expiry is introduced.",
         ["Autheris.Api/Extensions/DependencyInjection/RebacSeedHostedService.cs"] =
             "Operator-configured seed tuples (Rebac.SeedTuples / development defaults) written at startup; not a runtime grant path.",
         ["Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs"] =

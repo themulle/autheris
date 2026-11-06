@@ -24,9 +24,7 @@ public sealed class DataCatalogSyncTenantScopeTests
     [Fact]
     public async Task SyncCatalog_Restricted_SkipsForeignAndUnknownTables_NoForeignNamesInWarnings()
     {
-        var clientFactory = Substitute.For<IDataCatalogClientFactory>();
         var client = Substitute.For<IDataCatalogClient>();
-        clientFactory.GetActiveClient().Returns(client);
         client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
 
         var ownTableId = new TableIdentifier("finance", "dbo", "own_table");
@@ -63,7 +61,7 @@ public sealed class DataCatalogSyncTenantScopeTests
 
         var options = Options.Create(new GatewayOptions());
         var sut = new DataCatalogSyncService(
-            clientFactory,
+            client,
             metadataRepo,
             epochService,
             options,

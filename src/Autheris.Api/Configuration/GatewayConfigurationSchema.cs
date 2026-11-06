@@ -87,7 +87,6 @@ public static class GatewayConfigurationSchema
         "Gateway:Cluster:Secret",
         // DefaultEnvironmentSecretProvider resolves these well-known secret references from configuration.
         "Gateway:DataMasking:HmacSecret",
-        "Gateway:Itsm:WebhookSecret",
         "Gateway:Secrets:VaultHostSuffixes"
     ];
 

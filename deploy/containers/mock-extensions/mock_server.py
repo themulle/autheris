@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 """
 Lightweight Mock Server for GqlGateway.Extensions
-Provides high-performance, low-memory mock APIs for all external extensions:
+Provides high-performance, low-memory mock APIs for external extensions:
 - OpenMetadata REST API (v1 tables, entities, webhooks)
-- Microsoft Purview / Apache Atlas Search API (rdbms_table search, classifications)
-- Collibra Data Intelligence Cloud REST Core API v2 (assets, domains, communities)
-- Alation Integration API v2 (tables, schemas, custom PII fields)
-- ServiceNow Table API (change_request approval tickets)
-- Jira Service Management REST API (issue tickets)
 - dbt manifest distribution, contract validation, proposals lifecycle & exposures
 - Azure Blob Storage & Iceberg metadata endpoint emulation
 Runs on standard Python without third-party dependencies (< 20MB RAM).
@@ -53,64 +48,6 @@ MOCK_TABLES = [
     }
 ]
 
-PURVIEW_ENTITIES = [
-    {
-        "guid": "purview-guid-1111",
-        "typeName": "rdbms_table",
-        "attributes": {
-            "name": "invoices",
-            "qualifiedName": "postgres://postgres/finance/public/invoices"
-        },
-        "classifications": [
-            {"typeName": "MICROSOFT.PERSONAL.EMAIL"},
-            {"typeName": "GDPR.Art9.Health"}
-        ]
-    },
-    {
-        "guid": "purview-guid-2222",
-        "typeName": "rdbms_table",
-        "attributes": {
-            "name": "orders",
-            "qualifiedName": "mssql://sqlserver/crm/dbo/orders"
-        },
-        "classifications": [
-            {"typeName": "MICROSOFT.PERSONAL.EMAIL"}
-        ]
-    }
-]
-
-COLLIBRA_ASSETS = [
-    {
-        "id": "collibra-asset-1111",
-        "name": "invoices",
-        "domain": {"name": "Finance"},
-        "tags": [{"name": "PII.Email"}, {"name": "GDPR.Art9.Health"}]
-    },
-    {
-        "id": "collibra-asset-2222",
-        "name": "orders",
-        "domain": {"name": "CRM"},
-        "tags": [{"name": "PII.Email"}]
-    }
-]
-
-ALATION_TABLES = [
-    {
-        "id": 101,
-        "name": "invoices",
-        "schema_name": "public",
-        "ds_id": 1,
-        "tags": ["PII.Email", "GDPR.Art9.Health", "Financial"]
-    },
-    {
-        "id": 102,
-        "name": "orders",
-        "schema_name": "dbo",
-        "ds_id": 2,
-        "tags": ["PII.Email", "Commercial"]
-    }
-]
-
 DBT_PROPOSALS = [
     {
         "id": "prop-1001",
@@ -151,7 +88,7 @@ class MockExtensionsHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, {
                 "status": "healthy",
                 "service": "mock-extensions",
-                "modules": ["OpenMetadata", "Purview", "Collibra", "Alation", "ServiceNow", "Jira", "dbt", "AzureBlob"]
+                "modules": ["OpenMetadata", "dbt", "AzureBlob"]
             })
             return
 
@@ -173,27 +110,7 @@ class MockExtensionsHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, {"data": [], "paging": {"total": 0, "after": None}})
             return
 
-        # 2. Microsoft Purview (Apache Atlas Basic Search API)
-        if path == "/catalog/api/atlas/v2/search/basic":
-            self.send_json(200, {
-                "entities": PURVIEW_ENTITIES
-            })
-            return
-
-        # 3. Collibra Data Intelligence Platform (REST Core API v2)
-        if path == "/rest/2.0/assets":
-            self.send_json(200, {
-                "total": len(COLLIBRA_ASSETS),
-                "results": COLLIBRA_ASSETS
-            })
-            return
-
-        # 4. Alation Data Catalog (Integration API v2)
-        if path.startswith("/integration/v2/table"):
-            self.send_json(200, ALATION_TABLES)
-            return
-
-        # 5. dbt: Manifest download
+        # 2. dbt: Manifest download
         if path == "/dbt/manifest.json":
             if MANIFEST_PATH.exists():
                 with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
@@ -328,7 +245,7 @@ def run():
     server_address = ("", PORT)
     httpd = http.server.ThreadingHTTPServer(server_address, MockExtensionsHandler)
     print(f"[mock-extensions] Starting Enterprise Mock Server on port {PORT}...")
-    print(f"[mock-extensions] Serving OpenMetadata, Purview, Collibra, Alation, ServiceNow, Jira, dbt & AzureBlob...")
+    print(f"[mock-extensions] Serving OpenMetadata, dbt & AzureBlob...")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

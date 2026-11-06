@@ -47,7 +47,6 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", "new { error = new { code = \"UNAUTHORIZED\"", 1, "OData v4 JSON error object for the OData basic-auth challenge"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", "new { error = new { code = \"NotFound\"", 1, "OData v4 JSON error object (reshaped, fixed message)"),
         ("src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs", "new { error = new { message, type = code", 1, "Iceberg REST catalog ErrorModel {message,type,code}"),
-        ("src/Autheris.Api/Endpoints/BackstageEndpoints.cs", "new { error = new { name = \"NotFoundError\"", 1, "Backstage ErrorResponseBody {error{name,message},response{statusCode}} (reshaped, fixed message)"),
         ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", "new { error = safeBody, status = statusCode }", 1, "Envoy ext_authz denied-response pass-through"),
         ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", "[\"error\"] = trinoError", 1, "Trino in-protocol QueryResults.error (a spec member of a 200 result, not an HTTP-level error body)")
     ];

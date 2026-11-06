@@ -19,6 +19,28 @@ public static class UnknownGatewayKeyGuard
     public const int MaxListedKeys = 20;
     public const int MaxKeyLength = 128;
 
+    private static readonly string[] RemovedSimpl12Prefixes =
+    [
+        GatewayConfigurationSchema.Root + ":Itsm",
+        GatewayConfigurationSchema.Root + ":Backstage",
+        GatewayConfigurationSchema.Root + ":Catalog:Purview",
+        GatewayConfigurationSchema.Root + ":Catalog:Collibra",
+        GatewayConfigurationSchema.Root + ":Catalog:Alation",
+        GatewayConfigurationSchema.Root + ":Catalog:DataHub",
+        GatewayConfigurationSchema.Root + ":Catalog:WebhookSecret",
+        GatewayConfigurationSchema.Root + ":Extensibility:EnableBreakGlass",
+        GatewayConfigurationSchema.Root + ":Extensibility:RequireJustificationForBreakGlass",
+        GatewayConfigurationSchema.Root + ":Extensibility:RequireRoleForBreakGlass",
+        GatewayConfigurationSchema.Root + ":Extensibility:BreakGlassAllowedRoles",
+        GatewayConfigurationSchema.Root + ":Extensibility:BreakGlassHeaderName",
+        GatewayConfigurationSchema.Root + ":Extensibility:JustificationHeaderName",
+        GatewayConfigurationSchema.Root + ":Extensibility:TicketValidationRegex",
+        GatewayConfigurationSchema.Root + ":Governance:IndividualGrants:BreakGlassMaxHours",
+        GatewayConfigurationSchema.Root + ":Governance:IndividualGrants:MaxBreakGlassDurationHours",
+        GatewayConfigurationSchema.Root + ":HitLStepUp:AutoCreateItsmTicket",
+        GatewayConfigurationSchema.Root + ":HitLStepUp:PreferredItsmSystem"
+    ];
+
     public static void ThrowIfUnknownKeys(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -50,6 +72,19 @@ public static class UnknownGatewayKeyGuard
             {
                 unknown.Add("Analytics:Privacy:Noise (removed (OD-11); small-group suppression applies)");
                 break;
+            }
+        }
+
+        // Removed sections and keys fail startup with any value (including false or empty).
+        foreach (var removedPrefix in RemovedSimpl12Prefixes)
+        {
+            if (configuration.GetSection(removedPrefix).Exists() ||
+                configuration.AsEnumerable().Any(kv =>
+                    !string.IsNullOrEmpty(kv.Key) &&
+                    (kv.Key.Equals(removedPrefix, StringComparison.OrdinalIgnoreCase) ||
+                     kv.Key.StartsWith(removedPrefix + ":", StringComparison.OrdinalIgnoreCase))))
+            {
+                unknown.Add(removedPrefix);
             }
         }
 
