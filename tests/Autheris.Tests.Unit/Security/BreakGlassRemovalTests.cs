@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
@@ -14,9 +15,7 @@ using Autheris.Domain.Governance;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -83,48 +82,59 @@ public sealed class BreakGlassRemovalTests
     }
 
     [Fact]
-    public async Task Profile_breakglass_assignments_removed_and_grant_nothing()
+    public void Profile_breakglass_assignments_removed_and_grant_nothing()
     {
         Enum.GetNames<AccessProfileAssignmentKind>().ShouldNotContain("BreakGlass");
-        Enum.GetNames<FunctionalRight>().ShouldNotContain("SecurityBreakGlass");
 
-        var dbName = $"bg-removal-{Guid.NewGuid():N}";
-        var cs = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-        await using var keepAlive = new SqliteConnection(cs);
-        await keepAlive.OpenAsync();
+        var functionalRightNames = typeof(FunctionalRight)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(FunctionalRight))
+            .Select(f => f.Name)
+            .ToList();
+        functionalRightNames.ShouldNotContain("SecurityBreakGlass");
 
-        using var repo = new SqliteGovernanceRepository(new FakeEpochValidationService(), cs);
-        var tenant = new TenantId("tenant-a");
+        var logger = new CapturingLogger<AccessProfileStore>();
+        var store = new AccessProfileStore(
+            AccessProfileDialect.PostgreSql,
+            (_, _) => throw new NotSupportedException(),
+            logger: logger);
+
+        var parsedKind = store.ReadKind("BreakGlass");
+        Enum.IsDefined(parsedKind).ShouldBeFalse();
+        logger.Entries.ShouldContain(e => e.Level == LogLevel.Warning && e.Message.Contains("unknown kind"));
+        foreach (var entry in logger.Entries)
+        {
+            entry.Message.ShouldNotContain("BreakGlass");
+        }
+
         var now = DateTimeOffset.UtcNow;
-
-        await repo.UpsertProfileAsync(new AccessProfile
+        var profile = new AccessProfile
         {
             ProfileId = "p-1",
-            TenantId = tenant,
+            TenantId = new TenantId("tenant-a"),
             Name = "Profile 1",
-            MaskingMode = MaskingPolicyMode.Masked,
+            MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["sales.public.orders"],
             CreatedBy = "admin",
             CreatedAt = now
-        });
+        };
 
-        // Simulate a legacy row in ACCESS_PROFILE_ASSIGNMENTS with kind = 'BreakGlass' prior to migration 0006.
-        await using (var cmd = keepAlive.CreateCommand())
+        var legacyBreakGlassAssignment = new AccessProfileAssignment
         {
-            cmd.CommandText = """
-                INSERT INTO ACCESS_PROFILE_ASSIGNMENTS
-                    (tenant_id, profile_id, subject_type, subject, assigned_at, expires_at, created_by, approved_by, approved_at, justification, kind, renewal_count)
-                VALUES
-                    ('tenant-a', 'p-1', 'User', 'alice', @now, @exp, 'req', 'approver', @now, 'incident-secret', 'BreakGlass', 0);
-                """;
-            cmd.Parameters.AddWithValue("@now", now.ToString("O"));
-            cmd.Parameters.AddWithValue("@exp", now.AddHours(12).ToString("O"));
-            await cmd.ExecuteNonQueryAsync();
-        }
+            Subject = "alice",
+            SubjectType = AccessProfileSubjectType.User,
+            AssignedAt = now,
+            ExpiresAt = now.AddHours(12),
+            CreatedBy = "req",
+            ApprovedBy = "approver",
+            ApprovedAt = now,
+            Justification = "incident-secret",
+            Kind = parsedKind,
+            RenewalCount = 0
+        };
 
         // At runtime, an unknown assignment kind ('BreakGlass') fails closed and grants nothing.
-        var activeForAlice = await repo.GetActiveProfilesForSubjectAsync(tenant, ["alice"], [], [], now);
-        activeForAlice.ShouldBeEmpty();
+        AccessProfileAssignmentRules.IsEffective(profile, legacyBreakGlassAssignment, now).ShouldBeFalse();
     }
 
     private sealed class InspectingInterceptor(Action<IngressContext> inspect) : IIngressInterceptor

@@ -45,7 +45,6 @@ public class RestMcpHitlAndWebhookSecurityTests
                 Enabled = true,
                 ApprovalTimeoutSeconds = timeoutSeconds,
                 RequireDifferentApprover = true,
-                AutoCreateItsmTicket = false,
                 RequireTotp2Fa = false
             }
         });

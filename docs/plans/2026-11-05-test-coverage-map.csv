@@ -79,3 +79,9 @@ Autheris.Tests.Unit.Persistence.DialectSql.ItsmOutboxSqlCoreGoldenTests.GetPendi
 Autheris.Tests.Unit.Persistence.DialectSql.ItsmOutboxSqlCoreGoldenTests.MarkCompleted_IssuesGoldenSql_WithGoldenBinding,feature deleted (WP-SIMPL-12),Security
 Autheris.Tests.Unit.Persistence.DialectSql.ItsmOutboxSqlCoreGoldenTests.MarkFailed_IssuesGoldenSql_WithGoldenBinding,feature deleted (WP-SIMPL-12),Security
 Autheris.Tests.Unit.Plugins.Auth.AuthPluginRoleEscalationTests.IsProhibitedRole_ChecksTenantPrefixedFormsAndKeepsBusinessRoles,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Architecture.DialectSql.DialectSqlGoldenArchitectureTests.Itsm_Outbox_SystemQueue_Is_Only_TenantFilter_Exemption,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Architecture.DialectSql.DialectSqlGoldenArchitectureTests.Webhook_And_Itsm_Outbox_Claim_Is_Exclusive_And_Tenant_Scoped_Unchanged,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Unit.MessageCapturingLogger.Ext17_BadEntity_LogDoesNotContainQualifiedName,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Unit.MessageCapturingLogger.Ext17_OneBadEntity_DoesNotDropPage,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Unit.Webhooks.WebhookErrorLeakageTests.Webhook_HandlerThrows_ReturnsFixedMessageWithoutExceptionText,feature deleted (WP-SIMPL-12),Security
+Autheris.Tests.Unit.Webhooks.WebhookErrorLeakageTests.Webhook_MalformedJson_ReturnsFixedMessage,feature deleted (WP-SIMPL-12),Security

@@ -43,7 +43,7 @@ public sealed class ConsentRecertificationScanTests
         };
 
         var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetExpiringConsentsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+        consentRepo.GetExpiringConsentsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([expiringConsent]));
 
         var recordedEntries = new List<AuditLogEntry>();

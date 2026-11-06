@@ -453,7 +453,7 @@ internal sealed class AccessProfileStore(
         RenewalCount = reader.GetInt32(o + 9)
     };
 
-    private AccessProfileAssignmentKind ReadKind(string rawKind)
+    internal AccessProfileAssignmentKind ReadKind(string rawKind)
     {
         if (Enum.TryParse<AccessProfileAssignmentKind>(rawKind, true, out var k) && Enum.IsDefined(k))
         {

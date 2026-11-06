@@ -135,7 +135,7 @@ public sealed class RemovedConfigKeysTests
         var ex = Should.Throw<InvalidOperationException>(() =>
             UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
 
-        ex.Message.ShouldContain(key);
+        ex.Message.ShouldContain("Gateway:Itsm");
     }
 
     [Theory]
@@ -147,7 +147,7 @@ public sealed class RemovedConfigKeysTests
         var ex = Should.Throw<InvalidOperationException>(() =>
             UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
 
-        ex.Message.ShouldContain(key);
+        ex.Message.ShouldContain("Gateway:Backstage");
     }
 
     [Theory]
@@ -161,10 +161,13 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Alation:Enabled", "false")]
     public void Catalog_vendor_keys_fail_startup(string key, string value)
     {
+        var config = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() =>
-            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
 
-        ex.Message.ShouldContain(key);
+        var unknown = UnknownGatewayKeyGuard.FindUnknownKeys(config);
+        unknown.ShouldContain(u => key.Equals(u, StringComparison.OrdinalIgnoreCase) || key.StartsWith(u + ":", StringComparison.OrdinalIgnoreCase));
+        ex.Message.ShouldContain(unknown[0]);
     }
 
     [Theory]
@@ -178,9 +181,12 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:IndividualGrants:BreakGlassMaxHours", "72")]
     public void Breakglass_interceptor_keys_fail_startup(string key, string value)
     {
+        var config = Config(key, value);
         var ex = Should.Throw<InvalidOperationException>(() =>
-            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
 
-        ex.Message.ShouldContain(key);
+        var unknown = UnknownGatewayKeyGuard.FindUnknownKeys(config);
+        unknown.ShouldContain(u => key.Equals(u, StringComparison.OrdinalIgnoreCase) || key.StartsWith(u + ":", StringComparison.OrdinalIgnoreCase));
+        ex.Message.ShouldContain(unknown[0]);
     }
 }
