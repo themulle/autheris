@@ -197,7 +197,7 @@ The earlier tests of this section plus the four OD-12 tests (SEC-SIMPL-90..93) c
 
 ## 11. Phase 3 addendum (OD-18..OD-44)
 
-Verdict for WP-SIMPL-38..49: **APPROVED WITH CONDITIONS** (WP-SIMPL-48, WP-SIMPL-49 and the OD-38..OD-44 amendments reviewed 2026-11-06). The conditions below are binding for Phase 4 and Phase 5; the "proposed" condition lists inside the WP specs are adopted as binding only as amended here. SEC-SIMPL-85 is replaced by SEC-AZ-05/08. Condition ids of colliding ranges are renamed (WP-41: SEC-SIMPL-99..114 becomes SEC-DISC-01..16; WP-43: SEC-SIMPL-99..110 becomes SEC-AUTH-01..12; WP-42: SEC-SIMPL-U1..U12 becomes SEC-USAGE-01..12; the specs must use the new ids).
+Verdict for WP-SIMPL-38..49: **APPROVED WITH CONDITIONS** (WP-SIMPL-48, WP-SIMPL-49 and the OD-38..OD-44 amendments reviewed 2026-11-06; WP-SIMPL-49 re-reviewed after the OD-44 revision). The conditions below are binding for Phase 4 and Phase 5; the "proposed" condition lists inside the WP specs are adopted as binding only as amended here. SEC-SIMPL-85 is replaced by SEC-AZ-05/08. Condition ids of colliding ranges are renamed (WP-41: SEC-SIMPL-99..114 becomes SEC-DISC-01..16; WP-43: SEC-SIMPL-99..110 becomes SEC-AUTH-01..12; WP-42: SEC-SIMPL-U1..U12 becomes SEC-USAGE-01..12; the specs must use the new ids).
 
 ### 11.1 Authorization model (ADR-020, WP-SIMPL-46, WP-SIMPL-48, OD-30..OD-43) - binding SEC-AZ-01..19
 
@@ -274,19 +274,23 @@ No WP-38..48 PR merges before its tests of 11.1 or 11.2 exist and are green; WP-
 | 45 | `DmlSecurityTests.*` final owner; `WriteGrantTests.*`; `WriteTransportTests.*` |
 | 46 | SEC-AZ tests of 11.1; `RebacEnforcementTests.All_paths_enforced_when_tuples_exist_and_exemption_fails_startup` is deleted and replaced by `CrossTransportAuthorizationParityTests`; `AuthorizationHook_can_only_narrow`; `Untrusted_plugin_hash_is_not_loaded` |
 | 48 | SEC-AZ-15..19 tests of 11.1 (WP-SIMPL-48 part); parity rows S20..S27 |
-| 49 | SEC-VIEW-01..10 tests of 11.7; parity rows V1..V10 |
+| 49 | SEC-PROD-01..14 tests of 11.7; parity rows P1..P14 |
 
-### 11.7 Virtual views (OD-44, WP-SIMPL-49) - binding SEC-VIEW-01..10
+### 11.7 Data products (OD-44, WP-SIMPL-49) - binding SEC-PROD-01..14
 
-- **SEC-VIEW-01** A view definition is one `SELECT` checked by the AST security visitor (no DML, DDL, system catalogs or functions outside the allow-list); no DDL is ever sent to a data source.
-- **SEC-VIEW-02** View columns come from the definition and catalog metadata, never from the source (OD-25); PII propagates by lineage; unresolved lineage counts as PII.
-- **SEC-VIEW-03** A view is readable only when the owners of every base object approved its current definition hash, its product owners and the classification of its PII-derived columns; the author never approves; SQL changes and product-owner transfers require base-owner approval; after activation only the product owners (and their delegates) decide grants on the view.
-- **SEC-VIEW-04** The decision point decides the view with the caller's grants on the view only; no view grant means default deny; base-table grants are never an alternative path.
-- **SEC-VIEW-05** Base-table grants, denies and hard row policies of the caller never affect a view decision (neither widen nor narrow it); denies and hard policies bound to the view itself apply; withdrawal of approval by a current base owner suspends the view.
-- **SEC-VIEW-06** A PII view column is Clear only if the base owners classified it as Clear-eligible and the caller's view grant has Clear; a column declassified as non-PII must be recorded with the approving base owner; masked view columns follow the mask guards.
-- **SEC-VIEW-07** Nested views are expanded with their own approved definitions and decided by the decision point; depth <= 3, cycles rejected.
-- **SEC-VIEW-08** Invalid, suspended, pending or retired views deny on every transport.
-- **SEC-VIEW-09** Discovery never reveals base objects hidden from the caller; the reserved source name `views` cannot be configured as a data source.
-- **SEC-VIEW-10** Every view access is audited with view id and definition hash and metered per view.
+- **SEC-PROD-01** Creation and definition changes only by: owner or delegate of every base object; owner of the data source of every base object; `DataProductAdmin`; `DataProductSync` through the signed sync path. Procedures only by data-source owners, `DataProductAdmin` or the sync.
+- **SEC-PROD-02** Products created by `DataProductAdmin` or the sync name a product owner different from the creator and the sync identity; transfers only by `DataProductAdmin`, never to itself.
+- **SEC-PROD-03** The product owner decides grants, row policies, masking, hidden columns and refresh, never the definition, base objects or column classification.
+- **SEC-PROD-04** Base owners have no approval and no veto; every create, change and retirement notifies them and is visible in the effective-access report.
+- **SEC-PROD-05** `DataProductAdmin` and `DataProductSync` are tenant-scoped, implied by no other role (ClusterAdmin included) and mapped with four-eyes approval; the sync role reaches only the sync endpoints.
+- **SEC-PROD-06** A product is decided by the decision point with the caller's grants, denies and hard row policies on the product only; base-table grants, denies and hard policies never widen or narrow it; no product grant means default deny.
+- **SEC-PROD-07** Grants on products follow the consent rules incl. the self-approval ban.
+- **SEC-PROD-08** PII-derived columns and columns with unresolved lineage are Masked by default; declassification only by the creator with a reason, audited; Clear needs a Clear-eligible class and a Clear rule on the grant.
+- **SEC-PROD-09** A refresh executes only the current definition hash, under limits (rows, bytes, runtime), with a cluster-wide lease; no DDL is ever sent to a source; columns never come from source metadata (OD-25).
+- **SEC-PROD-10** One snapshot is retained; a failed refresh keeps it and marks it stale; `MaxStaleness` denies when exceeded; products are part of the GDPR disclosure report.
+- **SEC-PROD-11** Read procedures never commit (never-committed SQL Server transaction, read-only PostgreSQL transaction) and run on the EXECUTE-only read connection.
+- **SEC-PROD-12** Write procedures need a separate write-execute grant (an execute grant never suffices), run only through the write connection, only on wired transports (procedure REST route, MCP without read-only token) and are audited with intent and outcome.
+- **SEC-PROD-13** Git-managed definitions are read-only through the API; the sync requires the sync role and a signed webhook; drift is reported, never overwritten silently.
+- **SEC-PROD-14** Every product access and refresh is audited with product id and definition hash; discovery never reveals base objects hidden from the caller; `products` is a reserved data-source name.
 
-Mandatory tests: the `[Trait("Category","Security")]` classes of WP-SIMPL-49 section 6.1, `VirtualViewArchitectureTests.No_ddl_statement_built_in_view_code` and parity rows V1..V10.
+Mandatory tests: the `[Trait("Category","Security")]` classes of WP-SIMPL-49 section 6.1, `ProductArchitectureTests.*` and parity rows P1..P14.

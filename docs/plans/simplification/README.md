@@ -33,7 +33,7 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 | 3 | Core authorization 4 | [14](WP-SIMPL-14-delete-casbin.md) Casbin deletion | WP-06; WP-46 PR 1-5; WP-43 PR 4 (Envoy); WP-45 PR 1-3 (every `IPolicyEnforcementService` consumer incl. Envoy ext_authz calls the decision point); not in parallel with WP-46 or WP-45 PR 4 |
 | 3 | Core authorization 4 | [26](WP-SIMPL-26-pilot-module-odata.md) OData core hardening (OD-24) | WP-46 merged; must merge before WP-29 |
 | 3 | Persistence lane | [42](WP-SIMPL-42-usage-accounting-users-groups.md) usage accounting (replaces FinOps) | PR-1 any time; PR-2+ after WP-11, WP-19, WP-20a-20d; PR-3b after WP-46 PR 1 (grant id on the decision record); PR-7 after WP-37 |
-| 5 | After the feature freeze (Stage 3 exit) | [49](WP-SIMPL-49-virtual-views.md) virtual views (OD-44) | WP-46, 47, 48, 41, 42, 44, 21, 20 merged; not under `freeze-exception` |
+| 5 | After the feature freeze (Stage 3 exit) | [49](WP-SIMPL-49-data-products.md) data products: materialized and live views, stored procedures with their own product owner (OD-44) | WP-46, 47, 48, 41, 42, 44, 21, 20 merged; not under `freeze-exception` |
 
 `[WF]` = changes GitHub workflows; approved by the owner in the defined bundles (OD-17).
 
@@ -96,9 +96,9 @@ New work package [WP-SIMPL-48](WP-SIMPL-48-row-policies-dynamic-coverage.md); am
 - **OD-42:** the decision record lists every contributing grant; audit and usage count the access for each grant in full, user/group/tenant totals once (revises R6).
 - **OD-43:** non-blocking approval-time hint (redundant grant, empty intersection, future objects included) and an effective-access report with provenance.
 
-## Owner decision OD-44 (2026-11-06)
+## Owner decision OD-44 (2026-11-06, revised)
 
-- **OD-44:** virtual views: data owners or GovernanceAdmins define read-only views as SQL in Autheris (nothing is created in the source); active only after the owners of every base object approved the exact definition and the designated product owners, which delegates granting authority to the product owners (data products such as cubes); base-table denies do not propagate; catalog objects in the reserved data source `views`, granted, discovered, audited and metered like tables on every transport; definer semantics (a view grant suffices); multi-source views run in the DuckDB federation; PII by lineage, Masked unless base owners approved Clear. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-virtual-views.md).
+- **OD-44 (revised 2026-11-06):** data products: views (materialized via the DuckDB table cache, live later) and stored procedures (read and write) defined in Autheris, each with its own product owner who decides all grants; base owners are decoupled (notified, no approval). Created by data owners or delegates over own objects, data-source owners over their source, the new role `DataProductAdmin` (implied by no other role, never product owner of its own creations) or Git sync (`DataProductSync`). Product grants suffice; base-table rules do not apply. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-data-products.md).
 
 ## Security advisories
 

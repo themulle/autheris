@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted by the owner on 2026-11-05 (OD-30). This ADR revises OD-7 (ReBAC enforcement; advisory GHSA-78j7-3gh6-7cqx, details in the private advisory) and replaces SEC-SIMPL-85; implementation in WP-SIMPL-46. Amended by OD-32..OD-35 (access-profile assignments materialize grant records; owner grant records; independent write grants; write enforcement in the shared pipeline) and by OD-38..OD-43 (named row policies at two levels, dynamic object coverage, per-cell masking, every contributing grant recorded, transparency; see "Amendment 2026-11-06" below; implementation in WP-SIMPL-48) and by OD-44 (virtual views with definer semantics, WP-SIMPL-49).
+Accepted by the owner on 2026-11-05 (OD-30). This ADR revises OD-7 (ReBAC enforcement; advisory GHSA-78j7-3gh6-7cqx, details in the private advisory) and replaces SEC-SIMPL-85; implementation in WP-SIMPL-46. Amended by OD-32..OD-35 (access-profile assignments materialize grant records; owner grant records; independent write grants; write enforcement in the shared pipeline) and by OD-38..OD-43 (named row policies at two levels, dynamic object coverage, per-cell masking, every contributing grant recorded, transparency; see "Amendment 2026-11-06" below; implementation in WP-SIMPL-48) and by OD-44 (data products with their own product owner, WP-SIMPL-49).
 
 ## Context
 
@@ -78,9 +78,9 @@ Adopt **option B**.
 - **Per-cell masking (OD-41).** Grants are grouped by column signature; one signature compiles to a plain `WHERE`; several signatures compute each scope once as a flag and decide each cell with `CASE`. No `UNION ALL` rewrite.
 - **Attribution (OD-42).** The decision record lists every contributing grant; audit and usage count the access for each of them. `AuthorizingGrant` is not used.
 - **Transparency (OD-43).** Non-blocking approval-time hint (redundant grant, empty intersection) and an effective-access report with provenance (group, grant, row policy), without predicate or parameter values of other subjects.
-- **Virtual views as data products (OD-44).** A view defined in Autheris is an object of its own (reserved data source `views`) with designated product owners. The owners of every base object approve once at creation (definition, product owners, classification of PII-derived columns) and thereby delegate granting authority to the product owners; product-owner transfers and SQL changes need their approval again. The decision point decides the view with the caller's grants and denies on the view only (definer semantics); base-table grants, denies and hard row policies of the caller do not propagate. PII columns stay Masked unless classified Clear-eligible at approval and Clear on the view grant. Implementation after the feature freeze (WP-SIMPL-49).
+- **Data products (OD-44).** Views (materialized or live) and stored procedures defined in Autheris are objects of their own (reserved data source `products`) with a product owner who decides all grants on them. Base owners are decoupled (no approval, notification only). The decision point decides a product with the caller's grants, denies and hard row policies on the product only (definer semantics). Exception to decision 4: the tenant-scoped role `DataProductAdmin` (implied by no other role, four-eyes mapped) may create products over any objects and designate their product owner, never itself; it still cannot grant itself access, because grants come only from the product owner and self-approval is forbidden. Implementation after the feature freeze (WP-SIMPL-49).
 
-Precedence is unchanged: precondition > explicit deny (including hard-policy denies; for a view only denies on the view itself) > grant (row-scope union, then hard policies, then narrowing inputs) > default deny.
+Precedence is unchanged: precondition > explicit deny (including hard-policy denies; for a data product only denies on the product itself) > grant (row-scope union, then hard policies, then narrowing inputs) > default deny.
 
 ## Consequences
 
