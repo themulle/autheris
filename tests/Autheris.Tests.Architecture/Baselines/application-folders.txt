@@ -11,7 +11,6 @@ Data
 DataCatalog
 DataSources
 Dbt
-Diagnostics
 Docs
 Events
 Extensibility

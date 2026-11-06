@@ -281,14 +281,8 @@ Autheris encompasses **57+ enterprise features**, documented in [`docs/features/
   - Resilient distributed token-bucket rate limiting (`RedisRateLimiterService`) with seamless fallback to `InMemoryRateLimiterService`.
 - **Token Revocation Endpoint (`POST /api/admin/tokens/revoke`)**:
   - Cluster-wide JTI blacklisting for immediate token invalidation.
-- **AST-Aware Production Traffic Shadowing & Dark Replay ([`F-OPS-01`](docs/features/f-ops-01-traffic-shadowing-dark-replay.md))**:
-  - Asynchronous shadowing of live queries to benchmark and validate new versions without impacting production traffic.
-- **SSRF Defense & Reverse Proxy Hardening**:
-  - `SsrfProtectionHandler`: DNS pre-resolution blocks RFC 1918, loopback, link-local, and cloud metadata addresses (169.254.169.254).
-  - Strict internal CIDR allowlists (`TrustedInternalNetworks`) for approved on-premises systems (Jira, ServiceNow).
-  - HTTP redirects disabled (`AllowAutoRedirect = false`) to thwart redirect-based SSRF exploits.
 - **Developer Quickstart & Insecure Mode Governance ([`F-DX-01`](docs/features/f-dx-01-developer-quickstart.md), `ADR-012`)**:
-  - Turnkey getting-started container with embedded Microsoft Garnet cache and pre-seeded demo personas.
+  - Turnkey getting-started container with in-memory cache and pre-seeded demo personas.
   - Strict startup validation: Risk switches categorized into `DANGER` (immediate startup abortion outside of `Development`) and `WARN` (production warning banners).
 
 | Configuration Switch | Classification | Behavior |
@@ -413,7 +407,7 @@ Currently passes **3,728 / 3,728 tests (100% green)** across all test suites:
 
 ### 3. Run Gateway via Docker Container (Fastest / Getting Started)
 
-A turnkey container image featuring the integrated **Microsoft Garnet .NET Cache**, in-memory governance database (pre-seeded with 10 domains), and interactive web UI is available via GitHub Container Registry:
+A turnkey container image featuring an in-memory governance database (pre-seeded with 10 domains) and interactive web UI is available via GitHub Container Registry:
 
 > **Security Notice:** The container starts in `Production` by default. The getting-started mode below
 > explicitly sets `ASPNETCORE_ENVIRONMENT=Development` and the opt-in `AUTHERIS_ALLOW_DEV_IN_CONTAINER=true`,

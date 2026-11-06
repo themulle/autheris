@@ -44,4 +44,23 @@ public sealed class PackageBoundaryArchitectureTests
     {
         typeof(FileSystemUniversalDocStore).Assembly.ShouldBe(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
     }
+
+    [Fact]
+    public void No_garnet_package()
+    {
+        var csprojFiles = RepositoryScan.EnumerateFiles("", "*.csproj");
+        var violations = new System.Collections.Generic.List<string>();
+
+        foreach (var relativePath in csprojFiles)
+        {
+            var fullPath = System.IO.Path.Combine(RepositoryScan.RepoRoot, relativePath);
+            var content = System.IO.File.ReadAllText(fullPath);
+            if (content.Contains("Microsoft.Garnet", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{relativePath}: references Microsoft.Garnet");
+            }
+        }
+
+        violations.ShouldBeEmpty("Microsoft.Garnet package is prohibited across all projects.");
+    }
 }

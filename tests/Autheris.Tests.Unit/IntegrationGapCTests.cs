@@ -24,7 +24,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Garnet;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -460,99 +459,6 @@ public sealed class IntegrationGapCTests
         var sha1Validator = RedisConnectionSecurity.CreatePinnedCertificateValidator(
             RedisConnectionSecurity.NormalizeThumbprints([pinnedCert.GetCertHashString()], "test"));
         sha1Validator(new object(), pinnedCert, null, SslPolicyErrors.None).ShouldBeTrue();
-    }
-
-    [Fact]
-    public void H01_GarnetServerArguments_ContainTlsOnlyWhenEnabled()
-    {
-        var plain = GarnetServerManager.BuildServerArguments(new GarnetOptions(), "pw", null);
-        plain.ShouldNotContain("--tls");
-        plain.ShouldContain("--auth");
-
-        var tls = GarnetServerManager.BuildServerArguments(
-            new GarnetOptions { EnableTls = true, TlsCertFile = "/certs/garnet.pfx" },
-            "pw",
-            "pfx-pw");
-        tls.ShouldContain("--tls");
-        var certIndex = tls.IndexOf("--cert-file-name");
-        certIndex.ShouldBeGreaterThanOrEqualTo(0);
-        tls[certIndex + 1].ShouldBe("/certs/garnet.pfx");
-        var pwIndex = tls.IndexOf("--cert-password");
-        pwIndex.ShouldBeGreaterThanOrEqualTo(0);
-        tls[pwIndex + 1].ShouldBe("pfx-pw");
-
-        Should.Throw<InvalidOperationException>(() =>
-            GarnetServerManager.BuildServerArguments(new GarnetOptions { EnableTls = true }, "pw", null));
-    }
-
-    [Fact]
-    public void H01_GarnetTls_MissingCertificate_AbortsStart()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            Caching = new CachingOptions
-            {
-                Garnet = new GarnetOptions
-                {
-                    EnableEmbeddedServer = true,
-                    Host = "127.0.0.1",
-                    Port = 3297,
-                    EnableTls = true,
-                    TlsCertFile = Path.Combine(Path.GetTempPath(), $"missing_{Guid.NewGuid():N}.pfx")
-                }
-            }
-        });
-
-        using var manager = new GarnetServerManager(options, environment: Env("Production"));
-        Should.Throw<InvalidOperationException>(() => manager.StartServer());
-        manager.IsRunning.ShouldBeFalse();
-    }
-
-    [Fact]
-    public void H01_GarnetTls_UnresolvableCertPasswordSecret_FailsFast()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            Caching = new CachingOptions
-            {
-                Garnet = new GarnetOptions
-                {
-                    EnableTls = true,
-                    TlsCertFile = "/certs/garnet.pfx",
-                    TlsCertPasswordSecretRef = $"GAPC_UNSET_{Guid.NewGuid():N}"
-                }
-            }
-        });
-
-        Should.Throw<InvalidOperationException>(() =>
-        {
-            using var unresolved = new GarnetServerManager(options);
-        });
-
-        var provider = Substitute.For<IKeyVaultSecretProvider>();
-        provider.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes("pfx-secret"));
-        Should.NotThrow(() =>
-        {
-            using var resolved = new GarnetServerManager(options, secretProvider: provider);
-        });
-    }
-
-    [Fact]
-    public void H01_GarnetClientTls_IsConfiguredOnlyWhenEnabled()
-    {
-        var plain = RedisConnectionSecurity.ApplyGarnetClientTls(new ConfigurationOptions(), new GarnetOptions());
-        plain.Ssl.ShouldBeFalse();
-
-        var tls = RedisConnectionSecurity.ApplyGarnetClientTls(
-            new ConfigurationOptions(),
-            new GarnetOptions { EnableTls = true, Host = "127.0.0.1" });
-        tls.Ssl.ShouldBeTrue();
-        tls.SslHost.ShouldBe("127.0.0.1");
-
-        var withHost = RedisConnectionSecurity.ApplyGarnetClientTls(
-            new ConfigurationOptions(),
-            new GarnetOptions { EnableTls = true, TlsSslHost = "garnet.local" });
-        withHost.SslHost.ShouldBe("garnet.local");
     }
 
     // =========================================================================

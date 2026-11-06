@@ -8,9 +8,8 @@ public static class ClusterStateServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the <see cref="IDistributedClusterStateProvider"/> matching <paramref name="mode"/> together with the
-    /// <see cref="IClusterStateTopology"/> describing it. <see cref="ClusterStateMode.Embedded"/> and
-    /// <see cref="ClusterStateMode.External"/> use the Redis provider (the caller registers the connection multiplexer);
-    /// <see cref="ClusterStateMode.InMemory"/> uses the process-local provider.
+    /// <see cref="IClusterStateTopology"/> describing it. <see cref="ClusterStateMode.External"/> uses the Redis provider
+    /// (the caller registers the connection multiplexer); <see cref="ClusterStateMode.InMemory"/> uses the process-local provider.
     /// </summary>
     public static IServiceCollection AddClusterState(this IServiceCollection services, ClusterStateMode mode)
     {

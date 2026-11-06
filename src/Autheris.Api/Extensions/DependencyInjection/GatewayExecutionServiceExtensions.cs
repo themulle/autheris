@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using Autheris.Api.Hosting;
 using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Diagnostics.Shadowing;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
 using Autheris.Application.FinOps.Interfaces;
@@ -150,17 +149,6 @@ public static class GatewayExecutionServiceExtensions
             Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
             services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
             services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
-        }
-
-        // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
-        services.AddHttpClient<TrafficShadowingService>()
-            .AddSecureOutboundHandlers(EgressIntegrations.Shadowing);
-        services.AddSingleton<TrafficShadowingService>();
-        services.AddSingleton<ITrafficShadowingService>(sp =>
-            sp.GetRequiredService<TrafficShadowingService>());
-        if (gatewayOptions.TrafficShadowing.Enabled)
-        {
-            services.AddHostedService(sp => sp.GetRequiredService<TrafficShadowingService>());
         }
 
         // FOCUS FinOps Accounting (F-AI-08)

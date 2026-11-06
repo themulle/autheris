@@ -15,7 +15,6 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Databricks;
 using Autheris.Domain.Diagnostics;
-using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Health;
 using Autheris.Infrastructure.Idempotency;
 using Autheris.Infrastructure.Messaging;
@@ -42,37 +41,7 @@ public static class GatewayStorageServiceExtensions
 
         services.AddSingleton<IBinaryCacheSerializer, MemoryPackCacheSerializer>();
 
-        if (gatewayOptions.Caching.Garnet.EnableEmbeddedServer)
-        {
-            // SEC H-01 / AR-06: Register GarnetServerManager as singleton and hosted service.
-            services.AddSingleton<IGarnetServerManager, GarnetServerManager>();
-            services.AddHostedService(sp => (GarnetServerManager)sp.GetRequiredService<IGarnetServerManager>());
-
-            services.AddSingleton<IConnectionMultiplexer>(sp =>
-            {
-                var garnetManager = sp.GetRequiredService<IGarnetServerManager>();
-                // SEC H-01 / AR-06: Imperatively ensure Garnet is running before establishing RESP connection
-                // to prevent race conditions when services resolve multiplexer before HostedService.StartAsync.
-                garnetManager.StartServer();
-
-                var garnetConfig = new ConfigurationOptions
-                {
-                    EndPoints = { $"{gatewayOptions.Caching.Garnet.Host}:{gatewayOptions.Caching.Garnet.Port}" },
-                    Password = garnetManager.ClientPassword, // SEC H-01: Garnet runs with --auth Password
-                    ConnectTimeout = gatewayOptions.Caching.Redis.ConnectTimeoutMs,
-                    SyncTimeout = gatewayOptions.Caching.Redis.SyncTimeoutMs,
-                    AbortOnConnectFail = false
-                };
-                RedisConnectionSecurity.ApplyGarnetClientTls(garnetConfig, gatewayOptions.Caching.Garnet); // SEC H-01: optional TLS
-                return ConnectionMultiplexer.Connect(garnetConfig);
-            });
-            services.AddSingleton<IEventBus, RedisEventBus>();
-            services.AddSingleton<IRateLimiterService, RedisRateLimiterService>();
-            services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
-            services.AddSingleton<ITokenRevocationService, RedisTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddClusterState(ClusterStateMode.Embedded);
-        }
-        else if (gatewayOptions.Caching.Redis.Enabled)
+        if (gatewayOptions.Caching.Redis.Enabled)
         {
             var redisConfig = ConfigurationOptions.Parse(gatewayOptions.Caching.Redis.Configuration);
             redisConfig.ConnectTimeout = gatewayOptions.Caching.Redis.ConnectTimeoutMs;
