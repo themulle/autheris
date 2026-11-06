@@ -6,6 +6,7 @@ Autheris.Api->Autheris.Domain
 Autheris.Api->Autheris.Extensions
 Autheris.Api->Autheris.GraphQL
 Autheris.Api->Autheris.Infrastructure
+Autheris.Api->Autheris.Modules.Abstractions
 Autheris.Application->Autheris.Domain
 Autheris.Application->TrinoSqlEngine
 Autheris.Benchmarks->Autheris.Api
@@ -16,6 +17,7 @@ Autheris.GraphQL->Autheris.Application
 Autheris.GraphQL->Autheris.Domain
 Autheris.Infrastructure->Autheris.Application
 Autheris.Infrastructure->Autheris.Domain
+Autheris.Modules.Abstractions->Autheris.Domain
 Autheris.Sim.ApiHost->Autheris.Api
 Autheris.Tests.Architecture->Autheris.Api
 Autheris.Tests.Architecture->Autheris.Application
@@ -23,11 +25,13 @@ Autheris.Tests.Architecture->Autheris.Domain
 Autheris.Tests.Architecture->Autheris.Extensions
 Autheris.Tests.Architecture->Autheris.GraphQL
 Autheris.Tests.Architecture->Autheris.Infrastructure
+Autheris.Tests.Architecture->Autheris.Modules.Abstractions
 Autheris.Tests.Architecture->TrinoSqlEngine
 Autheris.Tests.Common->Autheris.Application
 Autheris.Tests.Fuzz->TrinoSqlEngine
 Autheris.Tests.Integration->Autheris.Api
 Autheris.Tests.Integration->Autheris.Extensions
+Autheris.Tests.Integration->Autheris.Modules.Abstractions
 Autheris.Tests.Integration->Autheris.Tests.Common
 Autheris.Tests.Parity->Autheris.Api
 Autheris.Tests.Parity->Autheris.Tests.Common
@@ -44,6 +48,7 @@ Autheris.Tests.Unit->Autheris.Domain
 Autheris.Tests.Unit->Autheris.Extensions
 Autheris.Tests.Unit->Autheris.GraphQL
 Autheris.Tests.Unit->Autheris.Infrastructure
+Autheris.Tests.Unit->Autheris.Modules.Abstractions
 Autheris.Tests.Unit->Autheris.Tests.Common
 Autheris.Tests.Unit->TrinoSqlEngine
 PolicyPredicateLint->Autheris.Application

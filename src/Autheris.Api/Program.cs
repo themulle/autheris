@@ -68,6 +68,7 @@ var demoDataEnabled = Autheris.Domain.Options.DemoDataSwitch.Resolve(gatewayOpti
 builder.Services.AddSingleton<Autheris.Domain.Options.IDemoDataSwitch>(new Autheris.Domain.Options.DemoDataSwitch(demoDataEnabled));
 builder.Services.AddGatewayGraphQL(gatewayOptions);
 builder.Services.AddAsyncJobsAndDatasourceTesting(builder.Configuration);
+builder.Services.AddGatewayModules(builder.Configuration, builder.Environment, gatewayOptions);
 
 // 4. Build and Pipeline Configuration
 var app = builder.Build();

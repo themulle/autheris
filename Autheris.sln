@@ -49,6 +49,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqlCorpusExtractor", "tools
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SqlGate.BenchCheck", "tools/SqlGate.BenchCheck/SqlGate.BenchCheck.csproj", "{5C2B9D17-6E4A-4B83-9F10-A7D3C8E2B456}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Modules.Abstractions", "src/Autheris.Modules.Abstractions/Autheris.Modules.Abstractions.csproj", "{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -287,12 +289,25 @@ Global
 		{7E3A1F52-9B6D-4C28-A4E1-5D0C8B2F6A19}.Release|x64.Build.0 = Release|Any CPU
 		{7E3A1F52-9B6D-4C28-A4E1-5D0C8B2F6A19}.Release|x86.ActiveCfg = Release|Any CPU
 		{7E3A1F52-9B6D-4C28-A4E1-5D0C8B2F6A19}.Release|x86.Build.0 = Release|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Debug|x64.Build.0 = Debug|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Debug|x86.Build.0 = Debug|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Release|x64.ActiveCfg = Release|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Release|x64.Build.0 = Release|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Release|x86.ActiveCfg = Release|Any CPU
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B2FAE447-007C-45CB-9DE2-23F4BFB42C03} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{D4F18A31-52B4-4E8B-A79C-1823C7E914F5} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{8BEE4999-6527-43AF-86E5-09482C3DF21D} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{853C28D8-307D-4779-8EE1-BF52B909AF42} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{8D74AE89-4F95-4B9C-A6E4-254318F144AC} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}

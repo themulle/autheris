@@ -63,4 +63,30 @@ public sealed class PackageBoundaryArchitectureTests
 
         violations.ShouldBeEmpty("Microsoft.Garnet package is prohibited across all projects.");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Api_extensions_usages_do_not_grow()
+    {
+        var allowedFiles = RepositoryScan.ReadBaseline("api-extensions-usages.txt")
+            .ToHashSet(StringComparer.Ordinal);
+
+        var actualFiles = new System.Collections.Generic.List<string>();
+        foreach (var file in RepositoryScan.EnumerateFiles("src/Autheris.Api", "*.cs"))
+        {
+            var text = RepositoryScan.ReadText(file);
+            if (text.Contains("Autheris.Extensions", StringComparison.Ordinal))
+            {
+                actualFiles.Add(RepositoryScan.ToRelativePath(file));
+            }
+        }
+
+        actualFiles.Count.ShouldBeLessThanOrEqualTo(
+            allowedFiles.Count,
+            $"Direct Autheris.Api -> Autheris.Extensions usage count ({actualFiles.Count}) exceeded baseline ({allowedFiles.Count}).");
+
+        var unexpected = actualFiles.Where(f => !allowedFiles.Contains(f)).ToList();
+        unexpected.ShouldBeEmpty(
+            "New Autheris.Api files referencing Autheris.Extensions are forbidden:\n" + string.Join("\n", unexpected));
+    }
 }

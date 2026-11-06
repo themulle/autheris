@@ -1,5 +1,6 @@
 using System.Security;
 using System.Security.Cryptography;
+using Autheris.Infrastructure.Modules.Trust;
 
 namespace Autheris.Infrastructure.Plugins;
 
@@ -93,8 +94,9 @@ public sealed class PluginTrustList
 
     internal static void VerifyBytes(string fileName, byte[] bytes, string expectedHash)
     {
-        var actualHash = Convert.ToHexString(SHA256.HashData(bytes));
-        if (!HashesEqual(expectedHash, actualHash))
+        var actualHashBytes = IntegrityHashHelper.ComputeSha256Bytes(bytes);
+        var actualHash = Convert.ToHexString(actualHashBytes);
+        if (!IntegrityHashHelper.FixedTimeEqualsHex((expectedHash ?? string.Empty).Trim(), actualHashBytes))
         {
             throw new SecurityException($"Security error: Integrity check failed for plugin '{fileName}'. Expected SHA-256: {expectedHash}, actual: {actualHash}");
         }
@@ -102,11 +104,9 @@ public sealed class PluginTrustList
 
     private static bool HashesEqual(string? expectedHex, string? actualHex)
     {
-        byte[] expected;
         byte[] actual;
         try
         {
-            expected = Convert.FromHexString((expectedHex ?? string.Empty).Trim());
             actual = Convert.FromHexString((actualHex ?? string.Empty).Trim());
         }
         catch (FormatException)
@@ -114,7 +114,7 @@ public sealed class PluginTrustList
             return false;
         }
 
-        return expected.Length == SHA256.HashSizeInBytes && CryptographicOperations.FixedTimeEquals(expected, actual);
+        return IntegrityHashHelper.FixedTimeEqualsHex((expectedHex ?? string.Empty).Trim(), actual);
     }
 
     private static string NormalizeKey(string key) => key.Replace('\\', '/').TrimStart('.', '/');

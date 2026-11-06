@@ -48,12 +48,94 @@ public static class UnknownGatewayKeyGuard
         var unknown = FindUnknownKeys(configuration);
         if (unknown.Count > 0)
         {
+            foreach (var key in unknown)
+            {
+                if (TryMatchKnownModuleSection(key, GatewayConfigurationSchema.KnownModuleSections, out var section, out var moduleId))
+                {
+                    throw new InvalidOperationException(
+                        $"Configuration section '{Sanitize(section)}' (key '{Sanitize(key)}') requires module {moduleId}, but module {moduleId} is not installed.");
+                }
+            }
+
             throw new InvalidOperationException(BuildMessage(unknown));
         }
     }
 
+    public static void ThrowIfUnknownKeys(
+        IConfiguration configuration,
+        Autheris.Api.Hosting.ModuleLoadResult moduleLoadResult,
+        IReadOnlyDictionary<string, string>? knownModuleSections = null)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(moduleLoadResult);
+
+        ThrowIfUnknownKeys(
+            configuration,
+            moduleLoadResult.LoadedModuleIds,
+            moduleLoadResult.ClaimedConfigurationSections,
+            knownModuleSections);
+    }
+
+    public static void ThrowIfUnknownKeys(
+        IConfiguration configuration,
+        IReadOnlyCollection<string> loadedModuleIds,
+        IReadOnlyCollection<string>? claimedModuleSections = null,
+        IReadOnlyDictionary<string, string>? knownModuleSections = null)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(loadedModuleIds);
+
+        var loadedSet = new HashSet<string>(loadedModuleIds, StringComparer.OrdinalIgnoreCase);
+        var claimedSet = claimedModuleSections is not null
+            ? new HashSet<string>(claimedModuleSections, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var effectiveKnownModules = knownModuleSections ?? GatewayConfigurationSchema.KnownModuleSections;
+
+        foreach (var entry in configuration.GetSection(GatewayConfigurationSchema.Root).AsEnumerable(makePathsRelative: true))
+        {
+            if (string.IsNullOrEmpty(entry.Key) || entry.Value is null)
+            {
+                continue;
+            }
+
+            var fullPath = GatewayConfigurationSchema.Root + ":" + entry.Key;
+            if (IsClaimedByLoadedModule(fullPath, claimedSet))
+            {
+                continue;
+            }
+
+            if (TryMatchKnownModuleSection(fullPath, effectiveKnownModules, out var matchedSection, out var requiredModuleId) &&
+                !loadedSet.Contains(requiredModuleId))
+            {
+                throw new InvalidOperationException(
+                    $"Configuration section '{Sanitize(matchedSection)}' (key '{Sanitize(fullPath)}') requires module {requiredModuleId}, but module {requiredModuleId} is not installed.");
+            }
+        }
+
+        var unknown = FindUnknownKeys(configuration, claimedSet);
+        if (unknown.Count > 0)
+        {
+            throw new InvalidOperationException(BuildMessage(unknown));
+        }
+    }
+
+    public static void Validate(
+        IConfiguration configuration,
+        IReadOnlyCollection<string> loadedModuleIds,
+        IReadOnlyCollection<string>? claimedModuleSections = null,
+        IReadOnlyDictionary<string, string>? knownModuleSections = null) =>
+        ThrowIfUnknownKeys(configuration, loadedModuleIds, claimedModuleSections, knownModuleSections);
+
+    public static void Validate(
+        IConfiguration configuration,
+        Autheris.Api.Hosting.ModuleLoadResult moduleLoadResult,
+        IReadOnlyDictionary<string, string>? knownModuleSections = null) =>
+        ThrowIfUnknownKeys(configuration, moduleLoadResult, knownModuleSections);
+
     /// <summary>Sorted, distinct unknown keys (full <c>Gateway:...</c> paths, shortest unknown prefix only).</summary>
-    public static IReadOnlyList<string> FindUnknownKeys(IConfiguration configuration)
+    public static IReadOnlyList<string> FindUnknownKeys(
+        IConfiguration configuration,
+        IReadOnlyCollection<string>? claimedModuleSections = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
@@ -95,6 +177,12 @@ public static class UnknownGatewayKeyGuard
                 continue;
             }
 
+            var fullKey = GatewayConfigurationSchema.Root + ":" + entry.Key;
+            if (claimedModuleSections is not null && IsClaimedByLoadedModule(fullKey, claimedModuleSections))
+            {
+                continue;
+            }
+
             var segments = entry.Key.Split(':');
             var index = FirstUnknownSegment(segments);
             if (index >= 0)
@@ -107,6 +195,47 @@ public static class UnknownGatewayKeyGuard
             .Where(k => !unknown.Any(other => k.Length > other.Length && k.StartsWith(other + ":", StringComparison.OrdinalIgnoreCase)))
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static bool IsClaimedByLoadedModule(string fullPath, IEnumerable<string> claimedSections)
+    {
+        foreach (var section in claimedSections)
+        {
+            if (string.IsNullOrWhiteSpace(section))
+            {
+                continue;
+            }
+
+            if (string.Equals(fullPath, section, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.StartsWith(section + ":", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryMatchKnownModuleSection(
+        string fullPath,
+        IReadOnlyDictionary<string, string> knownModuleSections,
+        out string matchedSection,
+        out string moduleId)
+    {
+        foreach (var (section, modId) in knownModuleSections)
+        {
+            if (string.Equals(fullPath, section, StringComparison.OrdinalIgnoreCase) ||
+                fullPath.StartsWith(section + ":", StringComparison.OrdinalIgnoreCase))
+            {
+                matchedSection = section;
+                moduleId = modId;
+                return true;
+            }
+        }
+
+        matchedSection = string.Empty;
+        moduleId = string.Empty;
+        return false;
     }
 
     /// <summary>The index of the first segment (relative to <c>Gateway</c>) that no type declares, or -1 when the whole key is known.</summary>

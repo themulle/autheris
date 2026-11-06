@@ -9,7 +9,7 @@ namespace Autheris.Infrastructure.Persistence;
 /// the journal mode. A file database never uses a shared cache; an in-memory database always does (one named, shared-cache database per
 /// provider that lives as long as the provider).
 /// </summary>
-internal sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDisposable
+public sealed class SqliteGovernanceConnectionProvider : IAsyncDisposable, IDisposable
 {
     private const int BusyTimeoutMilliseconds = 5000;
     private const int DefaultCommandTimeoutSeconds = 30;

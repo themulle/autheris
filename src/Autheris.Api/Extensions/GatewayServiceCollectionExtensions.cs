@@ -102,6 +102,21 @@ public static partial class GatewayServiceCollectionExtensions
 
         return services;
     }
+
+    public static IServiceCollection AddGatewayModules(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        GatewayOptions gatewayOptions)
+    {
+        var hostContext = new ModuleHostContext(
+            TimeProvider.System,
+            ModuleLoader.DefaultHostVersion,
+            new GovernanceConnectionFactory(gatewayOptions.GovernanceDb, statePaths: null, environment));
+        var loader = new ModuleLoader();
+        loader.LoadAndConfigureServices(services, configuration, environment, hostContext);
+        return services;
+    }
     public static IServiceCollection AddGatewayAuth(
         this IServiceCollection services,
         GatewayOptions gatewayOptions,
