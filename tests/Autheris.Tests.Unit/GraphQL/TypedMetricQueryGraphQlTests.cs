@@ -101,7 +101,6 @@ public sealed class TypedMetricQueryGraphQlTests
         { new AggregationColumnUnavailableException(), "AGGREGATION_COLUMN_UNAVAILABLE" },
         { new MetricFilterInvalidException(), "METRIC_FILTER_INVALID" },
         { new AggregationRowCapExceededException(), "AGGREGATION_ROW_CAP_EXCEEDED" },
-        { new PrivacyBudgetExhaustedException("alice", 1.0, 0.0), "PRIVACY_BUDGET_EXHAUSTED" },
         { new ArgumentException("Dimension 'secret_dim' is not declared"), "AGGREGATION_ARGUMENT_INVALID" },
         { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" },
         { new AggregationPrivacyRestrictedException(), "AGGREGATION_PRIVACY_RESTRICTED" },

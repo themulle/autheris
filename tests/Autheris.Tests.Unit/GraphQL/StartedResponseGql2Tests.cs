@@ -36,29 +36,6 @@ public sealed class StartedResponseGql2Tests
         return context;
     }
 
-    [Theory]
-    [InlineData("{ ping }")]
-    [InlineData("{ unknownField }")]
-    public async Task CdnCacheTagMiddleware_DoesNotWriteHeaders_OnStartedResponse(string query)
-    {
-        var executor = await new ServiceCollection()
-            .AddGraphQLServer()
-            .AddQueryType<PingQuery>()
-            .UseRequest<CdnCacheTagMiddleware>()
-            .UseDefaultPipeline()
-            .BuildRequestExecutorAsync();
-
-        var request = OperationRequestBuilder.New()
-            .SetDocument(query)
-            .SetGlobalState("HttpContext", StartedHttpContext())
-            .Build();
-
-        await using var result = await executor.ExecuteAsync(request);
-
-        result.ToJson().ShouldNotContain("read-only");
-        result.ToJson().ShouldNotContain("Unexpected Execution Error");
-    }
-
     [Fact]
     public void Guard_SkipsWrites_WhenResponseHasStarted()
     {

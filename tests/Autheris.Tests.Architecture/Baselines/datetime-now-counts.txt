@@ -75,8 +75,6 @@ src/Autheris.Application/Procedures/Services/InMemoryProcedureRegistry.cs|4
 src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs|1
 src/Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs|2
 src/Autheris.Application/ResourceGroups/ResourceGroupManager.cs|1
-src/Autheris.Application/SchemaRegistry/RegisteredSchema.cs|1
-src/Autheris.Application/SchemaRegistry/SchemaRegistryService.cs|1
 src/Autheris.Application/Security/Totp/Services/TotpEnrollmentService.cs|2
 src/Autheris.Application/Security/Totp/Services/TotpVerificationService.cs|5
 src/Autheris.Application/Serialization/ParquetExportService.cs|1

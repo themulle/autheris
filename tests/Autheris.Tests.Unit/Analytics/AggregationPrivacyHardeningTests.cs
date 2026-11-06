@@ -146,8 +146,7 @@ public sealed class AggregationPrivacyHardeningTests
             metaRepo,
             audit,
             dataSourceExecutors: [executor],
-            analyticsOptions: Options.Create(options),
-            dpEngine: null);
+            analyticsOptions: Options.Create(options));
         return (service, executor, audit);
     }
 
@@ -164,25 +163,6 @@ public sealed class AggregationPrivacyHardeningTests
 
         return rows;
     }
-
-    private static AnalyticsOptions NoiseOptions(double epsilon = 1.0, double budget = 100.0, bool exposeCounts = true) => new()
-    {
-        Privacy = new AnalyticsPrivacyOptions
-        {
-            DefaultMinGroupSize = 2,
-            ExposeSuppressedGroupsCount = exposeCounts,
-            Noise = new AnalyticsNoiseOptions
-            {
-                Enabled = true,
-                Epsilon = epsilon,
-                DailyBudgetEpsilon = budget,
-                MeasureBounds = new Dictionary<string, MeasureBoundsOptions>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["amount"] = new MeasureBoundsOptions { Min = 0, Max = 1000 }
-                }
-            }
-        }
-    };
 
     // ---------------------------------------------------------------- W0-1 / SEC-112-02 / T-S-01
 
@@ -422,19 +402,7 @@ public sealed class AggregationPrivacyHardeningTests
     }
 
     [Fact]
-    public async Task ExecuteAggregationAsync_SuppressedRowsCount_IsZeroWhenNoiseIsEnabled()
-    {
-        var (service, _, _) = CreateService(DepartmentRows(("Big", 6, 1m), ("Tiny", 1, 1m)), NoiseOptions());
-
-        var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
-
-        result.NoiseApplied.ShouldBeTrue();
-        result.SuppressedRowsCount.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task ExecuteAggregationAsync_SuppressedRowsCount_IsExposedWhenAllowedAndNoiseIsOff()
+    public async Task ExecuteAggregationAsync_SuppressedRowsCount_IsExposedWhenAllowed()
     {
         var (service, _, _) = CreateService(
             DepartmentRows(("Big", 6, 1m), ("Tiny", 2, 1m)),
@@ -501,90 +469,8 @@ public sealed class AggregationPrivacyHardeningTests
         result.Totals.Aggregates["sum_amount"].ShouldBe(15406m);
     }
 
-    // ---------------------------------------------------------------- W0-7 / SEC-112-03 / T-S-07
-
     [Fact]
-    public async Task ExecuteAggregationAsync_NoiseOn_RejectsDuplicateFunctionAndColumnPairs()
-    {
-        var (service, executor, _) = CreateService(DepartmentRows(("A", 6, 1m)), NoiseOptions());
-
-        var ex = await Should.ThrowAsync<AggregationPrivacyRestrictedException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId,
-            GroupBy: ["department"],
-            Aggregates:
-            [
-                new AggregateSelection(AggregateFunction.Count, "amount", "c1"),
-                new AggregateSelection(AggregateFunction.Count, "amount", "c2")
-            ],
-            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
-
-        ex.ErrorCode.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
-        executor.Calls.ShouldBe(0);
-    }
-
-    [Theory]
-    [InlineData(AggregateFunction.Min)]
-    [InlineData(AggregateFunction.Max)]
-    public async Task ExecuteAggregationAsync_NoiseOn_RejectsMinAndMax(AggregateFunction function)
-    {
-        var (service, executor, _) = CreateService(DepartmentRows(("A", 6, 1m)), NoiseOptions());
-
-        var ex = await Should.ThrowAsync<AggregationPrivacyRestrictedException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId,
-            GroupBy: ["department"],
-            Aggregates: [new AggregateSelection(function, "amount", "x")],
-            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
-
-        ex.ErrorCode.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
-        executor.Calls.ShouldBe(0);
-    }
-
-    private const string SentinelAlias = "sentinel_alias_zq";
-
-    [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "I389-T-01")]
-    [Trait("SecurityCondition", "I389-T-02")]
-    [Fact]
-    public async Task PrivacyRestricted_MinMaxRepeatedPairMissingBounds_SameCodeAndMessage_NoColumnOrAlias_ExecutorNotCalled()
-    {
-        var noBounds = NoiseOptions();
-        noBounds.Privacy.Noise.MeasureBounds = new Dictionary<string, MeasureBoundsOptions>(StringComparer.OrdinalIgnoreCase);
-        AggregateSelection[][] causes =
-        [
-            [new AggregateSelection(AggregateFunction.Min, "amount", SentinelAlias)],
-            [new AggregateSelection(AggregateFunction.Count, "amount", SentinelAlias), new AggregateSelection(AggregateFunction.Count, "amount", "other_alias")],
-            [new AggregateSelection(AggregateFunction.Sum, "amount", SentinelAlias)],
-            [new AggregateSelection(AggregateFunction.Avg, "amount", SentinelAlias)]
-        ];
-
-        var messages = new HashSet<string>();
-        foreach (var aggregates in causes)
-        {
-            var (service, executor, audit) = CreateService(DepartmentRows(("A", 6, 1m)), aggregates[0].Function == AggregateFunction.Sum || aggregates[0].Function == AggregateFunction.Avg ? noBounds : NoiseOptions());
-
-            var ex = await Should.ThrowAsync<AggregationPrivacyRestrictedException>(() => service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-                OrdersTableId,
-                GroupBy: ["department"],
-                Aggregates: aggregates,
-                PreEvaluatedDecision: CreateDecision().AsPdpEvaluated())));
-
-            ex.ErrorCode.ShouldBe("AGGREGATION_PRIVACY_RESTRICTED");
-            ex.Data.Count.ShouldBe(0);
-            ex.InnerException.ShouldBeNull();
-            ex.ToString().ShouldNotContain("amount");
-            ex.ToString().ShouldNotContain(SentinelAlias);
-            messages.Add(ex.Message);
-            audit.Entries.ShouldNotBeEmpty();
-            audit.Entries.ShouldAllBe(e => !e.ToString()!.Contains(SentinelAlias) && !System.Text.Json.JsonSerializer.Serialize(e).Contains(SentinelAlias));
-            executor.Calls.ShouldBe(0);
-        }
-
-        messages.Count.ShouldBe(1);
-        messages.Single().ShouldBe("The requested aggregate is not available under the privacy policy.");
-    }
-
-    [Fact]
-    public async Task ExecuteAggregationAsync_NoiseOff_AllowsDuplicatePairsAndMinMax()
+    public async Task ExecuteAggregationAsync_AllowsDuplicatePairsAndMinMax()
     {
         var (service, _, _) = CreateService(DepartmentRows(("A", 6, 1m)), new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } });
 
@@ -599,26 +485,6 @@ public sealed class AggregationPrivacyHardeningTests
             PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
 
         result.Groups.Single().Aggregates["m1"].ShouldBe(1m);
-    }
-
-    [Fact]
-    public async Task ExecuteAggregationAsync_NoiseOn_ChargesEpsilonPerNoisedAggregatePlusTheRowCount()
-    {
-        var (service, _, _) = CreateService(DepartmentRows(("A", 6, 1m), ("B", 6, 1m)), NoiseOptions(epsilon: 1.5, budget: 100.0));
-
-        var result = await service.ExecuteAggregationAsync(CreatePrincipal("S-1-5-21-BUDGET"), new AggregationQuery(
-            OrdersTableId,
-            GroupBy: ["department"],
-            Aggregates:
-            [
-                new AggregateSelection(AggregateFunction.Count, null, "cnt"),
-                new AggregateSelection(AggregateFunction.Sum, "amount", "sum_amount"),
-                new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount")
-            ],
-            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
-
-        // Two column aggregates (sum, avg) plus the row count: 3 x 1.5.
-        result.Metadata.EpsilonConsumed.ShouldBe(4.5);
     }
 
     // ---------------------------------------------------------------- W0-8 / F-6 / T-S-11
@@ -794,35 +660,6 @@ public sealed class AggregationPrivacyHardeningTests
     }
 
     [Fact]
-    public async Task ExecuteAggregationAsync_NoiseOnWithMergeIntoOther_KeepsNullForCountDistinctAndAvgOnTheMergedRow()
-    {
-        var options = NoiseOptions();
-        options.Privacy.DefaultMinGroupSize = 3;
-        options.Privacy.SuppressionMode = SmallGroupStrategy.MergeIntoOther;
-
-        var rows = DepartmentRows(("Big", 4, 100m), ("S1", 1, 1m), ("S2", 2, 50m));
-        var (service, _, _) = CreateService(rows, options);
-
-        var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
-            OrdersTableId,
-            GroupBy: ["department"],
-            Aggregates:
-            [
-                new AggregateSelection(AggregateFunction.Count, null, "cnt"),
-                new AggregateSelection(AggregateFunction.Avg, "amount", "avg_amount"),
-                new AggregateSelection(AggregateFunction.CountDistinct, "amount", "distinct_amount")
-            ],
-            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
-
-        result.NoiseApplied.ShouldBeTrue();
-        result.MergedIntoOther.ShouldBeTrue();
-        var other = result.Groups.Single(g => g.IsMergedOther);
-        other.Aggregates["avg_amount"].ShouldBeNull();
-        other.Aggregates["distinct_amount"].ShouldBeNull();
-        result.Groups.Single(g => !g.IsMergedOther).Aggregates["avg_amount"].ShouldNotBeNull();
-    }
-
-    [Fact]
     public void CombineMetricFiltersWithWhere_RequestClauseWithoutTrinoBuilder_FailsClosedInsteadOfUsingSqlPredicate()
     {
         var metric = new DbtMetric("m", "simple", null, null, "status = 'open'", null, [], [], new Dictionary<string, string>());
@@ -913,8 +750,7 @@ public sealed class AggregationPrivacyHardeningTests
             metaRepo,
             new CapturingAuditLogRepository(),
             gatewayExecutionService: gateway,
-            analyticsOptions: Options.Create(new AnalyticsOptions()),
-            dpEngine: null);
+            analyticsOptions: Options.Create(new AnalyticsOptions()));
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => service.ExecuteAggregationAsync(
             CreatePrincipal(),
@@ -950,8 +786,7 @@ public sealed class AggregationPrivacyHardeningTests
             analyticsOptions: Options.Create(new AnalyticsOptions
             {
                 Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 3, SuppressionMode = SmallGroupStrategy.MergeIntoOther }
-            }),
-            dpEngine: null);
+            }));
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId,
@@ -977,37 +812,6 @@ public sealed class AggregationPrivacyHardeningTests
         other.Aggregates["distinct_amount"].ShouldBeNull();
         result.Totals!.Aggregates["min_amount"].ShouldBeNull();
         result.Totals.Aggregates["max_amount"].ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task ExecuteAggregationAsync_NoiseOn_OrderAndLimitFollowTheNoisedValues()
-    {
-        // Deterministic noise: the first sampled bucket (group A, true count 6) gets +100, the second (group B, true count 8) gets -5.
-        var queue = new Queue<double>([100.0, -5.0]);
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        metaRepo.GetTableMetadataAsync(OrdersTableId, Arg.Any<CancellationToken>()).Returns(CreateOrdersMetadata());
-        var service = new GovernedAggregationService(
-            metaRepo,
-            new CapturingAuditLogRepository(),
-            dataSourceExecutors: [new RowExecutor(DepartmentRows(("A", 6, 1m), ("B", 8, 1m)))],
-            analyticsOptions: Options.Create(NoiseOptions()),
-            dpEngine: null)
-        {
-            NoiseSampler = _ => queue.Dequeue()
-        };
-
-        var result = await service.ExecuteAggregationAsync(CreatePrincipal("S-1-5-21-ORDER"), new AggregationQuery(
-            OrdersTableId,
-            GroupBy: ["department"],
-            OrderBy: [new TableOrderBy("count", true)],
-            Limit: 1,
-            PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
-
-        // Without noise B (8) would lead; with the noised counts A (106) leads and the limit keeps A only.
-        result.Metadata.Truncated.ShouldBeTrue();
-        result.Groups.Count.ShouldBe(1);
-        result.Groups[0].GroupKey["department"].ShouldBe("A");
-        result.Groups[0].Count.ShouldBe(106);
     }
 
     [Theory]

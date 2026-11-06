@@ -17,7 +17,6 @@ using Autheris.Api.Middleware;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -587,45 +586,6 @@ public class RestMcpHitlAndWebhookSecurityTests
         EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["GovernanceAdmin"]).User).ShouldBeFalse();
         EndpointSecurity.IsGlobalGovernanceAdmin(new ClaimsPrincipal(new ClaimsIdentity([new(ClaimTypes.Role, "GovernanceAdmin")], "Test"))).ShouldBeTrue();
         EndpointSecurity.IsGlobalGovernanceAdmin(CreateContext("tenant-a", ["ClusterAdmin"]).User).ShouldBeTrue();
-    }
-
-    // =========================================================================
-    // M-12: schema registry ownership and RegisteredBy
-    // =========================================================================
-
-    [Fact]
-    public void M12_OnlyOwnerOrFirstRegistrantMayPublish()
-    {
-        var history = new List<RegisteredSchema>
-        {
-            new() { ServiceName = "accounts", Version = "v2.0.0", Sdl = "type Query { a: Int }", RegisteredAt = DateTimeOffset.UtcNow, RegisteredBy = "S-1-5-21-OWNER" },
-            new() { ServiceName = "accounts", Version = "v1.0.0", Sdl = "type Query { a: Int }", RegisteredAt = DateTimeOffset.UtcNow.AddDays(-10), RegisteredBy = "S-1-5-21-OWNER" }
-        };
-
-        SchemaRegistryEndpoints.IsServiceOwner(history, "S-1-5-21-OWNER").ShouldBeTrue();
-        SchemaRegistryEndpoints.IsServiceOwner(history, "S-1-5-21-OTHER-DEV").ShouldBeFalse();
-        SchemaRegistryEndpoints.IsServiceOwner(history, null).ShouldBeFalse();
-        SchemaRegistryEndpoints.IsServiceOwner([], "S-1-5-21-NEW-DEV").ShouldBeTrue();
-    }
-
-    [Fact]
-    public void M12_RegisteredBy_FromBody_IsReplacedByServerIdentity()
-    {
-        var spoofed = new SchemaRegistrationRequest
-        {
-            ServiceName = "accounts",
-            Sdl = "type Query { a: Int }",
-            RegisteredBy = "S-1-5-21-CEO",
-            Version = "v9.0.0",
-            DryRun = true
-        };
-
-        var serverSide = SchemaRegistryEndpoints.WithRegisteredBy(spoofed, "S-1-5-21-REAL-DEV");
-
-        serverSide.RegisteredBy.ShouldBe("S-1-5-21-REAL-DEV");
-        serverSide.ServiceName.ShouldBe("accounts");
-        serverSide.Version.ShouldBe("v9.0.0");
-        serverSide.DryRun.ShouldBeTrue();
     }
 
     // =========================================================================

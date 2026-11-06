@@ -9,7 +9,6 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Integrations.Backstage;
 using Autheris.Extensions.Backstage;
 using Autheris.Application.Interfaces;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
@@ -114,61 +113,6 @@ public sealed class BackstageIntegrationTests
         federated.Metadata.Links.ShouldNotContain(l => l.Title == "GraphQL IDE (Banana Cake Pop)");
         var link = federated.Metadata.Links.First(l => l.Title == "GraphQL Explorer");
         link.Url.ShouldBe("https://portal.example.com/graphql-explorer");
-    }
-
-    [Fact]
-    public async Task ExportCatalogEntitiesAsync_WithSubgraphs_ExportsEachSubgraphAsApiEntity()
-    {
-        // Arrange
-        var schemaRegistry = Substitute.For<ISchemaRegistryService>();
-        schemaRegistry.GetAllServicesAsync(Arg.Any<CancellationToken>())
-            .Returns(new List<string> { "Accounts", "Inventory" });
-
-        schemaRegistry.GetLatestSchemaAsync("Accounts", Arg.Any<CancellationToken>())
-            .Returns(new RegisteredSchema
-            {
-                ServiceName = "Accounts",
-                Version = "1.2.0",
-                Sdl = "type Query { account(id: ID!): Account }",
-                GitCommit = "abc1234",
-                GitBranch = "main",
-                RegisteredBy = "alice",
-                IsActive = true
-            });
-
-        schemaRegistry.GetLatestSchemaAsync("Inventory", Arg.Any<CancellationToken>())
-            .Returns(new RegisteredSchema
-            {
-                ServiceName = "Inventory",
-                Version = "0.9.1",
-                Sdl = "type Query { inventoryCount: Int }",
-                GitCommit = "def5678",
-                GitBranch = "release/v0.9",
-                RegisteredBy = "bob",
-                IsActive = false // Deprecated
-            });
-
-        var options = Options.Create(new GatewayOptions());
-        var service = new BackstageCatalogExportService(options, schemaRegistry: schemaRegistry);
-
-        // Act
-        var entities = await service.ExportCatalogEntitiesAsync();
-
-        // Assert
-        var accounts = entities.FirstOrDefault(e => e.Metadata.Name == "subgraph-accounts");
-        accounts.ShouldNotBeNull();
-        accounts.Spec.Type.ShouldBe("graphql");
-        accounts.Spec.Lifecycle.ShouldBe("production");
-        accounts.Spec.Owner.ShouldBe("user:alice");
-        accounts.Spec.Definition.ShouldNotBeNull();
-        accounts.Spec.Definition.ShouldContain("type Query { account");
-        accounts.Metadata.Annotations["autheris.io/version"].ShouldBe("1.2.0");
-        accounts.Metadata.Annotations["autheris.io/git-commit"].ShouldBe("abc1234");
-
-        var inventory = entities.FirstOrDefault(e => e.Metadata.Name == "subgraph-inventory");
-        inventory.ShouldNotBeNull();
-        inventory.Spec.Lifecycle.ShouldBe("deprecated");
-        inventory.Spec.Owner.ShouldBe("user:bob");
     }
 
     [Fact]

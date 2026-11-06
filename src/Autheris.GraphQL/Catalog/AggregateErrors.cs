@@ -62,7 +62,6 @@ internal static class AggregateFailureMapper
     public static GraphQLException? ForAggregate(Exception ex) => ex switch
     {
         GraphQLException g => g,
-        PrivacyBudgetExhaustedException => AggregateErrors.Create("PRIVACY_BUDGET_EXHAUSTED", AggregateErrors.BudgetExhaustedMessage),
         MaskedAggregationException => AggregateErrors.Create(MaskedAggregationException.ErrorCodeConst, AggregateErrors.MaskedMessage),
         AggregationColumnUnavailableException => AggregateErrors.Create(AggregationColumnUnavailableException.ErrorCodeConst, AggregationColumnUnavailableException.FixedMessage),
         AggregationRowCapExceededException => AggregateErrors.Create(AggregationRowCapExceededException.ErrorCodeConst, AggregationRowCapExceededException.FixedMessage),

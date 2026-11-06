@@ -127,15 +127,6 @@ public static class AnalyticsEndpoints
             var result = await aggregationService.ExecuteAggregationAsync(httpContext.User, query, ct).ConfigureAwait(false);
             return Results.Ok(result);
         }
-        catch (PrivacyBudgetExhaustedException ex)
-        {
-            SafeErrorResults.LogFailure(httpContext, ex, "PRIVACY_BUDGET_EXHAUSTED");
-            return SafeErrorResults.Problem(
-                StatusCodes.Status429TooManyRequests,
-                "PRIVACY_BUDGET_EXHAUSTED",
-                "The daily differential privacy epsilon budget has been exhausted.",
-                httpContext);
-        }
         catch (MaskedAggregationException ex)
         {
             SafeErrorResults.LogFailure(httpContext, ex, MaskedAggregationException.ErrorCodeConst);
@@ -230,15 +221,6 @@ public static class AnalyticsEndpoints
 
             var result = await metricQueryService.QueryMetricsAsync(httpContext.User, metricRequest, ct).ConfigureAwait(false);
             return Results.Ok(result);
-        }
-        catch (PrivacyBudgetExhaustedException ex)
-        {
-            SafeErrorResults.LogFailure(httpContext, ex, "PRIVACY_BUDGET_EXHAUSTED");
-            return SafeErrorResults.Problem(
-                StatusCodes.Status429TooManyRequests,
-                "PRIVACY_BUDGET_EXHAUSTED",
-                "The daily differential privacy epsilon budget has been exhausted.",
-                httpContext);
         }
         catch (MaskedAggregationException ex)
         {

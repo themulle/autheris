@@ -164,19 +164,7 @@ public sealed partial class TransportGateCoverageTests
             })
             .ToList();
 
-    private static IEnumerable<RepositoryScan.SourceFile> AllRepositoryCs()
-    {
-        var root = RepositoryScan.RepoRoot;
-        foreach (var path in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-        {
-            var relative = RepositoryScan.Normalize(Path.GetRelativePath(root, path));
-            var segments = relative.Split('/');
-            if (segments.Any(s => s is "bin" or "obj" or "node_modules" or ".git"))
-            {
-                continue;
-            }
-
-            yield return new RepositoryScan.SourceFile(relative, File.ReadAllText(path));
-        }
-    }
+    private static IEnumerable<RepositoryScan.SourceFile> AllRepositoryCs() =>
+        RepositoryScan.EnumerateFiles("", "*.cs")
+            .Select(relative => new RepositoryScan.SourceFile(relative, RepositoryScan.ReadText(relative)));
 }

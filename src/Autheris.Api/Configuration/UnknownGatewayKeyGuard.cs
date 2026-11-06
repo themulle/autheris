@@ -36,6 +36,23 @@ public static class UnknownGatewayKeyGuard
         ArgumentNullException.ThrowIfNull(configuration);
 
         var unknown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // OD-11: differential privacy noise removed; small-group suppression applies
+        foreach (var entry in configuration.AsEnumerable())
+        {
+            if (string.IsNullOrEmpty(entry.Key))
+            {
+                continue;
+            }
+
+            if (entry.Key.StartsWith("Analytics:Privacy:Noise", StringComparison.OrdinalIgnoreCase) ||
+                entry.Key.StartsWith(GatewayConfigurationSchema.Root + ":Analytics:Privacy:Noise", StringComparison.OrdinalIgnoreCase))
+            {
+                unknown.Add("Analytics:Privacy:Noise (removed (OD-11); small-group suppression applies)");
+                break;
+            }
+        }
+
         foreach (var entry in configuration.GetSection(GatewayConfigurationSchema.Root).AsEnumerable(makePathsRelative: true))
         {
             if (string.IsNullOrEmpty(entry.Key))

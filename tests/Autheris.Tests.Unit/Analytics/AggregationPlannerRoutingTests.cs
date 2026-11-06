@@ -128,8 +128,7 @@ public sealed class AggregationPlannerRoutingTests
             {
                 Aggregation = new AggregationOptions { MaxGroups = maxGroups },
                 Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = minGroupSize }
-            }),
-            dpEngine: null);
+            }));
         return (service, sql, requests);
     }
 

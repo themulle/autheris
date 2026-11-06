@@ -214,21 +214,8 @@ public sealed class DocsIntegrityTests
             string.Join("\n", violations.Take(50)));
     }
 
-    private static IReadOnlyList<string> GetAllMarkdownFiles()
-    {
-        var root = RepositoryScan.RepoRoot;
-        return Directory.EnumerateFiles(root, "*.md", SearchOption.AllDirectories)
-            .Select(f => RepositoryScan.Normalize(Path.GetRelativePath(root, f)))
-            .Where(p => !p.StartsWith(".git/", StringComparison.OrdinalIgnoreCase) &&
-                        !p.StartsWith(".claude/", StringComparison.OrdinalIgnoreCase) &&
-                        !p.StartsWith("worktrees/", StringComparison.OrdinalIgnoreCase) &&
-                        !p.Contains("/.git/") &&
-                        !p.Contains("/bin/") &&
-                        !p.Contains("/obj/") &&
-                        !p.Contains("/node_modules/"))
-            .OrderBy(f => f, StringComparer.Ordinal)
-            .ToList();
-    }
+    private static IReadOnlyList<string> GetAllMarkdownFiles() =>
+        RepositoryScan.EnumerateFiles("", "*.md");
 
     private static IReadOnlyList<string> GetGatedMarkdownFiles()
     {

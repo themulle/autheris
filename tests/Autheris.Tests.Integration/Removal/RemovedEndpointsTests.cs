@@ -53,6 +53,14 @@ public sealed class RemovedEndpointsTests : IClassFixture<WebApplicationFactory<
     [InlineData("POST", "/portal/2fa/enroll/verify")]
     [InlineData("GET", "/portal/approvals")]
     [InlineData("POST", "/portal/approvals/t-123/step-up")]
+    [InlineData("GET", "/api/v1/governance/dp/budget")]
+    [InlineData("POST", "/api/v1/governance/dp/budget/reset")]
+    [InlineData("POST", "/api/v1/governance/dp/perturb")]
+    [InlineData("POST", "/api/schema-registry/publish")]
+    [InlineData("POST", "/api/schema-registry/check")]
+    [InlineData("GET", "/api/schema-registry/services")]
+    [InlineData("GET", "/api/schema-registry/accounts/latest")]
+    [InlineData("GET", "/api/schema-registry/accounts/history")]
     public async Task Removed_routes_return_404_for_admin_and_anonymous(string method, string route)
     {
         using var admin = CreateAdminClient();
@@ -104,7 +112,9 @@ public sealed class RemovedEndpointsTests : IClassFixture<WebApplicationFactory<
             "/api/v1/flight/sql",
             "/getting-started",
             "/portal/2fa",
-            "/portal/approvals"
+            "/portal/approvals",
+            "/api/v1/governance/dp",
+            "/api/schema-registry"
         };
 
         foreach (var pattern in removedPatterns)

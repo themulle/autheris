@@ -43,9 +43,6 @@ route /api/governance/classification/transition | governance admin route (Catalo
 route /api/governance/consents/apply | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/datasources | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/datasources/{id}/refresh-physical-keys | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/differential-privacy/budget/{clientId} | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/differential-privacy/budget/{clientId}/reset | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/differential-privacy/perturb | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/eu-ai-act/article-10-certificate | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/gdpr/export-pdf | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/hitl/approve | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
@@ -67,11 +64,6 @@ route /api/integrations/backstage/catalog-entities | catalog integration, lineag
 route /api/integrations/backstage/catalog-entities/{name} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/integrations/backstage/catalog-info.yaml | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/lineage/openlineage/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/check | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/publish | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/{service}/history | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/{service}/latest | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/services | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/catalog/datahub/events | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point

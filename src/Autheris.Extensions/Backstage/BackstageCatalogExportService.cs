@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -20,7 +19,6 @@ using Autheris.Application.Integrations.Backstage;
 
 public sealed class BackstageCatalogExportService : IBackstageCatalogExportService
 {
-    private readonly ISchemaRegistryService? _schemaRegistry;
     private readonly ITableMetadataRepository? _tableRepository;
     private readonly ISchemaSunsettingService? _sunsettingService;
     private readonly IDataOwnershipRepository? _dataOwnershipRepository;
@@ -29,14 +27,12 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
 
     public BackstageCatalogExportService(
         IOptions<GatewayOptions>? options = null,
-        ISchemaRegistryService? schemaRegistry = null,
         ITableMetadataRepository? tableRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         ILogger<BackstageCatalogExportService>? logger = null,
         IDataOwnershipRepository? dataOwnershipRepository = null)
     {
         _options = options?.Value ?? new GatewayOptions();
-        _schemaRegistry = schemaRegistry;
         _tableRepository = tableRepository;
         _sunsettingService = sunsettingService;
         _logger = logger;
@@ -176,67 +172,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
         };
         entities.Add(openApiEntity);
 
-        // 3. Subgraphs from Schema Registry (P8)
-        if (_schemaRegistry != null)
-        {
-            try
-            {
-                var services = await _schemaRegistry.GetAllServicesAsync(cancellationToken);
-                foreach (var service in services)
-                {
-                    var latest = await _schemaRegistry.GetLatestSchemaAsync(service, cancellationToken);
-                    if (latest == null) continue;
-
-                    var entityName = SanitizeEntityName($"subgraph-{latest.ServiceName}");
-                    var annotations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["backstage.io/managed-by-location"] = $"url:/api/integrations/backstage/catalog-entities/{entityName}",
-                        ["autheris.io/subgraph"] = latest.ServiceName,
-                        ["autheris.io/version"] = latest.Version,
-                        ["autheris.io/registered-at"] = latest.RegisteredAt.ToString("O")
-                    };
-
-                    if (!string.IsNullOrWhiteSpace(latest.GitCommit))
-                        annotations["autheris.io/git-commit"] = latest.GitCommit;
-                    if (!string.IsNullOrWhiteSpace(latest.GitBranch))
-                        annotations["autheris.io/git-branch"] = latest.GitBranch;
-                    if (!string.IsNullOrWhiteSpace(latest.RegisteredBy))
-                        annotations["autheris.io/registered-by"] = latest.RegisteredBy;
-
-                    var subgraphEntity = new BackstageEntity
-                    {
-                        ApiVersion = "backstage.io/v1alpha1",
-                        Kind = "API",
-                        Metadata = new BackstageMetadata
-                        {
-                            Name = entityName,
-                            Namespace = backstageOpts.DefaultNamespace,
-                            Title = $"{latest.ServiceName} Subgraph API",
-                            Description = $"Federated Subgraph '{latest.ServiceName}' registered in Autheris Schema Registry (v{latest.Version}).",
-                            Tags = ["graphql", "subgraph", "federation", SanitizeEntityName(latest.ServiceName)],
-                            Annotations = annotations
-                        },
-                        Spec = new BackstageSpec
-                        {
-                            Type = "graphql",
-                            Lifecycle = latest.IsActive ? "production" : "deprecated",
-                            Owner = !string.IsNullOrWhiteSpace(latest.RegisteredBy)
-                                ? $"user:{latest.RegisteredBy}"
-                                : backstageOpts.DefaultOwner,
-                            System = backstageOpts.DefaultSystem,
-                            Definition = latest.Sdl
-                        }
-                    };
-                    entities.Add(subgraphEntity);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to load subgraphs from Schema Registry for Backstage export.");
-            }
-        }
-
-        // 4. Governed Tables / Data Products
+        // 3. Governed Tables / Data Products
         if (backstageOpts.IncludeTablesAsApis && _tableRepository != null)
         {
             try

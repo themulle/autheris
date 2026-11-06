@@ -31,9 +31,7 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ["src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs|[\"error\"] = errorText"] =
             "Audit details dictionary of a rejected federated statement, not a response body",
         ["src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs|[\"error\"] = new Dictionary<string, object> { [\"type\"] = \"string\" },"] =
-            "OpenAPI schema property declaration, not a response body",
-        ["src/Autheris.Application/Governance/Services/DifferentialPrivacyEngine.cs|new { attempted = request.Epsilon, error = \"Cluster budget store unavailable\" }"] =
-            "Audit DetailsJson payload of a fail-closed privacy budget denial, not a response body (the request itself ends in an exception)"
+            "OpenAPI schema property declaration, not a response body"
     };
 
     /// <summary>

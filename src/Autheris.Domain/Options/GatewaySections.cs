@@ -61,7 +61,6 @@ public static class GatewaySections
     public const string L1MemoryCache = "Gateway:Caching:L1MemoryCache";
     public const string Redis = "Gateway:Caching:Redis";
     public const string EpochValidation = "Gateway:Caching:EpochValidation";
-    public const string Cdn = "Gateway:Caching:Cdn";
     public const string DataSources = "Gateway:DataSources";
     public const string DataSourcesHttp = "Gateway:DataSources:Http";
     public const string Lakehouse = "Gateway:Lakehouse";

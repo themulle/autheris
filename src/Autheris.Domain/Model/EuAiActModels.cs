@@ -12,17 +12,9 @@ public sealed record EuAiActArticle10Certificate(
     string TenantId,
     DateTimeOffset IssuedAtUtc,
     string Specification,
-    DifferentialPrivacyMetricsSummary DifferentialPrivacyMetrics,
     AuditLineageSummary AuditLineage,
     string AuditChainTailHash,
     string IntegritySealSha256
-);
-
-public sealed record DifferentialPrivacyMetricsSummary(
-    double TotalDailyEpsilonBudget,
-    double ConsumedEpsilon,
-    double RemainingEpsilon,
-    DateTimeOffset LastResetUtc
 );
 
 public sealed record AuditLineageSummary(
