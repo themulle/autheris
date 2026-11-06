@@ -26,10 +26,6 @@
       <Private>false</Private>
       <ExcludeAssets>runtime</ExcludeAssets>
     </ProjectReference>
-    <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj">
-      <Private>false</Private>
-      <ExcludeAssets>runtime</ExcludeAssets>
-    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
