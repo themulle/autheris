@@ -26,7 +26,6 @@ public sealed class CatalogVisibilityServiceArchitectureTests
         "Autheris.Application.Governance.Services.EffectiveAccessExplanationService",
         "Autheris.Application.Mcp.Services.AiDataGuardrailService",
         "Autheris.Application.Mcp.Services.SemanticMcpCompiler",
-        "Autheris.Application.Serialization.ArrowFlightSqlServer",
         "Autheris.Application.Sql.Services.TrinoMetadataQueryHandler",
         "Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService"
     ];

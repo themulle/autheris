@@ -12,7 +12,7 @@ public sealed class ReadPathInventoryTests
     public void Default_profile_golden_line()
     {
         ReadPathInventory.Describe(new GatewayOptions()).ShouldBe(
-            "Read paths: graphql=on graphql_aggregate=on rest_data=on odata=on arrow=on flight_sql=on duckdb_olap=on websql=off sql_endpoints=on lakehouse=off mcp=off(catalog=on,query=on,api=on,access=on,disabled_tools=0)");
+            "Read paths: graphql=on graphql_aggregate=on rest_data=on odata=on arrow=on duckdb_olap=on websql=off sql_endpoints=on lakehouse=off mcp=off(catalog=on,query=on,api=on,access=on,disabled_tools=0)");
     }
 
     [Fact]

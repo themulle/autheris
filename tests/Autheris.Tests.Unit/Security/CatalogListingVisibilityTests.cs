@@ -76,14 +76,6 @@ public sealed class CatalogListingVisibilityTests
         return repo;
     }
 
-    // Flight SQL lists the tables of data sources the tenant may query through WebSQL (catalog domain = data source).
-    private static ArrowFlightSqlServer Flight(IConsentRepository? consents) => new(
-        Substitute.For<IArrowExportService>(),
-        Tables(),
-        Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowedDataSources = [Tenant] }, Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" }, Catalog = new DataCatalogOptions { SharedTables = [OrdersId.ToString(), SalariesId.ToString()] } }),
-        NullLogger<ArrowFlightSqlServer>.Instance,
-        consents);
-
     private static IcebergRestCatalogFederationService Iceberg(IConsentRepository? consents) => new(
         Substitute.For<IIcebergMetadataReader>(),
         Tables(),
@@ -92,38 +84,6 @@ public sealed class CatalogListingVisibilityTests
         global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
         new ConsentResolutionService(),
         consents);
-
-    [Fact]
-    public async Task FlightSql_GetTables_ListsOnlyConsentedTables()
-    {
-        var tables = await Flight(Consents(AllowOrders())).GetTablesAsync(User(), new TenantId(Tenant));
-
-        tables.Select(t => t.TableName).ShouldBe(["orders"]);
-    }
-
-    [Fact]
-    public async Task FlightSql_GetTables_WithoutConsent_ListsNothing()
-    {
-        var tables = await Flight(Consents()).GetTablesAsync(User(), new TenantId(Tenant));
-
-        tables.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task FlightSql_GetTables_WithoutConsentRepository_FailsClosed()
-    {
-        var tables = await Flight(null).GetTablesAsync(User(), new TenantId(Tenant));
-
-        tables.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task FlightSql_GetTables_GovernanceAdmin_ListsWholeTenantCatalog()
-    {
-        var tables = await Flight(Consents()).GetTablesAsync(User("GovernanceAdmin"), new TenantId(Tenant));
-
-        tables.Select(t => t.TableName).OrderBy(n => n).ShouldBe(["orders", "salaries"]);
-    }
 
     [Fact]
     public async Task Iceberg_ListNamespacesAndTables_ShowOnlyConsentedTables()

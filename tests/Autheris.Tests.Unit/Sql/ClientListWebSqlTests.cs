@@ -221,7 +221,7 @@ public sealed class ClientListWebSqlTests
         await using var f = await CreateAsync();
         const string sql = "SELECT id FROM orders WHERE id IN (@ids)";
         var raw = P("ids", "[1,2]");
-        foreach (string? transport in new string?[] { null, SqlTransports.Rest, SqlTransports.Mcp, SqlTransports.ArrowExport, SqlTransports.FlightSql, SqlTransports.AsyncJob, SqlTransports.Olap, "graphql" })
+        foreach (string? transport in new string?[] { null, SqlTransports.Rest, SqlTransports.Mcp, SqlTransports.ArrowExport, SqlTransports.AsyncJob, SqlTransports.Olap, "graphql" })
         {
             var ex = await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, raw, transport: transport));
             ex.Code.ShouldBe("SQL_LIST_PARAM_POSITION");

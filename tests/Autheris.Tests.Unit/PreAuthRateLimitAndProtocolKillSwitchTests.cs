@@ -117,7 +117,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var disabledOptions = new GatewayOptions
         {
             OData = new ODataOptions { Enabled = false },
-            Arrow = new ArrowExportOptions { Enabled = false, EnableFlightSql = false },
+            Arrow = new ArrowExportOptions { Enabled = false },
             Lakehouse = new LakehouseOptions { Enabled = false }
         };
 
@@ -154,7 +154,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var enabledOptions = new GatewayOptions
         {
             OData = new ODataOptions { Enabled = true },
-            Arrow = new ArrowExportOptions { Enabled = true, EnableFlightSql = true },
+            Arrow = new ArrowExportOptions { Enabled = true },
             Lakehouse = new LakehouseOptions { Enabled = true }
         };
 

@@ -53,9 +53,6 @@ public sealed class TransportRowLimitsOptions
     /// <summary>Arrow IPC export (POST /api/v1/export/arrow; Arrow.MaxExportRows still caps the export).</summary>
     public ChannelRowLimitOptions ArrowExport { get; init; } = new();
 
-    /// <summary>Arrow Flight SQL (/api/v1/flight/sql/*).</summary>
-    public ChannelRowLimitOptions FlightSql { get; init; } = new();
-
     /// <summary>Asynchronous query jobs (POST /api/v1/jobs/query); the client MaxRows is clamped to MaxAllowedRows (SR-H-05).</summary>
     public ChannelRowLimitOptions AsyncJob { get; init; } = new();
 }

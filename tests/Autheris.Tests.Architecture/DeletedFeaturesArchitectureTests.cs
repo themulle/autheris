@@ -7,6 +7,7 @@ using System.Reflection;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class DeletedFeaturesArchitectureTests
 {
     private static readonly Assembly[] ProductionAssemblies =
@@ -40,5 +41,20 @@ public sealed class DeletedFeaturesArchitectureTests
     {
         var fullPath = Path.Combine(RepositoryScan.RepoRoot, relativeDirectory);
         Directory.Exists(fullPath).ShouldBeFalse($"Deleted feature directory '{relativeDirectory}' ({featureName}) must not exist.");
+    }
+
+    [Theory]
+    [InlineData("ArrowFlightSqlEndpoints")]
+    [InlineData("ArrowFlightSqlServer")]
+    [InlineData("IArrowFlightSqlServer")]
+    [InlineData("DevPortalEndpoints")]
+    [InlineData("DevPortalAssets")]
+    public void Deleted_Types_Do_Not_Exist_In_Production_Assemblies(string typeName)
+    {
+        foreach (var assembly in ProductionAssemblies)
+        {
+            var found = assembly.GetTypes().Any(t => t.Name == typeName || t.FullName?.EndsWith("." + typeName, StringComparison.Ordinal) == true);
+            found.ShouldBeFalse($"Type {typeName} was found in {assembly.GetName().Name}, but should have been deleted.");
+        }
     }
 }

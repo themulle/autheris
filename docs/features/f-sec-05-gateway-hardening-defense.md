@@ -39,7 +39,7 @@ flowchart TD
 ### Component Details
 
 - **`PreAuthIpRateLimitingMiddleware`:** Inspects incoming `Authorization: Bearer <token>` headers. When `ExemptAuthenticatedRequests = true`, authenticated requests skip the crude IP-based pre-auth bucket while remaining strictly constrained by downstream identity-based SID and cost limiters. Dynamic `Retry-After: <seconds>` headers inform throttled clients of the remaining window duration.
-- **Protocol Kill-Switches (`GatewayOptions`):** Independent toggle switches for `OData.Enabled`, `Arrow.Enabled`, `Arrow.EnableFlightSql`, `Lakehouse.Enabled`, and `DuckDbOlap.Enabled`. Disabled protocols are not mapped in Kestrel and are filtered out of `McpDatasetCatalog`.
+- **Protocol Kill-Switches (`GatewayOptions`):** Independent toggle switches for `OData.Enabled`, `Arrow.Enabled`, `Lakehouse.Enabled`, and `DuckDbOlap.Enabled`. Disabled protocols are not mapped in Kestrel and are filtered out of `McpDatasetCatalog`.
 - **`NegotiateHardening` & Authentication Schemes:** `AddNegotiate(...)` is only registered when `gatewayOptions.Authentication.IsKerberosConfigured = true`. Fallback challenges return `Bearer`. `OnAuthenticationFailed` intercepts malformed SPNEGO payloads and cleanly fails with 401.
 - **`ICallerContextProvider` & `CallerContext`:** Extracts sanitized client headers (`X-Caller-Application`, `X-Caller-Version`, `X-Caller-Query-Name`), attaching them to `SecurityPrincipalContext` and automatically embedding `"caller": { "app", "ver", "query" }` into `AuditLogEntry.DetailsJson` and the immutable HMAC-SHA256 hash chain.
 - **`ErrorSanitizingFilter`:** Whitelists machine-readable codes (`COLUMN_NOT_RELEASED`, `FILTER_ON_MASKED_COLUMN`, `COST_LIMIT`, `ROW_LIMIT`, `RATE_LIMIT`) while enforcing anti-oracle masking for `TableNotFoundException` in staging and production environments.
@@ -73,8 +73,7 @@ flowchart TD
       "Enabled": false
     },
     "Arrow": {
-      "Enabled": true,
-      "EnableFlightSql": false
+      "Enabled": true
     },
     "Lakehouse": {
       "Enabled": false

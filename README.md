@@ -80,7 +80,7 @@ Autheris encompasses **57+ enterprise features**, documented in [`docs/features/
 - **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
   - Secure HTTP-based SQL execution (`POST /api/v1/sql` & `/api/sql`) modeled after Trino/Presto — eliminates open database ports (1433/5432) across the corporate network.
   - AST-Level Security Linter & Rewriter (ANTLR4-based): Enforces strict read-only semantics (`SELECT`), rejects multiple statements (`;`), comments, and system functions (`@@`).
-  - Granular Transport Row Limits (`RowLimits`): Fine-tuned default and maximum row budgets per transport (`Trino`, `Parquet`, `SqlEndpoints`, `ArrowExport`, `FlightSql`) with accurate truncation reporting (only reported as truncated when rows were actually severed).
+  - Granular Transport Row Limits (`RowLimits`): Fine-tuned default and maximum row budgets per transport (`Trino`, `Parquet`, `SqlEndpoints`, `ArrowExport`) with accurate truncation reporting (only reported as truncated when rows were actually severed).
   - DML Guardrails (`WebSql.AllowDml`): DML requires dedicated `WebSql.DmlWriterRoles`; unfiltered `UPDATE`/`DELETE` queries (`WHERE 1=1`, `WHERE true`) are strictly rejected (`RejectUnfilteredDml`); automated transaction limits with rollback on exceeding `WebSql.MaxAffectedRows` (default: 1,000 rows); cryptographic audit logging of all DML events.
 - **Declarative SQL-to-API REST Engine & Auto-OpenAPI 3.0 ([`F-SQL-01`](docs/features/f-sql-01-declarative-sql-endpoints.md))**:
   - Zero-code REST endpoints directly from versioned `.sql` files (`GET` / `POST /api/v1/queries/{name}`).
@@ -100,8 +100,8 @@ Autheris encompasses **57+ enterprise features**, documented in [`docs/features/
   - Native support for standard OData query options: `$select`, `$filter`, `$orderby` multi-column sorting, `$top`, `$skip`, and `$count` (`?$count=true` or `/table/$count`).
   - Mandatory `OData-Version: 4.0` response header for seamless Excel, PowerQuery, and Power BI compatibility.
   - Dynamic OpenAPI 3.1 specification (`/odata/v4/$openapi`) with integrated offline-capable Swagger UI (`/docs`, `/ui/swagger`).
-- **Arrow IPC over HTTP & Binary Egress ([`F-DATA-04`](docs/features/f-data-04-arrow-flight-sql.md))**:
-  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Arrow IPC over HTTP (`/api/v1/flight/sql/*`) and Arrow Binary Export (`/api/v1/export/arrow`).
+- **Arrow IPC over HTTP & Binary Egress**:
+  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Arrow Binary Export (`/api/v1/export/arrow`).
 - **Hierarchical Apache Parquet Binary Egress ([`F-DATA-01`](docs/features/f-data-01-parquet-egress.md))**:
   - On-the-fly serialization to authentic, Snappy-compressed Parquet files across all data channels (GraphQL, WebSQL, SQL endpoints, OData) when requested via `Accept: application/vnd.apache.parquet`.
   - Strict Zero-Trust guarantee: Parquet serialization occurs post-RLS, post-masking, and post-consent — files contain only authorized, sanitized data.
