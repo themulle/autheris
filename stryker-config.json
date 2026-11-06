@@ -7,7 +7,9 @@
       "**/Ast/Visitors/AstSecurityVisitor*.cs",
       "**/Ast/Visitors/AstSimplificationVisitor.cs",
       "**/Ast/Security/*.cs",
-      "**/Ast/Emit/*.cs"
+      "**/Ast/Emit/*.cs",
+      "**/VirtualFilters/MandatoryRowFilterResolver.cs",
+      "**/Security/SecretScrubber.cs"
     ],
     "thresholds": {
       "high": 85,
