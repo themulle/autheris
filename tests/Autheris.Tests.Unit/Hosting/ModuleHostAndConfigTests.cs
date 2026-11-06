@@ -39,6 +39,9 @@ public sealed class ModuleHostTests
             .Build();
         var env = new FakeHostEnvironment();
         var connFactory = new GovernanceConnectionFactory(services.BuildServiceProvider());
+        var beforeAssemblies = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(a => a.GetName().Name ?? string.Empty)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var result = ModuleLoader.LoadModules(services, config, env, connFactory, NullLogger.Instance);
         result.Modules.ShouldBeEmpty();
@@ -46,6 +49,7 @@ public sealed class ModuleHostTests
         var loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies()
             .Select(a => a.GetName().Name ?? string.Empty)
             .Where(name =>
+                !beforeAssemblies.Contains(name) &&
                 name.StartsWith("Autheris.Modules.", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(name, "Autheris.Modules.Abstractions", StringComparison.OrdinalIgnoreCase))
             .ToList();

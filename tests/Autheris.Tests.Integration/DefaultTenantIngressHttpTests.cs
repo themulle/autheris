@@ -34,6 +34,7 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
             b.UseSetting("Gateway:Rebac:Enabled", "true");
             b.UseSetting("Gateway:WebSql:Enabled", "true");
             b.UseSetting("Gateway:Arrow:Enabled", "true");
+            b.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
             b.UseSetting("Gateway:Lakehouse:Enabled", "true");
             if (defaultTenantId is not null)
             {

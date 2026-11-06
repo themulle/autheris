@@ -109,12 +109,20 @@ public static partial class GatewayServiceCollectionExtensions
         IHostEnvironment environment,
         GatewayOptions gatewayOptions)
     {
+        services.TryAddScoped<Autheris.Application.Policy.IAccessDecisionPoint, Autheris.Application.Policy.AccessDecisionPoint>();
         var hostContext = new ModuleHostContext(
             TimeProvider.System,
             ModuleLoader.DefaultHostVersion,
             new GovernanceConnectionFactory(gatewayOptions.GovernanceDb, statePaths: null, environment));
         var loader = new ModuleLoader();
-        loader.LoadAndConfigureServices(services, configuration, environment, hostContext);
+        var moduleLoadResult = loader.LoadAndConfigureServices(services, configuration, environment, hostContext);
+        Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
+            configuration,
+            moduleLoadResult,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse"
+            });
         return services;
     }
     public static IServiceCollection AddGatewayAuth(

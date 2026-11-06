@@ -74,7 +74,19 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 
         var predicates = ExtractPredicates(context.Arguments);
 
-        // 02 / SEC M-35 / EX-17: Reject filter on uncataloged columns or non-clear columns to prevent inference side-channels
+        if (context.RequestedFields != null)
+        {
+            foreach (var requestedField in context.RequestedFields)
+            {
+                if (context.Metadata.GetColumn(requestedField) == null)
+                {
+                    throw new Autheris.Domain.Exceptions.GatewaySecurityException(
+                        $"Delta Lake scan of '{context.Metadata.Identifier}' rejected: Requested column '{requestedField}' is not declared in the catalog.");
+                }
+            }
+        }
+
+        // Reject filter on uncataloged columns or non-clear columns to prevent inference side-channels
         foreach (var column in predicates.Keys.ToList())
         {
             var colMeta = context.Metadata.GetColumn(column);
@@ -122,8 +134,8 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         // Generate synthetic row data for pruned files respecting schema & partition values
         var rawRows = new List<Dictionary<string, object?>>();
         var selectedCols = context.RequestedFields != null && context.RequestedFields.Count > 0
-            ? new HashSet<string>(context.RequestedFields, StringComparer.OrdinalIgnoreCase)
-            : new HashSet<string>(snapshot.Metadata.Schema.Fields.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+            ? new HashSet<string>(context.RequestedFields.Where(f => context.Metadata.GetColumn(f) != null), StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(snapshot.Metadata.Schema.Fields.Select(f => f.Name).Where(n => context.Metadata.GetColumn(n) != null), StringComparer.OrdinalIgnoreCase);
 
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {

@@ -199,7 +199,10 @@ public sealed class ExtensionsRegistrationTests
     [Fact]
     public void EXT_LakehouseExecutor_IsRegisteredExactlyOnce()
     {
-        var services = CreateServices(new GatewayOptions());
+        var options = new GatewayOptions();
+        var services = CreateServices(options);
+        Autheris.Modules.Lakehouse.LakehouseServiceCollectionExtensions.AddLakehouseIntegration(services, options);
+        Autheris.Modules.Lakehouse.LakehouseServiceCollectionExtensions.AddLakehouseIntegration(services, options);
 
         services.Count(d => d.ServiceType == typeof(IDataSourceExecutor) &&
                             d.ImplementationType == typeof(Autheris.Extensions.Lakehouse.Services.LakehouseDataSourceExecutor))

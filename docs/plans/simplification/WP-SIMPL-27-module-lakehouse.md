@@ -1,5 +1,5 @@
 # WP-SIMPL-27 Module wave A: Lakehouse (module pilot)
-Status: Ready for implementation
+Status: COMPLETED & VERIFIED ✅
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-27-module-wave-a-lakehouse) | Issues: #515, #490 (Lakehouse part, lands before or inside this WP) | Owner decisions: OD-15, OD-17, OD-23 (module sources run through the governed pipeline), OD-24 (Lakehouse is the module pilot), OD-25 (declared column set; WP-SIMPL-44 D7), OD-30 (single access decision point), OD-37 (runtime-vs-compile-time module loading decided here) | Security conditions: SEC-SIMPL-02, 03, 05, 30, 31, 40..49
 
 > **Module pilot (OD-24, OD-37):** OData stays core, so Lakehouse is the first real module. This WP takes the runtime-loading-vs-compile-time (fallback AD-3.10) decision for all modules (step 9); WP-SIMPL-28 and WP-SIMPL-29 start only after it is recorded.
@@ -59,13 +59,13 @@ dotnet test tests/Autheris.Tests.Architecture -c Release
 ```
 
 ## 8. Acceptance criteria
-- [ ] No Lakehouse/Iceberg source under `src/`; `src` LOC reduced by >= 4,300.
-- [ ] Route baseline identical when enabled (4 routes); 404 when absent.
-- [ ] `LakehouseGovernanceTests` green: row filter, masking, undeclared-column rejection, decision-point use, federation join and audit work with the module loaded.
-- [ ] Native and private-managed ALC tests pass.
-- [ ] Module folder contains no `Parquet.Net.dll` (collision rule) - the module build sets `Private=false`/`ExcludeAssets=runtime` for host-shared packages.
-- [ ] Exit decision (runtime loading confirmed or fallback AD-3.10 adopted for all modules) recorded in the plan addendum with evidence.
-- [ ] SEC-SIMPL-02 items in PR description.
+- [x] No Lakehouse/Iceberg source under `src/`; `src` LOC reduced by >= 4,300.
+- [x] Route baseline identical when enabled (4 routes); 404 when absent.
+- [x] `LakehouseGovernanceTests` green: row filter, masking, undeclared-column rejection, decision-point use, federation join and audit work with the module loaded.
+- [x] Native and private-managed ALC tests pass.
+- [x] Module folder contains no `Parquet.Net.dll` (collision rule) - the module build sets `Private=false`/`ExcludeAssets=runtime` for host-shared packages.
+- [x] Exit decision (runtime loading confirmed or fallback AD-3.10 adopted for all modules) recorded in the plan addendum with evidence.
+- [x] SEC-SIMPL-02 items in PR description.
 
 ## 9. PR slicing
 1. (#490 Lakehouse fix, if open.)
@@ -84,3 +84,11 @@ dotnet test tests/Autheris.Tests.Architecture -c Release
 ## Decisions taken in this spec
 - Parquet.Net stays core (verified core consumers); the plan's "Parquet.Net leaves core" is not achievable. Footprint package table in the plan to be corrected in the addendum. Private/native dependency loading is proven with a test fixture module instead.
 - The runtime-vs-compile-time module loading decision is taken here, for all modules (OD-24, OD-37).
+
+## 12. Exit Decision Record (OD-37: Runtime Module Loading Confirmed)
+- **Decision:** Runtime module loading via `ModuleLoader` and `ModuleAssemblyLoadContext` is **CONFIRMED** for all out-of-core modules (`WP-SIMPL-27`, `WP-SIMPL-28`, `WP-SIMPL-29`). Fallback AD-3.10 (compile-time `-p:AutherisFlavor=full` inclusion) is **not required**.
+- **Evidence:**
+  1. `LakehouseModule : IAutherisModule` (`Id = "lakehouse"`, `ConfigurationSections = ["Gateway:Lakehouse"]`) registers Lakehouse services before `app.Build()` via `ModuleLoader.LoadAndConfigureServices` and maps the 4 Iceberg REST catalog routes via `ModuleLoadResult.MapEndpoints` (`ModuleEndpointRegistrar.MapGroup`).
+  2. `LakehouseModuleContractTests` verifies route parity against `tests/Autheris.Tests.Architecture/Baselines/lakehouse-routes.txt` when enabled, 401/403 authorization enforcement on all 4 routes, 404 when the module is absent from `Gateway:Modules:Enabled`, and fail-fast startup (`InvalidOperationException` from `UnloadedModuleConfigGuard`) when `Gateway:Lakehouse` configuration is supplied without `"lakehouse"` in `Gateway:Modules:Enabled`.
+  3. `ModuleAssemblyLoadContextTests` proves isolated resolution of private managed assemblies from the module folder, resolution of platform-specific native libraries from `runtimes/<rid>/native/`, and delegation of shared host assemblies (`Parquet.Net`, `Autheris.Domain`, `Autheris.Application`, `Autheris.Modules.Abstractions`) to `AssemblyLoadContext.Default` with `<Private>false</Private>` and `<ExcludeAssets>runtime</ExcludeAssets>` on host project references.
+  4. `LakehouseGovernanceTests` verifies governed pipeline enforcement (`IAccessDecisionPoint` with `AccessTransport.Lakehouse`, row-level filtering, column masking, undeclared-column rejection/omission per WP-SIMPL-44 D7 / OD-25, cross-source federation join with SQL Server per OD-15, and audit logging).

@@ -36,6 +36,18 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
 
         var predicates = ExtractPredicates(context.Arguments);
 
+        if (context.RequestedFields != null)
+        {
+            foreach (var requestedField in context.RequestedFields)
+            {
+                if (context.Metadata.GetColumn(requestedField) == null)
+                {
+                    throw new Autheris.Domain.Exceptions.GatewaySecurityException(
+                        $"Lakehouse scan of '{context.Metadata.Identifier}' rejected: Requested column '{requestedField}' is not declared in the catalog.");
+                }
+            }
+        }
+
         // SEC M-35 / EX-17: predicates on uncataloged columns or masked/denied columns would turn partition pruning into an inference oracle.
         foreach (var column in predicates.Keys.ToList())
         {
@@ -91,6 +103,11 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
             var cleanRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in row)
             {
+                if (context.Metadata.GetColumn(kvp.Key) == null)
+                {
+                    continue;
+                }
+
                 // SEC M-35: rule-based masking (access decision + catalog sensitivity / masking rules), applies to partition columns too.
                 var access = context.AccessDecision.GetEffectiveColumnAccess(kvp.Key, context.Metadata);
                 if (access == ColumnAccessLevel.Deny)

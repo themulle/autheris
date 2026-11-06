@@ -30,7 +30,7 @@ public sealed partial class OptionsConsumptionInventoryTests
     [Fact]
     public void UnconsumedOptionProperties_MustBeEmpty()
     {
-        var current = FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles);
+        var current = FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), ProductionAndModuleFiles.Value);
         current.ShouldBeEmpty("Option properties that no production code reads. Wire them up or delete them (ARCH-MNT-06, WP-SIMPL-06).");
     }
 
@@ -69,7 +69,7 @@ public sealed partial class OptionsConsumptionInventoryTests
         var entries = ParseIndirect(RepositoryScan.ReadBaseline("options-consumed-indirectly.txt"));
 
         entries.Count.ShouldBeGreaterThan(0, "The indirect-consumer file must not be empty; an empty file would hide a broken ratchet.");
-        CheckIndirect(entries, ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles).ShouldBeEmpty();
+        CheckIndirect(entries, ProductionAssemblies.SelectMany(SafeTypes), ProductionAndModuleFiles.Value).ShouldBeEmpty();
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed partial class OptionsConsumptionInventoryTests
     private static List<string> CheckIndirect(IReadOnlyList<IndirectEntry> entries, IEnumerable<Type> types, IReadOnlyList<RepositoryScan.SourceFile> files)
     {
         var typeList = types.ToList();
-        var index = ReferenceEquals(files, RepositoryScan.ProductionFiles) ? ProductionIndex.Value : BuildIndex(files);
+        var index = ReferenceEquals(files, ProductionAndModuleFiles.Value) ? ProductionIndex.Value : BuildIndex(files);
         var unconsumed = FindUnconsumed(typeList, files, countDeclaringReads: false).ToHashSet(StringComparer.Ordinal);
         var problems = new List<string>();
         foreach (var entry in entries)
@@ -169,7 +169,7 @@ public sealed partial class OptionsConsumptionInventoryTests
 
     private static List<string> FindUnconsumed(IEnumerable<Type> types, IReadOnlyList<RepositoryScan.SourceFile> files, bool countDeclaringReads = true)
     {
-        var index = ReferenceEquals(files, RepositoryScan.ProductionFiles) ? ProductionIndex.Value : BuildIndex(files);
+        var index = ReferenceEquals(files, ProductionAndModuleFiles.Value) ? ProductionIndex.Value : BuildIndex(files);
         var accessedByFile = index.Accessed;
 
         var result = new List<string>();
@@ -239,7 +239,14 @@ public sealed partial class OptionsConsumptionInventoryTests
         Dictionary<string, HashSet<string>> Accessed,
         Dictionary<string, HashSet<string>> Declaring);
 
-    private static readonly Lazy<FileIndex> ProductionIndex = new(() => BuildIndex(RepositoryScan.ProductionFiles));
+    private static readonly Lazy<IReadOnlyList<RepositoryScan.SourceFile>> ProductionAndModuleFiles = new(() =>
+        RepositoryScan.ProductionFiles
+            .Concat(RepositoryScan.EnumerateFiles("modules", "*.cs")
+                .Where(f => !f.Contains(".Tests/", StringComparison.OrdinalIgnoreCase))
+                .Select(r => new RepositoryScan.SourceFile(r, RepositoryScan.ReadText(r))))
+            .ToArray());
+
+    private static readonly Lazy<FileIndex> ProductionIndex = new(() => BuildIndex(ProductionAndModuleFiles.Value));
 
     private static FileIndex BuildIndex(IReadOnlyList<RepositoryScan.SourceFile> files)
     {

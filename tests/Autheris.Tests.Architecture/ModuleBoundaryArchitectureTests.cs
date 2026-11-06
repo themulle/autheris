@@ -76,7 +76,9 @@ public sealed partial class ModuleBoundaryArchitectureTests
         var modulesRootDir = Path.Combine(root, "modules");
         if (Directory.Exists(modulesRootDir))
         {
-            moduleProjects.AddRange(Directory.EnumerateFiles(modulesRootDir, "*.csproj", SearchOption.AllDirectories));
+            moduleProjects.AddRange(
+                Directory.EnumerateFiles(modulesRootDir, "*.csproj", SearchOption.AllDirectories)
+                    .Where(p => !p.EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase)));
         }
 
         foreach (var csproj in moduleProjects)

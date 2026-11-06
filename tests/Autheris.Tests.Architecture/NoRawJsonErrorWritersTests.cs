@@ -29,7 +29,6 @@ public sealed partial class NoRawJsonErrorWritersTests
         ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", 2, "OData basic-auth challenge object and the fixed-text diagnostics problem of the auth handler"),
         ("src/Autheris.Api/Endpoints/ScimFilterGuard.cs", 1, "SCIM 2.0 Error message (RFC 7644 section 3.12), fixed text (protocol allowlist)"),
         ("src/Autheris.Api/Endpoints/ScimMassChangeResult.cs", 1, "SCIM 2.0 Error message (RFC 7644 section 3.12), fixed text with Retry-After (protocol allowlist)"),
-        ("src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs", 1, "Iceberg REST catalog ErrorModel (protocol allowlist)"),
         ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", 1, "Envoy ext_authz denied-response pass-through, text sanitised (protocol allowlist)"),
         ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", 2, "Trino QueryResults.error inside a 200 result and the fixed-text execution timeout problem with its own type URI")
     ];

@@ -10,7 +10,7 @@ namespace Autheris.Tests.Architecture;
 [Trait("Category", "Security")]
 public sealed partial class NoRawExceptionMessageInEndpointResponsesTests
 {
-    private static readonly string[] ScannedDirectories = ["src/Autheris.Api/Endpoints", "src/Autheris.Api/Mcp"];
+    private static readonly string[] ScannedDirectories = ["src/Autheris.Api/Endpoints", "src/Autheris.Api/Mcp", "modules/Autheris.Modules.Lakehouse/Endpoints"];
 
     [GeneratedRegex(@"\b(?:e\d*|err|error|inner|\w*ex\d*|\w*[Ee]xception\d*)\.(?:Message|InnerException|StackTrace|ToString\(\))(?!\s*\.\s*Contains)")]
     private static partial Regex ExceptionMessageAccess();

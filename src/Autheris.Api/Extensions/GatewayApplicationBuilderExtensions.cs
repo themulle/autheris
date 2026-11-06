@@ -269,10 +269,6 @@ public static class GatewayApplicationBuilderExtensions
         {
             app.MapDuckDbOlapEndpoints();
         }
-        if (gatewayOptions.Lakehouse.Enabled)
-        {
-            app.MapIcebergRestCatalogEndpoints();
-        }
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
         if (switches.RestDataEndpointEnabled)

@@ -560,11 +560,11 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "Autheris.Domain": "[1.2.1, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
           "BitFaster.Caching": "[2.6.1, )",
           "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6.1, )",
-          "FastSqlEngine": "[1.2.1, )",
+          "FastSqlEngine": "[0.0.0-dev, )",
           "FluentValidation": "[12.2.0, )",
           "HotChocolate.Language": "[16.7.3, )",
           "MemoryPack": "[1.21.4, )",
@@ -591,13 +591,27 @@
       "autheris.extensions": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.2.1, )",
-          "Autheris.Domain": "[1.2.1, )",
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.14, )",
           "Microsoft.Extensions.Hosting.Abstractions": "[10.0.14, )",
           "Microsoft.Extensions.Http": "[10.0.14, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.14, )",
           "Microsoft.Extensions.Options": "[10.0.14, )"
+        }
+      },
+      "autheris.modules.abstractions": {
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Domain": "[0.0.0-dev, )"
+        }
+      },
+      "autheris.modules.lakehouse": {
+        "type": "Project",
+        "dependencies": {
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
+          "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
         }
       },
       "FastSqlEngine": {

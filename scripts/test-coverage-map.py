@@ -82,15 +82,18 @@ def extract_tests_from_source(source: str) -> tuple[set[str], set[str]]:
 def scan_worktree(root: pathlib.Path) -> tuple[set[str], set[str]]:
     all_tests: set[str] = set()
     security_tests: set[str] = set()
-    tests_dir = root / "tests"
-    for path in sorted(tests_dir.rglob("*.cs")):
-        rel = path.relative_to(root).as_posix()
-        if "/bin/" in rel or "/obj/" in rel:
+    for folder_name in ("tests", "modules"):
+        scan_dir = root / folder_name
+        if not scan_dir.exists():
             continue
-        source = path.read_text(encoding="utf-8", errors="replace")
-        file_all, file_sec = extract_tests_from_source(source)
-        all_tests.update(file_all)
-        security_tests.update(file_sec)
+        for path in sorted(scan_dir.rglob("*.cs")):
+            rel = path.relative_to(root).as_posix()
+            if "/bin/" in rel or "/obj/" in rel:
+                continue
+            source = path.read_text(encoding="utf-8", errors="replace")
+            file_all, file_sec = extract_tests_from_source(source)
+            all_tests.update(file_all)
+            security_tests.update(file_sec)
     return all_tests, security_tests
 
 

@@ -1,0 +1,4 @@
+GET /v1/{prefix}/namespaces
+GET /v1/{prefix}/namespaces/{namespace}/tables
+GET /v1/{prefix}/namespaces/{namespace}/tables/{table}
+POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials

@@ -30,7 +30,7 @@ internal static partial class TestInventoryScanner
         var allTests = new HashSet<string>(StringComparer.Ordinal);
         var securityTests = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var file in RepositoryScan.EnumerateFiles("tests", "*.cs"))
+        foreach (var file in RepositoryScan.EnumerateFiles("tests", "*.cs").Concat(RepositoryScan.EnumerateFiles("modules", "*.cs")))
         {
             var source = RepositoryScan.ReadText(file);
             ExtractFromSource(source, allTests, securityTests);

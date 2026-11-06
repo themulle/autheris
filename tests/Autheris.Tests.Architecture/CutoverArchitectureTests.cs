@@ -40,7 +40,7 @@ public sealed class CutoverArchitectureTests
         typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
-        typeof(Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService).Assembly,
+        typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
         typeof(TrinoSqlEngine.FastSqlEngine).Assembly
     ];
 
