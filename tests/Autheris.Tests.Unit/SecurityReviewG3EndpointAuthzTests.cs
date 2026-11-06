@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mesh.Services;
 using Autheris.Application.OData.Services;
 using Autheris.Domain.Common;

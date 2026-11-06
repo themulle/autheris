@@ -2,7 +2,7 @@ namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
 using System.Data;
 using System.Data.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Microsoft.Extensions.Logging;

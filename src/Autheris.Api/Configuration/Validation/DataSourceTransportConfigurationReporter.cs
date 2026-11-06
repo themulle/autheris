@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.DataSources;
 using Autheris.Application.Sql.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;

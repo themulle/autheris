@@ -9,7 +9,7 @@ using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;

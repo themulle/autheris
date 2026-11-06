@@ -98,7 +98,7 @@ public sealed class TreeSqlCompilerDefaultOrderingTests
         var ex = Should.Throw<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(
             () => Compile(new TreeQueryNode(Parent, ["a"]) { Offset = 5 }, access));
 
-        ex.Message.ShouldBe(Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
+        ex.Message.ShouldBe(Autheris.Application.DataSources.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
     }
 
     [Fact]

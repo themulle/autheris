@@ -4,7 +4,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;

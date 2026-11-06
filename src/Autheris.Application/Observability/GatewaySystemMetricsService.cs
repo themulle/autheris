@@ -7,8 +7,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Application.Interfaces;
-using Autheris.Application.ResourceGroups;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 

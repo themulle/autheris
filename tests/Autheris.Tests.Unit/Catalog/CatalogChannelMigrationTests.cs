@@ -5,7 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Policy;

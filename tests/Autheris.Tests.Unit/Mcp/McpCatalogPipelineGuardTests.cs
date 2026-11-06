@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

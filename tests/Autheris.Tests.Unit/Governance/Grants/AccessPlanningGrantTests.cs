@@ -11,7 +11,7 @@ namespace Autheris.Tests.Unit.Governance.Grants;
 public sealed class AccessPlanningGrantTests
 {
     private static AccessPlanningService Service() =>
-        new(Substitute.For<Autheris.Application.Interfaces.IAuditLogRepository>());
+        new(Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>());
 
     private static AdminPlanAccessRequest Plan(DateTimeOffset? validUntil) => new(
         "default.sales.orders",

@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Databricks;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
 using Autheris.Tests.Common;

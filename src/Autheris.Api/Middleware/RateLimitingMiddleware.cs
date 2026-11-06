@@ -1,7 +1,7 @@
 using Autheris.Api.Errors;
 using System.Security.Claims;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using System.Collections.Generic;

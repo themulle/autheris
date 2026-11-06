@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 
 namespace Autheris.Infrastructure.Idempotency;
 

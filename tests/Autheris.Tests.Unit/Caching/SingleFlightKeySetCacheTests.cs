@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Caching;
 
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;

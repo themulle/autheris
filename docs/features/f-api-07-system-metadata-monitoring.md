@@ -1,6 +1,6 @@
 # F-API-07: Canonical System Metadata & Monitoring Schema ($system)
 
-**Components:** `SystemMonitoringEndpoints.cs`, [`IGatewayHealthCheckService.cs`](../../src/Autheris.Application/Interfaces/IGatewayHealthCheckService.cs)
+**Components:** `SystemMonitoringEndpoints.cs`, [`IGatewayHealthCheckService.cs`](../../src/Autheris.Application/Common/Interfaces/IGatewayHealthCheckService.cs)
 
 ---
 

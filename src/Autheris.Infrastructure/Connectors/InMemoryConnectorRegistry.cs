@@ -2,7 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Connectors;
+using Autheris.Application.DataSources.Connectors;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 

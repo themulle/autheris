@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

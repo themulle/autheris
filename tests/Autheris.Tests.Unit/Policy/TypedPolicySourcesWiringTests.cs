@@ -7,8 +7,8 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
-using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Connectors.CrossDomain;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
 using Autheris.Application.Procedures.Interfaces;
@@ -285,7 +285,7 @@ public sealed class TypedPolicySourcesWiringTests
         await using var scope = provider.CreateAsyncScope();
         var service = scope.ServiceProvider.GetRequiredService<IProcedureExecutionService>();
 
-        FieldsOf(service, typeof(Autheris.Application.Interfaces.ITableReadConcurrencyGate)).ShouldHaveSingleItem().ShouldNotBeNull();
+        FieldsOf(service, typeof(Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate)).ShouldHaveSingleItem().ShouldNotBeNull();
         var limiter = FieldsOf(service, typeof(Autheris.Application.Procedures.Services.ProcedureDenialAuditLimiter)).ShouldHaveSingleItem();
         limiter.ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Procedures.Services.ProcedureDenialAuditLimiter>());
     }

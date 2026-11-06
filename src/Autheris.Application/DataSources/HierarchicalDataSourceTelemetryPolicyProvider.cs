@@ -1,7 +1,7 @@
 namespace Autheris.Application.DataSources;
 
 using System;
-using Autheris.Application.Telemetry;
+using Autheris.Application.Observability.Telemetry;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options.Observability;
 using Microsoft.Extensions.Logging;

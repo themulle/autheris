@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;

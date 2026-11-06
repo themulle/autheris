@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Search;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

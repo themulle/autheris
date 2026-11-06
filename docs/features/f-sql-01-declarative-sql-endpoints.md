@@ -1,6 +1,6 @@
 # F-SQL-01: Declarative SQL-to-API Engine & Auto-OpenAPI
 
-**Components:** [`SqlEndpointLoader.cs`](../../src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs), [`InMemorySqlEndpointRegistry.cs`](../../src/Autheris.Application/SqlEndpoints/Services/InMemorySqlEndpointRegistry.cs), [`SqlEndpointRoutes.cs`](../../src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs)
+**Components:** [`SqlEndpointLoader.cs`](../../src/Autheris.Application/Sql/Endpoints/Services/SqlEndpointLoader.cs), [`InMemorySqlEndpointRegistry.cs`](../../src/Autheris.Application/Sql/Endpoints/Services/InMemorySqlEndpointRegistry.cs), [`SqlEndpointRoutes.cs`](../../src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs)
 
 ---
 

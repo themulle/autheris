@@ -12,7 +12,7 @@ using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Federation.Services;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;

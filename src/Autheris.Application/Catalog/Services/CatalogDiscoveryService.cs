@@ -10,7 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -189,7 +189,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             }
         }
 
-        var keys = Autheris.Application.Data.Services.DatasetIndexProjection.Project(metadata, clear);
+        var keys = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(metadata, clear);
         var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var columnDetails = metadata.Columns.Select(c =>
@@ -243,7 +243,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var resolution = _consentResolution ?? new ConsentResolutionService();
             if (CallerScopeResolver.IsAdminView(scope))
             {
-                return Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(
+                return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(
                     CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, [], isAdmin: true, isGranted: false, bypass: false, _logger));
             }
 
@@ -258,7 +258,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var consents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
                 subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), tenantId, ct).ConfigureAwait(false);
             var granted = consents.Any(c => c.Effect == ConsentEffect.Allow && c.TableIdentifier == metadata.Identifier && c.TenantId == tenantId);
-            return Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(
+            return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(
                 CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, consents, isAdmin: false, isGranted: granted, bypass: false, _logger));
         }
         catch (OperationCanceledException)

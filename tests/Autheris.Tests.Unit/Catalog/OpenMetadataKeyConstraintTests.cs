@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;

@@ -7,7 +7,7 @@ using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Governance.Analysis;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence.Catalog;

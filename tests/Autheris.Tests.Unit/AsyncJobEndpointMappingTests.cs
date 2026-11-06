@@ -14,7 +14,7 @@ public sealed class AsyncJobEndpointMappingTests
     public void MapAsyncJobEndpoints_OnMinimalWebApplication_RegistersJobRoutes()
     {
         var builder = WebApplication.CreateSlimBuilder();
-        builder.Services.AddSingleton(Substitute.For<Autheris.Application.Jobs.Interfaces.IAsyncQueryJobManager>());
+        builder.Services.AddSingleton(Substitute.For<Autheris.Application.Runtime.Jobs.Interfaces.IAsyncQueryJobManager>());
         using var app = builder.Build();
 
         AsyncJobEndpoints.MapAsyncJobEndpoints(app);

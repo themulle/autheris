@@ -3,7 +3,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 using System;
 using System.Diagnostics;
 using Autheris.Api.Telemetry;
-using Autheris.Application.Telemetry;
+using Autheris.Application.Observability.Telemetry;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options.Observability;
 using Autheris.Infrastructure.Telemetry;

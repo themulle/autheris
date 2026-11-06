@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Extensions.Dbt;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;

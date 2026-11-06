@@ -7,7 +7,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -429,7 +429,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
         // I404-SC-L1/L4: keys and indexes only when wholly Clear for this caller (the level lookup fails closed to Deny).
-        var keyView = Autheris.Application.Data.Services.DatasetIndexProjection.Project(table, Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(columnAccessLevels));
+        var keyView = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(table, Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(columnAccessLevels));
         var primaryKeys = new HashSet<string>(keyView.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         // Token-efficient Brief view for AI App & Report Generators

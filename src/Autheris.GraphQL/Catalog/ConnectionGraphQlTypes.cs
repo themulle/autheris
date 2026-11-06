@@ -6,9 +6,9 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -401,7 +401,7 @@ internal static class ConnectionGraphQlTypes
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
         }
-        catch (Autheris.Application.Data.Relations.CrossSourceRelationException ex)
+        catch (Autheris.Application.DataSources.Relations.CrossSourceRelationException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
         }

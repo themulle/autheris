@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Lint;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;

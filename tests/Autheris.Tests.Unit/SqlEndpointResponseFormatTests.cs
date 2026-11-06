@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Sql.Interfaces;
-using Autheris.Application.SqlEndpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;

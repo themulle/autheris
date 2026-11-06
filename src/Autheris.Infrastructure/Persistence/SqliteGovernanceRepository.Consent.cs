@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Autheris.Application.Governance.ConsentRequests;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

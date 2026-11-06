@@ -1,5 +1,5 @@
 using System.Security.Cryptography;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Security;

@@ -4,7 +4,7 @@
 **Category:** Incremental Data Synchronization & CDC Polling  
 **Components:**
 - Domain: [`TableModels.cs`](../../src/Autheris.Domain/Model/TableModels.cs) (`DeletedKeyPolicy`)
-- Application: [`ChangeDetectionModels.cs`](../../src/Autheris.Application/Data/Changes/ChangeDetectionModels.cs), [`IGovernedChangeDetectionService.cs`](../../src/Autheris.Application/Data/Changes/IGovernedChangeDetectionService.cs), [`GovernedChangeDetectionService.cs`](../../src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.cs)
+- Application: [`ChangeDetectionModels.cs`](../../src/Autheris.Application/DataSources/Changes/ChangeDetectionModels.cs), [`IGovernedChangeDetectionService.cs`](../../src/Autheris.Application/DataSources/Changes/IGovernedChangeDetectionService.cs), [`GovernedChangeDetectionService.cs`](../../src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.cs)
 - API: [`ChangeDetectionEndpoints.cs`](../../src/Autheris.Api/Endpoints/ChangeDetectionEndpoints.cs)
 
 ---

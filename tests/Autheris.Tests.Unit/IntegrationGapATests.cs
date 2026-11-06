@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -243,7 +243,7 @@ public sealed class IntegrationGapATests
     {
         var services = new ServiceCollection();
         services.AddScoped<IDataSourceExecutor>(_ => new SqlTableReadExecutor(
-            new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed));
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), () => governed));
         var provider = services.BuildServiceProvider();
         return new SqlConnector(
             connectorId: ConnectorId,

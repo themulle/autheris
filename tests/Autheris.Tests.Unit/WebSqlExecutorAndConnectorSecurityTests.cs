@@ -15,8 +15,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
-using Autheris.Application.Connectors;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
@@ -479,7 +479,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             RequestedFields: ["id", "name"]);
 
         var executor = new SqlTableReadExecutor(
-            new Autheris.Application.Data.Services.GovernedTableReadPlanner(),
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(),
             () => Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
 
         var ex = await Should.ThrowAsync<ArgumentException>(() => executor.ExecuteAsync(context));
@@ -501,7 +501,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         var governed = Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
         governed.ExecuteQueryBufferedAsync(default!, default!, default, default)
             .ReturnsForAnyArgs(new Autheris.Application.Sql.Interfaces.GovernedSqlResult("", [], [], 0, 0));
-        var executor = new SqlTableReadExecutor(new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed);
+        var executor = new SqlTableReadExecutor(new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), () => governed);
 
         var rows = await executor.ExecuteAsync(context);
         rows.ShouldNotBeNull();
@@ -1171,7 +1171,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     public async Task SqlTableReadExecutor_InvalidTenantClaim_ThrowsForbiddenWithGenericMessage()
     {
         var executor = new SqlTableReadExecutor(
-            new Autheris.Application.Data.Services.GovernedTableReadPlanner(),
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(),
             () => Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>());
 
         var table = new Table

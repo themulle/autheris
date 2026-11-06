@@ -8,7 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -332,7 +332,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             entitySchema["x-long-description"] = table.Table.LongDescription;
         }
 
-        var keyView = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(table, table.Columns);
+        var keyView = Autheris.Application.DataSources.Services.TableKeyVisibility.Restrict(table, table.Columns);
         var properties = new JsonObject();
         var requiredCols = new JsonArray();
 

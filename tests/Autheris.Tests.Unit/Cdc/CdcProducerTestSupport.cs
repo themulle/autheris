@@ -12,7 +12,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;
@@ -355,7 +355,7 @@ internal sealed class CdcProducerHarness
 
     public Microsoft.Extensions.Time.Testing.FakeTimeProvider Time { get; } = new();
 
-    public Autheris.Application.Interfaces.ITableMetadataRepository Metadata { get; } = NSubstitute.Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+    public Autheris.Application.Common.Interfaces.ITableMetadataRepository Metadata { get; } = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
 
     public GatewayOptions Options { get; }
 

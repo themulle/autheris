@@ -10,10 +10,10 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.Connectors;
-using Autheris.Application.Connectors.CrossDomain;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Federation;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
@@ -663,7 +663,7 @@ public sealed class OlapStagingService(
         // counts; only the tenant column, the typed row policy and whole identifiers of the decision's row filter do.
         try
         {
-            Autheris.Application.Data.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientFilterColumns: null, tenantColumnCounts: true);
+            Autheris.Application.DataSources.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientFilterColumns: null, tenantColumnCounts: true);
         }
         catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException ex)
         {

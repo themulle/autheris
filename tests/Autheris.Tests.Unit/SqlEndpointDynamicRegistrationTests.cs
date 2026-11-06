@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit;
 
 using Microsoft.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
 using System.Collections.Generic;
@@ -9,8 +9,8 @@ using System.IO;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
-using Autheris.Application.SqlEndpoints.Interfaces;
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;

@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using Autheris.Api.Hosting.Warmup;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Interfaces;
 using HotChocolate.Execution;

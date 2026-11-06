@@ -1,6 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 
 /// <summary>

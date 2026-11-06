@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Hosting;
 using System;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.State;
 using Autheris.Domain.Interfaces;

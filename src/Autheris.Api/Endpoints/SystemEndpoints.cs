@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Observability;
-using Autheris.Application.ResourceGroups;
+using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;

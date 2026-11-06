@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Autheris.Api.Middleware;
 using Autheris.Application.Analytics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

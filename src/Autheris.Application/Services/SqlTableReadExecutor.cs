@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Security;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;

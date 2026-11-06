@@ -7,7 +7,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;
@@ -186,7 +186,7 @@ public sealed class GovernedPipelineCachePoisoningTests
         var writer = await service.CompileAsync(Sql, User("S-W"), new TenantId(Tenant));
         writer.StatementClass.ShouldBe(SqlStatementClass.Delete);
 
-        var policy = await new GovernancePolicyFactory(new StubCatalogProvider(table), Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(
+        var policy = await new GovernancePolicyFactory(new StubCatalogProvider(table), Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(
             new GovernedPolicyInput("default", new TenantId(Tenant),
                 new Dictionary<TableIdentity, TableAccessDecision>
                 {

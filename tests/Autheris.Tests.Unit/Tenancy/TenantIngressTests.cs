@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using Autheris.Application.Identity;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mesh.Services;
 using Autheris.Application.Services;
 using Autheris.Application.Tenancy;

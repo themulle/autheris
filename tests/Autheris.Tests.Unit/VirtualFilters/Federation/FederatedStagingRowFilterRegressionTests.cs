@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Autheris.Application.Connectors;
+using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -178,7 +178,7 @@ public sealed class FederatedStagingRowFilterRegressionTests
         var (decision, enforcement) = Protected(Customers, "1");
         var plan = new Autheris.Application.VirtualFilters.Federation.VirtualFilterTablePlan(
             enforcement, Autheris.Application.VirtualFilters.Federation.VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
-        var emptyRegistry = NSubstitute.Substitute.For<Autheris.Application.Connectors.IAutherisConnectorRegistry>();
+        var emptyRegistry = NSubstitute.Substitute.For<Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry>();
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
             Staging(emptyRegistry).StageAsync([Request(Customers, decision, plan)], User(), Tenant, Budget()));

@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
 using Autheris.Domain.Common;

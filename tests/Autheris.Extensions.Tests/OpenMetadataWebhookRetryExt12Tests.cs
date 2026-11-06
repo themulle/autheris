@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OpenMetadata;

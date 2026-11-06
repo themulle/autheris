@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Sql.Errors;
 using System;
 using System.Security;
 using Antlr4.Runtime.Misc;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Services;

@@ -292,7 +292,7 @@ public sealed class DynamicSchemaContractTests
 
         var contract = new SchemaContractDefinition("partner", allowedTables: ["orders"]);
 
-        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IConsentRepository>();
+        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IConsentRepository>();
         var allowConsent = new Consent
         {
             TableIdentifier = deniedTable,
@@ -347,7 +347,7 @@ public sealed class DynamicSchemaContractTests
         var sensitiveTable = new TableIdentifier("hr", "public", "salaries");
         var contract = new SchemaContractDefinition("external", excludedTags: ["HIGH"]);
 
-        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IConsentRepository>();
+        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IConsentRepository>();
         var policy = new Autheris.Application.Policy.TableAccessPolicy(
             consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(),
@@ -397,7 +397,7 @@ public sealed class DynamicSchemaContractTests
 
         var manager = new SchemaContractManager(Options.Create(options), NullLogger<SchemaContractManager>.Instance);
 
-        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IConsentRepository>();
+        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IConsentRepository>();
         var policy = new Autheris.Application.Policy.TableAccessPolicy(
             consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(),

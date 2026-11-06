@@ -1,4 +1,4 @@
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 

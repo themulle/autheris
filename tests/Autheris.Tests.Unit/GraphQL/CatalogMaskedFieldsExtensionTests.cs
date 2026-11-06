@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

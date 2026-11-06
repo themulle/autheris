@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Federation;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.Sql.Services;

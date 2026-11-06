@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Cache;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;

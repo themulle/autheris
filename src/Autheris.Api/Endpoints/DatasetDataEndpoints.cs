@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Sql.Errors;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

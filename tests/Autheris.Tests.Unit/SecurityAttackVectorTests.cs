@@ -12,7 +12,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Services;
@@ -314,7 +314,7 @@ public sealed class SecurityAttackVectorTests
             RequestedFields: ["id", "name"]);
 
         var governed = NSubstitute.Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
-        var executor = new SqlTableReadExecutor(new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed);
+        var executor = new SqlTableReadExecutor(new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), () => governed);
 
         // Act & Assert: Must reject query to prevent boolean-based / count-based side-channel inference
         var ex = await Should.ThrowAsync<ArgumentException>(async () =>

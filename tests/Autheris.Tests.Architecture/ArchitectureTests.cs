@@ -120,8 +120,8 @@ public class ArchitectureTests
         {
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogClient),
             typeof(Autheris.Application.Catalog.Interfaces.IDataCatalogSyncService),
-            typeof(Autheris.Application.Interfaces.IOpenLineageClient),
-            typeof(Autheris.Application.Interfaces.IOpenJevClient),
+            typeof(Autheris.Application.Lineage.IOpenLineageClient),
+            typeof(Autheris.Application.Common.Interfaces.IOpenJevClient),
             typeof(Autheris.Extensions.OpenMetadata.IOpenMetadataClient),
             typeof(Autheris.Application.Streaming.Interfaces.IMssqlChangeTrackingPoller)
         };
@@ -207,7 +207,7 @@ public class ArchitectureTests
             .Where(t => t.IsInterface && t.Name.EndsWith("Repository", StringComparison.Ordinal))
             .Select(t => t.FullName!)
             .ToArray();
-        repositoryInterfaces.ShouldContain("Autheris.Application.Interfaces.ITableMetadataRepository", "positive control: the repository list is populated");
+        repositoryInterfaces.ShouldContain("Autheris.Application.Common.Interfaces.ITableMetadataRepository", "positive control: the repository list is populated");
 
         var result = Types.InAssembly(typeof(Autheris.Api.Endpoints.DuckDbOlapEndpoints).Assembly)
             .That()

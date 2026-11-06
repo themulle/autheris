@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Crypto;

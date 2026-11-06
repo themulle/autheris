@@ -13,7 +13,7 @@ using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Policies;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Tools;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Rebac.Services;

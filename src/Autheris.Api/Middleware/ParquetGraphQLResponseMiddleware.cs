@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;

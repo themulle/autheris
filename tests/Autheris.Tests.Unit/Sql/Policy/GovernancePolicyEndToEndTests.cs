@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;
@@ -87,7 +87,7 @@ public sealed class GovernancePolicyEndToEndTests
         provider.GetCatalogAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ITableCatalog>(catalog));
 
-        var policy = await new GovernancePolicyFactory(provider, Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(
+        var policy = await new GovernancePolicyFactory(provider, Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(
             new GovernedPolicyInput("ds", Tenant, new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = decision },
                 new HashSet<TableIdentity>(), GovernedSubqueryStrategy.Correlated)
             { Metadata = new Dictionary<TableIdentity, TableMetadata> { [Orders] = Meta } },

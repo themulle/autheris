@@ -1,7 +1,7 @@
 using Autheris.Tests.Common;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

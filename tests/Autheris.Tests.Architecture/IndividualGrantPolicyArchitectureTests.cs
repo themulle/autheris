@@ -86,7 +86,7 @@ public class IndividualGrantPolicyArchitectureTests
         callers.ShouldBe(
             [
                 "Autheris.Application/Identity/Attributes/AttributeValidatingConsentRepository.cs",
-                "Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs",
+                "Autheris.Application/Governance/Workflows/ConsentRecertificationWorkflowService.cs",
                 "Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"
             ],
             ignoreOrder: true,

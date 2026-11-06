@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.TrustedDocuments;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;

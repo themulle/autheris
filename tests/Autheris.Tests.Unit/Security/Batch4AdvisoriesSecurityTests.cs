@@ -9,7 +9,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
 using Autheris.Application.Analytics;
 using Autheris.Application.DataSources;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;

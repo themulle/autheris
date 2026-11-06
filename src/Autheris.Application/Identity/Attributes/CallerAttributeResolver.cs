@@ -11,7 +11,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;

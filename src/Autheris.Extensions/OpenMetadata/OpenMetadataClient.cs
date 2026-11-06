@@ -35,7 +35,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
         HttpClient httpClient,
         IOptions<GatewayOptions> options,
         ILogger<OpenMetadataClient> logger,
-        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         _httpClient = httpClient;

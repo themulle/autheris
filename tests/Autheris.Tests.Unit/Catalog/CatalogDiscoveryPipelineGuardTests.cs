@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Catalog;
 
 using Autheris.Tests.Common;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestSupport;
 using NSubstitute;
 using Autheris.Domain.Common;

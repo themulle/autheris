@@ -1,7 +1,8 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Infrastructure.Persistence;
 using NSubstitute;

@@ -55,6 +55,6 @@ Virtual system tables are mapped under `domain = "governance"`, providing metada
 
 ## 3. Architecture & Implementation
 
-- **Service:** `GovernedDataQueryService` in `src/Autheris.Application/Data/Services/GovernedDataQueryService.cs`
+- **Service:** `GovernedDataQueryService` in `src/Autheris.Application/DataSources/Services/GovernedDataQueryService.cs`
 - **Hosted Registry:** `VirtualSystemTablesHostedService` registers system tables into `ITableMetadataRepository` during application startup.
 - **Endpoints:** Registered in `src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs`.

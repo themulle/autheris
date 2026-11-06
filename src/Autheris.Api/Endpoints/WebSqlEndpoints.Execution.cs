@@ -11,7 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Serialization;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;

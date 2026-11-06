@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Integration;
 
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Governance;

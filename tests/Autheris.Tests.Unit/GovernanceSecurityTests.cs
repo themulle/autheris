@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.GraphQL.Types;

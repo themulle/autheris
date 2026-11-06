@@ -4,7 +4,7 @@
 **Category:** Data Access & Privacy Governance  
 **Components:**
 - Domain: [`AnalyticsOptions.cs`](../../src/Autheris.Domain/Options/AnalyticsOptions.cs), [`TableModels.cs`](../../src/Autheris.Domain/Model/TableModels.cs)
-- Application: [`IGovernedAggregationService.cs`](../../src/Autheris.Application/Analytics/IGovernedAggregationService.cs), [`GovernedAggregationService.cs`](../../src/Autheris.Application/Analytics/GovernedAggregationService.cs), [`AggregationCostCalculator.cs`](../../src/Autheris.Application/Analytics/AggregationCostCalculator.cs), [`GovernedTableReadPlanner.cs`](../../src/Autheris.Application/Data/Services/GovernedTableReadPlanner.cs)
+- Application: [`IGovernedAggregationService.cs`](../../src/Autheris.Application/Analytics/IGovernedAggregationService.cs), [`GovernedAggregationService.cs`](../../src/Autheris.Application/Analytics/GovernedAggregationService.cs), [`AggregationCostCalculator.cs`](../../src/Autheris.Application/Analytics/AggregationCostCalculator.cs), [`GovernedTableReadPlanner.cs`](../../src/Autheris.Application/DataSources/Services/GovernedTableReadPlanner.cs)
 - API: [`AnalyticsEndpoints.cs`](../../src/Autheris.Api/Endpoints/AnalyticsEndpoints.cs)
 
 ---

@@ -7,7 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
@@ -107,7 +107,7 @@ public sealed class DelegatedAuditRouteIntegrationTests : IClassFixture<WebAppli
         var metadata = NSubstitute.Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>())
             .Returns(new TableMetadata { Identifier = table, Columns = [new TableColumn { ColumnName = "id", DataType = "int" }] });
-        var resolver = NSubstitute.Substitute.For<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver>();
+        var resolver = NSubstitute.Substitute.For<Autheris.Application.DataSources.Connectors.CrossDomain.ICrossDomainAccessResolver>();
         resolver.ResolveAccessAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<Autheris.Domain.Common.TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<Autheris.Domain.Common.TenantId>(), Arg.Any<System.Threading.CancellationToken>())
             .Returns(Autheris.Domain.Interfaces.TableAccessDecision.Denied(table, "no grant"));
         using var factory = _factory.WithWebHostBuilder(builder =>

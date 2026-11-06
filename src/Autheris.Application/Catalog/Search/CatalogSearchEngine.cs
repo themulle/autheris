@@ -7,7 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

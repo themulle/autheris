@@ -223,7 +223,7 @@ public sealed partial class CasbinEnforcementService
     }
 
     // WP-PF-03 / M6: one compiled matcher per distinct RAW pattern in a bounded LRU (no per-call string building, no clear-all at the limit).
-    private static readonly Autheris.Application.Caching.BoundedCache<string, ObjectPatternMatcher> ObjectPatternMatchers = new(MaxObjectPatternMatchers, comparer: StringComparer.Ordinal);
+    private static readonly Autheris.Application.State.Caching.BoundedCache<string, ObjectPatternMatcher> ObjectPatternMatchers = new(MaxObjectPatternMatchers, comparer: StringComparer.Ordinal);
     private const int MaxObjectPatternMatchers = 20_000;
 
     /// <summary>Test seam for the regex evaluation (a linear-time regex cannot be made to time out reliably in a unit test).</summary>

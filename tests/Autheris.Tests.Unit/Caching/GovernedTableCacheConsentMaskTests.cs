@@ -7,7 +7,7 @@ using System.Security;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching.TableCache.Governance;
+using Autheris.Application.State.Caching.TableCache.Governance;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

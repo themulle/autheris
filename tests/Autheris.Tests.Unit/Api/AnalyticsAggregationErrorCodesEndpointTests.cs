@@ -94,9 +94,9 @@ public sealed class AnalyticsAggregationErrorCodesEndpointTests
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Dialect, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, Sentinel), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
-        { new AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily.Xml), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
-        { new AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily.Spatial), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
-        { new AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily.Unknown), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
+        { new AggregationGroupKeyNotSupportedException(Autheris.Application.DataSources.Services.GroupKeyTypeFamily.Xml), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
+        { new AggregationGroupKeyNotSupportedException(Autheris.Application.DataSources.Services.GroupKeyTypeFamily.Spatial), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
+        { new AggregationGroupKeyNotSupportedException(Autheris.Application.DataSources.Services.GroupKeyTypeFamily.Unknown), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage },
         { new SqlTimeZoneException(GovernedSqlErrorCodes.FunctionUnsupportedDialect), 422, "AGGREGATION_NOT_SUPPORTED", NotSupportedMessage }
     };
 
@@ -141,9 +141,9 @@ public sealed class AnalyticsAggregationErrorCodesEndpointTests
     {
         var families = new[]
         {
-            Autheris.Application.Data.Services.GroupKeyTypeFamily.Xml,
-            Autheris.Application.Data.Services.GroupKeyTypeFamily.Spatial,
-            Autheris.Application.Data.Services.GroupKeyTypeFamily.Unknown
+            Autheris.Application.DataSources.Services.GroupKeyTypeFamily.Xml,
+            Autheris.Application.DataSources.Services.GroupKeyTypeFamily.Spatial,
+            Autheris.Application.DataSources.Services.GroupKeyTypeFamily.Unknown
         };
         var rest = new List<(int Status, string Body)>();
         var metrics = new List<(int Status, string Body)>();

@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Contracts;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Plugins.Auth;
 using Autheris.Domain.Common;

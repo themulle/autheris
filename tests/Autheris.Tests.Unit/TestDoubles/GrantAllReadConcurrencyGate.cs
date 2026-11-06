@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.TestDoubles;
 
 using System;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 
 /// <summary>Always grants a lease. Test-only: it must never be registered outside tests (it disables the read concurrency limit).</summary>
 public sealed class GrantAllReadConcurrencyGate : ITableReadConcurrencyGate

@@ -4,7 +4,7 @@ using System;
 using System.Net.Http;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
@@ -13,8 +13,8 @@ using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
-using Autheris.Application.SqlEndpoints.Interfaces;
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Plugins;
@@ -61,9 +61,9 @@ public static class GatewaySqlEngineServiceExtensions
         // WP-ARC-B-02: SQL table reads run through the governed pipeline (planner + IGovernedSqlExecutionService). Scoped, because the
         // execution service is; it is resolved lazily to keep the FederatedStagingService -> IEnumerable<IDataSourceExecutor> ->
         // IGovernedSqlExecutionService -> IFederatedQueryExecutionService cycle out of the constructor graph.
-        services.TryAddSingleton<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner, Autheris.Application.Data.Services.GovernedTableReadPlanner>();
+        services.TryAddSingleton<Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner, Autheris.Application.DataSources.Services.GovernedTableReadPlanner>();
         services.AddScoped<SqlTableReadExecutor>(sp => new SqlTableReadExecutor(
-            sp.GetRequiredService<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>(),
+            sp.GetRequiredService<Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner>(),
             () => sp.GetRequiredService<IGovernedSqlExecutionService>(),
             sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>(),
             sp.GetService<Autheris.Application.DataSources.IIngressTransportContext>()));

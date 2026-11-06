@@ -34,7 +34,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
     // fallbacks only exist for Development and tests (environment == null).
     internal static byte[] ResolveHitLHmacKey(
         GatewayOptions? options,
-        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         var isDevelopment = environment == null || environment.IsDevelopment();
@@ -149,7 +149,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
         Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService? totpVerificationService = null,
         Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? totpSecretStore = null,
-        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));

@@ -10,7 +10,7 @@ using Autheris.Api.Errors;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
 using Autheris.Application.Governance.Grants;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

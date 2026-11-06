@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

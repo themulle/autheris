@@ -9,14 +9,14 @@ public sealed class CrossSourceRowReaderArchitectureTests
     [Fact]
     public void CrossSourceRowReader_HasNoClientTextEntryPoint()
     {
-        var offenders = typeof(Autheris.Application.Data.Relations.ICrossSourceRowReader)
+        var offenders = typeof(Autheris.Application.DataSources.Relations.ICrossSourceRowReader)
             .GetMethods()
             .Where(m => m.GetParameters().Any(p => p.ParameterType == typeof(string)))
             .Select(m => m.Name)
             .ToList();
 
         offenders.ShouldBeEmpty();
-        typeof(Autheris.Application.Data.Relations.GovernedCrossSourceRowReader)
+        typeof(Autheris.Application.DataSources.Relations.GovernedCrossSourceRowReader)
             .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.DeclaredOnly)
             .Where(m => m.GetParameters().Any(p => p.ParameterType == typeof(string)))
             .ShouldBeEmpty();

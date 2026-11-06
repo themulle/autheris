@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Analytics;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Exceptions;

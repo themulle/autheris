@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

@@ -4,7 +4,7 @@ using Autheris.Api.Errors;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using Autheris.Application.ResourceGroups;
+using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

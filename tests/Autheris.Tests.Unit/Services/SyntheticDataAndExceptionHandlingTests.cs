@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
