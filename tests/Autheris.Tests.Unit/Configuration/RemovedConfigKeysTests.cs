@@ -37,6 +37,11 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:RowLimits:FlightSql", "true")]
     [InlineData("Gateway:RowLimits:FlightSql:DefaultMaxRows", "1000")]
     [InlineData("Gateway:RowLimits:FlightSql:MaxAllowedRows", "5000")]
+    [InlineData("Analytics:Privacy:Noise:Enabled", "false")]
+    [InlineData("Gateway:Caching:Cdn:Enabled", "false")]
+    [InlineData("Gateway:Caching:Cdn:Cloudflare:ApiToken", "x")]
+    [InlineData("Gateway:SchemaRegistry", "true")]
+    [InlineData("Gateway:SchemaRegistry:Enabled", "false")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);

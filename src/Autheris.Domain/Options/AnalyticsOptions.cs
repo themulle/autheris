@@ -84,13 +84,11 @@ public sealed class AnalyticsPrivacyOptions
     /// <summary>
     /// MISC-09: when true and the effective minimum group size is above 1, a WHERE predicate that negates (<c>&lt;&gt;</c>, <c>NOT IN</c>,
     /// <c>NOT LIKE</c>, <c>NOT BETWEEN</c>, <c>IS NOT</c> other than <c>IS NOT NULL</c>, <c>NOT (...)</c>) or isolates one row (equality on a unique
-    /// or primary key column) on a column that is not a group-by column is rejected. Note: k-anonymity without noise does not fully resist
-    /// differencing; enable the noise option for stronger protection.
+    /// or primary key column) on a column that is not a group-by column is rejected.
     /// </summary>
     public bool RestrictNegatedFilters { get; set; } = true;
     public bool ExposeSuppressedGroupsCount { get; set; } = true;
     public Dictionary<string, DatasetPrivacyOverrideOptions> Datasets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    public AnalyticsNoiseOptions Noise { get; set; } = new();
 }
 
 /// <summary>Per-dataset override for minimum group size and suppression mode.</summary>
@@ -98,23 +96,6 @@ public sealed class DatasetPrivacyOverrideOptions
 {
     public int? MinGroupSize { get; set; }
     public SmallGroupStrategy? SuppressionMode { get; set; }
-}
-
-/// <summary>Differential privacy Laplace noise settings for governed aggregations (<c>Analytics:Privacy:Noise</c>).</summary>
-public sealed class AnalyticsNoiseOptions
-{
-    public bool Enabled { get; set; }
-    public double Epsilon { get; set; } = 1.0;
-    public double DailyBudgetEpsilon { get; set; } = 10.0;
-    public int CacheMaxEntries { get; set; } = 10_000;
-    public Dictionary<string, MeasureBoundsOptions> MeasureBounds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-}
-
-/// <summary>Clipping / sensitivity bounds for a numeric measure column (<c>Max &gt; Min</c>).</summary>
-public sealed class MeasureBoundsOptions
-{
-    public double Min { get; set; }
-    public double Max { get; set; }
 }
 
 

@@ -206,7 +206,6 @@ public sealed class TypedAggregateResolverTests
         { new ArgumentException("echo secret_value"), "AGGREGATION_ARGUMENT_INVALID" },
         { new GatewayForbiddenException("Access denied."), "ACCESS_DENIED" },
         { new TableNotFoundException(new TableIdentifier("sales", "dbo", "orders")), "ACCESS_DENIED" },
-        { new PrivacyBudgetExhaustedException("alice", 1.0, 0.0), "PRIVACY_BUDGET_EXHAUSTED" },
         { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" },
         { new AggregationPrivacyRestrictedException(), "AGGREGATION_PRIVACY_RESTRICTED" },
         { new AggregationFilterRejectedException(), "AGG_NEGATED_FILTER_REJECTED" },

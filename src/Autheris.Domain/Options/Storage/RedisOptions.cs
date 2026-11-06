@@ -7,7 +7,6 @@ public sealed class CachingOptions
     [Required] public L1MemoryCacheOptions L1MemoryCache { get; init; } = new();
     [Required] public RedisOptions Redis { get; init; } = new();
     [Required] public EpochValidationOptions EpochValidation { get; init; } = new();
-    [Required] public CdnOptions Cdn { get; init; } = new();
 }
 
 public sealed class L1MemoryCacheOptions

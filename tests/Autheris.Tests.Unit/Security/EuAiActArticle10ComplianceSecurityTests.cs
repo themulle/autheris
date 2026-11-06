@@ -14,7 +14,6 @@ using Xunit;
 
 public sealed class EuAiActArticle10ComplianceSecurityTests
 {
-    private readonly IDifferentialPrivacyEngine _dpEngine = Substitute.For<IDifferentialPrivacyEngine>();
     private readonly IAuditChainExportSource _auditSource = Substitute.For<IAuditChainExportSource>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
 
@@ -28,15 +27,7 @@ public sealed class EuAiActArticle10ComplianceSecurityTests
         _auditSource.GetVerifiedChainAnchor()
             .Returns(new AuditChainAnchor(42L, auditTailHash, DateTimeOffset.UtcNow, "sig_abc"));
 
-        _dpEngine.GetBudgetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(new PrivacyBudget(
-                ClientId: tenantId,
-                TotalDailyEpsilonBudget: 10.0,
-                ConsumedEpsilon: 3.5,
-                LastResetUtc: DateTimeOffset.UtcNow
-            ));
-
-        var exporter = new EuAiActAuditExporter(_dpEngine, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, _auditSource);
+        var exporter = new EuAiActAuditExporter(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, _auditSource);
 
         // Act
         var certificate = await exporter.GenerateCertificateAsync(tenantId);
@@ -45,9 +36,6 @@ public sealed class EuAiActArticle10ComplianceSecurityTests
         certificate.ShouldNotBeNull();
         certificate.TenantId.ShouldBe(tenantId);
         certificate.Specification.ShouldBe("EU AI Act Article 10 (Data Governance & Privacy-Preserving AI)");
-        certificate.DifferentialPrivacyMetrics.TotalDailyEpsilonBudget.ShouldBe(10.0);
-        certificate.DifferentialPrivacyMetrics.ConsumedEpsilon.ShouldBe(3.5);
-        certificate.DifferentialPrivacyMetrics.RemainingEpsilon.ShouldBe(6.5);
         certificate.AuditChainTailHash.ShouldBe(auditTailHash);
         certificate.IntegritySealSha256.ShouldNotBeNullOrWhiteSpace();
         certificate.IntegritySealSha256.Length.ShouldBe(64);
@@ -68,10 +56,7 @@ public sealed class EuAiActArticle10ComplianceSecurityTests
         _auditSource.GetVerifiedChainAnchor()
             .Returns((AuditChainAnchor?)null);
 
-        _dpEngine.GetBudgetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(new PrivacyBudget(tenantId, 10.0, 0.0, DateTimeOffset.UtcNow));
-
-        var exporter = new EuAiActAuditExporter(_dpEngine, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, _auditSource);
+        var exporter = new EuAiActAuditExporter(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, _auditSource);
 
         // Act
         var certificate = await exporter.GenerateCertificateAsync(tenantId);

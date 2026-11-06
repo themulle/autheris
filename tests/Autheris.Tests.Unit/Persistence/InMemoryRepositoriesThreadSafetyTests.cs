@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Events.Services;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;
@@ -86,35 +85,6 @@ public sealed class InMemoryRepositoriesThreadSafetyTests
 
         var list = await store.ListSubscriptionsAsync(tenantId);
         list.Count.ShouldBe(100);
-    }
-
-    [Fact]
-    public async Task SchemaRegistryRepository_ConcurrentWritesAndReads_AreConsistent()
-    {
-        var repo = new InMemorySchemaRegistryRepository();
-        const string serviceName = "pricing-service";
-        const int iterations = 50;
-
-        await Parallel.ForEachAsync(Enumerable.Range(0, iterations), async (i, ct) =>
-        {
-            await repo.SaveSchemaAsync(new RegisteredSchema
-            {
-                ServiceName = serviceName,
-                Version = $"v1.{i}",
-                Sdl = $"type Query {{ price_{i}: Int }}",
-                IsActive = true
-            }, ct);
-
-            var latest = await repo.GetLatestAsync(serviceName, ct);
-            latest.ShouldNotBeNull();
-            latest.ServiceName.ShouldBe(serviceName);
-        });
-
-        var history = await repo.GetHistoryAsync(serviceName);
-        history.Count.ShouldBe(iterations);
-
-        // Exactly one schema should be active in history
-        history.Count(s => s.IsActive).ShouldBe(1);
     }
 
     [Fact]

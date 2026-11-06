@@ -34,7 +34,6 @@ Plugins
 Policy
 Procedures
 ResourceGroups
-SchemaRegistry
 Security
 Serialization
 Services

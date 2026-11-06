@@ -44,8 +44,6 @@ public sealed class Issue405GroupKeyAuditServiceTests
         public required IGovernedSqlExecutionService Sql { get; init; }
 
         public required IGovernedTableReadPlanner Planner { get; init; }
-
-        public required IDifferentialPrivacyEngine Dp { get; init; }
     }
 
     private static TableMetadata Metadata(string sourceType, DataSourceType type, params (string Name, string Type)[] cols)
@@ -98,16 +96,14 @@ public sealed class Issue405GroupKeyAuditServiceTests
         writer.RecordAsync(Arg.Do<AuditLogEntry>(entries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var spyPlanner = planner ?? Substitute.For<IGovernedTableReadPlanner>();
-        var dp = Substitute.For<IDifferentialPrivacyEngine>();
         var service = new GovernedAggregationService(
             metaRepo,
             sqlExecutionService: sql,
             dataSourceExecutors: [new FixedExecutor(DataSourceType.HttpDeclarative)],
             auditWriter: writer,
             analyticsOptions: Options.Create(new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 1 } }),
-            planner: spyPlanner,
-            dpEngine: dp);
-        return new Harness { Service = service, Entries = entries, Sql = sql, Planner = spyPlanner, Dp = dp };
+            planner: spyPlanner);
+        return new Harness { Service = service, Entries = entries, Sql = sql, Planner = spyPlanner };
     }
 
     private static AggregationQuery Query(string[] groupBy, TableAccessDecision decision, TableFilterClause? where = null, AggregateSelection[]? aggregates = null) =>

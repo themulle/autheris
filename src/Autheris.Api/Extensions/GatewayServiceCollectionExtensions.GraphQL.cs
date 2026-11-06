@@ -54,13 +54,10 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
 using Autheris.Infrastructure.Streaming;
 using Autheris.GraphQL.Subscriptions;
-using Autheris.Infrastructure.Cdn;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Sql;
 using Autheris.Application.Serialization;
-using Autheris.Application.SchemaRegistry.Validation;
 using System.Net.Http;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Trace;
@@ -124,10 +121,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>(Autheris.GraphQL.Catalog.CatalogRelationRegistry.Current);
         // SEC M-16: Singleton, damit registrierte API-Keys und der Key-Cache über Requests hinweg bestehen.
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
-        services.AddHttpClient<CloudflareCdnPurgeService>().AddSecureOutboundHandlers(EgressIntegrations.Cdn);
-        services.AddHttpClient<FastlyCdnPurgeService>().AddSecureOutboundHandlers(EgressIntegrations.Cdn);
         services.AddHttpClient("OpenApiIngestion").AddSecureOutboundHandlers(EgressIntegrations.Catalog);
-        services.AddTransient<ICdnCachePurgeService, CloudflareCdnPurgeService>();
 
         services.AddFusionFederationServices(gatewayOptions);
 
@@ -190,7 +184,6 @@ public static partial class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
-            .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SlowListsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()

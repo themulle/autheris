@@ -10,8 +10,6 @@ using Autheris.Application.Observability;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
 using Autheris.Application.ResourceGroups;
-using Autheris.Application.SchemaRegistry;
-using Autheris.Application.SchemaRegistry.Validation;
 using Autheris.Application.Services;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -138,12 +136,6 @@ public static class GatewayCoreServiceExtensions
         services.AddSingleton<IExtensibilityPipeline, ExtensibilityPipeline>();
         services.AddSingleton<IIngressInterceptor, JustificationAndBreakGlassInterceptor>();
         services.AddSingleton<IEgressInterceptor, AuditLineageEgressInterceptor>();
-
-        // Schema Registry & AST Linter (P8)
-        services.AddSingleton<IValidator<SchemaRegistrationRequest>, SchemaRegistrationRequestValidator>();
-        services.AddSingleton<ISchemaLinter, SchemaLinter>();
-        services.AddSingleton<ISchemaRegistryRepository, InMemorySchemaRegistryRepository>();
-        services.AddSingleton<ISchemaRegistryService, SchemaRegistryService>();
 
         return services;
     }

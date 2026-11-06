@@ -88,7 +88,6 @@ public static partial class GatewayGovernanceServiceExtensions
         // Strategic Enterprise Moats (P10, P11, P12)
         services.AddSingleton<IPolicySimulationService, PolicySimulationService>();
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
-        services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
         services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // WP-SC-16

@@ -78,7 +78,6 @@
   "RestDatasetHttpTableIntegrationTests": 8,
   "RestDatasetHttpTableRestNotOptedInIntegrationTests": 14,
   "RowFilterChannelParityTests": 7,
-  "SchemaRegistryEndpointSecurityTests": 22,
   "SqlServerCloudEventSubscriptionStoreContractTests": 31,
   "SqlServerColumnMetadataReaderTests": 19,
   "SqlServerConsentContractTests": 9,
