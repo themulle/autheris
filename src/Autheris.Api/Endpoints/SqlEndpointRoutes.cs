@@ -12,9 +12,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
-using Autheris.Application.SqlEndpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -77,7 +77,7 @@ public static class SqlEndpointRoutes
         RegisterSqlEndpointRequest? request,
         ISqlEndpointRegistry registry,
         HttpContext context,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? loader = null)
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? loader = null)
     {
         if (context.User.IsReadOnly() || !IsListAdmin(context.User))
         {
@@ -95,7 +95,7 @@ public static class SqlEndpointRoutes
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid endpoint name. Must contain only alphanumeric characters, underscores, or hyphens and not exceed 128 characters.", context);
         }
 
-        var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
+        var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader>();
         Autheris.Domain.Model.SqlEndpointDefinition definition;
 
         if (endpointLoader != null)

@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;

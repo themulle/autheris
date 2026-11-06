@@ -1,6 +1,6 @@
 # F-PERF-13: GraphQL Cost & Client-Tier Quota Rate Limiting
 
-**Components:** [`CostAndQuotaMiddleware.cs`](../../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs), [`ClientTierResolver.cs`](../../src/Autheris.Application/Caching/Services/ClientTierResolver.cs), [`QueryCostAnalyzerRule.cs`](../../src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs), [`RedisRateLimiterService.cs`](../../src/Autheris.Infrastructure/RateLimiting/RedisRateLimiterService.cs), [`ClientTierModels.cs`](../../src/Autheris.Domain/Model/ClientTierModels.cs)
+**Components:** [`CostAndQuotaMiddleware.cs`](../../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs), [`ClientTierResolver.cs`](../../src/Autheris.Application/State/Caching/Services/ClientTierResolver.cs), [`QueryCostAnalyzerRule.cs`](../../src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs), [`RedisRateLimiterService.cs`](../../src/Autheris.Infrastructure/RateLimiting/RedisRateLimiterService.cs), [`ClientTierModels.cs`](../../src/Autheris.Domain/Model/ClientTierModels.cs)
 
 ---
 

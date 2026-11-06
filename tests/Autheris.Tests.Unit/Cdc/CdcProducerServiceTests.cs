@@ -6,7 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;
@@ -164,7 +164,7 @@ public sealed class CdcProducerServiceTests
     {
         var method = typeof(CdcProducerService).GetMethod("GetPartitions", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var list = (System.Collections.IEnumerable)method.Invoke(service, null)!;
-        return list.Cast<Autheris.Application.Hosting.ClusterPartition>().Select(p => new ClusterPartitionView(p.Key, p.Schedule.Interval, p.Schedule.LeaseTtl)).ToList();
+        return list.Cast<Autheris.Application.Runtime.Hosting.ClusterPartition>().Select(p => new ClusterPartitionView(p.Key, p.Schedule.Interval, p.Schedule.LeaseTtl)).ToList();
     }
 
     [Fact]
@@ -225,8 +225,8 @@ public sealed class CdcProducerServiceTests
     {
         var poller = Substitute.For<IMssqlChangeTrackingPoller>();
         var service = Service(poller, Substitute.For<ICdcStreamStore>(), Options("fin.dbo.Orders"), Cluster(new() { ["cdc:mssql:poll:fin.dbo.gone"] = 1 }));
-        var partition = new Autheris.Application.Hosting.ClusterPartition(
-            "cdc:mssql:poll:fin.dbo.gone", new Autheris.Application.Hosting.ClusterSchedule(true, TimeSpan.FromSeconds(1), TimeSpan.Zero, TimeSpan.FromSeconds(15), TimeSpan.Zero));
+        var partition = new Autheris.Application.Runtime.Hosting.ClusterPartition(
+            "cdc:mssql:poll:fin.dbo.gone", new Autheris.Application.Runtime.Hosting.ClusterSchedule(true, TimeSpan.FromSeconds(1), TimeSpan.Zero, TimeSpan.FromSeconds(15), TimeSpan.Zero));
 
         await service.RunPartitionCycleAsync(partition, CancellationToken.None);
 

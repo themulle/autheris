@@ -56,7 +56,7 @@ public sealed class RebacGovernanceAdminAuthorizationTests
         var context = GovernanceAdminContext(explicitTenantClaim);
         var tuple = new RebacTuple("default-tenant", "S-1-5-21-X", "viewer", "table:a.b.c");
 
-        var result = await RebacEndpoints.AddTuplesAsync([tuple], context.Request, Substitute.For<IRebacStore>(), Substitute.For<IRebacEvaluator>(), AuditWriterTestServices.Over(Substitute.For<Autheris.Application.Interfaces.IAuditLogRepository>()));
+        var result = await RebacEndpoints.AddTuplesAsync([tuple], context.Request, Substitute.For<IRebacStore>(), Substitute.For<IRebacEvaluator>(), AuditWriterTestServices.Over(Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>()));
         var (status, body) = await ExecuteAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status403Forbidden);

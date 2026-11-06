@@ -158,7 +158,7 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         using (var seeding = Create(bypassConsent: false))
         {
             using var scope = seeding.Services.CreateScope();
-            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>();
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
             var tableId = Guid.NewGuid();
             await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
             {
@@ -186,7 +186,7 @@ public sealed class Issue341GraphQlInternalErrorTests : IDisposable
         using var host = Create();
         using (var scope = host.Services.CreateScope())
         {
-            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>();
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
             var tableId = Guid.NewGuid();
             await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
             {

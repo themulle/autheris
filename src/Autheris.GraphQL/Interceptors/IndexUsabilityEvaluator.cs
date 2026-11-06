@@ -3,7 +3,7 @@ namespace Autheris.GraphQL.Interceptors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources.Services;
 using Autheris.Application.Sql.Indexing;
 using Autheris.Domain.Model;
 using HotChocolate.Language;

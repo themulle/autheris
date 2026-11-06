@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Sql.Policy;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Policy.RowFilterKeySets;

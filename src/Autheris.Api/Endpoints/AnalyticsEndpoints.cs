@@ -11,7 +11,7 @@ using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Analytics;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

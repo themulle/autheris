@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
-using Autheris.Application.Data.Changes;
+using Autheris.Application.DataSources.Changes;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

@@ -161,14 +161,14 @@ public static class ODataCsdlGenerator
 
     /// <summary>
     /// Befund 4a.4 / issue #94 (SD-4): entity keys reference existing properties only. The key is the row identity of the
-    /// metadata that is passed in (<see cref="Autheris.Application.Data.Services.TableRowIdentity"/>: declared primary key,
+    /// metadata that is passed in (<see cref="Autheris.Application.DataSources.Services.TableRowIdentity"/>: declared primary key,
     /// unique index, Meta marker key, the <c>(client_id, ts)</c> convention), always complete. Callers pass the metadata filtered
     /// for the caller, so a key that touches a hidden column is dropped as a whole, never emitted as a subset. Without a
     /// resolvable key all properties form a composite key (CSDL needs a key); a table without columns keeps the <c>id</c> placeholder.
     /// </summary>
     public static IReadOnlyList<string> ResolveEntityKeys(TableMetadata table)
     {
-        var identity = Autheris.Application.Data.Services.TableRowIdentity.Select(table);
+        var identity = Autheris.Application.DataSources.Services.TableRowIdentity.Select(table);
         if (identity.Count > 0)
         {
             return identity;

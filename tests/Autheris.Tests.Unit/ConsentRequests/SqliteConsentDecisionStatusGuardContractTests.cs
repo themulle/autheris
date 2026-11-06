@@ -1,5 +1,5 @@
 using System.Data.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 

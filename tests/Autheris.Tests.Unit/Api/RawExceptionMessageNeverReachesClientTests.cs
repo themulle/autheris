@@ -16,7 +16,7 @@ using Autheris.Api.Mcp;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Olap;

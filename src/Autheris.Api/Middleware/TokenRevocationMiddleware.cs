@@ -4,7 +4,7 @@ using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>

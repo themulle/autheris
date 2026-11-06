@@ -2,7 +2,7 @@ namespace Autheris.Api.Security;
 
 using System;
 using System.Diagnostics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Security;

@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
 using Autheris.Application.Identity.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Mesh.Services;
 using Autheris.Domain.Common;

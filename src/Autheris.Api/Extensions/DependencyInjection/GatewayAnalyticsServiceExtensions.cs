@@ -1,9 +1,9 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using Autheris.Application.Analytics;
-using Autheris.Application.Data;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.DataSources.Services;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Extensions.Dbt;
 using Autheris.Domain.Options;

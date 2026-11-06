@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;

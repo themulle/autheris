@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Services;

@@ -353,9 +353,9 @@ public static partial class TreeSqlCompiler
         {
             // SD-2: the same default ordering as every other read path. The composite fallback sorts every clear column, so
             // nested relation lists stop after the key rules to bound the cost.
-            var defaultOrdering = Autheris.Application.Data.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
-            var useDefault = defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.None &&
-                (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.ClearColumnComposite);
+            var defaultOrdering = Autheris.Application.DataSources.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
+            var useDefault = defaultOrdering.Kind != Autheris.Application.DataSources.Services.DefaultOrderingKind.None &&
+                (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.DataSources.Services.DefaultOrderingKind.ClearColumnComposite);
             if (useDefault)
             {
                 if (!defaultOrdering.Terms.All(t => SafeNameRegex().IsMatch(t.Name)))
@@ -371,10 +371,10 @@ public static partial class TreeSqlCompiler
                     Need(term.Name);
                 }
             }
-            else if (defaultOrdering.Kind == Autheris.Application.Data.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)
+            else if (defaultOrdering.Kind == Autheris.Application.DataSources.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)
             {
                 // No clear orderable column: paging beyond the first page would be unstable (same refusal and text as the planner).
-                throw new GatewayInvalidQueryException(Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
+                throw new GatewayInvalidQueryException(Autheris.Application.DataSources.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
             }
         }
 

@@ -4,7 +4,7 @@ using System;
 using System.Threading;
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Webhooks;
 
 /// <summary>

@@ -1,5 +1,5 @@
 using System.Globalization;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;

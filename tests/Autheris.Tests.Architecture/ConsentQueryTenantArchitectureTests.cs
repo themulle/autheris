@@ -58,8 +58,8 @@ public sealed class ConsentQueryTenantArchitectureTests
     [Fact]
     public void TheGuardRecognisesTheTenantAwareOverload()
     {
-        var module = CecilModuleCache.For(typeof(Autheris.Application.Interfaces.IConsentRepository).Assembly);
-        var iface = module.GetType("Autheris.Application.Interfaces.IConsentRepository");
+        var module = CecilModuleCache.For(typeof(Autheris.Application.Common.Interfaces.IConsentRepository).Assembly);
+        var iface = module.GetType("Autheris.Application.Common.Interfaces.IConsentRepository");
         var guarded = iface.Methods.Where(m => Guarded.Contains(m.Name)).ToList();
 
         guarded.Count(m => IsTenantLess(m)).ShouldBe(2);

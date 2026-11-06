@@ -11,7 +11,7 @@ using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Policy.Services;
@@ -20,7 +20,7 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Workflows;
+using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -46,8 +46,8 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<ICatalogVisibilityMetrics>(sp => sp.GetRequiredService<CatalogVisibilityMetrics>());
         services.AddHostedService<CatalogGovernanceHostedService>();
         services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
-            sp.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>(),
-            sp.GetService<Autheris.Application.Interfaces.IDataOwnershipRepository>(),
+            sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
+            sp.GetService<Autheris.Application.Common.Interfaces.IDataOwnershipRepository>(),
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),

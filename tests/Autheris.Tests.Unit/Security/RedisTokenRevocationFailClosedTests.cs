@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Security;
 using Microsoft.AspNetCore.Http;

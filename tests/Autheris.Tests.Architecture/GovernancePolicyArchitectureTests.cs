@@ -65,7 +65,7 @@ public sealed class GovernancePolicyArchitectureTests
         sites.ShouldContain("Autheris.Application.Sql.Services.GovernedSqlRewriter");
         sites.ShouldContain("Autheris.Application.Sql.Services.FederatedDuckDbExecutionService");
         sites.ShouldContain("Autheris.Application.Procedures.Services.GovernedProcedureExecutionService");
-        sites.ShouldContain("Autheris.Application.Connectors.CrossDomain.DefaultCrossDomainAccessResolver");
+        sites.ShouldContain("Autheris.Application.DataSources.Connectors.CrossDomain.DefaultCrossDomainAccessResolver");
     }
 
     [Fact]

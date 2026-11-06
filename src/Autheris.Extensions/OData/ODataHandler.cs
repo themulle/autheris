@@ -7,7 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -284,7 +284,7 @@ public sealed partial class ODataHandler(
                 }
 
                 // SD-4 / SEC-94-03: keys, indexes and Meta marker keys that touch a hidden column are dropped as a whole.
-                var filteredMeta = Autheris.Application.Data.Services.TableKeyVisibility.Restrict(tableMeta, allowedColumns);
+                var filteredMeta = Autheris.Application.DataSources.Services.TableKeyVisibility.Restrict(tableMeta, allowedColumns);
 
                 authorizedTables.Add(filteredMeta);
             }
@@ -601,7 +601,7 @@ public sealed partial class ODataHandler(
         {
             // Issue #94 (D-10): without an orderable clear column the pages cannot be positioned deterministically. Refuse
             // instead of returning a page that the next one may duplicate or skip. The text names no column.
-            return Error(400, "InvalidQueryOption", Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
+            return Error(400, "InvalidQueryOption", Autheris.Application.DataSources.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
         }
 
         if (effectiveTop == 0)

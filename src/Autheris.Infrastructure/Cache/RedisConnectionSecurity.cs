@@ -3,7 +3,7 @@ using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;

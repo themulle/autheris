@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Security.Cryptography;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;

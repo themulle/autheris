@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;

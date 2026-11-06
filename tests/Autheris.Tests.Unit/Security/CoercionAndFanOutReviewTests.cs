@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security;
 using System.Threading.Tasks;
-using Autheris.Application.Connectors;
+using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.Services;
 using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Common;

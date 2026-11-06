@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -127,7 +127,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
-            var filterCols = Autheris.Application.Data.Services.DataApiFilterTranslator.ExtractReferencedColumns(context.AccessDecision.CombinedRowFilterSql, context.Metadata);
+            var filterCols = Autheris.Application.DataSources.Services.DataApiFilterTranslator.ExtractReferencedColumns(context.AccessDecision.CombinedRowFilterSql, context.Metadata);
             foreach (var fc in filterCols)
             {
                 selectedCols.Add(fc);

@@ -11,7 +11,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -176,7 +176,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             totalBytes += rawBytes > 0 ? rawBytes : ResponseSizeLimitingHandler.BytesRead(stream);
             if (totalBytes > config.MaxStagedBytes)
             {
-                throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(
+                throw new Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException(
                     context.Metadata.Identifier,
                     config.MaxStagedRows);
             }
@@ -190,7 +190,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             allRows.AddRange(rows);
             if (allRows.Count > config.MaxStagedRows)
             {
-                throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(
+                throw new Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException(
                     context.Metadata.Identifier,
                     config.MaxStagedRows);
             }

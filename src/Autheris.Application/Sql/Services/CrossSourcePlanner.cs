@@ -4,7 +4,7 @@ using System;
 using System.Security.Claims;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Federation.KeySet;
@@ -539,7 +539,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
     {
         foreach (var reqCol in t.Metadata.RequiredFilterColumns)
         {
-            if (!Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+            if (!Autheris.Application.DataSources.Services.RequiredFilterColumnRule.IsColumnSatisfied(
                     reqCol, t.Metadata, dec, clientFilterColumns, tenantColumnCounts: true))
             {
                 return false;

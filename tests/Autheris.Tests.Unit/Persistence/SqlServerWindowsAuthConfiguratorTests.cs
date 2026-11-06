@@ -6,7 +6,7 @@ using System.Security;
 using System.Security.Authentication.ExtendedProtection;
 using System.Text;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;

@@ -1,6 +1,6 @@
 using System.IO;
-using Autheris.Application.SqlEndpoints.Interfaces;
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Audit;
 using NSubstitute;
 using Shouldly;

@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Data;
 
 using System;
 using System.Collections.Generic;
-using Autheris.Application.Data;
+using Autheris.Application.DataSources;
 using Autheris.Domain.Common;
 using Shouldly;
 using Xunit;

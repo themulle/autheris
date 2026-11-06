@@ -1,7 +1,7 @@
 using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using HotChocolate;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

@@ -1,4 +1,4 @@
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Services;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;

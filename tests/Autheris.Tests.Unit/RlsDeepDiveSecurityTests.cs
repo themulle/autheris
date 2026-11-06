@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Security;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Common;

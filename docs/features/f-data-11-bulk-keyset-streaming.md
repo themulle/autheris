@@ -11,10 +11,10 @@ Autonomous AI agents, ETL synchronization pipelines, and batch analytics consume
 `F-DATA-11` resolves these limitations with an enterprise-grade streaming and quota settlement engine:
 - **Governed Keyset Streaming Endpoint:** Exposes `POST /api/v1/data/{domain}/{schema}/{table}/stream` (with alias `/bulk`), strictly scoped to single tables and accessible with read-only scopes in [`ReadOnlyTokenMiddleware`](../../src/Autheris.Api/Middleware/ReadOnlyTokenMiddleware.cs).
 - **Deterministic Keyset Cursor Seeking:** Replaces `OFFSET` pagination with monotonic keyset cursor seek predicates (`WHERE pk > @cursor_pk`) derived from catalog primary key metadata ([`TableMetadata.PrimaryKeyColumns`](../../src/Autheris.Domain/Model/TableModels.cs)), guaranteeing constant $O(1)$ seek performance across arbitrary table depths.
-- **Tamper-Evident HMAC Cursors:** Generates opaque, URL-safe base64 cursors signed with HMAC-SHA256 ([`KeysetCursorEncoder`](../../src/Autheris.Application/Data/Services/KeysetCursorEncoder.cs)) to prevent client tampering, injection, or cross-tenant replay.
+- **Tamper-Evident HMAC Cursors:** Generates opaque, URL-safe base64 cursors signed with HMAC-SHA256 ([`KeysetCursorEncoder`](../../src/Autheris.Application/DataSources/Services/KeysetCursorEncoder.cs)) to prevent client tampering, injection, or cross-tenant replay.
 - **True Chunked Streaming (Zero LOH):** Emits records row-by-row directly from the ADO.NET `DbDataReader` into ASP.NET Core `PipeWriter` / `Utf8JsonWriter` (NDJSON) or Apache Arrow IPC streams (`Transfer-Encoding: chunked`), keeping memory allocation bounded and constant regardless of stream length.
 - **Multiplicity-Aware Cost Estimation:** Recognizes relation cardinality (1:1 and N:1 single-object relations) in [`QueryCostAnalyzerRule`](../../src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs) to avoid artificial 10x multiplier compounding.
-- **Two-Phase Token Bucket Work Settlement:** Implements atomic `ReserveCostQuotaAsync` (admission check) and `SettleCostQuotaAsync` (post-stream reconciliation) in [`IRateLimiterService`](../../src/Autheris.Application/Interfaces/IRateLimiterService.cs), refunding unused quota or debiting additional compute based on actual rows delivered.
+- **Two-Phase Token Bucket Work Settlement:** Implements atomic `ReserveCostQuotaAsync` (admission check) and `SettleCostQuotaAsync` (post-stream reconciliation) in [`IRateLimiterService`](../../src/Autheris.Application/Common/Interfaces/IRateLimiterService.cs), refunding unused quota or debiting additional compute based on actual rows delivered.
 
 ---
 
@@ -66,10 +66,10 @@ flowchart TD
 |---|---|
 | [`TableStreamEndpoints`](../../src/Autheris.Api/Endpoints/TableStreamEndpoints.cs) | Maps `/api/v1/data/{domain}/{schema}/{table}/stream` and `/bulk`; coordinates admission, streaming, cursor emission, and settlement. |
 | [`ReadOnlyTokenMiddleware`](../../src/Autheris.Api/Middleware/ReadOnlyTokenMiddleware.cs) | Whitelists stream endpoints for read-only tokens (`Agent.Read`, `App.Read`). |
-| [`KeysetCursorEncoder`](../../src/Autheris.Application/Data/Services/KeysetCursorEncoder.cs) | Encodes and decodes keyset pagination cursors with HMAC-SHA256 integrity verification, tenant bounding, and direction flags. |
-| [`GovernedTableReadPlanner`](../../src/Autheris.Application/Data/Services/GovernedTableReadPlanner.Keyset.cs) | Compiles table queries with keyset seek predicates (`WHERE pk > @cursor`), caller RLS filters, and column projections. |
+| [`KeysetCursorEncoder`](../../src/Autheris.Application/DataSources/Services/KeysetCursorEncoder.cs) | Encodes and decodes keyset pagination cursors with HMAC-SHA256 integrity verification, tenant bounding, and direction flags. |
+| [`GovernedTableReadPlanner`](../../src/Autheris.Application/DataSources/Services/GovernedTableReadPlanner.Keyset.cs) | Compiles table queries with keyset seek predicates (`WHERE pk > @cursor`), caller RLS filters, and column projections. |
 | [`QueryCostAnalyzerRule`](../../src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs) | Evaluates static query cost with cardinality awareness (multiplier 1 for 1:1/N:1 joins). |
-| [`IRateLimiterService`](../../src/Autheris.Application/Interfaces/IRateLimiterService.cs) | Implements two-phase token bucket accounting (`ReserveCostQuotaAsync` and `SettleCostQuotaAsync`) backed by Redis or in-memory stores. |
+| [`IRateLimiterService`](../../src/Autheris.Application/Common/Interfaces/IRateLimiterService.cs) | Implements two-phase token bucket accounting (`ReserveCostQuotaAsync` and `SettleCostQuotaAsync`) backed by Redis or in-memory stores. |
 
 ---
 

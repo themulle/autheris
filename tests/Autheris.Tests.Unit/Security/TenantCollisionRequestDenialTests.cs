@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Security;
 using Autheris.Tests.Unit.TestDoubles;
 using System.Security.Claims;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;

@@ -7,7 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Analysis;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;

@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Governance.TrustedDocuments;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

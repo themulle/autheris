@@ -3,7 +3,7 @@ namespace Autheris.Application.VirtualFilters.Federation;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Microsoft.Extensions.Options;
 
 /// <summary>

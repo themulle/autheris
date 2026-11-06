@@ -326,7 +326,7 @@ public static class CatalogApiEndpoints
         Guid relationId,
         SetRelationCrossDataSourceDto request,
         HttpContext context,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableRelationRepository relationRepo,
         CancellationToken ct)
     {
         if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User) && !EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
@@ -462,7 +462,7 @@ public static class CatalogApiEndpoints
     /// <summary>Resolves an active dataset by table id or domain.schema.table (shared with the row filter strategy endpoints).</summary>
     private static Task<TableIdentifier?> ResolveActiveDatasetAsync(
         string? id,
-        Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         CancellationToken ct)
         => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
 
@@ -526,7 +526,7 @@ public static class CatalogApiEndpoints
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,
         SetDatasetKeysDto? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
         HttpContext httpContext,
         CancellationToken ct)
@@ -676,7 +676,7 @@ public static class CatalogApiEndpoints
     internal static async Task<IResult> SetDatasetRequiredFiltersHandler(
         string id,
         SetDatasetRequiredFiltersDto? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
         HttpContext httpContext,
         CancellationToken ct)
@@ -769,7 +769,7 @@ public static class CatalogApiEndpoints
     internal static async Task<IResult> SetDatasetSyntheticSamplesHandler(
         string id,
         System.Collections.Generic.IReadOnlyList<System.Collections.Generic.Dictionary<string, object?>>? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
         HttpContext httpContext,
         CancellationToken ct)
@@ -810,7 +810,7 @@ public static class CatalogApiEndpoints
     /// </summary>
     internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(
         string id,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
         [Microsoft.AspNetCore.Mvc.FromServices] ICatalogVisibilityService visibility,
         HttpContext httpContext,

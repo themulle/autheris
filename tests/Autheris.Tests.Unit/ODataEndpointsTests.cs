@@ -419,7 +419,7 @@ public sealed class ODataEndpointsTests
             Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
         };
 
-        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var metadataRepo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
 
@@ -454,7 +454,7 @@ public sealed class ODataEndpointsTests
     public async Task HandleFlatEntitySetRequestAsync_WhenNotFound_Returns404()
     {
         var context = CreateHttpContext(path: "/odata/v4/unknown_table");
-        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var metadataRepo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
 
@@ -482,7 +482,7 @@ public sealed class ODataEndpointsTests
             Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
         };
 
-        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var metadataRepo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
 
@@ -527,7 +527,7 @@ public sealed class ODataEndpointsTests
             Table = new Autheris.Domain.Model.Table { SchemaName = "archive", TableName = "invoices" }
         };
 
-        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var metadataRepo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table1, table2]));
 
@@ -577,7 +577,7 @@ public sealed class ODataEndpointsTests
         Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, env);
         Microsoft.Extensions.DependencyInjection.LoggingServiceCollectionExtensions.AddLogging(services);
         context.RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
-        var repo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var repo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
 
         var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync("SecretEntity_XYZ", CreateMockHandler(new ODataQueryResult(true, 200, new object())), repo, context);

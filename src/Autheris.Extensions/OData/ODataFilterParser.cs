@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 
@@ -613,7 +613,7 @@ public static class ODataFilterParser
 
         public string QuoteColumn(string name) =>
             Trino
-                ? Autheris.Application.Data.Services.DataApiFilterTranslator.QuoteIdentifier(_columnResolver?.Invoke(name) ?? name)
+                ? Autheris.Application.DataSources.Services.DataApiFilterTranslator.QuoteIdentifier(_columnResolver?.Invoke(name) ?? name)
                 : Dialect.QuoteIdentifier(name);
 
         public string AddParameter(object? value)

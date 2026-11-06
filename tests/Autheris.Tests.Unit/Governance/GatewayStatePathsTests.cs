@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;

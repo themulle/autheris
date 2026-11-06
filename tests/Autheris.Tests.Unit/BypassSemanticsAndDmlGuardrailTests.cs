@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;

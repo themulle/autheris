@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;

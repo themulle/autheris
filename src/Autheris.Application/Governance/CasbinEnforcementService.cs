@@ -12,7 +12,7 @@ using System.Threading;
 using Casbin;
 using Casbin.Model;
 using Autheris.Application.Governance.Caching;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
@@ -103,7 +103,7 @@ public sealed partial class CasbinEnforcementService : IPolicyEnforcementService
         public long Epoch { get; } = epoch;
 
         /// <summary>WP-PF-09: candidate rules per (tenant, table, action); a snapshot is immutable, so entries never go stale.</summary>
-        public Autheris.Application.Caching.BoundedCache<CandidateKey, CandidateSet> Candidates { get; } = new(20_000);
+        public Autheris.Application.State.Caching.BoundedCache<CandidateKey, CandidateSet> Candidates { get; } = new(20_000);
 
         public FrozenDictionary<string, FrozenSet<string>> GetRoleClosure(string tenant) =>
             RoleClosures.TryGetValue(tenant, out var closure) ? closure : WildcardRoleClosure;

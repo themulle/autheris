@@ -1,7 +1,7 @@
 namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
 using System.Diagnostics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;

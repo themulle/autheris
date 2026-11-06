@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -178,7 +178,7 @@ public sealed class AuditChainIntegrityMonitorTests
         var health = Substitute.For<IGatewayHealthCheckService>();
         health.CheckHealthAsync(Arg.Any<System.Threading.CancellationToken>())
             .Returns<Task<GatewayHealthReport>>(_ => throw new InvalidOperationException("Server=db-internal;Password=secret"));
-        var resourceGroups = Substitute.For<Autheris.Application.ResourceGroups.IResourceGroupManager>();
+        var resourceGroups = Substitute.For<Autheris.Application.Runtime.ResourceGroups.IResourceGroupManager>();
         resourceGroups.GetMetrics().Returns(new ResourceGroupMetrics(DateTimeOffset.UtcNow, Array.Empty<ResourceGroupTierMetrics>()));
 
         var metrics = await new Autheris.Application.Observability.GatewaySystemMetricsService(

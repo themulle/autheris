@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using NSubstitute;

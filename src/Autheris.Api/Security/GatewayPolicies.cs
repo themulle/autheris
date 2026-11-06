@@ -1,7 +1,7 @@
 namespace Autheris.Api.Security;
 
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Authorization;

@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Cdc;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;

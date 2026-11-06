@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text;
+using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;

@@ -11,7 +11,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
 using Autheris.Application.Streaming.Interfaces;

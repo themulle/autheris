@@ -153,21 +153,21 @@ scope src/Autheris.Api/Hosting/Warmup/GraphQlExecutorGate.cs | exempt: GraphQL w
 scope src/Autheris.Api/Hosting/Warmup/StartupWarmupService.cs | exempt: startup warmup Task.Run bound; no request ingress, reaches no governed data
 scope src/Autheris.Application/Audit/AuditGroupCommitSink.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Audit/AuditRetentionPurgeWorker.cs | exempt: audit retention purge; reaches no governed data
-scope src/Autheris.Application/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Caching/PolicyEpochGuard.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Services/CatalogVisibilityMetrics.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data
-scope src/Autheris.Application/Jobs/Services/AsyncJobScheduler.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Jobs/Services/AsyncQueryJobBackgroundWorker.cs | copy: re-stamps the ingress transport captured at submission
 scope src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs | exempt: approval bookkeeping; reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
+scope src/Autheris.Application/Runtime/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/Runtime/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data
+scope src/Autheris.Application/Runtime/Jobs/Services/AsyncJobScheduler.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/Runtime/Jobs/Services/AsyncQueryJobBackgroundWorker.cs | copy: re-stamps the ingress transport captured at submission
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs | copy: copies the ingress transport into the new scope (stamp site)
+scope src/Autheris.Application/State/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/State/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs | copy: stamps Rest ingress for webhook outbox delivery
 scope src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
@@ -187,11 +187,11 @@ scope src/Autheris.Infrastructure/RateLimiting/InMemoryRateLimiterService.cs | e
 executor src/Autheris.Api/Extensions/DependencyInjection/GatewayExecutionServiceExtensions.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Api/Extensions/DependencyInjection/GatewaySqlEngineServiceExtensions.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Analytics/GovernedAggregationService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/Adapters/LegacyDataSourceExecutorAdapter.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/GovernedConnectorReader.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/IAutherisConnectorFactory.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/IAutherisConnectorRegistry.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Interfaces/IDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/Common/Interfaces/IDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/Adapters/LegacyDataSourceExecutorAdapter.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/GovernedConnectorReader.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/IAutherisConnectorFactory.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/IAutherisConnectorRegistry.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Olap/DuckDbOlapEngine.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Olap/FederatedStagingService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Olap/OlapStagingService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)

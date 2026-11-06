@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Identity.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;

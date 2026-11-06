@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Security;
 using System.Text;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;

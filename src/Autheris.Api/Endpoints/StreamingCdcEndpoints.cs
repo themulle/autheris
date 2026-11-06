@@ -13,7 +13,7 @@ using Autheris.Api.Security;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;

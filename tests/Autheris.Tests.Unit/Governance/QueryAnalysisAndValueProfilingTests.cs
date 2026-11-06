@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Governance.Analysis;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

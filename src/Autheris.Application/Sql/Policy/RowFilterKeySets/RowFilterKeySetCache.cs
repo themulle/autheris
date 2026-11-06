@@ -1,6 +1,6 @@
 namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Microsoft.Extensions.Logging;
 
 public enum RowFilterKeySetCacheStatus

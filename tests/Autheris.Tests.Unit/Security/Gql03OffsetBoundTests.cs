@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;

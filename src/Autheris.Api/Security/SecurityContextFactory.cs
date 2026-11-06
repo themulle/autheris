@@ -135,7 +135,7 @@ public static class SecurityContextFactory
     {
         var user = context.User;
         // 6. Extract Client IP
-        var clientIp = context.RequestServices?.GetService(typeof(Autheris.Application.Interfaces.IClientIpResolver)) is Autheris.Application.Interfaces.IClientIpResolver ipResolver
+        var clientIp = context.RequestServices?.GetService(typeof(Autheris.Application.Common.Interfaces.IClientIpResolver)) is Autheris.Application.Common.Interfaces.IClientIpResolver ipResolver
             ? ipResolver.ResolveClientIp()
             : context.Connection.RemoteIpAddress;
 

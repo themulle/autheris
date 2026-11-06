@@ -8,7 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Lint;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

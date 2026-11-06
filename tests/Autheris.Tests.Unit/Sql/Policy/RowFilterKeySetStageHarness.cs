@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.Sql.Policy;
 
 using System.Collections.Immutable;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Common;

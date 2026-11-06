@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;

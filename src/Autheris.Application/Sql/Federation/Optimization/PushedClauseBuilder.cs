@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Services;

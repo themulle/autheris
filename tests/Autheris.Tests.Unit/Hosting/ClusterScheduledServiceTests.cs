@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Hosting;
+using Autheris.Application.Runtime.Hosting;
 using Autheris.Application.State;
 using Autheris.Tests.Common;
 using Microsoft.Extensions.DependencyInjection;

@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
 using System.Collections.Generic;
-using Autheris.Application.Connectors;
+using Autheris.Application.DataSources.Connectors;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;

@@ -8,9 +8,9 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Connectors;
-using Autheris.Application.Connectors.Adapters;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.DataSources.Connectors.Adapters;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Audit;
@@ -108,7 +108,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             {
                 // MISC-04: shared whole-identifier rule.
                 bool IsSatisfied(string reqCol) =>
-                    Autheris.Application.Data.Services.RequiredFilterColumnRule.IsColumnSatisfied(
+                    Autheris.Application.DataSources.Services.RequiredFilterColumnRule.IsColumnSatisfied(
                         reqCol, req.Metadata, req.Decision, req.PushdownFilter?.ConstrainedColumns, tenantColumnCounts: true);
 
                 if (req.Metadata.RequiredFilterColumnGroups.Length > 0)
@@ -252,7 +252,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                         subtreeRowPolicy,
                         ct).ConfigureAwait(false);
                 }
-                catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
+                catch (Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException ex)
                 {
                     _logger.LogWarning("Subtree {Subtree} exceeded staging limit of {Limit} rows.", subtree.SubtreeId, ex.MaxRows);
                     throw new GatewaySecurityException($"Subtree '{subtree.SubtreeId}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");
@@ -496,7 +496,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                                 rowPolicy,
                                 ct).ConfigureAwait(false);
                         }
-                        catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
+                        catch (Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException ex)
                         {
                             _logger.LogWarning("Table {Table} exceeded staging limit of {Limit} rows.", ex.Table, ex.MaxRows);
                             throw new GatewaySecurityException($"Table '{ex.Table}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");
@@ -548,7 +548,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                         rowPolicy,
                         ct).ConfigureAwait(false);
                 }
-                catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
+                catch (Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException ex)
                 {
                     _logger.LogWarning("Table {Table} exceeded staging limit of {Limit} rows.", ex.Table, ex.MaxRows);
                     throw new GatewaySecurityException($"Table '{ex.Table}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");

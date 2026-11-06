@@ -3,7 +3,7 @@ namespace Autheris.Application.Governance.Services;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Domain.Audit;
 using Microsoft.Extensions.Options;

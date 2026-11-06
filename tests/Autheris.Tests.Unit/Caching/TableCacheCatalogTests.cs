@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Caching;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Autheris.Application.Caching.TableCache;
+using Autheris.Application.State.Caching.TableCache;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
 using Shouldly;

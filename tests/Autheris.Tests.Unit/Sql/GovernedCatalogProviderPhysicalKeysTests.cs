@@ -1,6 +1,6 @@
 using System.Data.Common;
 using System.Runtime.CompilerServices;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

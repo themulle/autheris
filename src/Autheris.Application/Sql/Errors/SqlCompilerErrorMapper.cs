@@ -5,7 +5,7 @@ using System.Security;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using Autheris.Application.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
 using TrinoSqlEngine;

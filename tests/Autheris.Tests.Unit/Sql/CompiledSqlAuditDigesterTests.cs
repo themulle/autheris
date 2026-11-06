@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Sql;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;

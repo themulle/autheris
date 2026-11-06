@@ -1,6 +1,6 @@
 using System.Globalization;
 using Autheris.Application.Analytics;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources.Services;
 using Autheris.Domain.Common;
 using Microsoft.Data.Sqlite;
 using Shouldly;
@@ -116,7 +116,7 @@ public sealed class GovernedTableReadPlannerSqliteBucketTests
     {
         var (select, groupBy, shape) = GovernedTableReadPlanner.BuildTimeBucketExpression(
             "d", new TimeBucketSpecification("d", TimeBucketInterval.Day, "Europe/Berlin"), DatabaseDialect.Sqlite, "date");
-        shape.ShouldBe(Autheris.Application.Data.Interfaces.TimeBucketKeyShape.Date);
+        shape.ShouldBe(Autheris.Application.DataSources.Interfaces.TimeBucketKeyShape.Date);
         groupBy.ShouldBe("strftime('%Y-%m-%d', \"d\")");
         groupBy.ShouldNotContain("datetime");
     }

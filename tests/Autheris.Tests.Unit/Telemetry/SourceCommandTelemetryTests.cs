@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using Autheris.Application.Telemetry;
+using Autheris.Application.Observability.Telemetry;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Microsoft.Extensions.Logging;

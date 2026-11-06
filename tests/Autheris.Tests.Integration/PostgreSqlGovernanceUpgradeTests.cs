@@ -3,7 +3,7 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.Extensions.Options;

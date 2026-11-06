@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using System.Text.RegularExpressions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Tenancy;
@@ -28,7 +28,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
-    private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
+    private readonly Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IConsumerUsageRecorder? _usageRecorder;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
@@ -52,7 +52,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
-        Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
+        Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
@@ -284,7 +284,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         bool rlsPushdownAlreadyOccurred = false;
         bool inDbMaskingAlreadyOccurred = false;
 
-        Autheris.Application.Connectors.IAutherisConnector? connector = null;
+        Autheris.Application.DataSources.Connectors.IAutherisConnector? connector = null;
         bool canUseConnector = _connectorRegistry != null &&
             _connectorRegistry.TryGetConnectorForTable(table, out connector) &&
             connector != null &&
@@ -308,10 +308,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             // SEC-ATR-05: a connector that opens its own scope copies the caller's ingress from here.
             session.Items[Autheris.Application.DataSources.IngressTransportContext.SessionItemKey] = _transportGate.Ingress;
 
-            rawRows = await Autheris.Application.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
+            rawRows = await Autheris.Application.DataSources.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
-            rlsPushdownAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
-            inDbMaskingAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
+            rlsPushdownAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
+            inDbMaskingAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
         }
         else
         {
@@ -346,14 +346,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // Architecture 2: row filter (unless pushed down), masking exactly once and the response byte cap are the
         // same steps for connector and executor rows, and for every other connector caller (OLAP).
         var maxBytes = _options?.GraphQL?.MaxResponseBytes > 0 ? _options.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
-        var processedRows = Autheris.Application.Connectors.GovernedConnectorReader.Apply(
+        var processedRows = Autheris.Application.DataSources.Connectors.GovernedConnectorReader.Apply(
             rawRows,
             metadata,
             decision,
             tenantId.Value,
             rlsPushdownAlreadyOccurred,
             inDbMaskingAlreadyOccurred,
-            new Autheris.Application.Connectors.GovernedRowPolicy(
+            new Autheris.Application.DataSources.Connectors.GovernedRowPolicy(
                 _maskingProvider,
                 _options?.DataMasking?.HmacKeyId,
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
@@ -364,7 +364,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // Issue #94: the transport must not offer a continuation when no deterministic order was possible.
         var unordered = pageItems.TryGetValue(TableQueryItems.Ordering, out var orderingKind) &&
-            string.Equals(orderingKind as string, nameof(Autheris.Application.Data.Services.DefaultOrderingKind.None), StringComparison.Ordinal);
+            string.Equals(orderingKind as string, nameof(Autheris.Application.DataSources.Services.DefaultOrderingKind.None), StringComparison.Ordinal);
 
         long? totalCount = null;
         if (countTotal)

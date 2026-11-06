@@ -322,7 +322,7 @@ public static class GatewayApplicationBuilderExtensions
             return;
         }
 
-        var loader = services.GetRequiredService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
+        var loader = services.GetRequiredService<Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader>();
         loader.LoadFromDirectory(gatewayOptions.SqlEndpoints.Directory, gatewayOptions.SqlEndpoints.EnableHotReload);
     }
 }

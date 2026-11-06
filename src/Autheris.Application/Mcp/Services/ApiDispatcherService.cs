@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.Sql.Interfaces;

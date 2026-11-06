@@ -4,7 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Infrastructure.Persistence.Catalog;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;

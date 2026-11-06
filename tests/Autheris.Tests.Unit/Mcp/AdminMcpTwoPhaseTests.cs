@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Mcp.Tools;

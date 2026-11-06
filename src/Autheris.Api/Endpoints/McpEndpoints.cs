@@ -230,7 +230,7 @@ public static class McpEndpoints
             ? (securityContext != null ? securityContext.GroupSids.Select(s => s.Value).ToList() : principal.GetGroupSids().Select(s => s.Value).ToList())
             : new List<string>();
         var clientIp = securityContext?.ClientIp?.ToString()
-                        ?? (context.RequestServices?.GetService<Autheris.Application.Interfaces.IClientIpResolver>()?.ResolveClientIp()
+                        ?? (context.RequestServices?.GetService<Autheris.Application.Common.Interfaces.IClientIpResolver>()?.ResolveClientIp()
                             ?? context.Connection.RemoteIpAddress)?.ToString();
 
         var isReadOnly = principal.IsReadOnly();

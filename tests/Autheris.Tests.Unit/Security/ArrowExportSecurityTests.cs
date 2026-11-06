@@ -12,7 +12,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Rebac.Services;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -239,7 +239,7 @@ public sealed class ArrowExportSecurityTests
             httpContext,
             service,
             sqlExecutionService: null,
-            new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         // Assert
         result.ShouldBeOfType<ProblemHttpResult>();
@@ -267,7 +267,7 @@ public sealed class ArrowExportSecurityTests
             httpContext,
             service,
             sqlExecutionService: null,
-            new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
+            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         // Assert
         result.ShouldBeOfType<ProblemHttpResult>();
@@ -300,7 +300,7 @@ public sealed class ArrowExportSecurityTests
             .Returns<Task<GovernedSqlResult>>(_ => throw (Exception)Activator.CreateInstance(exceptionType, secret)!);
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            CreateAuthenticatedArrowContext("finance.invoices"), service, sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
+            CreateAuthenticatedArrowContext("finance.invoices"), service, sql, new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         var problem = result.ShouldBeOfType<ProblemHttpResult>();
         problem.StatusCode.ShouldBe(expectedStatus);
@@ -314,7 +314,7 @@ public sealed class ArrowExportSecurityTests
         var service = new ArrowExportService(CreateOptions(), NullLogger<ArrowExportService>.Instance);
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            CreateAuthenticatedArrowContext("finance.invoices"), service, sqlExecutionService: null, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
+            CreateAuthenticatedArrowContext("finance.invoices"), service, sqlExecutionService: null, new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), CancellationToken.None);
 
         result.ShouldBeOfType<ProblemHttpResult>().StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
     }
@@ -327,7 +327,7 @@ public sealed class ArrowExportSecurityTests
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(r => captured = r), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(new GovernedSqlResult("SELECT 1", ["_col0"], [], 0, 1));
-        var planner = Substitute.For<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>();
+        var planner = Substitute.For<Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner>();
         planner.BuildFullTableSelect(Arg.Any<TableIdentifier>()).Returns("SELECT * FROM planner_text");
 
         await ArrowExportEndpoints.HandleArrowExportAsync(
@@ -341,7 +341,7 @@ public sealed class ArrowExportSecurityTests
     [Fact]
     public void GovernedTableReadPlanner_BuildFullTableSelect_QualifiesTheTable()
     {
-        var planner = new Autheris.Application.Data.Services.GovernedTableReadPlanner();
+        var planner = new Autheris.Application.DataSources.Services.GovernedTableReadPlanner();
 
         planner.BuildFullTableSelect(new TableIdentifier("sales", "public", "orders")).ShouldBe("SELECT * FROM public.orders");
     }
@@ -378,7 +378,7 @@ public sealed class ArrowExportSecurityTests
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Do<TenantId>(t => capturedTenant = t), Arg.Any<CancellationToken>())
             .Returns(new GovernedSqlResult("SELECT 1", ["id"], [], 0, 1));
-        var planner = Substitute.For<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>();
+        var planner = Substitute.For<Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner>();
         planner.BuildFullTableSelect(Arg.Any<TableIdentifier>()).Returns("SELECT id FROM finance.invoices");
 
         var context = CreateAuthenticatedArrowContext("finance.invoices");

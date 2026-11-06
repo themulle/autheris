@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.Identity;
 using Autheris.Application.Identity.Validators;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options.Security;
 using Microsoft.AspNetCore.Authentication;

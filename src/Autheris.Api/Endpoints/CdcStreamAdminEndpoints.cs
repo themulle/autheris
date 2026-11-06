@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Audit;

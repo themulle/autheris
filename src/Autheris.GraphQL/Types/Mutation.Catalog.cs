@@ -4,7 +4,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -20,7 +20,7 @@ public sealed partial class Mutation
     public async Task<bool> ReloadSchemaAsync(
         [Service] IEventBus eventBus = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        [Service] Autheris.Application.Interfaces.IAuditLogRepository auditLog = default!,
+        [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository auditLog = default!,
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         CancellationToken ct = default)
     {
@@ -154,7 +154,7 @@ public sealed partial class Mutation
         [Service] IDataCatalogSyncService catalogSyncService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        [Service] Autheris.Application.Interfaces.IAuditLogRepository? auditLog = null,
+        [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository? auditLog = null,
         [Service] ILogger<Mutation>? logger = null,
         CancellationToken ct = default)
     {
@@ -332,7 +332,7 @@ public sealed partial class Mutation
     /// <summary>#341 (C341-7): closes the write-ahead sync entry with a failure outcome; an unavailable audit sink never replaces the governed error.</summary>
     private static async Task RecordSyncFailureAsync(
         Autheris.Application.Audit.IAuditWriter? auditWriter,
-        Autheris.Application.Interfaces.IAuditLogRepository? auditLog,
+        Autheris.Application.Common.Interfaces.IAuditLogRepository? auditLog,
         TenantId tenant,
         ClaimsPrincipal principal,
         bool dryRun,

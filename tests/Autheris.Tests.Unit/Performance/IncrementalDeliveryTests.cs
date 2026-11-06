@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
-using Autheris.Application.Performance.IncrementalDelivery;
+using Autheris.Application.Observability.IncrementalDelivery;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;

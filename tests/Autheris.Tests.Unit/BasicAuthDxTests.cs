@@ -3,7 +3,7 @@ using System.Text.Json;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Authentication;

@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -72,7 +72,7 @@ public sealed class SemanticBaseTableResolver
         foreach (var candidate in candidates)
         {
             var meta = await _repository.GetTableMetadataAsync(candidate, ct).ConfigureAwait(false)
-                ?? Autheris.Application.Data.VirtualSystemTables.Get(candidate);
+                ?? Autheris.Application.DataSources.VirtualSystemTables.Get(candidate);
             if (meta != null && meta.Table.IsActive && !SemanticVirtualTables.IsVirtualTable(meta) && (isVisible is null || isVisible(meta)))
             {
                 return meta;

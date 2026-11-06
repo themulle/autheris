@@ -180,7 +180,7 @@ public class ODataFilterParserTests
     [Fact]
     public void GetTrinoPredicate_WithoutBuilder_FailsClosed()
     {
-        var clause = new Autheris.Application.Interfaces.TableFilterClause("a = 1", new System.Collections.Generic.Dictionary<string, object?>(), new[] { "a" });
+        var clause = new Autheris.Application.Common.Interfaces.TableFilterClause("a = 1", new System.Collections.Generic.Dictionary<string, object?>(), new[] { "a" });
 
         Should.Throw<NotSupportedException>(() => clause.GetTrinoPredicate());
     }

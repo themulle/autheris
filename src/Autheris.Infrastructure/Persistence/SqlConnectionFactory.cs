@@ -1,5 +1,5 @@
 using System.Data.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;

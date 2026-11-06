@@ -233,7 +233,7 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
     [Fact]
     public async Task PolicySimulationService_MatchesEnforcement_ForWildcardRules()
     {
-        var auditRepo = Substitute.For<Autheris.Application.Interfaces.IAuditLogRepository>();
+        var auditRepo = Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>();
         auditRepo.QueryAuditLogsAsync(
             Arg.Any<string?>(),
             Arg.Any<Sid?>(),

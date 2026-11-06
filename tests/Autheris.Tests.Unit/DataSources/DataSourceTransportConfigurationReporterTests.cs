@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestSupport;
 using Autheris.Application.DataSources;
 using Autheris.Domain.Interfaces;

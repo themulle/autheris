@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Analytics;
 using Autheris.Application.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -10,7 +10,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
-using Autheris.GraphQL.Catalog;
 using Autheris.GraphQL.Interceptors;
 using HotChocolate;
 using HotChocolate.Execution.Configuration;
@@ -805,7 +804,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
                 .Build());
         }
-        catch (Autheris.Application.Data.Relations.CrossSourceRelationException ex)
+        catch (Autheris.Application.DataSources.Relations.CrossSourceRelationException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
         }

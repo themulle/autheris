@@ -3,7 +3,7 @@ namespace Autheris.Application.Security;
 using System;
 using System.Security;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 

@@ -10,7 +10,7 @@ using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Validation;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;

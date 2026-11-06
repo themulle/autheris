@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Diagnostics;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Tools;

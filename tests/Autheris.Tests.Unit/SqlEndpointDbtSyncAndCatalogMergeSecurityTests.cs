@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Shouldly;

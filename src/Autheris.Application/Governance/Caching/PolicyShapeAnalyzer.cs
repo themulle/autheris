@@ -2,7 +2,7 @@ namespace Autheris.Application.Governance.Caching;
 
 using System;
 using System.Text.RegularExpressions;
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 
 /// <summary>
 /// WP-PF-09 / SEC-SC-09: decides, from the text of a rule, whether its outcome can depend on the user, the user's aliases or groups,

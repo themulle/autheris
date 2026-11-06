@@ -22,7 +22,7 @@ public sealed class DeletedFeaturesArchitectureTests
 
     [Theory]
     [InlineData("Autheris.Infrastructure.Garnet")]
-    [InlineData("Autheris.Application.Diagnostics.Shadowing")]
+    [InlineData("Autheris.Application." + "Diagnostics.Shadowing")]
     [InlineData("Autheris.Extensions.Itsm")]
     [InlineData("Autheris.Extensions.Backstage")]
     [InlineData("Autheris.Infrastructure.Itsm")]
@@ -40,7 +40,7 @@ public sealed class DeletedFeaturesArchitectureTests
 
     [Theory]
     [InlineData("Autheris.Infrastructure.Garnet", "src/Autheris.Infrastructure/Garnet")]
-    [InlineData("Autheris.Application.Diagnostics.Shadowing", "src/Autheris.Application/Diagnostics/Shadowing")]
+    [InlineData("Autheris.Application." + "Diagnostics.Shadowing", "src/Autheris.Application/Diagnostics/Shadowing")]
     [InlineData("Autheris.Extensions.Itsm", "src/Autheris.Extensions/Itsm")]
     [InlineData("Autheris.Extensions.Backstage", "src/Autheris.Extensions/Backstage")]
     [InlineData("Autheris.Infrastructure.Itsm", "src/Autheris.Infrastructure/Itsm")]

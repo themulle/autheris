@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.DataApi;
 
 using System;
 using System.Collections.Generic;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Shouldly;

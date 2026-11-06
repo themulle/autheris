@@ -136,7 +136,7 @@ public sealed class ResponseSizeLimitingHandlerTests
         var executor = new DeclarativeHttpDataSourceExecutor(
             factory, Microsoft.Extensions.Logging.Abstractions.NullLogger<DeclarativeHttpDataSourceExecutor>.Instance, environment: env);
         var metadata = FederatedVfPipelineHarness.HttpTable("crm_api", "public", "customers", "id");
-        var context = new Autheris.Application.Interfaces.DataSourceExecutionContext(
+        var context = new Autheris.Application.Common.Interfaces.DataSourceExecutionContext(
             SourceName: "crm_api",
             Metadata: metadata,
             Principal: new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity("Test")),

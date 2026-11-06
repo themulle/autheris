@@ -1,7 +1,7 @@
 namespace Autheris.Api.Security;
 
 using System.Net;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Microsoft.AspNetCore.Http;
 
 public sealed class HttpContextClientIpResolver : IClientIpResolver

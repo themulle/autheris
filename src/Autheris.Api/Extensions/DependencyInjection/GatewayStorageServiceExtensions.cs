@@ -2,9 +2,9 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using System.Linq;
-using Autheris.Application.Caching.Interfaces;
-using Autheris.Application.Caching.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.State.Caching.Interfaces;
+using Autheris.Application.State.Caching.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;

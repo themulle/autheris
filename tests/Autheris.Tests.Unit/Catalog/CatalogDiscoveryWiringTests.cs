@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Configuration;

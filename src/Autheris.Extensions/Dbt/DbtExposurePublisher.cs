@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Microsoft.Extensions.Logging;
 
 public sealed class DbtExposurePublisher(

@@ -173,7 +173,7 @@ public static class ApiErrorCodes
             typeof(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes),
             typeof(Autheris.Domain.Model.CdcActivationCodes),
             typeof(Autheris.Application.Governance.Grants.GrantErrorCodes),
-            typeof(Autheris.Application.Data.Changes.ChangeDetectionErrorCodes),
+            typeof(Autheris.Application.DataSources.Changes.ChangeDetectionErrorCodes),
             typeof(Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes),
             typeof(Autheris.Application.Analytics.AggregationErrorCodes),
             typeof(Autheris.Domain.Model.AccessProfileAssignmentRules)

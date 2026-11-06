@@ -1,9 +1,9 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
-using Autheris.Application.Caching.TableCache;
-using Autheris.Application.Caching.TableCache.Engines;
-using Autheris.Application.Caching.TableCache.Governance;
+using Autheris.Application.State.Caching.TableCache;
+using Autheris.Application.State.Caching.TableCache.Engines;
+using Autheris.Application.State.Caching.TableCache.Governance;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Options.TableCache;
 using Autheris.Infrastructure.Caching.TableCache;

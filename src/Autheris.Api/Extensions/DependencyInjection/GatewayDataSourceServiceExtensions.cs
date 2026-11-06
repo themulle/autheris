@@ -2,7 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using Autheris.Application.DataSources;
-using Autheris.Application.Telemetry;
+using Autheris.Application.Observability.Telemetry;
 using Autheris.Domain.Options.DataSources;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

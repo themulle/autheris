@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.DataSources;
 using Autheris.Domain.Options.DataSources;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Tree;

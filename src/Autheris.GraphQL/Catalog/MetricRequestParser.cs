@@ -1,6 +1,6 @@
 using System.Globalization;
 using Autheris.Application.Analytics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Options;
 using HotChocolate;

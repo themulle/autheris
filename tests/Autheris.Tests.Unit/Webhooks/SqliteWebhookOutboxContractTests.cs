@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Webhooks;
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

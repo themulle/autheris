@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

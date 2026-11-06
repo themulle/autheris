@@ -248,9 +248,9 @@ public sealed class AggregationRowCapExceededException : GatewaySecurityExceptio
 /// </summary>
 public sealed class AggregationGroupKeyNotSupportedException : TrinoSqlEngine.SqlCompileNotSupportedException
 {
-    public Autheris.Application.Data.Services.GroupKeyTypeFamily Family { get; }
+    public Autheris.Application.DataSources.Services.GroupKeyTypeFamily Family { get; }
 
-    public AggregationGroupKeyNotSupportedException(Autheris.Application.Data.Services.GroupKeyTypeFamily family)
+    public AggregationGroupKeyNotSupportedException(Autheris.Application.DataSources.Services.GroupKeyTypeFamily family)
         : base(TrinoSqlEngine.SqlCompileNotSupportedReason.Construct, "aggregation group key type")
     {
         Family = family;

@@ -1,5 +1,5 @@
 using System.Collections.Frozen;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;

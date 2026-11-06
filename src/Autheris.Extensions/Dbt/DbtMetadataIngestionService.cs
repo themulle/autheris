@@ -11,7 +11,8 @@ using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Semantic;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Catalog;
@@ -31,7 +32,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly ILineageGraphStore _lineageGraphStore;
     private readonly IPolicyEpochRepository? _epochRepository;
     private readonly Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? _gatewayOptions;
-    private readonly Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? _sqlEndpointLoader;
+    private readonly Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? _sqlEndpointLoader;
     private readonly ITableRelationRepository? _relationRepository;
     private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
     private readonly IRebacStore? _rebacStore;
@@ -103,7 +104,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ILogger<DbtMetadataIngestionService> logger)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, null, null, null, logger)
     {
@@ -115,7 +116,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         ILogger<DbtMetadataIngestionService> logger)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, null, null, logger)
@@ -128,7 +129,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         ILogger<DbtMetadataIngestionService> logger)
@@ -142,7 +143,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         IRebacStore? rebacStore,
@@ -157,7 +158,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         IRebacStore? rebacStore,
@@ -173,7 +174,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         IRebacStore? rebacStore,
@@ -190,7 +191,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         IRebacStore? rebacStore,

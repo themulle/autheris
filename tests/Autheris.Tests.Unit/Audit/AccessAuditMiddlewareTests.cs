@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Domain.Common;

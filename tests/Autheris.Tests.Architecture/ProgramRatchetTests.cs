@@ -145,6 +145,22 @@ public sealed partial class ProgramRatchetTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Application_top_level_folder_count_is_at_most_32()
+    {
+        var appDir = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Application");
+        var actualFolders = Directory.GetDirectories(appDir)
+            .Select(Path.GetFileName)
+            .Where(d => !string.IsNullOrEmpty(d) && !SkippedAppFolders.Contains(d, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(d => d, StringComparer.Ordinal)
+            .ToList();
+
+        output.WriteLine($"Application top-level folders: {actualFolders.Count} (max 32)");
+        actualFolders.Count.ShouldBeLessThanOrEqualTo(
+            32,
+            $"WP-SIMPL-24: src/Autheris.Application top-level folder count ({actualFolders.Count}) must be <= 32. Folders: {string.Join(", ", actualFolders)}");
+    }
+
+    [Fact]
     public void Plan_id_comments_do_not_grow()
     {
         var baseline = RepositoryScan.ParseCountBaseline(RepositoryScan.ReadBaseline("plan-id-comment-counts.txt"));

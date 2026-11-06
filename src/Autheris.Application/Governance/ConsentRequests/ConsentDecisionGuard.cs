@@ -5,7 +5,7 @@ using System.Diagnostics.Metrics;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;

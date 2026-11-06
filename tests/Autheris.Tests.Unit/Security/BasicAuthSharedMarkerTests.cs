@@ -1,7 +1,7 @@
 using System.Text;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;

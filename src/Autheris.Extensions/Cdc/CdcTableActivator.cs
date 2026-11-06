@@ -10,7 +10,7 @@ using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Common;

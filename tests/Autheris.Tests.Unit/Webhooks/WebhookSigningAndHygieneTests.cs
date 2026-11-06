@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Autheris.Application.Events.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Events;

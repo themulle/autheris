@@ -118,6 +118,7 @@ src/Autheris.Application/Observability/  @themulle
 src/Autheris.Application/Olap/  @themulle
 src/Autheris.Application/Performance/  @themulle
 src/Autheris.Application/Plugins/  @themulle
+src/Autheris.Application/Runtime/  @themulle
 src/Autheris.Application/ResourceGroups/  @themulle
 src/Autheris.Application/Serialization/  @themulle
 src/Autheris.Application/Services/  @themulle

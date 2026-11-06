@@ -10,7 +10,7 @@ using Autheris.Application.Sql.TimeZones;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using TrinoSqlEngine.Analysis;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

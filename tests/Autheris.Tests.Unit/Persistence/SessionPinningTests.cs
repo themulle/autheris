@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Persistence;
 
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;

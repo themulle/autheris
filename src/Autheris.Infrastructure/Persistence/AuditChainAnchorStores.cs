@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;

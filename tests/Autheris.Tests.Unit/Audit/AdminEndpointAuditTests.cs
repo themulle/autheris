@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;

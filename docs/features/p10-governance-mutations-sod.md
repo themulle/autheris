@@ -1,6 +1,6 @@
 # P10: Enterprise Governance Mutations & 4-Eyes SoD
 
-**Components:** `MutationTypes.cs`, [`ConsentRequestService.cs`](../../src/Autheris.Application/ConsentRequests/ConsentRequestService.cs), [`RedisIdempotencyStore.cs`](../../src/Autheris.Infrastructure/Idempotency/RedisIdempotencyStore.cs), [`ConsentRecertificationWorkflowService.cs`](../../src/Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs)
+**Components:** `MutationTypes.cs`, [`ConsentRequestService.cs`](../../src/Autheris.Application/ConsentRequests/ConsentRequestService.cs), [`RedisIdempotencyStore.cs`](../../src/Autheris.Infrastructure/Idempotency/RedisIdempotencyStore.cs), [`ConsentRecertificationWorkflowService.cs`](../../src/Autheris.Application/Governance/Workflows/ConsentRecertificationWorkflowService.cs)
 
 ---
 

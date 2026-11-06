@@ -8,7 +8,7 @@ using System.Security;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
