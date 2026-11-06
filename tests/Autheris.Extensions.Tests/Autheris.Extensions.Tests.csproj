@@ -25,6 +25,7 @@
     <Compile Include="..\Autheris.Tests.Common\StubHttpMessageHandler.cs" Link="TestSupport\StubHttpMessageHandler.cs" />
     <Compile Include="..\Autheris.Tests.Common\TestTenants.cs" Link="TestSupport\TestTenants.cs" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
+    <ProjectReference Include="..\..\modules\Autheris.Modules.Lakehouse\Autheris.Modules.Lakehouse.csproj" />
   </ItemGroup>
 
   <ItemGroup>

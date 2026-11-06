@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.DataSources;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -26,6 +27,7 @@ public sealed class IcebergRestCatalogSecurityTests
     private readonly IIcebergMetadataReader _metadataReader = Substitute.For<IIcebergMetadataReader>();
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
     private readonly IOptions<GatewayOptions> _options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
+    private readonly IDataSourceTransportGate _transportGate = Substitute.For<IDataSourceTransportGate>();
 
     private static readonly TableIdentifier OrdersId = new("tenant-1", "raw", "orders");
 
@@ -61,7 +63,8 @@ public sealed class IcebergRestCatalogSecurityTests
         repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
         return new IcebergRestCatalogFederationService(_metadataReader, _metadataRepo, _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new ConsentResolutionService(), repo);
+            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new ConsentResolutionService(), repo,
+            transportGate: _transportGate);
     }
 
     [Fact]
@@ -70,7 +73,8 @@ public sealed class IcebergRestCatalogSecurityTests
         _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(Orders("id")));
         var service = new IcebergRestCatalogFederationService(_metadataReader, _metadataRepo, _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            transportGate: _transportGate);
 
         await Should.ThrowAsync<SecurityException>(() => service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
     }
@@ -161,7 +165,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             _options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
-            Substitute.For<IAuditLogRepository>());
+            Substitute.For<IAuditLogRepository>(),
+            transportGate: _transportGate);
 
         // Act
         // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
@@ -185,7 +190,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             _options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
-            Substitute.For<IAuditLogRepository>());
+            Substitute.For<IAuditLogRepository>(),
+            transportGate: _transportGate);
 
         var unauthenticatedPrincipal = new ClaimsPrincipal(new ClaimsIdentity()); // no identity or permissions
 
@@ -245,7 +251,8 @@ public sealed class IcebergRestCatalogSecurityTests
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             auditRepo,
             new ConsentResolutionService(),
-            consentRepo);
+            consentRepo,
+            transportGate: _transportGate);
 
         var response = await service.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
         response.ShouldNotBeNull();
@@ -282,7 +289,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataReader, _metadataRepo, _options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
-            new ConsentResolutionService(), consentRepo, policy);
+            new ConsentResolutionService(), consentRepo, policy,
+            transportGate: _transportGate);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             new[]
@@ -375,7 +383,8 @@ public sealed class IcebergRestCatalogSecurityTests
             auditRepo,
             new ConsentResolutionService(),
             consentRepo,
-            rebacEvaluator: rebac);
+            rebacEvaluator: rebac,
+            transportGate: _transportGate);
 
         await Should.ThrowAsync<SecurityException>(() =>
             service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
@@ -459,7 +468,8 @@ public sealed class IcebergRestCatalogSecurityTests
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new ConsentResolutionService(),
             consentRepo,
-            rebacEvaluator: rebac);
+            rebacEvaluator: rebac,
+            transportGate: _transportGate);
 
         // 1. ListTablesAsync should only list 'orders' because 'customers' is denied by ReBAC
         var listed = await service.ListTablesAsync("tenant-1", "raw", Analyst());

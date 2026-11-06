@@ -52,8 +52,9 @@ public static class UnknownGatewayKeyGuard
             {
                 if (TryMatchKnownModuleSection(key, GatewayConfigurationSchema.KnownModuleSections, out var section, out var moduleId))
                 {
+                    var pascal = ToPascalModuleName(moduleId);
                     throw new InvalidOperationException(
-                        $"Configuration section '{Sanitize(section)}' (key '{Sanitize(key)}') requires module {moduleId}, but module {moduleId} is not installed.");
+                        $"Configuration section '{Sanitize(section)}' (key '{Sanitize(key)}') requires module {moduleId} (Autheris.Modules.{pascal}), but module {moduleId} is not installed.");
                 }
             }
 
@@ -107,8 +108,9 @@ public static class UnknownGatewayKeyGuard
             if (TryMatchKnownModuleSection(fullPath, effectiveKnownModules, out var matchedSection, out var requiredModuleId) &&
                 !loadedSet.Contains(requiredModuleId))
             {
+                var pascal = ToPascalModuleName(requiredModuleId);
                 throw new InvalidOperationException(
-                    $"Configuration section '{Sanitize(matchedSection)}' (key '{Sanitize(fullPath)}') requires module {requiredModuleId}, but module {requiredModuleId} is not installed.");
+                    $"Configuration section '{Sanitize(matchedSection)}' (key '{Sanitize(fullPath)}') requires module {requiredModuleId} (Autheris.Modules.{pascal}), but module {requiredModuleId} is not installed.");
             }
         }
 
@@ -331,5 +333,16 @@ public static class UnknownGatewayKeyGuard
         }
 
         return builder.ToString();
+    }
+
+    private static string ToPascalModuleName(string moduleId)
+    {
+        if (string.IsNullOrWhiteSpace(moduleId))
+        {
+            return string.Empty;
+        }
+
+        var parts = moduleId.Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries);
+        return string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
     }
 }

@@ -28,6 +28,7 @@
     <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\..\modules\Autheris.Modules.Lakehouse\Autheris.Modules.Lakehouse.csproj" />
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
   </ItemGroup>
 

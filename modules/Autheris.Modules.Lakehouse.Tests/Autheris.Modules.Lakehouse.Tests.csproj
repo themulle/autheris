@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <RestoreLockedMode>false</RestoreLockedMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.14" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="NSubstitute" Version="6.2.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\tests\Autheris.Tests.Unit\TestDoubles\NullAuditLogRepository.cs" Link="TestDoubles\NullAuditLogRepository.cs" />
+    <ProjectReference Include="..\Autheris.Modules.Lakehouse\Autheris.Modules.Lakehouse.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Domain\Autheris.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Infrastructure\Autheris.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\..\tests\Autheris.Tests.Common\Autheris.Tests.Common.csproj" />
+  </ItemGroup>
+
+</Project>

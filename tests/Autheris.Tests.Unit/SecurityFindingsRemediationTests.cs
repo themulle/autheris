@@ -1077,6 +1077,7 @@ public class SecurityFindingsRemediationTests
         services.AddLogging();
 
         services.AddGatewayInfrastructure(options);
+        Autheris.Modules.Lakehouse.LakehouseServiceCollectionExtensions.AddLakehouseIntegration(services, options);
 
         var sp = services.BuildServiceProvider();
         var factory = sp.GetRequiredService<IHttpClientFactory>();

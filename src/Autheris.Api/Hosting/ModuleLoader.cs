@@ -212,11 +212,10 @@ public sealed class ModuleLoader
                 $"Configuration key '{AllowUnsignedConfigKey}' is true outside the Development environment ({environment.EnvironmentName}).");
         }
 
-        string? modulesRoot = configuration[PathConfigKey];
-        if (string.IsNullOrWhiteSpace(modulesRoot))
-        {
-            modulesRoot = DefaultModulesPath;
-        }
+        string? configuredModulesRoot = configuration[PathConfigKey];
+        string modulesRoot = string.IsNullOrWhiteSpace(configuredModulesRoot)
+            ? DefaultModulesPath
+            : configuredModulesRoot;
 
         var enabledIds = ReadEnabledModuleIds(configuration);
 
@@ -228,9 +227,20 @@ public sealed class ModuleLoader
             return new ModuleLoadResult([]);
         }
 
+        var effectiveHostContext = hostContext ?? new ModuleHostContext(
+            TimeProvider.System,
+            _hostVersion,
+            new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions(), statePaths: null, environment));
+
         string fullModulesRoot = Path.GetFullPath(modulesRoot);
         if (!Directory.Exists(fullModulesRoot))
         {
+            if (string.IsNullOrWhiteSpace(configuredModulesRoot) &&
+                TryLoadWorkspaceModules(enabledIds, services, configuration, effectiveHostContext, out var workspaceResult))
+            {
+                return workspaceResult;
+            }
+
             throw new ModuleLoadException(enabledIds[0], $"Module root directory '{fullModulesRoot}' does not exist.");
         }
 
@@ -242,11 +252,6 @@ public sealed class ModuleLoader
 
         using var ownedPublicKey = _publicKeyOverride is null ? LoadEmbeddedReleasePublicKey() : null;
         ECDsa effectivePublicKey = _publicKeyOverride ?? ownedPublicKey!;
-
-        var effectiveHostContext = hostContext ?? new ModuleHostContext(
-            TimeProvider.System,
-            _hostVersion,
-            new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions(), statePaths: null, environment));
 
         var loadedModules = new List<LoadedModuleDescriptor>(enabledIds.Count);
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -620,5 +625,132 @@ public sealed class ModuleLoader
         }
 
         return false;
+    }
+
+    private bool TryLoadWorkspaceModules(
+        IReadOnlyList<string> enabledIds,
+        IServiceCollection services,
+        IConfiguration configuration,
+        IModuleHostContext effectiveHostContext,
+        out ModuleLoadResult result)
+    {
+        result = new ModuleLoadResult([]);
+        var loadedModules = new List<LoadedModuleDescriptor>(enabledIds.Count);
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var moduleId in enabledIds)
+        {
+            ValidateModuleIdFormat(moduleId);
+            if (!seenIds.Add(moduleId))
+            {
+                throw new ModuleLoadException(moduleId, $"Duplicate module id '{moduleId}' in '{EnabledConfigKey}'.");
+            }
+
+            var pascal = string.Concat(moduleId.Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
+            var assemblyFileName = $"Autheris.Modules.{pascal}.dll";
+            var moduleDllPath = FindWorkspaceModuleDll(pascal, assemblyFileName, out var moduleBinDir);
+            if (moduleDllPath is null)
+            {
+                return false;
+            }
+
+            byte[] dllBytes = File.ReadAllBytes(moduleDllPath);
+            var filesDict = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                [assemblyFileName] = dllBytes
+            };
+
+            if (moduleBinDir is not null && Directory.Exists(moduleBinDir))
+            {
+                foreach (var peerDll in Directory.EnumerateFiles(moduleBinDir, "*.dll", SearchOption.TopDirectoryOnly))
+                {
+                    var peerName = Path.GetFileName(peerDll);
+                    if (!string.Equals(peerName, assemblyFileName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        filesDict[peerName] = File.ReadAllBytes(peerDll);
+                    }
+                }
+            }
+
+            var manifest = new ModuleManifest(
+                Schema: 1,
+                Id: moduleId,
+                Version: _hostVersion,
+                HostVersion: _hostVersion,
+                AbstractionsVersion: _abstractionsVersion,
+                EntryAssembly: assemblyFileName,
+                EntryType: $"Autheris.Modules.{pascal}.{pascal}Module",
+                Files: [new ModuleManifestFile(assemblyFileName, IntegrityHashHelper.ComputeSha256HexLower(dllBytes))],
+                KeyId: "workspace",
+                Signature: string.Empty);
+
+            var verifiedImage = new VerifiedModuleImage(
+                moduleId,
+                moduleBinDir ?? Path.GetDirectoryName(moduleDllPath)!,
+                manifest,
+                filesDict);
+
+            var alc = new ModuleAssemblyLoadContext(verifiedImage);
+            var hostAssembliesWithoutSelf = AssemblyLoadContext.Default.Assemblies
+                .Where(a => !string.Equals(a.GetName().Name, $"Autheris.Modules.{pascal}", StringComparison.OrdinalIgnoreCase));
+            alc.EnsureNoHostAssemblyCollisions(hostAssembliesWithoutSelf);
+
+            var baseDirCopy = Path.Combine(AppContext.BaseDirectory, assemblyFileName);
+            Assembly entryAssembly = File.Exists(baseDirCopy)
+                ? AssemblyLoadContext.Default.LoadFromAssemblyPath(baseDirCopy)
+                : alc.LoadEntryAssembly();
+
+            var entryType = entryAssembly.GetType(manifest.EntryType, throwOnError: false, ignoreCase: false)
+                ?? entryAssembly.GetTypes().FirstOrDefault(t => !t.IsAbstract && !t.IsInterface && typeof(IAutherisModule).IsAssignableFrom(t));
+            if (entryType is null)
+            {
+                throw new ModuleLoadException(moduleId, $"Entry type '{manifest.EntryType}' was not found in '{assemblyFileName}'.");
+            }
+
+            var moduleInstance = (IAutherisModule)(Activator.CreateInstance(entryType)
+                ?? throw new ModuleLoadException(moduleId, $"Activator returned null for '{entryType.FullName}'."));
+
+            if (!string.Equals(moduleInstance.Id, moduleId, StringComparison.Ordinal))
+            {
+                throw new ModuleLoadException(moduleId, $"Module instance Id '{moduleInstance.Id}' does not match manifest id '{moduleId}'.");
+            }
+
+            var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
+            var protectedSnapshot = CaptureProtectedServicesSnapshot(services);
+            moduleInstance.ConfigureServices(services, scopedConfig, effectiveHostContext);
+            VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
+
+            loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
+        }
+
+        result = new ModuleLoadResult(loadedModules);
+        services.AddSingleton(result);
+        return true;
+    }
+
+    private static string? FindWorkspaceModuleDll(string pascal, string assemblyFileName, out string? moduleBinDir)
+    {
+        moduleBinDir = null;
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            var repoCandidate = Path.Combine(current.FullName, "modules", $"Autheris.Modules.{pascal}", "bin");
+            if (Directory.Exists(repoCandidate))
+            {
+                var found = Directory.EnumerateFiles(repoCandidate, assemblyFileName, SearchOption.AllDirectories)
+                    .FirstOrDefault();
+                if (found is not null)
+                {
+                    moduleBinDir = Path.GetDirectoryName(found);
+                    return found;
+                }
+            }
+
+            current = current.Parent;
+        }
+
+        var localCandidate = Path.Combine(AppContext.BaseDirectory, assemblyFileName);
+        return File.Exists(localCandidate) ? localCandidate : null;
     }
 }

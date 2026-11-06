@@ -6,7 +6,6 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.Cdc;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Extensions.Dbt;
-using Autheris.Extensions.Lakehouse;
 using Autheris.Extensions.Lineage;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,7 +35,6 @@ public static class ExtensionsServiceCollectionExtensions
         services.AddOpenMetadataIntegration(gatewayOptions);
         services.AddDataCatalogIntegration(gatewayOptions);
         services.AddDbtIntegration(gatewayOptions);
-        services.AddLakehouseIntegration(gatewayOptions);
         services.AddLineageExportIntegration(gatewayOptions);
         services.AddCdcSourceIntegration(gatewayOptions);
 

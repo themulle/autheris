@@ -105,4 +105,52 @@ public sealed class PackageBoundaryArchitectureTests
 
         odataTypes.ShouldBeEmpty("OData core lives in Autheris.Application.OData, not Autheris.Extensions.");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Lakehouse_module_does_not_bypass_access_decision_point()
+    {
+        var lakehouseAssembly = typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly;
+        var moduleDef = CecilModuleCache.For(lakehouseAssembly);
+
+        var tableAccessPolicyRefs = new System.Collections.Generic.List<string>();
+        var accessDecisionPointCallers = new System.Collections.Generic.List<string>();
+
+        foreach (var type in moduleDef.GetTypes())
+        {
+            foreach (var field in type.Fields)
+            {
+                if (field.FieldType.FullName == "Autheris.Application.Policy.TableAccessPolicy")
+                {
+                    tableAccessPolicyRefs.Add($"{type.FullName}.{field.Name}");
+                }
+            }
+
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.Operand is Mono.Cecil.MemberReference memberRef)
+                    {
+                        var declaringFullName = memberRef.DeclaringType?.FullName ?? string.Empty;
+                        if (declaringFullName == "Autheris.Application.Policy.TableAccessPolicy")
+                        {
+                            tableAccessPolicyRefs.Add($"{type.FullName}.{method.Name} -> {memberRef.FullName}");
+                        }
+                        else if (declaringFullName == "Autheris.Application.Policy.IAccessDecisionPoint")
+                        {
+                            accessDecisionPointCallers.Add($"{type.FullName}.{method.Name} -> {memberRef.Name}");
+                        }
+                    }
+                }
+            }
+        }
+
+        tableAccessPolicyRefs.ShouldBeEmpty(
+            "Autheris.Modules.Lakehouse must decide via IAccessDecisionPoint and never construct or invoke TableAccessPolicy directly:\n" +
+            string.Join("\n", tableAccessPolicyRefs));
+
+        accessDecisionPointCallers.ShouldNotBeEmpty(
+            "Positive control: IcebergRestCatalogFederationService in Autheris.Modules.Lakehouse must invoke IAccessDecisionPoint.DecideAsync.");
+    }
 }

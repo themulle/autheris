@@ -97,11 +97,6 @@ src/Autheris.Extensions/Cdc/DebeziumCdcParser.cs|1
 src/Autheris.Extensions/Dbt/DbtHealthCircuitBreaker.cs|3
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|4
 src/Autheris.Extensions/Dbt/DbtWebhookReceiver.cs|3
-src/Autheris.Extensions/Lakehouse/Services/AzureBlobStorageProvider.cs|1
-src/Autheris.Extensions/Lakehouse/Services/IcebergMetadataReader.cs|1
-src/Autheris.Extensions/Lakehouse/Services/IcebergRestCatalogFederationService.cs|1
-src/Autheris.Extensions/Lakehouse/Services/LakehouseDataSourceExecutor.cs|1
-src/Autheris.Extensions/Lakehouse/Services/S3LakehouseStorageProvider.cs|1
 src/Autheris.Extensions/Lineage/OpenJevClient.cs|2
 src/Autheris.Extensions/Lineage/OpenLineageClient.cs|1
 src/Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs|8
