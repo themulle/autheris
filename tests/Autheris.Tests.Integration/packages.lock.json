@@ -1821,7 +1821,8 @@
       "autheris.tests.common": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.2.1, )"
+          "Autheris.Application": "[1.2.1, )",
+          "xunit.extensibility.core": "[2.9.3, )"
         }
       },
       "FastSqlEngine": {

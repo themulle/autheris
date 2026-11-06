@@ -17,6 +17,11 @@ internal static class RepositoryScan
 
     public static string RepoRoot => Root.Value;
 
+    public static string FindRepositoryRoot() => RepoRoot;
+
+    public static string ToRelativePath(string path) =>
+        Path.IsPathRooted(path) ? Normalize(Path.GetRelativePath(RepoRoot, path)) : Normalize(path);
+
     /// <summary>All production C# files under src/, sorted by relative path. Throws when none are found.</summary>
     public static IReadOnlyList<SourceFile> ProductionFiles => SrcFiles.Value;
 

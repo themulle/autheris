@@ -1,0 +1,3 @@
+# WP-SIMPL-23 baseline: NSubstitute usage ceilings across tests/
+Substitute.For	4184
+Received	537

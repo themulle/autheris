@@ -38,7 +38,7 @@ public sealed class DialectMatrixTests(ParityPostgresHostFixture host) : ParityT
 [Trait("Category", "Parity")]
 [Trait("Dialect", "Container")]
 [Collection(ParityPostgresCollection.Name)]
-public sealed class DialectPairwiseTests(ParityPostgresHostFixture host) : ParityTestBase
+public sealed class DialectPairwiseTests(ParityPostgresHostFixture host, ParitySqlServerHostFixture sqlServerHost) : ParityTestBase, IClassFixture<ParitySqlServerHostFixture>
 {
     public static IEnumerable<object[]> ContainerCases() =>
         PairwiseModel.Cases().Where(c => c.Dialect != PairwiseModel.Sqlite).SelectMany(c => new[] { "WebSql", "GraphQl" }, (c, ch) => new object[] { ch, c.Id });
@@ -48,17 +48,19 @@ public sealed class DialectPairwiseTests(ParityPostgresHostFixture host) : Parit
     public Task Pairwise_Case_Container(string channel, string caseId)
     {
         var c = PairwiseModel.Cases().Single(x => x.Id == caseId);
+        var activeHost = c.Dialect == PairwiseModel.SqlServer ? (IParityHost)sqlServerHost : host;
+        var activeSchema = c.Dialect == PairwiseModel.SqlServer ? ParitySqlServerHostFixture.Schema : ParityPostgresHostFixture.Schema;
         return ParityCell.RunAsync(
             new ParityCellInfo("pairwise", channel, PairwiseExecutor.CellCapability, caseId, c.Dialect),
-            () => new PairwiseExecutor(host, ParityPostgresHostFixture.Schema).RunAsync(c, channel));
+            () => new PairwiseExecutor(activeHost, activeSchema).RunAsync(c, channel));
     }
 }
 
-/// <summary>Robin item 2 (#280): aggregation with <c>where column = value</c> on PostgreSQL and SQL Server (SQL Server Pending).</summary>
+/// <summary>Robin item 2 (#280): aggregation with <c>where column = value</c> on PostgreSQL and SQL Server.</summary>
 [Trait("Category", "Parity")]
 [Trait("Dialect", "Container")]
 [Collection(ParityPostgresCollection.Name)]
-public sealed class DialectRobinTests(ParityPostgresHostFixture host) : ParityTestBase
+public sealed class DialectRobinTests(ParityPostgresHostFixture host, ParitySqlServerHostFixture sqlServerHost) : ParityTestBase, IClassFixture<ParitySqlServerHostFixture>
 {
     private const string Field = "default_public_" + ParitySeed.SalesTable + "_aggregate";
 
@@ -71,16 +73,15 @@ public sealed class DialectRobinTests(ParityPostgresHostFixture host) : ParityTe
         new ParityCellInfo("robin", channel, "aggregate_where_eq", $"Robin_280_AggregationWhereEqualsValue.{dialect}", dialect),
         async () =>
         {
-            if (dialect == "sqlserver")
-            {
-                throw new PendingCellException(channel, "sqlserver_host");
-            }
-
-            var robin = new RobinClient(host);
+            var activeHost = dialect == "sqlserver" ? (IParityHost)sqlServerHost : host;
+            var field = dialect == "sqlserver"
+                ? $"default_{ParitySqlServerHostFixture.Schema}_{ParitySeed.SalesTable}_aggregate"
+                : Field;
+            var robin = new RobinClient(activeHost);
             var result = channel == "GraphQl"
                 ? await robin.GraphQlAsync(
-                    "{ " + Field + "(where: { region: { eq: \"North\" } }, aggregates: [{ fn: COUNT, alias: \"n\" }, { fn: SUM, column: amount, alias: \"total\" }]) { groups { rowCount aggregates { " + RobinClient.AggregateSelection + " } } } }",
-                    Field)
+                    "{ " + field + "(where: { region: { eq: \"North\" } }, aggregates: [{ fn: COUNT, alias: \"n\" }, { fn: SUM, column: amount, alias: \"total\" }]) { groups { rowCount aggregates { " + RobinClient.AggregateSelection + " } } } }",
+                    field)
                 : await robin.WebSqlAsync("SELECT COUNT(*) AS n, SUM(amount) AS total FROM parity_sales WHERE region = 'North'");
             result.RowsShouldBe(["n", "total"], [[ParityExpected.RowsByRegion["North"], ParityExpected.SumAmountByRegion["North"]]]);
         });

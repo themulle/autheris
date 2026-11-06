@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="xunit.extensibility.core" Version="2.9.3" />
     <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />
   </ItemGroup>
 

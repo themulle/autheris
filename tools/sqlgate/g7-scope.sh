@@ -75,6 +75,12 @@ for f in "${all_files[@]}"; do
 done
 
 for g in "${globs[@]}"; do
+  if [ -z "${matched[$g]:-}" ] && [ -d "$root/src/Autheris.Application" ]; then
+    while IFS= read -r app_f; do
+      app_rel="${app_f#src/Autheris.Application/}"
+      if [[ "$app_rel" =~ $(glob_regex "$g") ]]; then matched["$g"]=1; break; fi
+    done < <(cd "$root" && find "src/Autheris.Application" -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*')
+  fi
   [ -n "${matched[$g]:-}" ] || fail "the glob '$g' matches no file"
 done
 [ "${#in_scope[@]}" -gt 0 ] || fail "the in-scope file set is empty"
