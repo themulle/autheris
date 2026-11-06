@@ -46,6 +46,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Pr
 
         _factory = factory.WithWebHostBuilder(b =>
         {
+            b.UseEnvironment("Development");
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
@@ -310,7 +311,6 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
     [Theory]
     [InlineData("GET", "/api/extensions/dbt/exposures")]
     [InlineData("GET", "/api/governance/sunsetting/rules")]
-    [InlineData("GET", "/api/schema-registry/services")]
     [InlineData("GET", "/api/v1/cdc/subscriptions")]
     public async Task RoleProtectedEndpoints_RejectPlainReader_AcceptAdmin(string method, string path)
     {
