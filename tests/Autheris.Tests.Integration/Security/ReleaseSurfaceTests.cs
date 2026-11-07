@@ -28,11 +28,8 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
         {
             builder.UseEnvironment("Production");
             builder.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
-            // The Testcontainers PostgreSQL server has no TLS: the explicit insecure-transport opt-in satisfies the governance TLS check
-            // (ConnectionTlsPolicy stays untouched); everything else in Production is still enforced.
-            builder.UseSetting("Gateway:Insecure:danger_allow_insecure_transport", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_tempDbPath));
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.WithVerifiedTls(GovernanceTestDatabase.CreateStable(_tempDbPath)));
             builder.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
             builder.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
             builder.UseSetting("Gateway:DataMasking:HmacSecretKeyVaultRef", "kv://masking-hmac");

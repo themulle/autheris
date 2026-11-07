@@ -30,6 +30,21 @@ internal static class GovernanceTestDatabase
     public static string CreateStable(string key) =>
         Stable.GetOrAdd(key, static k => new Lazy<string>(() => Create("stable_" + System.IO.Path.GetFileNameWithoutExtension(k)))).Value;
 
+    /// <summary>
+    /// A connection string for the same cloned database that verifies the server certificate (<c>SSL Mode=VerifyCA</c> with the test CA),
+    /// for hosts that run outside Development and therefore must satisfy ConnectionTlsPolicy.
+    /// </summary>
+    public static string WithVerifiedTls(string connectionString)
+    {
+        var ca = SharedDatabaseServers.PostgreSqlCaCertificatePath
+            ?? throw new InvalidOperationException("Verified TLS needs the Testcontainers PostgreSQL server (AUTHERIS_TEST_POSTGRES is set).");
+        return new Npgsql.NpgsqlConnectionStringBuilder(connectionString)
+        {
+            SslMode = Npgsql.SslMode.VerifyCA,
+            RootCertificate = ca
+        }.ConnectionString;
+    }
+
     /// <summary>Synchronous variant for host configuration callbacks.</summary>
     public static string Create(string name) => Task.Run(() => CreateAsync(name)).GetAwaiter().GetResult();
 

@@ -35,7 +35,7 @@ WHERE is_active = 1";
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 WHERE c.table_id = @tableId
-ORDER BY c.ctid"; // registration (heap) order; the natural-key unique index would otherwise return the columns by name
+ORDER BY c.ctid"; // TABLE_COLUMNS has no ordinal/serial/timestamp (id is a GUID): heap order is the only registration order until an ordinal column is added by a new migration step (follow-up); the natural-key unique index would otherwise return the columns by name
 
         public const string SelectActiveBatchTableColumnsSql = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,

@@ -20,13 +20,28 @@ internal static class SharedDatabaseServers
 {
     private static readonly bool Reuse = !string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>TLS material of the shared PostgreSQL server (ssl=on); the CA file is what <c>SSL Mode=VerifyCA</c> clients trust.</summary>
+    private static readonly Lazy<TestTlsMaterial> PostgreSqlTls = new(TestTlsMaterial.Create);
+
     private static readonly Lazy<Task<PostgreSqlContainer>> PostgreSql =
         new(() => StartAsync(new PostgreSqlBuilder("postgres:16-alpine")
             .WithReuse(Reuse)
-            // Every web-host test class gets its own cloned governance database (WP-SIMPL-11), each with its own Npgsql pool.
-            .WithCommand("-c", "max_connections=500")
-            .WithLabel("autheris.tests", "shared-postgresql")
+            .WithLabel("autheris.tests", "shared-postgresql-tls")
+            .WithResourceMapping(System.Text.Encoding.ASCII.GetBytes(PostgreSqlTls.Value.ServerCertPem), "/tmp/tls/server.crt")
+            .WithResourceMapping(System.Text.Encoding.ASCII.GetBytes(PostgreSqlTls.Value.ServerKeyPem), "/tmp/tls/server.key")
+            // The key must belong to the postgres user and be private, so it is copied before the server starts. Every web-host test class gets
+            // its own cloned governance database (WP-SIMPL-11), each with its own Npgsql pool, hence max_connections.
+            .WithEntrypoint("/bin/sh", "-c",
+                "mkdir -p /var/lib/postgresql/tls && cp /tmp/tls/server.crt /tmp/tls/server.key /var/lib/postgresql/tls/ && " +
+                "chown -R postgres:postgres /var/lib/postgresql/tls && chmod 600 /var/lib/postgresql/tls/server.key && " +
+                "exec docker-entrypoint.sh postgres -c max_connections=500 -c ssl=on " +
+                "-c ssl_cert_file=/var/lib/postgresql/tls/server.crt -c ssl_key_file=/var/lib/postgresql/tls/server.key")
+            .WithCommand()
             .Build()));
+
+    /// <summary>Path of the CA certificate that signed the shared PostgreSQL server certificate; null when an external server is used.</summary>
+    public static string? PostgreSqlCaCertificatePath =>
+        string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AUTHERIS_TEST_POSTGRES")) ? PostgreSqlTls.Value.CaFilePath : null;
 
     private static readonly Lazy<Task<MsSqlContainer>> SqlServer =
         new(() => StartAsync(new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
