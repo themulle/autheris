@@ -90,7 +90,8 @@ public static class GatewayConfigurationSchema
         "Gateway:Secrets:VaultHostSuffixes",
         "Gateway:Modules:AllowUnsignedInDevelopment",
         "Gateway:Modules:Enabled",
-        "Gateway:Modules:Path"
+        "Gateway:Modules:Path",
+        "Gateway:Modules:WorkspacePath"
     ];
 
     /// <summary>

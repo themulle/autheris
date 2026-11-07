@@ -48,6 +48,26 @@ internal static partial class PolicyShapeAnalyzer
         return shape;
     }
 
+    internal static bool ReferencesClientIp(string? subRule)
+    {
+        if (string.IsNullOrWhiteSpace(subRule))
+        {
+            return false;
+        }
+
+        var stripped = StringLiteral().Replace(subRule, " ");
+        foreach (Match match in Identifier().Matches(stripped))
+        {
+            var chain = match.Value.ToLowerInvariant();
+            if (chain.Contains("clientip", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static RuleShape Compute(string? subRule, string? rlsFilter)
     {
         // a rule that mentions a caller attribute placeholder can never be shared between users (it is refused at publication anyway).

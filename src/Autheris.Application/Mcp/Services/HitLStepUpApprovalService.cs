@@ -25,6 +25,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
     private readonly Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService? _totpService;
     private readonly Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? _totpSecretStore;
     private readonly byte[] _hmacKey;
+    private readonly TimeProvider _timeProvider;
+    internal byte[] HmacKey => _hmacKey;
     private static readonly byte[] ProcessFallbackHmacKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
 
     private const string DevSentinelKeyRef = "DEV_INSECURE_TEST_KEY_ONLY";
@@ -105,7 +107,12 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
     internal static string ComputeBroadcastSignature(byte[] key, HitLApprovalBroadcast broadcast)
     {
-        var payload = $"{broadcast.ApprovalId}:{broadcast.ApproverSid}:{broadcast.IsApproved}:{broadcast.Reason}";
+        var approvalId = broadcast.ApprovalId ?? string.Empty;
+        var approverSid = broadcast.ApproverSid ?? string.Empty;
+        var isApprovedStr = broadcast.IsApproved ? "true" : "false";
+        var reason = broadcast.Reason ?? string.Empty;
+        var issuedAtStr = broadcast.IssuedAt.ToString("O");
+        var payload = $"hitl-broadcast-v1:{approvalId.Length}:{approvalId}:{approverSid.Length}:{approverSid}:{isApprovedStr.Length}:{isApprovedStr}:{reason.Length}:{reason}:{issuedAtStr.Length}:{issuedAtStr}";
         using var hmac = new System.Security.Cryptography.HMACSHA256(key);
         var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(hash);
@@ -150,7 +157,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService? totpVerificationService = null,
         Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? totpSecretStore = null,
         Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
+        TimeProvider? timeProvider = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -158,6 +166,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         _clusterState = clusterState;
         _totpService = totpVerificationService;
         _totpSecretStore = totpSecretStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _hmacKey = ResolveHitLHmacKey(options.Value, secretProvider, environment);
     }
 
@@ -200,9 +209,22 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 await _clusterState.SetAsync($"hitl:ticket:{approvalId}", ticket, TimeSpan.FromSeconds(timeoutSeconds + 900), ct).ConfigureAwait(false);
                 clusterSubscription = _clusterState.SubscribeAsync<HitLApprovalBroadcast>($"hitl:events:{approvalId}", broadcast =>
                 {
+                    var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                    if (!string.Equals(broadcast.ApprovalId, approvalId, StringComparison.Ordinal))
+                    {
+                        _logger.LogWarning("Dropping HitL broadcast for ticket '{ApprovalId}' with mismatched broadcast approval ID.", safeApprovalIdForLog);
+                        return ValueTask.CompletedTask;
+                    }
+
+                    var minIssuedAt = entry.Ticket.CreatedAt - TimeSpan.FromSeconds(30);
+                    if (broadcast.IssuedAt < minIssuedAt || broadcast.IssuedAt > entry.Ticket.ExpiresAt)
+                    {
+                        _logger.LogWarning("Dropping expired or out-of-window HitL broadcast for ticket '{ApprovalId}'.", safeApprovalIdForLog);
+                        return ValueTask.CompletedTask;
+                    }
+
                     if (!VerifyBroadcastSignature(_hmacKey, broadcast))
                     {
-                        var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
                         _logger.LogWarning("Dropping unverified or tampered HitL broadcast for ticket '{ApprovalId}'.", safeApprovalIdForLog);
                         return ValueTask.CompletedTask;
                     }
@@ -217,7 +239,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                                 ApproverSid = broadcast.ApproverSid,
                                 RejectionReason = broadcast.IsApproved ? null : (broadcast.Reason ?? "Rejected by cluster decision.")
                             };
-                            entry.CompletedAt = DateTimeOffset.UtcNow;
+                            entry.CompletedAt = _timeProvider.GetUtcNow();
                             var result = new HitLApprovalResult(broadcast.IsApproved, entry.Ticket, broadcast.IsApproved ? "Approval granted." : (broadcast.Reason ?? "Approval rejected."));
                             entry.Tcs.TrySetResult(result);
                         }
@@ -485,13 +507,14 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                     Status = HitLApprovalStatus.Approved,
                     ApproverSid = approver.ApproverSid
                 };
-                entry.CompletedAt = DateTimeOffset.UtcNow;
+                entry.CompletedAt = _timeProvider.GetUtcNow();
 
                 approvedResult = new HitLApprovalResult(true, entry.Ticket, "Approval granted.");
                 entry.Tcs.TrySetResult(approvedResult);
             }
 
-            await BroadcastDecisionAsync(approvalId, approvedResult.Ticket, new HitLApprovalBroadcast(approvalId, approver.ApproverSid, true), ct).ConfigureAwait(false);
+            var issuedAt = _timeProvider.GetUtcNow();
+            await BroadcastDecisionAsync(approvalId, approvedResult.Ticket, new HitLApprovalBroadcast(approvalId, approver.ApproverSid, true, null, issuedAt), ct).ConfigureAwait(false);
             var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
             var safeApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
             _logger.LogInformation("HitL ticket '{ApprovalId}' approved by '{ApproverSid}'.", safeApprovalIdForLog, safeApproverSidForLog);
@@ -552,14 +575,15 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                     ApproverSid = approver.ApproverSid,
                     RejectionReason = reason ?? "Rejected by data steward."
                 };
-                entry.CompletedAt = DateTimeOffset.UtcNow;
+                entry.CompletedAt = _timeProvider.GetUtcNow();
 
                 rejectedResult = new HitLApprovalResult(false, entry.Ticket, entry.Ticket.RejectionReason);
                 entry.Tcs.TrySetResult(rejectedResult);
             }
 
+            var issuedAt = _timeProvider.GetUtcNow();
             await BroadcastDecisionAsync(approvalId, rejectedResult.Ticket,
-                new HitLApprovalBroadcast(approvalId, approver.ApproverSid, false, rejectedResult.Ticket.RejectionReason), ct).ConfigureAwait(false);
+                new HitLApprovalBroadcast(approvalId, approver.ApproverSid, false, rejectedResult.Ticket.RejectionReason, issuedAt), ct).ConfigureAwait(false);
             var safeRejectApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
             var safeRejectApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
             var safeRejectReasonForLog = (rejectedResult.Ticket.RejectionReason ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);

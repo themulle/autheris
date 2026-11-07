@@ -43,7 +43,7 @@ public sealed class ModuleHostTests
             .Select(a => a.GetName().Name ?? string.Empty)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var result = ModuleLoader.LoadModules(services, config, env, connFactory, NullLogger.Instance);
+        var result = ModuleLoader.LoadModules(services, config, env, connFactory, NullLogger<ModuleLoader>.Instance);
         result.Modules.ShouldBeEmpty();
 
         var loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies()

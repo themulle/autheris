@@ -81,7 +81,7 @@ public sealed class RebacSeedHostedService : IHostedService
                     TargetTable = "RebacTuples",
                     Decision = "ALLOW",
                     TraceId = Guid.NewGuid().ToString("N"),
-                    DetailsJson = $"{{\"count\":{tuplesToSeed.Count}}}"
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { count = tuplesToSeed.Count })
                 }, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)

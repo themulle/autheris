@@ -210,6 +210,34 @@ public sealed partial class CodeOwnersTests(ITestOutputHelper output)
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Every_non_glob_entry_path_exists()
+    {
+        var codeOwnersContent = RepositoryScan.ReadText(".github/CODEOWNERS");
+        var entries = ParseCodeOwners(codeOwnersContent);
+        var repoRoot = RepositoryScan.RepoRoot;
+
+        var missing = new List<string>();
+        foreach (var entry in entries)
+        {
+            var pattern = entry.Pattern.Trim();
+            if (pattern.Contains('*'))
+            {
+                continue;
+            }
+
+            var cleanPath = pattern.TrimStart('/');
+            var fullPath = Path.Combine(repoRoot, cleanPath.TrimEnd('/'));
+            if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+            {
+                missing.Add(pattern);
+            }
+        }
+
+        missing.ShouldBeEmpty($"The following non-glob CODEOWNERS entries do not exist in the repository: {string.Join(", ", missing)}");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Current_security_entries_are_preserved()
     {
         string[] originalEntries = [

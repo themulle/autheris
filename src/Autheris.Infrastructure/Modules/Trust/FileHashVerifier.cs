@@ -129,7 +129,7 @@ public static class FileHashVerifier
         return new VerifiedModuleImage(manifest.Id, fullRoot, manifest, loadedFiles);
     }
 
-    private static void EnsureNoSymlinkEscape(string fullRoot, string candidatePath)
+    public static void EnsureNoSymlinkEscape(string fullRoot, string candidatePath)
     {
         FileSystemInfo info = Directory.Exists(candidatePath)
             ? new DirectoryInfo(candidatePath)

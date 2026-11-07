@@ -322,4 +322,212 @@ public sealed class ModuleLoaderSecurityTests : IDisposable
         File.WriteAllText(Path.Combine(moduleDir, "module.json"), ModulePackageBuilder.SerializeManifestJson(manifest));
         return moduleDir;
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Workspace_fallback_throws_outside_development()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:WorkspacePath"] = _tempRoot,
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(services, config, env));
+        ex.Reason.ShouldContain("outside the Development environment");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Workspace_fallback_requires_allow_unsigned()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:WorkspacePath"] = _tempRoot,
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "false",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(services, config, env));
+        ex.Reason.ShouldContain("AllowUnsignedInDevelopment");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Workspace_fallback_not_used_without_workspace_path()
+    {
+        var services = new ServiceCollection();
+        var nonExistentPath = Path.Combine(_tempRoot, "no-such-path");
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Path"] = nonExistentPath,
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(services, config, env));
+        ex.Reason.ShouldContain("does not exist");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Workspace_fallback_does_not_search_parent_directories()
+    {
+        var subDir = Path.Combine(_tempRoot, "sub");
+        Directory.CreateDirectory(subDir);
+        var dllBytes = ModulePackageBuilder.GetValidModuleDllBytes();
+        File.WriteAllBytes(Path.Combine(_tempRoot, "Autheris.Modules.Sample.dll"), dllBytes);
+
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:WorkspacePath"] = subDir,
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(services, config, env));
+        ex.ModuleId.ShouldBe("sample");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_assembly_never_loads_into_default_context()
+    {
+        var wsDir = Path.Combine(_tempRoot, "workspace");
+        Directory.CreateDirectory(wsDir);
+        var dllBytes = ModulePackageBuilder.GetValidModuleDllBytes();
+        File.WriteAllBytes(Path.Combine(wsDir, "Autheris.Modules.Sample.dll"), dllBytes);
+
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:WorkspacePath"] = wsDir,
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var result = loader.LoadAndConfigureServices(services, config, env);
+        result.Modules.Count.ShouldBe(1);
+        var module = result.Modules[0];
+        var asm = module.Instance.GetType().Assembly;
+        var alc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(asm);
+        alc.ShouldNotBe(System.Runtime.Loader.AssemblyLoadContext.Default);
+        alc.ShouldBeOfType<ModuleAssemblyLoadContext>();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-01")]
+    public void Workspace_path_outside_development_fails_startup()
+    {
+        var options = new Autheris.Domain.Options.GatewayOptions();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
+        var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateStartup(
+                options,
+                env,
+                key => key == "Gateway:Modules:WorkspacePath" ? "/workspace" : null));
+        ex.Message.ShouldContain("Gateway:Modules:WorkspacePath");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-01")]
+    public void Workspace_module_symlink_outside_root_is_rejected()
+    {
+        var wsDir = Path.Combine(_tempRoot, "ws");
+        var outsideDir = Path.Combine(_tempRoot, "outside");
+        Directory.CreateDirectory(wsDir);
+        Directory.CreateDirectory(outsideDir);
+
+        var targetDll = Path.Combine(outsideDir, "Target.dll");
+        File.WriteAllBytes(targetDll, ModulePackageBuilder.GetValidModuleDllBytes());
+
+        var linkDll = Path.Combine(wsDir, "Autheris.Modules.Sample.dll");
+        File.CreateSymbolicLink(linkDll, targetDll);
+
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:WorkspacePath"] = wsDir,
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+        var ex = Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(services, config, env));
+        ex.Reason.ShouldContain("Symlink");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-01")]
+    public void Workspace_load_logs_unsigned_warning()
+    {
+        var wsDir = Path.Combine(_tempRoot, "ws_warn");
+        Directory.CreateDirectory(wsDir);
+        var dllBytes = ModulePackageBuilder.GetValidModuleDllBytes();
+        File.WriteAllBytes(Path.Combine(wsDir, "Autheris.Modules.Sample.dll"), dllBytes);
+
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "sample",
+                ["Gateway:Modules:WorkspacePath"] = wsDir,
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+            })
+            .Build();
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var testLogger = new TestModuleLoaderLogger();
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false, logger: testLogger);
+        var result = loader.LoadAndConfigureServices(services, config, env);
+
+        testLogger.Logs.ShouldContain(l => l.LogLevel == Microsoft.Extensions.Logging.LogLevel.Warning && l.Message.Contains("sample") && l.Message.Contains("unsigned"));
+    }
+
+    private sealed class TestModuleLoaderLogger : Microsoft.Extensions.Logging.ILogger<ModuleLoader>
+    {
+        public readonly List<(Microsoft.Extensions.Logging.LogLevel LogLevel, string Message)> Logs = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Logs.Add((logLevel, formatter(state, exception)));
+        }
+    }
 }

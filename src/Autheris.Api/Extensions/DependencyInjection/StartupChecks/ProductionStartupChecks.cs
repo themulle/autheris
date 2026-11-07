@@ -34,6 +34,15 @@ internal static class ProductionStartupChecks
             return;
         }
 
+        // Workspace module loading is strictly prohibited outside Development
+        var workspacePath = context.GetEnvironmentVariable("Gateway:Modules:WorkspacePath")
+            ?? context.GetEnvironmentVariable("Gateway__Modules__WorkspacePath")
+            ?? context.GetEnvironmentVariable("GATEWAY_MODULES_WORKSPACEPATH");
+        if (!string.IsNullOrWhiteSpace(workspacePath))
+        {
+            throw new ValidationException("Security violation: Gateway:Modules:WorkspacePath is strictly prohibited outside the Development environment.");
+        }
+
         if (options.GovernanceDb.SeedDemoData == true)
         {
             throw new ValidationException("Sicherheitsverletzung: GovernanceDb.SeedDemoData darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");

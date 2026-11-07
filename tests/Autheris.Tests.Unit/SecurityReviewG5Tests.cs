@@ -20,6 +20,7 @@ using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Audit;
 using Autheris.Application.Mcp.Services;
+using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
@@ -352,9 +353,17 @@ public sealed class SecurityReviewG5Tests : IDisposable
             .Returns(new ValueTask<TableAccessDecision>(abacAllowed
                 ? TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>())
                 : TableAccessDecision.Denied(OrdersId, "abac")));
+        var options = Options.Create(new GatewayOptions());
+        var adp = new AccessDecisionPoint(
+            options,
+            policy,
+            consentService: new Autheris.Application.Services.ConsentResolutionService(),
+            consentRepo: consentRepo,
+            metadataRepo: metaRepo);
         var svc = new IcebergRestCatalogFederationService(
-            Substitute.For<IIcebergMetadataReader>(), metaRepo, Options.Create(new GatewayOptions()),
-            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, new Autheris.Application.Services.ConsentResolutionService(), consentRepo, policy);
+            Substitute.For<IIcebergMetadataReader>(), metaRepo, options,
+            NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            adp, consentRepo: consentRepo);
         return (svc, policy);
     }
 
