@@ -3,6 +3,18 @@ namespace Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Olap;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Connectors;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.Common.Interfaces;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Autheris.Application.Sql;
+using TrinoSqlEngine.Ast.Emit;
 using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
@@ -172,6 +184,84 @@ public sealed class FederatedSubtreeColumnDecisionTests
     {
         var a = Meta("pg", "orders", null, "id");
         var b = Meta("pg", "items", new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["secret"] = new MaskingRule { RuleType = "REDACT" } }, "id", "secret");
-        Should.Throw<Exception>(() => Plan(Build(sql, (a, Open(a)), (b, Constrained(b, ColumnAccessLevel.Mask)))));
+        var ex = Should.Throw<WebSqlPolicyException>(() => Plan(Build(sql, (a, Open(a)), (b, Constrained(b, ColumnAccessLevel.Mask)))));
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.FilterOnMaskedColumn);
     }
+
+    private static TableMetadata Wide(string domain, string name, params (string Column, string Rule)[] rules) =>
+        Meta(domain, name, rules.ToDictionary(r => r.Column, r => new MaskingRule { RuleType = r.Rule }, StringComparer.OrdinalIgnoreCase), "id", "secret", "ssn");
+
+    private static TableAccessDecision Levels(TableMetadata m, ColumnAccessLevel secret, ColumnAccessLevel ssn) =>
+        TableAccessDecision.Allowed(m.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["secret"] = secret, ["ssn"] = ssn }, hasUnconstrainedColumnAllow: false);
+
+    /// <summary>Plans the query and stages every single-table request through the real staging service; the fake connector returns raw, all-column rows.</summary>
+    private static async Task<Dictionary<TableIdentifier, OlapTableSource>> StageAsync(Scenario s)
+    {
+        var plan = Plan(s);
+        var connector = Substitute.For<IAutherisConnector>();
+        var splits = Substitute.For<IConnectorSplitManager>();
+        var source = Substitute.For<IConnectorRecordSource>();
+        connector.SplitManager.Returns(splits);
+        connector.RecordSource.Returns(source);
+        splits.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>()).Returns([ConnectorSplit.Default("s")]);
+        source.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(_ => [new Dictionary<string, object?> { ["id"] = 1, ["secret"] = "raw-secret", ["ssn"] = "raw-ssn" }]);
+        var registry = Substitute.For<IAutherisConnectorRegistry>();
+        registry.TryGetConnectorForTable(Arg.Any<TableIdentifier>(), out Arg.Any<IAutherisConnector>()!).Returns(x => { x[1] = connector; return true; });
+        var audit = Substitute.For<IAuditLogRepository>();
+        audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var masking = Substitute.For<IColumnMaskingProvider>();
+        masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns(x => "M:" + x.ArgAt<MaskingRule>(2).RuleType);
+
+        var staging = new FederatedStagingService(registry, masking, audit, Options.Create(new GatewayOptions()), NullLogger<FederatedStagingService>.Instance);
+        var staged = await staging.StageAsync(plan.StagingRequests.Where(r => r.Subtree == null).ToList(), PlannerTestIdentity.User, PlannerTestIdentity.Tenant,
+            new FederationBudget(5, 1000, 5000, 32 * 1024 * 1024, 128 * 1024 * 1024, 30, 4));
+        return staged.ToDictionary(t => t.Table);
+    }
+
+    private static IReadOnlyDictionary<string, object?> OnlyRow(OlapTableSource t) => t.GovernedRows.Single();
+
+    internal static async Task AssertDenyColumnNeverStagedAsync(bool wildcard)
+    {
+        var root = Wide("pg", "orders");
+        var member = Wide("pg", "items");
+        var sql = wildcard
+            ? "SELECT * FROM pg.public.orders o JOIN pg.public.items i ON o.id = i.id"
+            : "SELECT o.id, i.id AS iid FROM pg.public.orders o JOIN pg.public.items i ON o.id = i.id";
+        var staged = await StageAsync(Build(sql, (root, Open(root)), (member, Levels(member, ColumnAccessLevel.Deny, ColumnAccessLevel.Clear))));
+
+        var row = OnlyRow(staged[member.Identifier]);
+        row.ContainsKey("secret").ShouldBeFalse();
+        row.Values.ShouldNotContain("raw-secret");
+        row.ContainsKey("id").ShouldBeTrue();
+    }
+
+    internal static async Task AssertMemberMaskAppliedPerMemberAsync(bool nameClash)
+    {
+        var root = Wide("pg", "orders", ("ssn", "REDACT"));
+        var member = nameClash ? Wide("pg", "items", ("ssn", "NULLIFY")) : Wide("pg", "items", ("secret", "NULLIFY"));
+        var rootDecision = nameClash ? TableAccessDecision.Allowed(root.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["secret"] = ColumnAccessLevel.Clear, ["ssn"] = ColumnAccessLevel.Clear }, hasUnconstrainedColumnAllow: true) : Levels(root, ColumnAccessLevel.Clear, ColumnAccessLevel.Mask);
+        var memberDecision = nameClash ? Levels(member, ColumnAccessLevel.Clear, ColumnAccessLevel.Mask) : Levels(member, ColumnAccessLevel.Mask, ColumnAccessLevel.Clear);
+        var staged = await StageAsync(Build("SELECT * FROM pg.public.orders o JOIN pg.public.items i ON o.id = i.id", (root, rootDecision), (member, memberDecision)));
+
+        var memberRow = OnlyRow(staged[member.Identifier]);
+        memberRow[nameClash ? "ssn" : "secret"].ShouldBe("M:NULLIFY");
+        if (!nameClash)
+        {
+            OnlyRow(staged[root.Identifier])["ssn"].ShouldBe("M:REDACT");
+        }
+    }
+
+    [Fact]
+    public async Task FederatedSubtree_NonRootMemberDenyColumn_IsNeverStaged_WildcardAndExplicit()
+    {
+        await AssertDenyColumnNeverStagedAsync(wildcard: true);
+        await AssertDenyColumnNeverStagedAsync(wildcard: false);
+    }
+
+    [Fact]
+    public Task FederatedSubtree_NameClashRootClearMemberMasked_StaysMasked() => AssertMemberMaskAppliedPerMemberAsync(nameClash: true);
+
+    [Fact]
+    public Task FederatedSubtree_MemberMask_IsAppliedWithTheMembersOwnRule() => AssertMemberMaskAppliedPerMemberAsync(nameClash: false);
 }
