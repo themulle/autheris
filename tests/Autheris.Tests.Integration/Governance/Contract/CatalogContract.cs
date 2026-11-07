@@ -295,8 +295,8 @@ public abstract class CatalogContract : GovernanceContractBase
         var getAct = () => Store.TableMetadata.GetTableMetadataAsync(table.Identifier);
         await getAct.Should().ThrowAsync<TableMetadataUnavailableException>();
 
-        var allAct = () => Store.TableMetadata.GetAllTablesAsync();
-        await allAct.Should().ThrowAsync<TableMetadataUnavailableException>();
+        var allTables = await Store.TableMetadata.GetAllTablesAsync();
+        allTables.Select(t => t.Identifier).Should().NotContain(table.Identifier);
 
         var activeId = await Store.TableMetadata.GetActiveTableIdentifierAsync(table.Identifier);
         activeId.Should().Be(table.Identifier);
