@@ -178,9 +178,11 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
         await PlantTenantAsync(consent.Id, "bad tenant!");
+        await ExecAsync(@"CREATE FUNCTION fail_refusal_audit_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+                          BEGIN RAISE EXCEPTION 'audit down'; END; $$;");
         await ExecAsync(@"CREATE TRIGGER fail_refusal_audit BEFORE INSERT ON AUDIT_LOG_ENTRIES
-                          WHEN NEW.event_type = 'CONSENT_TENANT_INTEGRITY_REFUSED'
-                          BEGIN SELECT RAISE(ABORT, 'audit down'); END;");
+                          FOR EACH ROW WHEN (NEW.event_type = 'CONSENT_TENANT_INTEGRITY_REFUSED')
+                          EXECUTE FUNCTION fail_refusal_audit_fn();");
 
         var ex = await Should.ThrowAsync<Exception>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "r"));
 
