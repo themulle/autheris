@@ -274,7 +274,7 @@ No WP-38..48 PR merges before its tests of 11.1 or 11.2 exist and are green; WP-
 | 45 | `DmlSecurityTests.*` final owner; `WriteGrantTests.*`; `WriteTransportTests.*` |
 | 46 | SEC-AZ tests of 11.1; `RebacEnforcementTests.All_paths_enforced_when_tuples_exist_and_exemption_fails_startup` is deleted and replaced by `CrossTransportAuthorizationParityTests`; `AuthorizationHook_can_only_narrow`; `Untrusted_plugin_hash_is_not_loaded` |
 | 48 | SEC-AZ-15..19 tests of 11.1 (WP-SIMPL-48 part); parity rows S20..S27 |
-| 49 | SEC-PROD-01..14 tests of 11.7; parity rows P1..P14 |
+| 49 | SEC-PROD-01..14 tests of 11.7; parity rows P1..P13 |
 
 ### 11.7 Data products (OD-44, WP-SIMPL-49) - binding SEC-PROD-01..14
 
@@ -286,11 +286,11 @@ No WP-38..48 PR merges before its tests of 11.1 or 11.2 exist and are green; WP-
 - **SEC-PROD-06** A product is decided by the decision point with the caller's grants, denies and hard row policies on the product only; base-table grants, denies and hard policies never widen or narrow it; no product grant means default deny.
 - **SEC-PROD-07** Grants on products follow the consent rules incl. the self-approval ban.
 - **SEC-PROD-08** PII-derived columns and columns with unresolved lineage are Masked by default; declassification only by the creator with a reason, audited; Clear needs a Clear-eligible class and a Clear rule on the grant.
-- **SEC-PROD-09** A refresh executes only the current definition hash, under limits (rows, bytes, runtime), with a cluster-wide lease; no DDL is ever sent to a source; columns never come from source metadata (OD-25).
-- **SEC-PROD-10** One snapshot is retained; a failed refresh keeps it and marks it stale; `MaxStaleness` denies when exceeded; products are part of the GDPR disclosure report.
-- **SEC-PROD-11** Read procedures never commit (never-committed SQL Server transaction, read-only PostgreSQL transaction) and run on the EXECUTE-only read connection.
-- **SEC-PROD-12** Write procedures need a separate write-execute grant (an execute grant never suffices), run only through the write connection, only on wired transports (procedure REST route, MCP without read-only token) and are audited with intent and outcome.
+- **SEC-PROD-09** A load (`schedule`, `onDemand`, `live`) executes only the current definition hash, under limits (rows, bytes, runtime), with a cluster-wide lease and single-flight; no DDL is ever sent to a source; columns never come from source metadata (OD-25).
+- **SEC-PROD-10** One result is retained per product and shared by callers (policies apply at read); a failed load keeps it and marks it stale; idle `onDemand` results are dropped; `MaxStaleness` denies when exceeded; products are part of the GDPR disclosure report.
+- **SEC-PROD-11** A procedure declared `read` needs an `Execute` grant, one declared `write` an `ExecuteWrite` grant; Autheris adds no transaction or read-only enforcement (OD-44); only creators with authority (SEC-PROD-01) can declare.
+- **SEC-PROD-12** Write procedures need a separate write-execute grant (an execute grant never suffices), run only on wired transports (procedure REST route, MCP without read-only token) and are audited with intent and outcome.
 - **SEC-PROD-13** Git-managed definitions are read-only through the API; the sync requires the sync role and a signed webhook; drift is reported, never overwritten silently.
 - **SEC-PROD-14** Every product access and refresh is audited with product id and definition hash; discovery never reveals base objects hidden from the caller; `products` is a reserved data-source name.
 
-Mandatory tests: the `[Trait("Category","Security")]` classes of WP-SIMPL-49 section 6.1, `ProductArchitectureTests.*` and parity rows P1..P14.
+Mandatory tests: the `[Trait("Category","Security")]` classes of WP-SIMPL-49 section 6.1, `ProductArchitectureTests.*` and parity rows P1..P13.

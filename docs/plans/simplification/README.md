@@ -98,7 +98,7 @@ New work package [WP-SIMPL-48](WP-SIMPL-48-row-policies-dynamic-coverage.md); am
 
 ## Owner decision OD-44 (2026-11-06, revised)
 
-- **OD-44 (revised 2026-11-06):** data products: views (materialized via the DuckDB table cache, live later) and stored procedures (read and write) defined in Autheris, each with its own product owner who decides all grants; base owners are decoupled (notified, no approval). Created by data owners or delegates over own objects, data-source owners over their source, the new role `DataProductAdmin` (implied by no other role, never product owner of its own creations) or Git sync (`DataProductSync`). Product grants suffice; base-table rules do not apply. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-data-products.md).
+- **OD-44 (revised 2026-11-06):** data products: views (two-stage DuckDB execution; load modes schedule, onDemand(ttl), live) and stored procedures (declared read or write) defined in Autheris, each with its own product owner who decides all grants; base owners are decoupled (notified, no approval). Created by data owners or delegates over own objects, data-source owners over their source, the new role `DataProductAdmin` (implied by no other role, never product owner of its own creations) or Git sync (`DataProductSync`). Product grants suffice; base-table rules do not apply. Planned now, built after the feature freeze: [WP-SIMPL-49](WP-SIMPL-49-data-products.md).
 
 ## Security advisories
 
