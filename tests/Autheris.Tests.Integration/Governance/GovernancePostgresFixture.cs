@@ -87,9 +87,13 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
             CloneGate.Release();
         }
 
+        // Many hosts run in one test process, each with its own pool per cloned database: keep the pools small and short-lived so that
+        // the idle connections of finished test classes do not exhaust the server's max_connections.
         return new NpgsqlConnectionStringBuilder(_adminConnectionString)
         {
-            Database = dbName
+            Database = dbName,
+            MaxPoolSize = 10,
+            ConnectionIdleLifetime = 5
         }.ConnectionString;
     }
 

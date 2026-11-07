@@ -207,6 +207,8 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
             {
                 b.UseEnvironment("Production");
                 b.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
+                // The Testcontainers PostgreSQL server has no TLS: the explicit insecure-transport opt-in satisfies the governance TLS check.
+                b.UseSetting("Gateway:Insecure:danger_allow_insecure_transport", "true");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(tempDb));
                 b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");

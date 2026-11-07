@@ -23,6 +23,8 @@ internal static class SharedDatabaseServers
     private static readonly Lazy<Task<PostgreSqlContainer>> PostgreSql =
         new(() => StartAsync(new PostgreSqlBuilder("postgres:16-alpine")
             .WithReuse(Reuse)
+            // Every web-host test class gets its own cloned governance database (WP-SIMPL-11), each with its own Npgsql pool.
+            .WithCommand("-c", "max_connections=500")
             .WithLabel("autheris.tests", "shared-postgresql")
             .Build()));
 
