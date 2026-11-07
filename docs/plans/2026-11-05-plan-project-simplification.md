@@ -426,8 +426,9 @@ Developer-ready specs in `simplification/`; dependencies and order in the README
 - [WP-SIMPL-48](simplification/WP-SIMPL-48-row-policies-dynamic-coverage.md) Row policies, dynamic object coverage and per-cell column state (OD-38..OD-43): named row policies with parameters at two levels (grant scope ORed, hard policies ANDed), pattern grants evaluated at decision time, per-cell masking for overlapping grants, effective-access report and approval preview.
 - [WP-SIMPL-49](simplification/WP-SIMPL-49-data-products.md) Data products (OD-44): views (two-stage DuckDB execution with load modes schedule, onDemand and live), stored procedures (declared read or write), defined in Autheris with their own product owner; base owners decoupled; new role `DataProductAdmin`; Git sync; built after the feature freeze (not under `freeze-exception`, not in the program total).
 - [WP-SIMPL-50](simplification/WP-SIMPL-50-review-remediation-v1-7-1.md) Remediation of the v1.7.1..HEAD code and security reviews: release blockers (unsigned workspace module fallback, missing-ABAC-service and unknown-IP fail-open, CODEOWNERS remap, module audit serialization, HitL broadcast binding), module host hardening (trust, route prefix, service allowlist, no raw governance connection, signed release path), ABAC row-filter propagation, ITSM and break-glass leftovers removed, aggregation residual risk after the DP removal (OD-11), lost test coverage checked, low cleanups (about 9.5 pd).
+- [WP-SIMPL-51](simplification/WP-SIMPL-51-websql-client-contract.md) WebSQL client contract from issues #527, #528, #529, #533: cost estimate and per-caller quota shared with GraphQL, typed columns with mask flags, syntax error positions and trailing semicolon, paging via bound continuation tokens without rewriting the statement (about 8 pd, Phase 3 review pending).
 
-Total effort: about 238.5-245.5 pd (WP-SIMPL-50 review remediation about 9.5 pd included) as the sum of the table above: WP-SIMPL-01..37 about 120-124 pd (security lane WP-SIMPL-36 8-12 and WP-SIMPL-37 4 included; WP-SIMPL-30 cancelled; WP-14, WP-16, WP-18 and WP-21 aligned with their specs and owner decisions) plus the owner-decision work packages WP-SIMPL-38..48 about 109-112 pd (WP-48 12 pd, WP-47 raised to 16 pd by OD-43) (estimates from section 11 of each spec). Contingency is not included; the earlier figure of 135-157 pd covered WP-01..37 only.
+Total effort: about 246.5-253.5 pd (WP-SIMPL-50 review remediation about 9.5 pd and WP-SIMPL-51 WebSQL client contract about 8 pd included) as the sum of the table above: WP-SIMPL-01..37 about 120-124 pd (security lane WP-SIMPL-36 8-12 and WP-SIMPL-37 4 included; WP-SIMPL-30 cancelled; WP-14, WP-16, WP-18 and WP-21 aligned with their specs and owner decisions) plus the owner-decision work packages WP-SIMPL-38..48 about 109-112 pd (WP-48 12 pd, WP-47 raised to 16 pd by OD-43) (estimates from section 11 of each spec). Contingency is not included; the earlier figure of 135-157 pd covered WP-01..37 only.
 
 ## 5. Architecture view: KEEP / MODULE / DELETE
 
@@ -519,7 +520,7 @@ DDL rule: only L-PER changes governance DDL (WP-11 removes the SQLite tree, WP-2
 
 ## Open issues and advisories assessment
 
-Assessment date 2026-11-05 (PM consolidation of seven triage slices). Scope: all 51 open GitHub issues and the draft security advisories. **Disclosure rule (SEC-SIMPL-01):** advisories are private drafts in a public repository; this plan names them only by GHSA id and the affected component. Details stay in the advisory.
+Assessment date 2026-11-05 (PM consolidation of seven triage slices; #527, #528, #529 and #533 added 2026-11-07 as WP-SIMPL-51). Scope: all 51 open GitHub issues and the draft security advisories. **Disclosure rule (SEC-SIMPL-01):** advisories are private drafts in a public repository; this plan names them only by GHSA id and the affected component. Details stay in the advisory.
 
 Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), **QUICK-WIN** (small, independent), **OBSOLETE-BY-REMOVAL** (closed by the deleting WP; no fix work), **PARTLY-OBSOLETE** (the part in deleted code is closed by the deleting WP; the rest is fixed), **DUPLICATE**, **NEEDS-DECISION** (depends on an owner decision below). Priorities P0 (now) to P3 (backlog). "Security lane" means WP-SIMPL-36 (section 4), which runs parallel to Stage 0 under the freeze exception; its first item is merging `fix/security-batch-5`.
 
@@ -590,6 +591,10 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #521 | Pre-pull Testcontainers images | QUICK-WIN | P2 | Bundled with #519; Oracle image pre-pull stays (OD-12) |
 | #522 | Oracle/Stress/Spark suites to nightly | QUICK-WIN | P1 | Oracle and Spark/Databricks suites stay (OD-12): full suites nightly, security-tagged smoke subset on PRs; after #519; aligned with WP-SIMPL-21 parity split |
 | #523 | CI under 30 min (umbrella) | FIX-IN-CORE | P1 | Umbrella for #516-#522; target definition decided (OD-6) |
+| #527 | WebSQL cost estimate and per-caller quota | FIX-IN-CORE | P1 | WP-SIMPL-51 I1; quota shared with GraphQL (missing gateway policy on a core transport, OD-3) |
+| #528 | WebSQL column types and mask flags | FIX-IN-CORE | P2 | WP-SIMPL-51 I2; breaking response shape allowed |
+| #529 | WebSQL syntax error position, trailing semicolon | QUICK-WIN | P2 | WP-SIMPL-51 I3; position only, no statement echo |
+| #533 | WebSQL and GraphQL paging without rewriting | FIX-IN-CORE | P2 | WP-SIMPL-51 I4; bound continuation token, ORDER BY required (D-51b) |
 
 ### Security advisories
 
