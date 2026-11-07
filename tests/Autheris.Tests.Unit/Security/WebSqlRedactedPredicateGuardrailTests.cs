@@ -157,7 +157,7 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
             service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
 
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
-        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]
@@ -223,7 +223,7 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
             service.RewriteSqlAsync("SELECT id FROM dbo.people ORDER BY email", CreateUser(), new TenantId(Tenant)));
 
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
-        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Trait("Category", "Security")]

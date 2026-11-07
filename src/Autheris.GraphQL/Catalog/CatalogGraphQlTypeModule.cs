@@ -442,7 +442,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     foreach (var rootFieldName in rootFieldNames)
                     {
                         d.Field(rootFieldName).Extend().OnBeforeCreate(
-                            definition => definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource)));
+                            definition =>
+                            {
+                                definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource));
+                                definition.Features.Set(new CatalogRootFieldFeature(table, schemaModel));
+                            });
                     }
                 }
             }));

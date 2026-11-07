@@ -124,7 +124,7 @@ public sealed class Sql6JoinGuardrailTests
             service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
 
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
-        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]

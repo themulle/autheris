@@ -148,6 +148,11 @@ public static class SqlCompilerErrorMapper
         // #321: the AST-level degree check of a set operation (fixed message, no column text); a caller mistake like a syntax error.
         e => e is SetOperationDegreeMismatchException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MaskedAggregationException ? Of(403, GovernedSqlErrorCodes.AggregationOnMaskedColumn) : null,
+        e => e is MaskedColumnPredicateException or FilterOnMaskedColumnException or WebSqlPolicyException { Code: GovernedSqlErrorCodes.FilterOnMaskedColumn }
+            ? Of(403, GovernedSqlErrorCodes.FilterOnMaskedColumn)
+            : null,
+        e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.EndpointDisabled } ? Of(403, GovernedSqlErrorCodes.EndpointDisabled) : null,
+        e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.StatementNotPermitted } ? Of(403, GovernedSqlErrorCodes.StatementNotPermitted) : null,
         e => e is RequiredFilterColumnMissingException ? Of(400, GovernedSqlErrorCodes.RequiredFilterColumnMissing) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.InvalidIdentifierQualification } ? Of(400, GovernedSqlErrorCodes.InvalidIdentifierQualification) : null,
         e => e is SecurityException ? Of(403, GovernedSqlErrorCodes.PolicyViolation) : null,
@@ -173,6 +178,9 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.RequiredFilterColumnMissing => Of(400, code),
         GovernedSqlErrorCodes.InvalidIdentifierQualification => Of(400, code),
         GovernedSqlErrorCodes.CheckOptionViolation => Of(403, code),
+        GovernedSqlErrorCodes.FilterOnMaskedColumn => Of(403, code),
+        GovernedSqlErrorCodes.EndpointDisabled => Of(403, code),
+        GovernedSqlErrorCodes.StatementNotPermitted => Of(403, code),
         GovernedSqlErrorCodes.ConstraintViolation => Of(409, code),
         GovernedSqlErrorCodes.AffectedRowsLimit => Of(422, code),
         GovernedSqlErrorCodes.DataError => Of(422, code),

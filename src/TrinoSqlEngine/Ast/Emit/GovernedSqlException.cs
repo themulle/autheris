@@ -23,6 +23,12 @@ public static class GovernedSqlErrorCodes
     /// <summary>A masked column was used as an aggregate argument or grouping expression.</summary>
     public const string AggregationOnMaskedColumn = "AGGREGATION_ON_MASKED_COLUMN";
 
+    /// <summary>A masked column was used in a filter, join or ordering expression.</summary>
+    public const string FilterOnMaskedColumn = "FILTER_ON_MASKED_COLUMN";
+
+    /// <summary>The SQL endpoint is disabled by gateway configuration.</summary>
+    public const string EndpointDisabled = "SQL_ENDPOINT_DISABLED";
+
     /// <summary>The statement uses an identifier with the reserved gateway prefix (a user error, 400; not a gateway defect).</summary>
     public const string ReservedIdentifier = "SQL_RESERVED_IDENTIFIER";
 
@@ -76,6 +82,8 @@ public static class GovernedSqlErrorCodes
         LimitExceeded => "The statement exceeds a resource limit.",
         UnfilteredDml => "UPDATE and DELETE statements require a restricting WHERE clause.",
         AggregationOnMaskedColumn => "Masked columns cannot be aggregated or grouped.",
+        FilterOnMaskedColumn => "Masked columns cannot be used in filters, joins, or ordering.",
+        EndpointDisabled => "The SQL endpoint is disabled by configuration.",
         ReservedIdentifier => "The statement uses an identifier that is reserved by the gateway.",
         PolicyDenied => "Access to a referenced table or column is denied.",
         PolicyViolation => "The SQL statement was rejected by the gateway security policy.",

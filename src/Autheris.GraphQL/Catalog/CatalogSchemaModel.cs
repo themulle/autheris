@@ -48,6 +48,9 @@ public sealed record CatalogTableType(
     IReadOnlyList<CatalogColumnField> Columns,
     IReadOnlyList<CatalogRelationField> Relations);
 
+/// <summary>Feature attached to every catalog root field on <c>Query</c> so request middleware can inspect table and column references.</summary>
+public sealed record CatalogRootFieldFeature(CatalogTableType Table, CatalogSchemaModel SchemaModel);
+
 /// <summary>BUG #157: why an active SQL catalog table is not part of the generated GraphQL schema.</summary>
 public enum CatalogTableOmissionReason
 {

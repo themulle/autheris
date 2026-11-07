@@ -159,7 +159,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         // WebSql:Enabled switches the client SQL endpoints; a gateway-planned table read is governed below like any other statement.
         if (!webSqlOptions.Enabled && !plannedTableRead)
         {
-            throw new WebSqlPolicyException("WebSQL execution is disabled by gateway configuration.");
+            throw new WebSqlPolicyException("WebSQL execution is disabled by gateway configuration.", GovernedSqlErrorCodes.EndpointDisabled);
         }
 
         if (rawSql.Length > webSqlOptions.MaxQueryLength)
@@ -231,7 +231,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         if (metadata.StatementType == SqlStatementType.Ddl)
         {
-            throw new WebSqlPolicyException("DDL statements (CREATE, DROP, ALTER, TRUNCATE, GRANT, REVOKE) are strictly forbidden in WebSQL.");
+            throw new WebSqlPolicyException(
+                "DDL statements (CREATE, DROP, ALTER, TRUNCATE, GRANT, REVOKE) are strictly forbidden in WebSQL.",
+                GovernedSqlErrorCodes.StatementNotPermitted);
         }
 
         bool isDml = metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete;
@@ -247,7 +249,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         if (metadata.StatementType != SqlStatementType.Select && (!isDml || !_options.Value.IsWebSqlDmlAllowed))
         {
             throw new WebSqlPolicyException(
-                $"WebSQL only permits read-only SELECT statements by default. Received '{metadata.StatementType}' operation. DML must be explicitly enabled via configuration.");
+                $"WebSQL only permits read-only SELECT statements by default. Received '{metadata.StatementType}' operation. DML must be explicitly enabled via configuration.",
+                GovernedSqlErrorCodes.StatementNotPermitted);
         }
 
         if (isDml)
@@ -605,8 +608,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                             ? mRule.RuleType ?? "REDACT"
                             : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                        var joinMessage = $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).";
+                        throw lvl == ColumnAccessLevel.Deny
+                            ? new WebSqlTableDeniedException(joinMessage)
+                            : new WebSqlPolicyException(joinMessage, GovernedSqlErrorCodes.FilterOnMaskedColumn);
                     }
 
                     // #322: same window decision as the executor guard (masked: window code; denied: filter-style denial).
@@ -630,8 +635,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                             ? mRule.RuleType ?? "REDACT"
                             : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
+                        var filterMessage = $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.";
+                        throw lvl == ColumnAccessLevel.Deny
+                            ? new WebSqlTableDeniedException(filterMessage)
+                            : new WebSqlPolicyException(filterMessage, GovernedSqlErrorCodes.FilterOnMaskedColumn);
                     }
                 }
             }

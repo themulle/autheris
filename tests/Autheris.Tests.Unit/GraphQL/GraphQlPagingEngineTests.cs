@@ -34,6 +34,8 @@ namespace Autheris.Tests.Unit.GraphQL;
 public sealed class GraphQlPagingEngineTests
 {
     private const string PageRangeBody = "{\"errors\":[{\"message\":\"The page size or offset is out of range.\",\"extensions\":{\"code\":\"INVALID_QUERY_OPTION\"}}]}";
+    private const string ComplexBody = "{\"errors\":[{\"message\":\"The query exceeds the allowed complexity.\",\"extensions\":{\"code\":\"QUERY_TOO_COMPLEX\"}}]}";
+    private const string ValidationBody = "{\"errors\":[{\"message\":\"The GraphQL request is invalid.\",\"extensions\":{\"code\":\"GRAPHQL_VALIDATION_FAILED\"}}]}";
 
     private static readonly TableIdentifier Customers = new("sales", "dbo", "customers");
     private static readonly TableIdentifier Secrets = new("sales", "dbo", "secrets");
@@ -41,12 +43,42 @@ public sealed class GraphQlPagingEngineTests
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
     private readonly ITableRelationRepository _relationRepo = Substitute.For<ITableRelationRepository>();
     private readonly IGovernedTreeQueryService _treeService = Substitute.For<IGovernedTreeQueryService>();
+    private readonly ITableAccessResolver _accessResolver = Substitute.For<ITableAccessResolver>();
+    private readonly Dictionary<string, ColumnAccessLevel> _customerColumnAccess = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<TreeQueryNode> _nodes = [];
 
     public GraphQlPagingEngineTests()
     {
         _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([Table(Customers), Table(Secrets)]);
         _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+        _accessResolver.ResolveTableAccessAsync(
+                Arg.Any<ClaimsPrincipal?>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<IReadOnlyList<string>?>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var tableId = call.ArgAt<TableIdentifier>(1);
+                var principal = call.ArgAt<ClaimsPrincipal?>(0) ?? new ClaimsPrincipal();
+                var meta = Table(tableId);
+                if (tableId == Secrets)
+                {
+                    return new ResolvedTableAccess(
+                        meta,
+                        TableAccessDecision.Denied(Secrets, ["Access denied."]),
+                        new TenantId("T1"),
+                        new Sid("S-1-5-21-ALICE"),
+                        principal);
+                }
+
+                return new ResolvedTableAccess(
+                    meta,
+                    TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(_customerColumnAccess, StringComparer.OrdinalIgnoreCase), null, hasUnconstrainedColumnAllow: true),
+                    new TenantId("T1"),
+                    new Sid("S-1-5-21-ALICE"),
+                    principal);
+            });
         _treeService.ExecuteAsync(
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
@@ -87,6 +119,7 @@ public sealed class GraphQlPagingEngineTests
         services.AddSingleton(_metadataRepo);
         services.AddSingleton(_relationRepo);
         services.AddSingleton(_treeService);
+        services.AddSingleton(_accessResolver);
         services.AddSingleton(env);
         services.AddSingleton(_ => new ErrorSanitizingFilter(env, NullLogger<ErrorSanitizingFilter>.Instance));
         var ctx = new DefaultHttpContext
@@ -285,14 +318,72 @@ public sealed class GraphQlPagingEngineTests
         }
     }
 
-    [Fact]
-    public async Task CostBudget_StillAppliesToAnInRangeHugePage()
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    public async Task CostBudget_StillAppliesToAnInRangeHugePage(string env)
     {
-        // first: 5000 is in range, but 5000 rows x multiplier is over the budget: still QUERY_TOO_COMPLEX in Development.
-        var (json, errors) = await RunAsync("Development", "{ sales_dbo_customers(first: 5000) { id } }");
+        // #558: first: 5000 is in range, and the caller may read sales_dbo_customers.id, so cost over the limit answers
+        // QUERY_TOO_COMPLEX with the fixed message and no numbers in every environment.
+        var (json, errors) = await RunAsync(env, "{ sales_dbo_customers(first: 5000) { id } }");
 
         errors.Count.ShouldBe(1, json);
         errors[0].Code.ShouldBe("QUERY_TOO_COMPLEX");
+        errors[0].Message.ShouldBe(ErrorSanitizingFilter.ComplexMessage);
+        json.ShouldBe(ComplexBody);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Development", "{ unknown_table(first: 5000) { id } }")]
+    [InlineData("Production", "{ unknown_table(first: 5000) { id } }")]
+    [InlineData("Development", "{ sales_dbo_customers(first: 5000) { id unknown_col } }")]
+    [InlineData("Production", "{ sales_dbo_customers(first: 5000) { id unknown_col } }")]
+    [InlineData("Production", "{ sales_dbo_customers(first: 5) { id unknown_col } }")]
+    [Trait("Category", "Security")]
+    public async Task CostBudget_UnknownFieldAtAnyCost_AnswersShieldedValidationError(string env, string query)
+    {
+        var (json, errors) = await RunAsync(env, query);
+
+        errors.Count.ShouldBe(1, json);
+        errors[0].Code.ShouldBe("GRAPHQL_VALIDATION_FAILED");
+        json.ShouldBe(ValidationBody);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Development", "{ sales_dbo_secrets(first: 5000) { id } }")]
+    [InlineData("Production", "{ sales_dbo_secrets(first: 5000) { id } }")]
+    [InlineData("Development", "{ a: sales_dbo_customers(first: 5000) { id } b: sales_dbo_secrets(first: 5) { id } }")]
+    [InlineData("Production", "{ a: sales_dbo_customers(first: 5000) { id } b: sales_dbo_secrets(first: 5) { id } }")]
+    [Trait("Category", "Security")]
+    public async Task CostBudget_OverLimitDocumentNamingDeniedTable_DoesNotAnswerCostCode(string env, string query)
+    {
+        var (json, errors) = await RunAsync(env, query);
+
+        errors.Count.ShouldBe(1, json);
+        errors[0].Code.ShouldBe("GRAPHQL_VALIDATION_FAILED");
+        json.ShouldBe(ValidationBody);
+        json.ShouldNotContain("QUERY_TOO_COMPLEX");
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Development", "{ sales_dbo_customers(first: 5000) { id name } }")]
+    [InlineData("Production", "{ sales_dbo_customers(first: 5000) { id name } }")]
+    [InlineData("Production", "{ sales_dbo_customers(first: 5000, where: { name: { eq: \"Alice\" } }) { id } }")]
+    [InlineData("Production", "{ sales_dbo_customers(first: 5000, orderBy: [{ name: ASC }]) { id } }")]
+    [Trait("Category", "Security")]
+    public async Task CostBudget_OverLimitDocumentNamingDeniedColumn_DoesNotAnswerCostCode(string env, string query)
+    {
+        _customerColumnAccess["name"] = ColumnAccessLevel.Deny;
+
+        var (json, errors) = await RunAsync(env, query);
+
+        errors.Count.ShouldBe(1, json);
+        errors[0].Code.ShouldBe("GRAPHQL_VALIDATION_FAILED");
+        json.ShouldBe(ValidationBody);
+        json.ShouldNotContain("QUERY_TOO_COMPLEX");
         _nodes.ShouldBeEmpty();
     }
 
