@@ -362,9 +362,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
     }
 
-    // a denied (hidden) column answers like a column that does not exist (SQL_POLICY_DENIED); a masked column keeps the statement-level code.
+    // a denied (hidden) column answers like a column that does not exist (SQL_POLICY_DENIED); a masked column uses the masked-predicate code.
     private static WebSqlPolicyException ColumnPolicyViolation(ColumnAccessLevel level, string message) =>
-        level == ColumnAccessLevel.Deny ? new WebSqlTableDeniedException(message) : new WebSqlPolicyException(message);
+        level == ColumnAccessLevel.Deny
+            ? new WebSqlTableDeniedException(message)
+            : new WebSqlPolicyException(message, TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FilterOnMaskedColumn);
 
     internal static bool MatchesPostgreSqlCatalogName(TableAccessTarget target, TableIdentifier catalogTable)
     {

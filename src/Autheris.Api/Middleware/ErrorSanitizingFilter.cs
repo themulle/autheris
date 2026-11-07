@@ -131,6 +131,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGGREGATION_ROW_CAP_EXCEEDED"] = "The aggregation covers more rows than the allowed limit; narrow the filter.",
         ["AGGREGATION_DISABLED"] = "Governed aggregation queries are disabled by configuration.",
         ["AGGREGATION_ON_MASKED_COLUMN"] = "A requested column is masked for the current caller and cannot be used in an aggregation.",
+        ["FILTER_ON_MASKED_COLUMN"] = "Masked columns cannot be used in filters, joins, or ordering.",
         ["AGG_NEGATED_FILTER_REJECTED"] = "The aggregation filter is rejected by the privacy policy.",
         ["AGGREGATION_PRIVACY_RESTRICTED"] = "The requested aggregate is not available under the privacy policy.",
         ["AGGREGATION_TIME_BUCKET_UNSUPPORTED"] = "Time bucketing is not supported for this column.",

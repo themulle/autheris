@@ -287,7 +287,9 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 {
                     if (metadata.JoinColumnReferences.Any(jc => string.Equals(jc.ColumnName, maskedCol, StringComparison.OrdinalIgnoreCase)))
                     {
-                        throw new WebSqlPolicyException($"Security Policy Violation: Column '{maskedCol}' in subtree '{stPlan.SubtreeId}' is protected by masking and cannot be used in a relational JOIN predicate across data sources (SEC-FED-19).");
+                        throw new WebSqlPolicyException(
+                            $"Security Policy Violation: Column '{maskedCol}' in subtree '{stPlan.SubtreeId}' is protected by masking and cannot be used in a relational JOIN predicate across data sources (SEC-FED-19).",
+                            GovernedSqlErrorCodes.FilterOnMaskedColumn);
                     }
                 }
             }

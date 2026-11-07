@@ -259,7 +259,6 @@ public abstract class AuditContract : GovernanceContractBase
             null);
         var checkpoint = unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey!, unsigned) };
 
-        Store.AuditAnchorStore.SavePurgeCheckpoint(checkpoint);
         await Store.AuditLogs.SavePurgeCheckpointAsync(checkpoint);
 
         var deletedCount = await Store.AuditLogs.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, batchSize: 50);
@@ -318,9 +317,9 @@ public abstract class AuditContract : GovernanceContractBase
         (await Store.AuditLogs.VerifyAuditHashChainAsync()).Should().BeTrue();
         (await store2.AuditLogs.VerifyAuditHashChainAsync()).Should().BeTrue();
 
-        var entries = await Store.AuditLogs.GetAuditLogEntriesAsync(limit: 50, tenantId: Store.TenantA);
+        var page = await Store.AuditLogs.QueryAuditLogPageAsync(new AuditLogPageQuery(Store.TenantA, PageSize: 50));
         var byInsert = orderedIds
-            .Select(id => entries.Single(e => e.Id == id))
+            .Select(id => page.Items.Single(e => e.Id == id))
             .ToList();
 
         for (int i = 1; i < byInsert.Count; i++)
@@ -349,8 +348,8 @@ public abstract class AuditContract : GovernanceContractBase
 
         (await Store.AuditLogs.VerifyAuditHashChainAsync()).Should().BeTrue();
 
-        var stored = await Store.AuditLogs.GetAuditLogEntriesAsync(limit: 100, tenantId: Store.TenantA);
-        var matched = batch.Select(b => stored.Single(s => s.Id == b.Id)).ToList();
+        var storedPage = await Store.AuditLogs.QueryAuditLogPageAsync(new AuditLogPageQuery(Store.TenantA, PageSize: 100));
+        var matched = batch.Select(b => storedPage.Items.Single(s => s.Id == b.Id)).ToList();
         matched.Should().HaveCount(25);
 
         for (int i = 1; i < matched.Count; i++)

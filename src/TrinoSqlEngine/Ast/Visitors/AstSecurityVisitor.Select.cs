@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Ast.Visitors;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Security;
 using TrinoSqlEngine.Ast.Nodes;
 
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
@@ -84,15 +85,23 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // Fail-Closed Predicate Guard: Check ORDER BY for masked columns
         if (node.OrderBy != null && _options.RejectMaskedColumnsInPredicates)
         {
-            var tables = new List<(string TableName, string? Alias)>();
-            CollectTableSources(node.Body, tables);
-            foreach (var (tbl, alias) in tables)
+            try
             {
-                EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.OrderBy, "ORDER BY");
+                var tables = new List<(string TableName, string? Alias)>();
+                CollectTableSources(node.Body, tables);
+                foreach (var (tbl, alias) in tables)
+                {
+                    EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.OrderBy, "ORDER BY");
+                }
+                var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
+                CollectDerivedMaskedSources(node.Body, derived);
+                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.OrderBy, "ORDER BY");
             }
-            var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
-            CollectDerivedMaskedSources(node.Body, derived);
-            EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.OrderBy, "ORDER BY");
+            catch (SecurityException ex) when (ex.Message.StartsWith("Masked column '", StringComparison.Ordinal))
+            {
+                ex.Data["FILTER_ON_MASKED_COLUMN"] = true;
+                throw;
+            }
         }
 
         var body = (QueryBody)Visit(node.Body);
@@ -138,29 +147,37 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // Fail-Closed Predicate Guard: Check WHERE, HAVING, and JOIN conditions for masked columns
         if (_options.RejectMaskedColumnsInPredicates && node.From != null)
         {
-            var tables = _specTables;
-            var derived = _specDerived;
-
-            if (node.Where != null)
+            try
             {
-                foreach (var (tbl, alias) in tables)
-                {
-                    EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.Where, "WHERE");
-                }
-                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.Where, "WHERE");
-            }
+                var tables = _specTables;
+                var derived = _specDerived;
 
-            if (node.Having != null)
+                if (node.Where != null)
+                {
+                    foreach (var (tbl, alias) in tables)
+                    {
+                        EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.Where, "WHERE");
+                    }
+                    EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.Where, "WHERE");
+                }
+
+                if (node.Having != null)
+                {
+                    foreach (var (tbl, alias) in tables)
+                    {
+                        EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.Having, "HAVING");
+                    }
+                    EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.Having, "HAVING");
+                }
+
+                CheckJoinConditions(node.From, tables);
+                CheckDerivedJoinConditions(node.From, derived);
+            }
+            catch (SecurityException ex) when (ex.Message.StartsWith("Masked column '", StringComparison.Ordinal))
             {
-                foreach (var (tbl, alias) in tables)
-                {
-                    EnsureNoMaskedColumnReferencesInPredicate(tbl, alias, node.Having, "HAVING");
-                }
-                EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.Having, "HAVING");
+                ex.Data["FILTER_ON_MASKED_COLUMN"] = true;
+                throw;
             }
-
-            CheckJoinConditions(node.From, tables);
-            CheckDerivedJoinConditions(node.From, derived);
         }
 
         // The sources are not read after this call: base.VisitQuerySpecification re-enters this method for nested specifications.

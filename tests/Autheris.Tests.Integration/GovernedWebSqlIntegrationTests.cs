@@ -155,8 +155,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
         var body = await response.Content.ReadAsStringAsync();
-        // WP-X0a (SEC-X1-05): a fixed message and a stable code; the response no longer explains the rejected statement class
-        body.ShouldContain("SQL_POLICY_VIOLATION");
+        // WP-X0a (SEC-X1-05) / #530: a fixed message and a stable code; the response does not echo the statement text or target
+        body.ShouldContain("SQL_STATEMENT_NOT_PERMITTED");
+        body.ShouldContain("This kind of statement is not permitted.");
         body.ShouldNotContain("DDL statements");
     }
 
@@ -176,8 +177,78 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
         var body = await response.Content.ReadAsStringAsync();
-        body.ShouldContain("SQL_POLICY_VIOLATION");
+        body.ShouldContain("SQL_STATEMENT_NOT_PERMITTED");
+        body.ShouldContain("This kind of statement is not permitted.");
         body.ShouldNotContain("SELECT statements");
+    }
+
+    [Theory]
+    [InlineData("INSERT INTO customers (id) VALUES (1)")]
+    [InlineData("UPDATE customers SET name = 'x' WHERE id = 1")]
+    [InlineData("DELETE FROM customers WHERE id = 1")]
+    [InlineData("CREATE TABLE t (id INT)")]
+    [InlineData("DROP TABLE customers")]
+    [InlineData("SHOW TABLES")]
+    public async Task WebSql_NonSelectStatements_ReturnStatementNotPermitted(string sql)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
+
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldContain("SQL_STATEMENT_NOT_PERMITTED");
+        body.ShouldContain("This kind of statement is not permitted.");
+    }
+
+    [Fact]
+    public async Task WebSql_WhenDisabledByConfiguration_ReturnsEndpointDisabled()
+    {
+        await using var disabledFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:WebSql:Enabled", "false");
+        });
+        var client = disabledFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
+
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT id FROM orders" });
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldContain("SQL_ENDPOINT_DISABLED");
+        body.ShouldContain("The SQL endpoint is disabled by configuration.");
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM masked_orders WHERE ssn = '123'")]
+    [InlineData("SELECT id, COUNT(*) FROM masked_orders GROUP BY id HAVING ssn = '123'")]
+    [InlineData("SELECT id FROM masked_orders ORDER BY ssn")]
+    [InlineData("SELECT a.id FROM masked_orders a JOIN masked_orders b ON a.ssn = b.ssn")]
+    public async Task WebSql_MaskedColumnInNonProjectionPosition_ReturnsFilterOnMaskedColumnWithoutColumnName(string sql)
+    {
+        await RegisterTableAsync(
+            "masked_orders",
+            new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX" } },
+            [
+                new TableColumn { ColumnName = "id", DataType = "varchar" },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
+                new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+            ]);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_123");
+
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldContain("FILTER_ON_MASKED_COLUMN");
+        body.ShouldContain("Masked columns cannot be used in filters, joins, or ordering.");
+        body.ShouldNotContain("ssn");
     }
 
     [Fact]
@@ -528,7 +599,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             sqlService.ValidateAsync("SELECT u.id, o.id FROM secure_users u JOIN orders o ON u.email = o.email", User("usr_test", "tenant_test"), new TenantId("tenant_test")));
 
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
-        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]

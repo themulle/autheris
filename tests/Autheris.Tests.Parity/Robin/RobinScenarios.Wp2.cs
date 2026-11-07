@@ -749,8 +749,7 @@ public sealed partial class RobinScenarios
     [InlineData("drop", "DROP TABLE parity_sales")]
     public Task Robin_Proactive_WriteStatementRejected(string variant, string sql) => Run("WebSql", "write_statement_rejected", async () =>
     {
-        // Lead decision 2026-10-23: a write is pinned to 403 SQL_POLICY_VIOLATION (security cell, never split, never a gap).
-        var rejected = (await Sql(sql)).Rejected("SQL_POLICY_VIOLATION");
+        var rejected = (await Sql(sql)).Rejected("SQL_STATEMENT_NOT_PERMITTED");
         rejected.Status.ShouldBe(403);
         (await Sql("SELECT COUNT(*) AS n FROM parity_sales")).RowsShouldBe(["n"], [[18]]);
     }, variant);
@@ -830,7 +829,7 @@ public sealed partial class RobinScenarios
                 : "A filter on a masked column was not rejected.");
         }
 
-        r.Rejected(channel switch { "WebSql" => "SQL_POLICY_VIOLATION", _ => "INVALID_QUERY" });
+        r.Rejected(channel switch { "Rest" => "INVALID_QUERY", _ => "FILTER_ON_MASKED_COLUMN" });
         if (channel != "GraphQl")
         {
             r.Status.ShouldBe(channel == "Rest" ? 400 : 403);
@@ -855,7 +854,7 @@ public sealed partial class RobinScenarios
                 : "ORDER BY a masked column was not rejected.");
         }
 
-        r.Rejected(channel == "WebSql" ? "SQL_POLICY_VIOLATION" : "INVALID_QUERY");
+        r.Rejected("FILTER_ON_MASKED_COLUMN");
         if (channel == "WebSql")
         {
             r.Status.ShouldBe(403);
