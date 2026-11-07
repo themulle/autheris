@@ -1,5 +1,5 @@
 # WP-SIMPL-51 WebSQL client contract: cost and quota, typed columns, syntax positions, paging
-Status: Ready for implementation (Phase 3 approved)
+Status: Ready for implementation (Phase 3 approved; owner confirmed all defaults 2026-11-07; implementation not started, waits for an explicit owner go)
 Parent: [plan](../2026-11-05-plan-project-simplification.md) | Issues: [#527](https://github.com/themulle/autheris/issues/527), [#528](https://github.com/themulle/autheris/issues/528), [#529](https://github.com/themulle/autheris/issues/529), [#533](https://github.com/themulle/autheris/issues/533) (all opened 2026-11-05, v1.7.0 observations) | Related: #530 and #558 (closed, error-code fixes), WP-SIMPL-45 (WebSQL write path), WP-SIMPL-42 (usage accounting) | Freeze: feature work, runs under `freeze-exception` like WP-SIMPL-38..48 or after the freeze (see D-51e)
 
 ## 1. Goal and outcome
@@ -172,6 +172,14 @@ Paging (I4)
 - Policy-denied charging: charge the failure fee (SEC-51-11).
 - D-51g: deriving from the audit key with a distinct HKDF label is acceptable (key separation holds, no new secret, multi-node consistent). Rotation invalidates tokens for at most `TokenLifetimeMinutes`; clients restart from page 1. A dedicated key is not required.
 - D-51l: keep. Not paging statements with their own LIMIT/FETCH/OFFSET avoids nested-offset semantics and offset arithmetic overflow; it is the safer default.
+
+### Owner confirmation (2026-11-07)
+The owner confirmed every default of this WP (D-51a..l) and the Phase 3 recommendations in this section. Binding from now on:
+- D-51i confirmed: `WebSql:Cost:MaxStatementCost = 2000`, independent of the tier `MaxCostPerQuery` and additionally capped by `MaxTokensCapacity`; Free-tier callers can run small bounded statements only. A per-tier override is a later, separate change.
+- D-51m (new, from Phase 3): statements denied by policy are charged the failure fee (SEC-51-11); syntax and token-guard errors are not charged.
+- D-51g confirmed: the page-token key is derived from the audit key with a distinct HKDF label; audit-key rotation invalidates open page tokens (at most their lifetime of 15 minutes).
+- D-51l confirmed: statements with their own root LIMIT/FETCH/OFFSET are not paged (`statement_has_limit`).
+- Implementation is not started by this confirmation; it starts on an explicit owner go and after the WP-SIMPL-45 gates in section 9.
 
 ## 15. Mandatory security tests (`[Trait("Category","Security")]`, in addition to section 6)
 - `FastSqlEngineSyntaxPositionTests`: `PolicyDeniedColumn_HasNoPosition`, `UnknownTable_HasNoPosition`, `ParseTimeout_HasNoPosition`, `StrictOptions_NotServedFromLenientNegativeCacheEntry`.

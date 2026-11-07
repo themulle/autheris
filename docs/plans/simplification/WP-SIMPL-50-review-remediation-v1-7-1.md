@@ -1,5 +1,5 @@
 # WP-SIMPL-50 Remediation of the v1.7.1..HEAD code and security reviews
-Status: Ready for implementation (Phase 3 approved)
+Status: Ready for implementation (Phase 3 approved; owner confirmed all defaults 2026-11-07; implementation not started, waits for an explicit owner go)
 Parent: [plan](../2026-11-05-plan-project-simplification.md) | Sources: (1) code review of `v1.7.1..HEAD` (30 commits, 2026-11-07), three read-only sampled reviews; (2) security review of `v1.7.1..5bbb0576` (2026-11-07), four read-only slices (module host and startup, authorization and identity, SQL and data plane, extensions/egress/secrets) | Code verified: `origin/main` 8fc7a66b (2026-11-07; the only commit after 5bbb0576 touches none of the files below) | Security conditions: SEC-AZ-04 (fail closed), SEC-PROD-01 (no new anonymous routes); module items follow the WP-SIMPL-25 trust conditions
 
 ## 1. Goal and outcome
@@ -154,8 +154,15 @@ No PR exceeds 400 net or added src lines; no split needed (C8 moves to its own P
 - D-50f: the module service guard also denies host extension points (startup filters, hosted services, auth options configurators); further additions go through an explicit host allowlist in review.
 - D-50g (changed by the code): modules get no governance connection; the "narrow repository" option is dropped because the Lakehouse module does not use the connection (`LakehouseModule.cs:23-28`).
 - D-50h (new): C14 deletes the unused module GraphQL extension point instead of hardening it.
-- Open question 1 (B14): where the module signing key lives (GitHub environment secret vs. offline/HSM signing in a manual release step). Default taken until answered: protected GitHub environment secret with a required reviewer.
-- Open question 2 (C8): whether the culture analyzer rules (CA1304/1305/1307/1310/1311) are enabled too. Default taken: they stay suppressed in this WP.
+- Open question 1 (B14, answered 2026-11-07, see D-50i): where the module signing key lives (GitHub environment secret vs. offline/HSM signing in a manual release step). Default taken until answered: protected GitHub environment secret with a required reviewer.
+- Open question 2 (C8, answered 2026-11-07, see D-50j): whether the culture analyzer rules (CA1304/1305/1307/1310/1311) are enabled too. Default taken: they stay suppressed in this WP.
+
+### Owner confirmation (2026-11-07)
+The owner confirmed every default of this WP, including D-50a..h and the Phase 3 recommendations in section 11. Binding from now on:
+- D-50i (B14): the release job signs with a non-exportable KMS/HSM key through GitHub OIDC federation (target). Until that key exists, a protected GitHub environment secret with a required reviewer is the accepted interim under SEC-50-15; switching to KMS/HSM needs no new decision.
+- D-50j (C8): the culture analyzer rules stay suppressed in this WP. Follow-up (not part of WP-50, recorded in the parent plan): enable CA1307, CA1309 and CA1310 as errors in `src` first; CA1304, CA1305 and CA1311 later with low priority.
+- D-50k (B4): the Lakehouse routes move to `/modules/lakehouse/iceberg/...`; old routes return 404; Iceberg clients change their catalog base URI (no compatibility alias, no production yet).
+- Implementation is not started by this confirmation; PR A goes first when the owner gives the go.
 
 ## 10. Estimate
 About 9.5 pd (unchanged): A 2.5, B1a 1.5, B1b 1.5, B2 1, B3 0.5, B5 1, B6 0.5, C 1. The former PR B4 is dropped (B9 refuted); the module-host work is split into B1a and B1b. Net src about +230 lines, all from the new signer tool (B14); without B14 about 0.
