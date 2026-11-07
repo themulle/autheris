@@ -84,3 +84,7 @@ src about -6,900 / +400; tests about -3,000 net (+600 fixture/new tests); 6 pers
 2. Fixture lives in `Autheris.Tests.Common` so Unit-moved and Integration tests share it; per-test-class database (not per-test) to bound clone cost.
 3. `governance-shape.sqlite.v0001.json` and `GatewayStartupValidator.IsInMemorySqlite` are deleted with the family (only governance consumers).
 4. `GovernanceProviderGuard` keeps its SQLite literals (`Sqlite`, `.db`, `.sqlite`, `:memory:`, `Mode=Memory`) permanently; WP-SIMPL-31 allow-lists them as guard text, not as SQLite support.
+
+## Follow-ups recorded during delivery
+- PostgreSQL catalog column order: `PostgreSqlGovernanceRepository.Catalog.cs` orders `TABLE_COLUMNS` by `ctid` (GUID ids, no ordinal column), which is not stable across UPDATE/VACUUM FULL. Follow-up: add an ordinal column via a new forward-only migration step (applied steps stay frozen, SEC-SIMPL-16) and order by it.
+- `simulation-nightly.yml` must provide a PostgreSQL service and `AUTHERIS_SIM_GOVERNANCE_DB` for the Sim API host (workflow edit needs owner approval).
