@@ -207,7 +207,7 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
             {
                 b.UseEnvironment("Production");
                 b.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(tempDb));
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.WithVerifiedTls(GovernanceTestDatabase.CreateStable(tempDb)));
                 b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");

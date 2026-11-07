@@ -29,7 +29,7 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseEnvironment("Production");
             builder.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_tempDbPath));
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.WithVerifiedTls(GovernanceTestDatabase.CreateStable(_tempDbPath)));
             builder.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
             builder.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
             builder.UseSetting("Gateway:DataMasking:HmacSecretKeyVaultRef", "kv://masking-hmac");
