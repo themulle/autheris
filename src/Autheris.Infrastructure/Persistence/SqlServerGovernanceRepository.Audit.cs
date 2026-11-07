@@ -36,13 +36,13 @@ public partial class SqlServerGovernanceRepository
             SelectMaxEligibleSeqSql: "SELECT MAX(seq) FROM dbo.AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq");
 
         public static string GetAuditLogEntries(bool withTenant) =>
-            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {(withTenant ? " WHERE tenant_id = @tenantId" : "")}
                             ORDER BY rowid DESC";
 
         public static string FormatQueryAuditLogs(string whereSql) =>
-            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {whereSql}
                             ORDER BY rowid DESC";

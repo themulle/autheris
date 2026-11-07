@@ -246,6 +246,13 @@ public abstract class CatalogContract : GovernanceContractBase
         if (!Store.IsAvailable) return;
 
         var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("phys_cap_tbl"));
+        var overCapDeclaredIndexes = Enumerable.Range(0, TableKeyDefinitionValidator.MaxIndexesPerTable + 1)
+            .Select(i => new TableIndexDefinition($"ix_cap_{i}", ["id"], false))
+            .ToList();
+        var declaredAct = () => Store.TableMetadata.UpsertTableMetadataAsync(
+            table with { Indexes = overCapDeclaredIndexes, ReplaceKeyDefinition = true });
+        await declaredAct.Should().ThrowAsync<TableDefinitionException>();
+
         var overCapIndexes = Enumerable.Range(0, TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable + 1)
             .Select(_ => new PhysicalIndexDefinition(["id"], [KeyColumnDirection.Ascending]))
             .ToList();
