@@ -107,6 +107,7 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
             .AddSingleton(httpContextAccessor)
             .AddSingleton(Options.Create(gatewayOptions))
             .AddSingleton<IClientTierResolver>(sp.GetRequiredService<IClientTierResolver>())
+            .AddSingleton<Autheris.Application.Common.Quota.IQueryCostQuota, Autheris.Application.Common.Quota.QueryCostQuota>()
             .AddGraphQLServer()
             .AddQueryType<SecurityTestQuery>()
             .UseRequest<CostAndQuotaMiddleware>()
@@ -172,9 +173,9 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task T_SEC_GOV177_03_DebitAdjustment_ClampedAtZero_NoNegativeUnderflow()
+    public async Task T_SEC_GOV177_03_DebitAdjustment_AllowsNegativeBalance_NoUnderflowToMax()
     {
-        // SEC-GOV177-02: Debit adjustments must clamp at 0 and never underflow to negative numbers.
+        // Debit adjustments allow negative balances to prevent unmetered over-quota execution.
         var limiter = new Autheris.Infrastructure.RateLimiting.InMemoryRateLimiterService();
         var policy = new ClientQuotaPolicy(
             Tier: ClientTier.Free,
@@ -193,9 +194,8 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
         var settle = await limiter.SettleCostQuotaAsync(key, 95, 300, policy, CancellationToken.None);
 
         settle.Allowed.ShouldBeTrue();
-        // Clamped at 0, never negative
-        settle.RemainingTokens.ShouldBe(0);
-        settle.RemainingTokens.ShouldBeGreaterThanOrEqualTo(0);
+        // Negative balance allowed so debt must refill before new requests
+        settle.RemainingTokens.ShouldBe(-200);
     }
 
     [Fact]
