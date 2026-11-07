@@ -211,10 +211,11 @@ internal sealed class GovernedSqlCompiler
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
-        var secured = (SqlStatement)new AstSecurityVisitor(BuildOptions(request, typed), typed)
+        var visitor = new AstSecurityVisitor(BuildOptions(request, typed), typed)
         {
             CancellationToken = token
-        }.Visit(typedLiterals);
+        };
+        var secured = (SqlStatement)visitor.Visit(typedLiterals);
         CheckBudget(request, clock, token);
 
         secured = CompilerHooks.Current.InterceptInjected(secured);
@@ -242,7 +243,12 @@ internal sealed class GovernedSqlCompiler
         var compiled = (generator is SqlDialectGeneratorBase capabilityAware
                 ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: timeZoneCallsValidated, maxRecursionDepth: request.MaxRecursionDepth)
                 : generator.Generate(secured, parameterSource, token))
-            with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
+            with
+            {
+                AppliedPredicates = applied,
+                ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured),
+                OutputColumnMasks = visitor.OutputColumnMasks
+            };
 
         // 10. output budget
         // The marker text of the lists that were actually expanded is not policy expansion: it is subtracted from the

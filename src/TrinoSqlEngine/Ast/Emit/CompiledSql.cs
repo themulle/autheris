@@ -51,6 +51,11 @@ public sealed record CompiledSql(
     public int? ExpectedAffectedRows { get; internal init; }
 
     /// <summary>
+    /// Output column mask flags for each root output column of a SELECT query.
+    /// </summary>
+    public ImmutableArray<bool> OutputColumnMasks { get; internal init; } = ImmutableArray<bool>.Empty;
+
+    /// <summary>
     /// Issue #277: true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit
     /// audits like the first compile.
     /// </summary>

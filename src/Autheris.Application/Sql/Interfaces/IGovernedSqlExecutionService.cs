@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Interfaces;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data.Common;
 using System.Security.Claims;
 using System.Threading;
@@ -88,8 +89,17 @@ public interface IGovernedSqlExecutionService
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, token) => rowWriter(reader, new GovernedResultInfo(SqlResultColumns.Describe(reader), ImmutableArray<bool>.Empty), token), ct);
+
+    Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
         Func<DbDataReader, CancellationToken, Task> rowWriter,
-        CancellationToken ct = default);
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
 
     Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
         GovernedSqlQueryRequest request,

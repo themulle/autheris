@@ -359,7 +359,7 @@ public static class TableStreamEndpoints
                 var microBatch = new List<IReadOnlyDictionary<string, object?>>(256);
                 Dictionary<string, object?>? lastRowPk = null;
 
-                await sqlExecutionService.ExecuteGovernedQueryAsync(queryRequest, httpContext.User, tenant, async (reader, token) =>
+                await sqlExecutionService.ExecuteGovernedQueryAsync(queryRequest, httpContext.User, tenant, async (reader, _, token) =>
                 {
                     int colCount = reader.FieldCount;
                     string[] colNames = new string[colCount];
@@ -480,7 +480,7 @@ public static class TableStreamEndpoints
 
                 Dictionary<string, object?>? lastRowPk = null;
 
-                await sqlExecutionService.ExecuteGovernedQueryAsync(queryRequest, httpContext.User, tenant, async (reader, token) =>
+                await sqlExecutionService.ExecuteGovernedQueryAsync(queryRequest, httpContext.User, tenant, async (reader, _, token) =>
                 {
                     int colCount = reader.FieldCount;
                     string[] colNames = new string[colCount];

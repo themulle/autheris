@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -98,11 +99,19 @@ public sealed partial class GovernedSqlExecutor
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
         await ExecuteCoreAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
     }
+
+    public Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
         GovernedSqlQueryRequest request,
@@ -122,9 +131,9 @@ public sealed partial class GovernedSqlExecutor
             request,
             user,
             tenantId,
-            async (reader, token) =>
+            async (reader, info, token) =>
             {
-                columnDescriptions = SqlResultColumns.Describe(reader);
+                columnDescriptions = info.Columns;
                 foreach (var column in columnDescriptions)
                 {
                     columns.Add(column.Name);
@@ -189,7 +198,7 @@ public sealed partial class GovernedSqlExecutor
                     request,
                     user,
                     tenantId,
-                    async (reader, token) =>
+                    async (reader, _, token) =>
                     {
                         var columnDescriptions = SqlResultColumns.Describe(reader);
                         var columns = new string[columnDescriptions.Count];
@@ -244,7 +253,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -321,6 +330,17 @@ public sealed partial class GovernedSqlExecutor
         return await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
     }
 
+    internal Task<string> ExecuteRewrittenAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        GovernedRewrite rewrite,
+        DmlAuditContext dmlContext,
+        IReadOnlyDictionary<string, object?> clientValues,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct) =>
+        ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, (reader, _, token) => rowWriter(reader, token), ct);
+
     /// <summary>
     /// Everything after a successful compile. Separate (and internal) so that the dialect agreement and the fail-closed rules of the
     /// execution half are testable without a rewriter.
@@ -332,7 +352,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedRewrite rewrite,
         DmlAuditContext dmlContext,
         IReadOnlyDictionary<string, object?> clientValues,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct)
     {
         var compiled = rewrite.Compiled;
@@ -387,7 +407,13 @@ public sealed partial class GovernedSqlExecutor
 
             // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
             using var syntheticReader = new SyntheticDataTableReader(compiled.Sql);
-            await rowWriter(syntheticReader, ct).ConfigureAwait(false);
+            var synCols = SqlResultColumns.Describe(syntheticReader);
+            var synMasks = compiled.OutputColumnMasks;
+            if (synMasks.IsDefault || synMasks.Length != syntheticReader.FieldCount)
+            {
+                synMasks = ImmutableArray.CreateRange(Enumerable.Repeat(false, syntheticReader.FieldCount));
+            }
+            await rowWriter(syntheticReader, new GovernedResultInfo(synCols, synMasks), ct).ConfigureAwait(false);
             return compiled.Sql;
         }
 
@@ -505,7 +531,7 @@ public sealed partial class GovernedSqlExecutor
 
                 using var emptyTable = new DataTable();
                 using var emptyReader = emptyTable.CreateDataReader();
-                await rowWriter(emptyReader, ct).ConfigureAwait(false);
+                await rowWriter(emptyReader, new GovernedResultInfo(Array.Empty<SqlResultColumn>(), ImmutableArray<bool>.Empty), ct).ConfigureAwait(false);
                 return compiled.Sql;
             }
 
@@ -526,13 +552,20 @@ public sealed partial class GovernedSqlExecutor
                 {
                     await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
                     {
+                        var columns = SqlResultColumns.Describe(reader);
+                        var maskArray = compiled.OutputColumnMasks;
+                        if (maskArray.IsDefault || (reader.FieldCount > 0 && maskArray.Length != reader.FieldCount))
+                        {
+                            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
+                        }
+                        var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
                         if (rewrite.DeliveredRowLimit > 0)
                         {
-                            await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                            await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), info, ct).ConfigureAwait(false);
                         }
                         else
                         {
-                            await rowWriter(reader, ct).ConfigureAwait(false);
+                            await rowWriter(reader, info, ct).ConfigureAwait(false);
                         }
                     }
 
@@ -791,183 +824,6 @@ public sealed partial class GovernedSqlExecutor
         if (!admitted)
         {
             throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
-        }
-    }
-
-    /// <summary>
-    /// 128 (C-4, C-15):<c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
-    /// binder slots of the SQL's own identifiers, never from a client key) and the counts are the compiled counts; no value. A list that
-    /// expanded to nothing (an empty list) has no slot and is not listed here; <c>list_params_empty</c> names it (names only).
-    /// </summary>
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
-    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
-
-    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
-    {
-        SortedDictionary<string, int>? lists = null;
-        foreach (var slot in compiled.Parameters)
-        {
-            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
-            {
-                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
-            }
-        }
-
-        if (lists is not null)
-        {
-            fields["list_params"] = lists;
-        }
-
-        // An empty list expands to nothing, so it has no slot above: its trace is the name only (no values), limited to plain identifiers.
-        if (clientValues is not null)
-        {
-            SortedSet<string>? empty = null;
-            foreach (var (name, value) in clientValues)
-            {
-                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
-                {
-                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
-                }
-            }
-
-            if (empty is not null)
-            {
-                fields["list_params_empty"] = empty.ToArray();
-            }
-        }
-    }
-
-    /// <summary>
-    /// 129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
-    /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
-    /// </summary>
-    private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
-    {
-        if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
-        {
-            return;
-        }
-
-        fields["caller_attributes"] = attributes.ToDictionary(
-            p => p.Key,
-            p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
-            StringComparer.OrdinalIgnoreCase);
-        fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
-    }
-
-    /// <summary>X1.2 / compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
-    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
-    {
-        fields["compiler_version"] = compiled.CompilerVersion;
-        fields["dialect"] = compiled.Dialect.ToString();
-        fields["bind_count"] = compiled.Parameters.Length;
-        if (compiled.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;   // written only for recursive statements (also on a template cache hit)
-        }
-
-        AddListAuditField(fields, compiled, clientValues);
-        fields["sql.compiled_digest"] = _digester.Compute(compiled);
-        if (_options.Value.Audit.StoreCompiledSql)
-        {
-            fields["compiledSql"] = compiled.Sql;
-        }
-    }
-
-    /// <summary>
-    /// Issue #107 (A-14): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
-    /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
-    /// </summary>
-    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
-    {
-        if (rewrite.KeySets is not { Count: > 0 } outcomes)
-        {
-            return;
-        }
-
-        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
-        {
-            ["table"] = o.Table,
-            ["rule_id"] = o.RuleId,
-            ["source"] = o.Source.ToString(),
-            ["strategy_source"] = o.StrategySource.ToString(),
-            ["outcome"] = o.Outcome.ToString(),
-            ["reason"] = o.Reason?.ToString(),
-            ["key_count"] = o.KeyCount,
-            ["padded_count"] = o.PaddedCount,
-            ["age_seconds"] = o.AgeSeconds
-        }).ToList();
-    }
-
-    private async Task RecordDmlAuditAsync(
-        TenantId tenantId,
-        ClaimsPrincipal user,
-        string dsName,
-        DmlAuditContext dmlContext,
-        string eventType,
-        string decision,
-        CompiledSql? compiled,
-        int? affectedRows,
-        string? reason,
-        bool synthetic,
-        string? originalSql = null)
-    {
-        var fields = new Dictionary<string, object?>
-        {
-            ["statementType"] = dmlContext.StatementType?.ToString(),
-            ["tables"] = dmlContext.Tables,
-            ["dataSource"] = dsName,
-            ["affectedRows"] = affectedRows,
-            ["maxAffectedRows"] = _options.Value.WebSql.MaxAffectedRows,
-            ["reason"] = reason,
-            ["synthetic"] = synthetic
-        };
-        if (compiled is null && dmlContext.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;   // a rejection before the compile still carries the flag
-        }
-
-        if (compiled is not null)
-        {
-            AddCompiledAuditFields(fields, compiled);
-        }
-        else if (originalSql is not null)
-        {
-            // A statement rejected before it compiled has no digest; the hash of its (literal-free) original text identifies it.
-            fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
-        }
-
-        await _auditWriter.RecordAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = eventType,
-            ActorSid = user.GetUserSid() ?? new Sid("anonymous"),
-            TargetTable = string.Join(",", dmlContext.Tables),
-            Decision = decision,
-            TraceId = TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
-            // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
-            // leave it without its audit record.
-        }, CancellationToken.None).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
-    /// duplicate the write): it is logged as Critical and counted for the operators.
-    /// </summary>
-    private async Task RecordCommittedDmlAuditAsync(
-        TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
-    {
-        try
-        {
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows, reason: null, synthetic: false).ConfigureAwait(false);
-        }
-        catch (Exception auditEx)
-        {
-            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
-            _logger?.LogCritical(auditEx,
-                "WebSQL DML on data source {DataSource} is committed but its audit record could not be written. TraceId={TraceId}",
-                dsName, Activity.Current?.TraceId.ToString());
         }
     }
 }

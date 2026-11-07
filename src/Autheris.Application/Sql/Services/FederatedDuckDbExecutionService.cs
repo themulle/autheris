@@ -3,6 +3,7 @@ namespace Autheris.Application.Sql.Services;
 using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -33,6 +34,7 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.ListParameters;
@@ -146,17 +148,64 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
 
-        var (duckDbResult, _, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
+        var (duckDbResult, plan, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
         using var dataTable = ConvertToDataTable(duckDbResult);
         using var reader = dataTable.CreateDataReader();
-        await rowWriter(reader, ct).ConfigureAwait(false);
+        var columns = SqlResultColumns.Describe(reader);
+        var maskArray = duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray();
+        if (maskArray.Length != reader.FieldCount)
+        {
+            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, TargetSqlDialect.DuckDb);
+        }
+        await rowWriter(reader, new GovernedResultInfo(columns, maskArray), ct).ConfigureAwait(false);
+    }
+
+    public Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
+
+    private static bool IsMaskedByName(string columnName, CrossSourcePlan plan)
+    {
+        bool foundMatch = false;
+        foreach (var req in plan.StagingRequests)
+        {
+            if (req.Subtree != null)
+            {
+                if (req.Subtree.ProjectedColumns.Any(c => string.Equals(c, columnName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    foundMatch = true;
+                    if (req.Subtree.MaskedColumns.Contains(columnName))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else
+            {
+                var matchingCol = req.Metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+                if (matchingCol != null)
+                {
+                    foundMatch = true;
+                    if (req.Decision.GetEffectiveColumnAccess(matchingCol.ColumnName, req.Metadata) == ColumnAccessLevel.Mask)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return !foundMatch;
     }
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
