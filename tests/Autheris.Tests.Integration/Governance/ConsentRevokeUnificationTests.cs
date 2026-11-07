@@ -41,8 +41,8 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
 
     private async Task EnsureTableAsync()
     {
-        await ExecAsync("INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test');" +
-                        "INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) VALUES ('" + Guid.NewGuid() + "', 'role-admin', 'User', '" + Admin.Value + "');");
+        await ExecAsync("INSERT INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test') ON CONFLICT DO NOTHING;" +
+                        "INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) SELECT '" + Guid.NewGuid() + "', id, 'User', '" + Admin.Value + "' FROM ROLES WHERE role_name = 'GovernanceAdmin';");
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = _table.Domain, SchemaName = _table.Schema, TableName = _table.TableName,

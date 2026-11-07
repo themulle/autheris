@@ -101,7 +101,7 @@ public sealed class WebhookSigningAndHygieneTests : IDisposable
         raw.ShouldNotContain("receiver.internal");
         raw.ShouldNotContain("ce.example.com");
         using var cmd = _repo.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT group_concat(name) FROM pragma_table_info('WEBHOOK_OUTBOX')";
+        cmd.CommandText = "SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'webhook_outbox'";
         var columns = (string)cmd.ExecuteScalar()!;
         columns.ShouldNotContain("url");
         columns.ShouldNotContain("secret");
