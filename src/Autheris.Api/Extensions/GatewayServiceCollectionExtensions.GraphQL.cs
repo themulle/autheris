@@ -141,7 +141,6 @@ public static partial class GatewayServiceCollectionExtensions
             .BindConfiguration(RevocationWatchOptions.SectionName)
             .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<RevocationWatchOptions>, RevocationWatchOptionsValidator>();
-        services.AddSingleton<IRealmSchemeSelector, RealmSchemeSelector>();
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, RequireFunctionalRightHandler>();
         services.AddOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>()
             .BindConfiguration(Autheris.Domain.Options.Security.IdentityRealmsOptions.SectionName)
