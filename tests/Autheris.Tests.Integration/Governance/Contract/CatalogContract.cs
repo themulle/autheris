@@ -246,6 +246,13 @@ public abstract class CatalogContract : GovernanceContractBase
         if (!Store.IsAvailable) return;
 
         var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("phys_cap_tbl"));
+        var overCapDeclaredIndexes = Enumerable.Range(0, TableKeyDefinitionValidator.MaxIndexesPerTable + 1)
+            .Select(i => new TableIndexDefinition($"ix_cap_{i}", ["id"], false))
+            .ToList();
+        var declaredAct = () => Store.TableMetadata.UpsertTableMetadataAsync(
+            table with { Indexes = overCapDeclaredIndexes, ReplaceKeyDefinition = true });
+        await declaredAct.Should().ThrowAsync<TableDefinitionException>();
+
         var overCapIndexes = Enumerable.Range(0, TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable + 1)
             .Select(_ => new PhysicalIndexDefinition(["id"], [KeyColumnDirection.Ascending]))
             .ToList();
@@ -288,8 +295,8 @@ public abstract class CatalogContract : GovernanceContractBase
         var getAct = () => Store.TableMetadata.GetTableMetadataAsync(table.Identifier);
         await getAct.Should().ThrowAsync<TableMetadataUnavailableException>();
 
-        var allAct = () => Store.TableMetadata.GetAllTablesAsync();
-        await allAct.Should().ThrowAsync<TableMetadataUnavailableException>();
+        var allTables = await Store.TableMetadata.GetAllTablesAsync();
+        allTables.Select(t => t.Identifier).Should().NotContain(table.Identifier);
 
         var activeId = await Store.TableMetadata.GetActiveTableIdentifierAsync(table.Identifier);
         activeId.Should().Be(table.Identifier);
